@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.22.0
+
+- **TLS verification is configurable.** The auth proxy used to accept any
+  certificate from the system unconditionally; the new setting
+  `abap2ui5.allowUnauthorizedCerts` makes that a choice. It stays **on by
+  default** — SAP development systems typically serve self-signed
+  certificates — but if your system presents a properly trusted
+  certificate, turn it off and the proxy verifies the chain on every
+  request, closing the machine-in-the-middle window the default leaves
+  open. The setting description spells out the tradeoff.
+
 ## 0.21.0
 
 - **Traffic log with roundtrip timings.** The auth proxy sees every request

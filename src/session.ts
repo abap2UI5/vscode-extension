@@ -13,6 +13,9 @@ export const OPEN_MODE_KEY = "openMode";
 const RELOAD_KEY = "reloadOn";
 /** Replaced by `reloadOn` in 0.9.0, still honoured while it is set. */
 const LEGACY_RELOAD_KEY = "reloadOnSave";
+/** Whether the proxy may talk to systems whose TLS certificate cannot be
+ *  verified (self-signed dev systems). */
+export const ALLOW_UNAUTHORIZED_KEY = "allowUnauthorizedCerts";
 
 /** Preview parameters and the recently launched apps live in the window's
  *  state: two windows may well look at two systems in two themes. */
@@ -87,6 +90,7 @@ export class Session implements vscode.Disposable {
     );
     this.statusItem.name = "abap2UI5";
     this.statusItem.command = "abap2ui5.reload";
+    this.applyProxySettings();
     this.watch = new ActivationWatch({
       source: this.proxy,
       current: () =>
@@ -151,6 +155,15 @@ export class Session implements vscode.Disposable {
     const legacyValue =
       legacy?.workspaceFolderValue ?? legacy?.workspaceValue ?? legacy?.globalValue;
     return resolveReloadTrigger(explicit, legacyValue);
+  }
+
+  /** Reads the proxy's TLS stance from the settings - called at start and
+   *  whenever `abap2ui5.allowUnauthorizedCerts` changes. Applies to the next
+   *  request; connections already open are unaffected. */
+  applyProxySettings(): void {
+    this.proxy.allowUnauthorized = vscode.workspace
+      .getConfiguration(CONFIG_SECTION)
+      .get<boolean>(ALLOW_UNAUTHORIZED_KEY, true);
   }
 
   recentApps(): string[] {

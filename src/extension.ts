@@ -20,7 +20,13 @@ import { formatTrafficLine, isRoundtrip } from "./traffic";
 import { registerModelView } from "./modelview";
 import { shortUrl } from "./webview";
 import { staleMessage } from "./previewcore";
-import { CONFIG_SECTION, OPEN_MODE_KEY, Session, TEMPLATE_KEY } from "./session";
+import {
+  ALLOW_UNAUTHORIZED_KEY,
+  CONFIG_SECTION,
+  OPEN_MODE_KEY,
+  Session,
+  TEMPLATE_KEY,
+} from "./session";
 import {
   movePreview,
   postToShownApp,
@@ -178,6 +184,11 @@ export function activate(context: vscode.ExtensionContext): void {
         e.affectsConfiguration(`${CONFIG_SECTION}.${OPEN_MODE_KEY}`)
       ) {
         provider.refreshWelcome();
+      }
+      if (
+        e.affectsConfiguration(`${CONFIG_SECTION}.${ALLOW_UNAUTHORIZED_KEY}`)
+      ) {
+        session.applyProxySettings();
       }
     }),
     // Shown app's class saved. A save alone does not change anything on the
