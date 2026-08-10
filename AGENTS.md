@@ -27,7 +27,12 @@ find a German string anywhere, it is a leftover — translate it.
 
 | Path | Purpose |
 | --- | --- |
-| `src/extension.ts` | Desktop activation, the F9 command, the Ctrl+F3 activate-and-reload command, webview tab and panel, reload handling |
+| `src/extension.ts` | Desktop activation: builds the `Session`, wires the preview surfaces, registers every command |
+| `src/session.ts` | The desktop session object: all mutable state (shown app, tab, status bar, channels, proxy, focus bookkeeping) with one `dispose()` registered in `context.subscriptions` |
+| `src/preview.ts` | The preview surfaces: panel view provider, editor tab, webview message handling, moving the app between tab and panel |
+| `src/launch.ts` | F9 (`runApp`), the Ctrl+F3 activate-and-reload command, the proxy-status watch, the connect-system flow |
+| `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list |
+| `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
 | `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only |
 | `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, settings only (no repo config, no render gate) |
 | `src/gate.ts` | The in-process property gate itself, shared by `viewcheck.ts` (desktop) and `webcheck.ts` (web) |
@@ -82,7 +87,7 @@ not committed.
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`,
-`proxy.ts` and `webview.ts` (HTML strings only — the state it renders is
+`proxy.ts`, `previewcore.ts`, `activationwatch.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
 Node, and an accidental import turns a unit test into a module-not-found
 error. Put the interesting logic
