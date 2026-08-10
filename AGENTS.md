@@ -116,11 +116,17 @@ request, so a failure there means you skipped this:
 
 ```bash
 npm install
-npm run lint      # tsc --noEmit
+npm run lint      # tsc --noEmit + eslint (eslint.config.mjs)
 npm test          # esbuild -> dist-test, then node --test
 npm run package   # production esbuild
 npm run vsix      # vsce package, catches manifest errors
 ```
+
+The eslint config is tuned to the codebase (empty catch as best-effort
+probe, the tests' mid-test `require()`), so a clean tree lints clean -
+a finding is a real mistake, not a formatting opinion. There is
+deliberately no Prettier: a full pass would reformat nearly every file,
+and the gate exists to catch bugs, not to churn the history.
 
 CI installs with `npm ci`, so `package-lock.json` has to stay in sync with
 `package.json` — a lockfile left behind fails the build before anything else

@@ -537,7 +537,7 @@
     "watch": "node esbuild.js --watch",
     "package": "node esbuild.js --production",
     "vsix": "vsce package",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && eslint .",
     "test": "node esbuild.js --tests && node --test dist-test/*.test.cjs",
     "test:web": "node esbuild.js && node esbuild.js --webtest && vscode-test-web --browserType=chromium --headless --extensionDevelopmentPath=. --extensionTestsPath=dist/web/test.js",
     "client-api": "node scripts/generate-client-api.mjs",
@@ -550,7 +550,9 @@
     "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^2.24.0",
     "esbuild": "^0.20.0",
+    "eslint": "^10.8.1",
     "tar": "^7.5.22",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.67.0"
   }
 }
