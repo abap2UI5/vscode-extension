@@ -2,9 +2,6 @@ import * as vscode from "vscode";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import {
   abapBindingContextAt,
-  abapContextAt,
-  abapNsMap,
-  BindingContext,
   eventNameAt,
   eventNameSpans,
   eventUsagesOf,
@@ -12,18 +9,7 @@ import {
   viewOutline,
   whenBranchOf,
   whenNameAt,
-  WriteContext,
-  xmlContextAt,
-  xmlNsMap,
 } from "./context";
-import {
-  absoluteOffers,
-  PathKind,
-  PathOffer,
-  relativeOffers,
-  resolvePathKind,
-  rowShapeFor,
-} from "./bindingpaths";
 import { declarationSpan, methodImplementations, usesBuilder } from "./abap";
 import {
   clientCallAt,
@@ -33,17 +19,14 @@ import {
   signatureHead,
 } from "./clientapi";
 import { chainIndentEdits } from "./chainformat";
-import { Snapshot } from "./metadata";
+import { membersOf } from "./metadata";
 import {
-  controlsIn,
-  describeControl,
-  describeMember,
-  deprecationText,
-  memberInfo,
-  membersOf,
-  Section,
-  valuesFor,
-} from "./metadata";
+  CompletionKind,
+  completionAt,
+  hoverAt,
+  isColorMember,
+  isXmlView,
+} from "./languagecore";
 import { abapColorSpans, formatCssColor, xmlColorSpans } from "./colors";
 import { snapshot } from "./snapshot";
 import { VIEW_SELECTOR } from "./selector";
@@ -58,39 +41,23 @@ import { VIEW_SELECTOR } from "./selector";
  * dependency, no network and no SAP system: the same knowledge that reports a
  * typo afterwards can prevent it.
  *
- * `context.ts` answers where the cursor is, `metadata.ts` answers what may go
- * there. This module is only the VS Code plumbing between the two.
+ * `languagecore.ts` decides WHAT is offered (it combines `context.ts` -
+ * where the cursor is - with `metadata.ts` - what may go there); this module
+ * is only the VS Code plumbing around it.
  */
-
-const VIEW_XML_RE = /\.(view|fragment)\.xml$/i;
-
-/** Which analysis a document gets - the builder's method chains, or plain
- *  XML. A `*.view.xml` is XML whatever language id it was given. */
-function contextAt(
-  doc: vscode.TextDocument,
-  position: vscode.Position
-): WriteContext | undefined {
-  const text = doc.getText();
-  const offset = doc.offsetAt(position);
-  const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
-  return isXml ? xmlContextAt(text, offset) : abapContextAt(text, offset);
-}
 
 /** Completion kinds that read right in the list: a control is a class, an
  *  event is an event, an aggregation is a slot to put things in. */
-const MEMBER_KIND: Record<Section, vscode.CompletionItemKind> = {
+const COMPLETION_KIND: Record<CompletionKind, vscode.CompletionItemKind> = {
+  control: vscode.CompletionItemKind.Class,
   properties: vscode.CompletionItemKind.Property,
   aggregations: vscode.CompletionItemKind.Field,
   associations: vscode.CompletionItemKind.Reference,
   events: vscode.CompletionItemKind.Event,
-};
-
-/** Members are offered properties-first: that is what a view writes most. */
-const SECTION_ORDER: Record<Section, string> = {
-  properties: "1",
-  aggregations: "2",
-  associations: "3",
-  events: "4",
+  value: vscode.CompletionItemKind.EnumMember,
+  namespace: vscode.CompletionItemKind.Module,
+  "binding-path": vscode.CompletionItemKind.Field,
+  "binding-table": vscode.CompletionItemKind.Struct,
 };
 
 function markdown(text: string): vscode.MarkdownString {
@@ -120,213 +87,46 @@ function modelShapeOf(doc: vscode.TextDocument): unknown {
   return shape;
 }
 
-/**
- * Completions inside a `{…}` binding: the paths the derived model actually
- * has - the same shape the gate reports `unknown-binding-path` against, so
- * what is offered here is exactly what will not squiggle afterwards. Row
- * fields of the enclosing aggregation first, absolute paths after.
- */
-function bindingItems(
-  doc: vscode.TextDocument,
-  binding: BindingContext
-): vscode.CompletionItem[] {
-  const shape = modelShapeOf(doc);
-  if (!shape) {
-    return [];
-  }
-  const range = new vscode.Range(
-    doc.positionAt(binding.start),
-    doc.positionAt(binding.end)
-  );
-  const make = (offer: PathOffer, group: string): vscode.CompletionItem => {
-    const item = new vscode.CompletionItem(
-      offer.path,
-      offer.table
-        ? vscode.CompletionItemKind.Struct
-        : vscode.CompletionItemKind.Field
-    );
-    item.detail = offer.table ? "table - what an aggregation binds" : "model path";
-    item.range = range;
-    item.sortText = `${group}${offer.path}`;
-    return item;
-  };
-  const items: vscode.CompletionItem[] = [];
-  if (binding.aggregations.length) {
-    const row = rowShapeFor(shape, binding.aggregations);
-    if (row) {
-      // The row the enclosing aggregation hands down - what a relative
-      // path means right here.
-      items.push(...relativeOffers(row).map((offer) => make(offer, "0")));
-    }
-  }
-  items.push(...absoluteOffers(shape).map((offer) => make(offer, "1")));
-  return items;
-}
-
 class ViewCompletion implements vscode.CompletionItemProvider {
   provideCompletionItems(
     doc: vscode.TextDocument,
     position: vscode.Position
   ): vscode.CompletionItem[] {
-    const data = snapshot();
-
-    // A binding being written wins over the enum values of the member - the
-    // `{` says the value is a path, not a literal.
-    const isXml =
-      VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(doc.getText());
-    if (!isXml) {
-      const binding = abapBindingContextAt(
-        doc.getText(),
-        doc.offsetAt(position),
-        (control, member) =>
-          membersOf(data, control).some(
-            (m) => m.name === member && m.section === "aggregations"
-          )
-      );
-      if (binding) {
-        return bindingItems(doc, binding);
-      }
-    }
-
-    const context = contextAt(doc, position);
-    if (!context) {
+    const offer = completionAt(
+      doc.getText(),
+      doc.fileName,
+      doc.offsetAt(position),
+      snapshot(),
+      () => modelShapeOf(doc)
+    );
+    if (!offer) {
       return [];
     }
     const range = new vscode.Range(
-      doc.positionAt(context.start),
-      doc.positionAt(context.end)
+      doc.positionAt(offer.start),
+      doc.positionAt(offer.end)
     );
-
-    if (context.kind === "control" && context.library) {
-      return controlsIn(data, context.library).map((local) => {
-        const full = `${context.library}.${local}`;
-        const item = new vscode.CompletionItem(
-          local,
-          vscode.CompletionItemKind.Class
-        );
-        item.detail = context.library;
-        item.documentation = markdown(describeControl(data, full));
-        item.range = range;
-        if (deprecationText(data[full]?.deprecated)) {
-          item.tags = [vscode.CompletionItemTag.Deprecated];
-        }
-        return item;
-      });
-    }
-
-    if (context.kind === "member" && context.control) {
-      return membersOf(data, context.control).map((member) => {
-        const item = new vscode.CompletionItem(
-          member.name,
-          MEMBER_KIND[member.section]
-        );
-        item.detail = member.type ?? member.section;
-        item.documentation = markdown(
-          describeMember(data, context.control!, member.name)
-        );
-        item.range = range;
-        // Own members before inherited ones, properties before the rest.
-        const inherited = member.declaredOn === context.control ? "0" : "1";
-        item.sortText = `${SECTION_ORDER[member.section]}${inherited}${member.name}`;
-        if (deprecationText(member.deprecated)) {
-          item.tags = [vscode.CompletionItemTag.Deprecated];
-        }
-        return item;
-      });
-    }
-
-    if (context.kind === "value" && context.control && context.member) {
-      const values = valuesFor(data, context.control, context.member);
-      return (values ?? []).map((value) => {
-        const item = new vscode.CompletionItem(
-          value,
-          vscode.CompletionItemKind.EnumMember
-        );
-        item.range = range;
-        return item;
-      });
-    }
-
-    if (context.kind === "namespace") {
-      const text = doc.getText();
-      const map = VIEW_XML_RE.test(doc.fileName) ? xmlNsMap(text) : abapNsMap(text);
-      return Object.entries(map)
-        .filter(([prefix]) => prefix)
-        .map(([prefix, library]) => {
-          const item = new vscode.CompletionItem(
-            prefix,
-            vscode.CompletionItemKind.Module
-          );
-          item.detail = library;
-          item.range = range;
-          return item;
-        });
-    }
-
-    return [];
+    return offer.entries.map((entry) => {
+      const item = new vscode.CompletionItem(
+        entry.label,
+        COMPLETION_KIND[entry.kind]
+      );
+      if (entry.detail !== undefined) {
+        item.detail = entry.detail;
+      }
+      if (entry.documentation !== undefined) {
+        item.documentation = markdown(entry.documentation);
+      }
+      item.range = range;
+      if (entry.sortText !== undefined) {
+        item.sortText = entry.sortText;
+      }
+      if (entry.deprecated) {
+        item.tags = [vscode.CompletionItemTag.Deprecated];
+      }
+      return item;
+    });
   }
-}
-
-/** What the hover says about one resolved binding path. */
-const PATH_KIND_TEXT: Record<PathKind, string> = {
-  table:
-    "a **table** in the derived model - what an aggregation (`items`, `rows`, …) " +
-    "binds. Inside its template, relative paths address one row.",
-  structure: "a **structure** in the derived model.",
-  field: "a **field** in the derived model - the binding resolves.",
-  "unknown-shape":
-    "below a structure this class does not declare (a DDIC or foreign type). " +
-    "The view check accepts any path here rather than guess.",
-  missing:
-    "**not in the derived model** - the view check reports this as " +
-    "`unknown-binding-path`, and at runtime the binding stays silently empty.",
-};
-
-/** Hover for a `{…}` path: what the derived model says about it. */
-function bindingHover(
-  doc: vscode.TextDocument,
-  position: vscode.Position,
-  data: Snapshot
-): vscode.Hover | undefined {
-  const binding = abapBindingContextAt(
-    doc.getText(),
-    doc.offsetAt(position),
-    (control, member) =>
-      membersOf(data, control).some(
-        (m) => m.name === member && m.section === "aggregations"
-      )
-  );
-  if (!binding) {
-    return undefined;
-  }
-  const range = new vscode.Range(
-    doc.positionAt(binding.start),
-    doc.positionAt(binding.end)
-  );
-  const path = doc.getText(range);
-  if (!path) {
-    return undefined;
-  }
-  const shape = modelShapeOf(doc);
-  if (!shape) {
-    return undefined;
-  }
-  let text: string;
-  if (path.startsWith("/")) {
-    text = PATH_KIND_TEXT[resolvePathKind(shape, path)];
-  } else if (binding.aggregations.length) {
-    const row = rowShapeFor(shape, binding.aggregations);
-    text = row
-      ? PATH_KIND_TEXT[resolvePathKind(row, path)] +
-        `\n\nRelative to the row of \`{${binding.aggregations[binding.aggregations.length - 1]}}\`.`
-      : "a relative path - the enclosing aggregation binds something the " +
-        "derived model cannot follow, so the row's fields are unknown here.";
-  } else {
-    text =
-      "a **relative path** - it addresses the row handed down by an " +
-      "enclosing aggregation binding, and none is in effect here.";
-  }
-  return new vscode.Hover(markdown(`\`{${path}}\` — ${text}`), range);
 }
 
 class ViewHover implements vscode.HoverProvider {
@@ -334,43 +134,20 @@ class ViewHover implements vscode.HoverProvider {
     doc: vscode.TextDocument,
     position: vscode.Position
   ): vscode.Hover | undefined {
-    const isXml =
-      VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(doc.getText());
-    if (!isXml) {
-      const binding = bindingHover(doc, position, snapshot());
-      if (binding) {
-        return binding;
-      }
-    }
-    const context = contextAt(doc, position);
-    if (!context) {
-      return undefined;
-    }
-    const data = snapshot();
-    const range = new vscode.Range(
-      doc.positionAt(context.start),
-      doc.positionAt(context.end)
+    const info = hoverAt(
+      doc.getText(),
+      doc.fileName,
+      doc.offsetAt(position),
+      snapshot(),
+      () => modelShapeOf(doc)
     );
-    const word = doc.getText(range);
-    if (!word) {
+    if (!info) {
       return undefined;
     }
-
-    if (context.kind === "control" && context.library) {
-      const text = describeControl(data, `${context.library}.${word}`);
-      return text ? new vscode.Hover(markdown(text), range) : undefined;
-    }
-    if (context.kind === "member" && context.control) {
-      const text = describeMember(data, context.control, word);
-      return text ? new vscode.Hover(markdown(text), range) : undefined;
-    }
-    // On a value, what helps is the member it belongs to: its type and, for
-    // an enum, everything else that would have been allowed there.
-    if (context.kind === "value" && context.control && context.member) {
-      const text = describeMember(data, context.control, context.member);
-      return text ? new vscode.Hover(markdown(text), range) : undefined;
-    }
-    return undefined;
+    return new vscode.Hover(
+      markdown(info.text),
+      new vscode.Range(doc.positionAt(info.start), doc.positionAt(info.end))
+    );
   }
 }
 
@@ -378,22 +155,11 @@ class ViewHover implements vscode.HoverProvider {
 // Colour swatches on colour-typed property values
 // ---------------------------------------------------------------------------
 
-/** Whether a member takes a CSS colour - `sap.ui.core.CSSColor` (and the
- *  types derived from it) say so themselves; a string property whose name
- *  ends in "color" (`backgroundColor` on a few older controls) counts too. */
-function isColorMember(data: Snapshot, control: string, member: string): boolean {
-  const type = memberInfo(data, control, member)?.type;
-  if (!type) {
-    return false;
-  }
-  return /CSSColor$/.test(type) || (type === "string" && /color$/i.test(member));
-}
-
 class ViewColors implements vscode.DocumentColorProvider {
   provideDocumentColors(doc: vscode.TextDocument): vscode.ColorInformation[] {
     const data = snapshot();
     const text = doc.getText();
-    const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
+    const isXml = isXmlView(doc.fileName, text);
     if (!isXml && !usesBuilder(text)) {
       return [];
     }

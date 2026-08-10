@@ -27,7 +27,12 @@ find a German string anywhere, it is a leftover — translate it.
 
 | Path | Purpose |
 | --- | --- |
-| `src/extension.ts` | Desktop activation, the F9 command, the Ctrl+F3 activate-and-reload command, webview tab and panel, reload handling |
+| `src/extension.ts` | Desktop activation: builds the `Session`, wires the preview surfaces, registers every command |
+| `src/session.ts` | The desktop session object: all mutable state (shown app, tab, status bar, channels, proxy, focus bookkeeping) with one `dispose()` registered in `context.subscriptions` |
+| `src/preview.ts` | The preview surfaces: panel view provider, editor tab, webview message handling, moving the app between tab and panel |
+| `src/launch.ts` | F9 (`runApp`), the Ctrl+F3 activate-and-reload command, the proxy-status watch, the connect-system flow |
+| `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list |
+| `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
 | `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only |
 | `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, settings only (no repo config, no render gate) |
 | `src/gate.ts` | The in-process property gate itself, shared by `viewcheck.ts` (desktop) and `webcheck.ts` (web) |
@@ -42,9 +47,11 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401 |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
+| `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability, the render-gate command ladder, scratch-file naming, the JSON report parsing |
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
 | `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, and "add to baseline" |
-| `src/language.ts` | Completion and hover, wired from `context.ts` + `metadata.ts` + `bindingpaths.ts` + `clientapi.ts`; the chain formatter and method navigation |
+| `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
+| `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
 | `src/clientapi.ts` | The bundled `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion |
 | `src/chainformat.ts` | Format Document for builder chains: per-line indents from the chain's own nesting |
 | `src/renderloc.ts` | Places a render-gate error message on the source line quoting its token |
@@ -82,7 +89,8 @@ not committed.
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`,
-`proxy.ts` and `webview.ts` (HTML strings only — the state it renders is
+`proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
+`checkcore.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
 Node, and an accidental import turns a unit test into a module-not-found
 error. Put the interesting logic
@@ -108,11 +116,17 @@ request, so a failure there means you skipped this:
 
 ```bash
 npm install
-npm run lint      # tsc --noEmit
+npm run lint      # tsc --noEmit + eslint (eslint.config.mjs)
 npm test          # esbuild -> dist-test, then node --test
 npm run package   # production esbuild
 npm run vsix      # vsce package, catches manifest errors
 ```
+
+The eslint config is tuned to the codebase (empty catch as best-effort
+probe, the tests' mid-test `require()`), so a clean tree lints clean -
+a finding is a real mistake, not a formatting opinion. There is
+deliberately no Prettier: a full pass would reformat nearly every file,
+and the gate exists to catch bugs, not to churn the history.
 
 CI installs with `npm ci`, so `package-lock.json` has to stay in sync with
 `package.json` — a lockfile left behind fails the build before anything else

@@ -22,6 +22,7 @@ jobs:
       - run: npm ci
 
       # Same four commands AGENTS.md asks for before pushing.
+      # lint = tsc --noEmit + eslint (config in eslint.config.mjs).
       - run: npm run lint
       - run: npm test
       - run: npm run package

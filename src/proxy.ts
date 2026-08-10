@@ -265,6 +265,14 @@ export class SapProxy {
   private authHeader?: string;
 
   /**
+   * Whether requests to the system may proceed when its TLS certificate
+   * cannot be verified (self-signed, private CA, hostname mismatch).
+   * Defaults to true because typical SAP dev systems serve self-signed
+   * certificates - the `abap2ui5.allowUnauthorizedCerts` setting feeds it.
+   */
+  allowUnauthorized = true;
+
+  /**
    * Called for every answer the system gives. The proxy is the only place
    * that sees them: inside the iframe a 401 is just a blank or unhelpful
    * page, and the extension used to have nothing to say about it. The host
@@ -349,7 +357,7 @@ export class SapProxy {
             authorization: auth,
             accept,
           },
-          rejectUnauthorized: false,
+          rejectUnauthorized: !this.allowUnauthorized,
         },
         (res) => {
           const status = res.statusCode ?? 0;
@@ -437,7 +445,9 @@ export class SapProxy {
       method: req.method,
       path: req.url,
       headers,
-      rejectUnauthorized: false, // dev systems often have self-signed certificates
+      // dev systems often have self-signed certificates - verification is
+      // opt-in via the abap2ui5.allowUnauthorizedCerts setting
+      rejectUnauthorized: !this.allowUnauthorized,
     };
 
     const proxyReq = mod.request(options, (proxyRes) => {
