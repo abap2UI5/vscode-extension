@@ -9,6 +9,15 @@ import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
 import { usesBuilder } from "./abap";
 import { runGate, VIEW_XML_RE } from "./gate";
+import {
+  augmentedPath,
+  CheckerCommand,
+  isCheckableSource,
+  parseRenderReport,
+  RenderResult,
+  resolveCheckerCommand,
+  scratchFileName,
+} from "./checkcore";
 import { toDiagnostics } from "./diagnostics";
 import {
   applyBaselineTo,
@@ -42,11 +51,6 @@ const CONFIG_SECTION = "abap2ui5";
  *  enough to feel immediate. */
 const LIVE_DEBOUNCE_MS = 400;
 
-interface RenderResult {
-  renderErrors: string[];
-  skippedRender: boolean;
-}
-
 /** Set when spawning the external render checker failed once - avoids a
  *  warning on every save. */
 let spawnFailed = false;
@@ -63,18 +67,9 @@ function config() {
   return vscode.workspace.getConfiguration(CONFIG_SECTION);
 }
 
-/** Checkable = a view/fragment XML, or an ABAP source calling the generic
- *  builder's factory. "ABAP source" means the abap language id or an *.abap
- *  file name - ABAP extensions differ in what they register, but a log or
- *  markdown file merely QUOTING builder code must not qualify. */
+/** See `isCheckableSource` - this is only the document unwrapping. */
 function isCheckable(doc: vscode.TextDocument): boolean {
-  if (VIEW_XML_RE.test(doc.fileName)) {
-    return true;
-  }
-  if (doc.languageId !== "abap" && !/\.abap$/i.test(doc.fileName)) {
-    return false;
-  }
-  return usesBuilder(doc.getText());
+  return isCheckableSource(doc.fileName, doc.languageId, doc.getText());
 }
 
 /** The document to check on demand: the active editor when it is checkable,
@@ -122,80 +117,26 @@ function optionsFor(doc: vscode.TextDocument): CheckOptions {
 // External render gate (optional)
 // ---------------------------------------------------------------------------
 
-interface CheckerCommand {
-  cmd: string;
-  args: string[];
-  env: Record<string, string>;
-  /** true when there is a real local installation to run - false means the
-   *  npx fallback, which needs npm on the machine */
-  installed: boolean;
-}
-
-/** The command used to run the external checker CLI for the render gate. An
- *  explicit setting wins; then a gate installed via "Install Render Gate";
- *  then a local linter checkout under the repos root (both run
- *  with VS Code's own Node.js); npx fetching from GitHub is the last
- *  resort. */
+/** The render gate's command, resolved from the settings and what is
+ *  installed - the decision itself lives in `checkcore.ts`. */
 function checkerCommand(): CheckerCommand {
-  const explicit = config().get<string>("viewCheck.command", "").trim();
-  if (explicit) {
-    const [cmd, ...args] = explicit.split(/\s+/);
-    return { cmd, args, env: {}, installed: true };
-  }
-  if (extContext) {
-    const cli = renderGateCli(extContext);
-    if (cli) {
-      return {
-        cmd: "node",
-        args: [cli],
-        env: { PLAYWRIGHT_BROWSERS_PATH: renderGateBrowsers(extContext) },
-        installed: true,
-      };
-    }
-  }
-  const root = config().get<string>("mcp.reposRoot", "").trim();
-  if (root) {
-    for (const dir of VIEW_CHECK_DIRS) {
-      const cli = path.join(root, dir, "cli.mjs");
-      if (fs.existsSync(cli)) {
-        return { cmd: "node", args: [cli], env: {}, installed: true };
-      }
-    }
-  }
-  return {
-    cmd: "npx",
-    args: ["--yes", "github:abap2UI5/linter"],
-    env: {},
-    installed: false,
-  };
+  const gateCli = extContext ? renderGateCli(extContext) : undefined;
+  return resolveCheckerCommand({
+    explicit: config().get<string>("viewCheck.command", ""),
+    installedGate:
+      gateCli && extContext
+        ? { cli: gateCli, browsersPath: renderGateBrowsers(extContext) }
+        : undefined,
+    reposRoot: config().get<string>("mcp.reposRoot", ""),
+    checkoutDirs: VIEW_CHECK_DIRS,
+    exists: (file) => fs.existsSync(file),
+  });
 }
 
-/** The extension host often runs with a minimal PATH (a GUI-launched VS Code
- *  on macOS misses /usr/local/bin and the Homebrew prefix) - the usual reason
- *  spawning npx fails. */
+/** See `augmentedPath` - the environment to spawn npx with. */
 function spawnEnv(): NodeJS.ProcessEnv {
-  if (process.platform === "win32") {
-    return process.env;
-  }
-  const parts = (process.env.PATH ?? "").split(path.delimiter);
-  for (const p of ["/usr/local/bin", "/opt/homebrew/bin"]) {
-    if (!parts.includes(p)) {
-      parts.push(p);
-    }
-  }
-  return { ...process.env, PATH: parts.join(path.delimiter) };
-}
-
-/** The checker is a CLI working on files, but the document may be unsaved or
- *  not a file on disk at all (the `adt` scheme of the ABAP remote
- *  filesystem) - so the buffer is written to a scratch file first. The name
- *  matters: the checker only looks at `*.clas.abap` and view/fragment XML. */
-function scratchFileFor(doc: vscode.TextDocument, dir: string): string {
-  const base = path.basename(doc.fileName);
-  if (VIEW_XML_RE.test(base) || base.endsWith(".clas.abap")) {
-    return path.join(dir, base);
-  }
-  return path.join(dir, `${path.parse(base).name}.clas.abap`);
+  const PATH = augmentedPath(process.platform, process.env.PATH);
+  return PATH === process.env.PATH ? process.env : { ...process.env, PATH };
 }
 
 function runRenderGate(
@@ -205,7 +146,7 @@ function runRenderGate(
   const scratchDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "abap2ui5-viewcheck-")
   );
-  const scratch = scratchFileFor(doc, scratchDir);
+  const scratch = path.join(scratchDir, scratchFileName(doc.fileName));
   fs.writeFileSync(scratch, doc.getText());
 
   const checker = checkerCommand();
@@ -259,28 +200,18 @@ function runRenderGate(
       done(undefined);
     });
     child.on("close", () => {
-      const start = stdout.indexOf("{");
-      if (start < 0) {
+      const parsed = parseRenderReport(stdout);
+      if (!parsed.ok) {
         log(
-          `view-check: render gate produced no JSON` +
-            (stderr ? ` - stderr: ${stderr.slice(0, 400)}` : "")
+          parsed.reason === "no-json"
+            ? `view-check: render gate produced no JSON` +
+                (stderr ? ` - stderr: ${stderr.slice(0, 400)}` : "")
+            : `view-check: render gate returned broken JSON - ${parsed.detail}`
         );
         done(undefined);
         return;
       }
-      try {
-        const report = JSON.parse(stdout.slice(start)) as {
-          results?: Array<{ renderErrors?: string[]; skippedRender?: boolean }>;
-        };
-        const r = report.results?.[0];
-        done({
-          renderErrors: r?.renderErrors ?? [],
-          skippedRender: r?.skippedRender ?? false,
-        });
-      } catch (err) {
-        log(`view-check: render gate returned broken JSON - ${String(err)}`);
-        done(undefined);
-      }
+      done(parsed.result);
     });
   });
 }

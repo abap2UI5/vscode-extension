@@ -47,9 +47,11 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401 |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
+| `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability, the render-gate command ladder, scratch-file naming, the JSON report parsing |
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
 | `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, and "add to baseline" |
-| `src/language.ts` | Completion and hover, wired from `context.ts` + `metadata.ts` + `bindingpaths.ts` + `clientapi.ts`; the chain formatter and method navigation |
+| `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
+| `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
 | `src/clientapi.ts` | The bundled `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion |
 | `src/chainformat.ts` | Format Document for builder chains: per-line indents from the chain's own nesting |
 | `src/renderloc.ts` | Places a render-gate error message on the source line quoting its token |
@@ -87,7 +89,8 @@ not committed.
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`,
-`proxy.ts`, `previewcore.ts`, `activationwatch.ts` and `webview.ts` (HTML strings only — the state it renders is
+`proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
+`checkcore.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
 Node, and an accidental import turns a unit test into a module-not-found
 error. Put the interesting logic
