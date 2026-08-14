@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { VIEW_CHECK_DIRS } from "./repolayout";
+import { CORPUS_DIRS, VIEW_CHECK_DIRS } from "./repolayout";
 
 /*
  * MCP server registration: exposes the abap2UI5 MCP server
@@ -11,8 +11,8 @@ import { VIEW_CHECK_DIRS } from "./repolayout";
  * system: capability queries, static view validation, deploy, transpiled
  * build, headless run with screenshot.
  *
- * The server orchestrates sibling checkouts (abap2UI5, ai-demokit,
- * abap2UI5-linter). Point `abap2ui5.mcp.reposRoot` at the folder containing
+ * The server orchestrates sibling checkouts (abap2UI5, samples-controls,
+ * linter). Point `abap2ui5.mcp.reposRoot` at the folder containing
  * them and the matching *_HOME environment variables are passed along.
  */
 
@@ -20,10 +20,10 @@ const CONFIG_SECTION = "abap2ui5";
 const PROVIDER_ID = "abap2ui5.mcp";
 
 /** Repo-name -> env var the server resolves it with (see ai-mcp lib/repos.mjs,
- *  whose VIEW_CHECK_DIRS this mirrors via src/repolayout.ts). */
+ *  whose CORPUS_DIRS / VIEW_CHECK_DIRS this mirrors via src/repolayout.ts). */
 const HOME_VARS: ReadonlyArray<readonly [string, string]> = [
   ["abap2UI5", "A2UI5_HOME"],
-  ["ai-demokit", "AI_DEMOKIT_HOME"],
+  ...CORPUS_DIRS.map((d) => [d, "SAMPLES_CONTROLS_HOME"] as const),
   ...VIEW_CHECK_DIRS.map((d) => [d, "AI_VIEW_CHECK_HOME"] as const),
 ];
 

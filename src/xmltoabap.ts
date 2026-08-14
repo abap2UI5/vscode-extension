@@ -1,5 +1,5 @@
 /*
- * XML view -> z2ui5_cl_ai_xml builder chain: the reverse of the reconstructed
+ * XML view -> z2ui5_cl_ui5_view_builder chain: the reverse of the reconstructed
  * XML view.
  *
  * The linter reconstructs the XML a class builds; this module goes the other
@@ -178,12 +178,12 @@ function splitTag(name: string): { prefix: string; local: string } {
 }
 
 interface Op {
-  verb: "open" | "leaf" | "a" | "shut";
+  verb: "ele" | "tag" | "a" | "end";
   args: string;
   level: number;
 }
 
-/** The call arguments of an open/leaf: positional when only the name is
+/** The call arguments of an ele/tag: positional when only the name is
  *  needed (a lone `n =` trips abaplint's omit_parameter_name), named when a
  *  namespace prefix rides along. */
 function elementArgs(name: string): string {
@@ -193,9 +193,9 @@ function elementArgs(name: string): string {
 
 function emitElement(el: XmlElement, level: number, out: Op[]): void {
   if (el.children.length === 0) {
-    out.push({ verb: "leaf", args: elementArgs(el.name), level });
+    out.push({ verb: "tag", args: elementArgs(el.name), level });
   } else {
-    out.push({ verb: "open", args: elementArgs(el.name), level });
+    out.push({ verb: "ele", args: elementArgs(el.name), level });
   }
   for (const [name, value] of el.attrs) {
     out.push({ verb: "a", args: `n = ${lit(name)} v = ${lit(value)}`, level: level + 1 });
@@ -204,7 +204,7 @@ function emitElement(el: XmlElement, level: number, out: Op[]): void {
     emitElement(child, level + 1, out);
   }
   if (el.children.length) {
-    out.push({ verb: "shut", args: "", level });
+    out.push({ verb: "end", args: "", level });
   }
 }
 
@@ -217,7 +217,7 @@ export interface ConvertedXml {
 /**
  * One XML view (or fragment) as the builder chain that produces it.
  *
- * `stringify( )` renders from the root, so the trailing `shut( )`s that only
+ * `stringify( )` renders from the root, so the trailing `end( )`s that only
  * walk the cursor back up are dropped - the corpus ends a chain at its
  * deepest node with a single `).`, and so does this.
  */
@@ -243,26 +243,26 @@ export function xmlToAbap(text: string, baseIndent = ""): ConvertedXml {
 
   const ops: Op[] = [];
   emitElement(roots[0], 0, ops);
-  // Trailing shuts only walk the cursor back to the root - the render closes
+  // Trailing ends only walk the cursor back to the root - the render closes
   // every still-open tag structurally, so the corpus leaves them off.
-  while (ops.length && ops[ops.length - 1].verb === "shut") {
+  while (ops.length && ops[ops.length - 1].verb === "end") {
     ops.pop();
   }
 
   const lines: string[] = [];
-  lines.push(`${baseIndent}DATA(view) = z2ui5_cl_ai_xml=>factory( ).`);
+  lines.push(`${baseIndent}DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).`);
   ops.forEach((op, ix) => {
     const first = ix === 0;
     const last = ix === ops.length - 1;
     const indent = baseIndent + STEP.repeat(op.level);
     // The corpus breathing rhythm, coarse-grained: a blank line before every
-    // shut, and before an open that starts a new sibling block after another
+    // end, and before an ele that starts a new sibling block after another
     // element's attributes - never between a control and its own a( ) lines.
     const prev = ops[ix - 1];
     const blankBefore =
-      (op.verb === "shut" && prev?.verb !== "shut") ||
-      (op.verb === "open" && (prev?.verb === "a" || prev?.verb === "shut")) ||
-      (op.verb === "leaf" && prev?.verb === "shut");
+      (op.verb === "end" && prev?.verb !== "end") ||
+      (op.verb === "ele" && (prev?.verb === "a" || prev?.verb === "end")) ||
+      (op.verb === "tag" && prev?.verb === "end");
     if (!first && blankBefore) {
       lines.push("");
     }

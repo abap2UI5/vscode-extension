@@ -374,7 +374,7 @@
         "abap2ui5.viewCheck.onSave": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Run the static view check every time a checkable file is saved: an ABAP class building views with `z2ui5_cl_ai_xml`, or a raw `*.view.xml` / `*.fragment.xml`. Findings appear in the Problems panel. The command *\"abap2UI5: Check Views (Static)\"* runs the same check on demand.\n\nTo also apply every mechanical fix on save, opt in via VS Code's own setting:\n\n```json\n\"editor.codeActionsOnSave\": { \"source.fixAll.abap2ui5\": \"explicit\" }\n```"
+          "markdownDescription": "Run the static view check every time a checkable file is saved: an ABAP class building views with `z2ui5_cl_ui5_view_builder`, or a raw `*.view.xml` / `*.fragment.xml`. Findings appear in the Problems panel. The command *\"abap2UI5: Check Views (Static)\"* runs the same check on demand.\n\nTo also apply every mechanical fix on save, opt in via VS Code's own setting:\n\n```json\n\"editor.codeActionsOnSave\": { \"source.fixAll.abap2ui5\": \"explicit\" }\n```"
         },
         "abap2ui5.viewCheck.live": {
           "type": "boolean",
@@ -438,7 +438,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `ai-demokit`, and optionally `linter`, `ai-mcp`). The matching `A2UI5_HOME` / `AI_DEMOKIT_HOME` / `AI_VIEW_CHECK_HOME` environment variables are passed to the server, and local `ai-mcp` / `linter` checkouts found here are preferred over downloading via npx.\n\nWhat is found here decides which programs are started, so it is read from your user settings only."
+          "markdownDescription": "Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, and optionally `linter`, `ai-mcp`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `AI_VIEW_CHECK_HOME` environment variables are passed to the server, and local `ai-mcp` / `linter` checkouts found here are preferred over downloading via npx.\n\nWhat is found here decides which programs are started, so it is read from your user settings only."
         }
       }
     },
@@ -544,7 +544,7 @@
     "client-api:check": "node scripts/generate-client-api.mjs --check"
   },
   "devDependencies": {
-    "@abap2ui5/linter": "github:abap2UI5/linter#c0e58d07103656f86dab6d883fcea1b6ee6d1060",
+    "@abap2ui5/linter": "github:abap2UI5/linter#f2f0f9c7fffac10579c7801d18a13b42c545825a",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.101.0",
     "@vscode/test-web": "^0.0.81",

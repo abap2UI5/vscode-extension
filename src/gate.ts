@@ -67,7 +67,7 @@ export function runGate(
         findings: [],
         renderable: false,
         helperNote: "",
-        nothingChecked: "no z2ui5_cl_ai_xml=>factory call found",
+        nothingChecked: "no z2ui5_cl_ui5_view_builder=>factory call found",
       };
     }
     if (prep.nodes.length === 0) {

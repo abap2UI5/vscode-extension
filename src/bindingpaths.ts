@@ -122,7 +122,7 @@ export function resolvePathKind(root: unknown, path: string): PathKind {
 /**
  * The row shape the innermost enclosing aggregation binding hands down.
  *
- * `aggregations` are the bound aggregation paths of the `open( )` chain
+ * `aggregations` are the bound aggregation paths of the `ele( )` chain
  * around the cursor, outermost first - `/TRAVELS` then `SUBITEMS` for a list
  * nested in a list. Each is resolved the way the gate resolves it: an
  * absolute path against the model root, a relative one against the row of

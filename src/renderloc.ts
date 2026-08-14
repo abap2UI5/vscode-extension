@@ -28,7 +28,7 @@ export function renderErrorNeedles(message: string): string[] {
     push(m[1] ?? m[2] ?? m[3]);
   }
   for (const m of message.matchAll(/\b(?:sap|z2ui5)(?:\.\w+)+/g)) {
-    // the local name is what the builder writes (`leaf( \`Button\` )`)
+    // the local name is what the builder writes (`tag( \`Button\` )`)
     push(m[0].split(".").pop());
   }
   for (const m of message.matchAll(/\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b/g)) {

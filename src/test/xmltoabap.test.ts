@@ -52,17 +52,17 @@ test("decodeEntities covers named and numeric entities", () => {
 test("xmlToAbap emits the corpus chain style", () => {
   const { abap, warnings } = xmlToAbap(SAMPLE);
   assert.deepEqual(warnings, []);
-  assert.match(abap, /DATA\(view\) = z2ui5_cl_ai_xml=>factory\( \)\./);
-  assert.match(abap, /view->open\( n = `View` ns = `mvc`/);
+  assert.match(abap, /DATA\(view\) = z2ui5_cl_ui5_view_builder=>factory\( \)\./);
+  assert.match(abap, /view->ele\( n = `View` ns = `mvc`/);
   // namespace declarations become plain attributes
   assert.match(abap, /\)->a\( n = `xmlns:f` v = `sap\.f`/);
   // decoded entity survives into the literal
   assert.match(abap, /\)->a\( n = `title` v = `Products & Prices`/);
   // an aggregation without a namespace is positional
-  assert.match(abap, /\)->open\( `columns`/);
+  assert.match(abap, /\)->ele\( `columns`/);
   // a namespaced control carries its prefix
-  assert.match(abap, /\)->leaf\( n = `Card` ns = `f` \)\./);
-  // the statement ends once, at the deepest point - trailing shuts dropped
+  assert.match(abap, /\)->tag\( n = `Card` ns = `f` \)\./);
+  // the statement ends once, at the deepest point - trailing ends dropped
   assert.match(abap, /client->view_display\( view->stringify\( \) \)\./);
 });
 
@@ -114,8 +114,8 @@ test("dropped text and mismatched tags are reported, not swallowed", () => {
   assert.ok(bad.warnings.some((w) => w.includes("does not match")));
 });
 
-test("a childless root converts as a single leaf", () => {
+test("a childless root converts as a single tag", () => {
   const { abap } = xmlToAbap(`<Text text="hi"/>`);
-  assert.match(abap, /view->leaf\( `Text`/);
+  assert.match(abap, /view->tag\( `Text`/);
   assert.match(abap, /\)->a\( n = `text` v = `hi` \)\./);
 });

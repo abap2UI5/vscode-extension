@@ -11,7 +11,7 @@ declare module "@abap2ui5/linter/reconstruct" {
      *  wrote the attribute - absent on nodes parseXml( ) produced. */
     attrs: Array<[string, string] | [string, string, number]>;
     children: ViewNode[];
-    /** Character offset of the `open( )` / `leaf( )` call - reconstruction
+    /** Character offset of the `ele( )` / `tag( )` call - reconstruction
      *  offsets are valid offsets into the original source (scrub( ) is
      *  offset-preserving). Absent on parseXml( ) nodes. */
     offset?: number;

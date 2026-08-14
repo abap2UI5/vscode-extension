@@ -54,13 +54,13 @@ test("formatCssColor writes hex while opaque, rgba() with alpha", () => {
 });
 
 const ABAP = `
-  DATA(view) = z2ui5_cl_ai_xml=>factory( ).
-  view->open( n = \`View\` ns = \`mvc\`
+  DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+  view->ele( n = \`View\` ns = \`mvc\`
       )->a( n = \`xmlns\` v = \`sap.m\`
-      )->leaf( \`ObjectStatus\`
+      )->tag( \`ObjectStatus\`
           )->a( n = \`text\` v = \`red\`
           )->a( n = \`iconColor\` v = \`#1873b4\`
-      )->leaf( \`Text\`
+      )->tag( \`Text\`
           )->a( n = \`text\` v = \`#123456\` ).
 `;
 

@@ -17,8 +17,8 @@ test("a class implementing something else is not an app", () => {
 });
 
 test("only the generic builder counts as checkable", () => {
-  assert.ok(usesBuilder("DATA(v) = z2ui5_cl_ai_xml=>factory( )."));
-  assert.ok(usesBuilder("z2ui5_cl_ai_xml=>FACTORY( )"));
+  assert.ok(usesBuilder("DATA(v) = z2ui5_cl_ui5_view_builder=>factory( )."));
+  assert.ok(usesBuilder("z2ui5_cl_ui5_view_builder=>FACTORY( )"));
   // The typed builder is on its way out and deliberately not reconstructed.
   assert.equal(usesBuilder("DATA(v) = z2ui5_cl_xml_view=>factory( )."), false);
 });

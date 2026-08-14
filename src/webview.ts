@@ -801,7 +801,7 @@ ${BASE_CSS}
 </style>
 </head>
 <body>
-  <div id="root"><p class="empty">Place the cursor on an \`open( )\` / \`leaf( )\` builder call - its control's properties appear here. The Inspect button in the preview lands here too.</p></div>
+  <div id="root"><p class="empty">Place the cursor on an \`ele( )\` / \`tag( )\` builder call - its control's properties appear here. The Inspect button in the preview lands here too.</p></div>
 <script nonce="${nonce}">
 (function () {
   const vscodeApi = acquireVsCodeApi();

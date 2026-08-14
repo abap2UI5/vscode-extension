@@ -1,6 +1,6 @@
 /*
  * The app skeletons "New App from Template" offers. They build their views
- * with z2ui5_cl_ai_xml on purpose: that is the builder abap2UI5 is
+ * with z2ui5_cl_ui5_view_builder on purpose: that is the builder abap2UI5 is
  * standardising on, and the only one the view check can reconstruct - a
  * template using the older z2ui5_cl_xml_view handed out a class the
  * extension's own checker then ignored.
@@ -33,13 +33,13 @@ ENDCLASS.
 CLASS zcl_my_app IMPLEMENTATION.
   METHOD z2ui5_if_app~main.
 
-    DATA(view) = z2ui5_cl_ai_xml=>factory( ).
-    view->open( n = \`View\` ns = \`mvc\`
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
         )->a( n = \`xmlns\`     v = \`sap.m\`
         )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
-        )->open( n = \`Page\`
+        )->ele( n = \`Page\`
         )->a( n = \`title\` v = \`Hello abap2UI5\`
-        )->leaf( n = \`Text\`
+        )->tag( n = \`Text\`
         )->a( n = \`text\` v = \`My first app\` ).
 
     client->view_display( view->stringify( ) ).
@@ -79,32 +79,32 @@ CLASS zcl_my_app IMPLEMENTATION.
 
   METHOD view_display.
 
-    DATA(view) = z2ui5_cl_ai_xml=>factory( ).
-    view->open( n = \`View\` ns = \`mvc\`
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
         )->a( n = \`xmlns\`     v = \`sap.m\`
         )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
-        )->open( \`Page\`
+        )->ele( \`Page\`
             )->a( n = \`title\` v = \`Products\`
-            )->open( \`Table\`
+            )->ele( \`Table\`
                 )->a( n = \`items\` v = client->_bind( mt_products )
-                )->open( \`columns\`
-                    )->open( \`Column\`
-                        )->leaf( \`Text\`
+                )->ele( \`columns\`
+                    )->ele( \`Column\`
+                        )->tag( \`Text\`
                             )->a( n = \`text\` v = \`Name\`
 
-                    )->shut(
-                    )->open( \`Column\`
-                        )->leaf( \`Text\`
+                    )->end(
+                    )->ele( \`Column\`
+                        )->tag( \`Text\`
                             )->a( n = \`text\` v = \`Price\`
 
-                    )->shut(
-                )->shut(
-                )->open( \`items\`
-                    )->open( \`ColumnListItem\`
-                        )->open( \`cells\`
-                            )->leaf( \`Text\`
+                    )->end(
+                )->end(
+                )->ele( \`items\`
+                    )->ele( \`ColumnListItem\`
+                        )->ele( \`cells\`
+                            )->tag( \`Text\`
                                 )->a( n = \`text\` v = \`{NAME}\`
-                            )->leaf( \`Text\`
+                            )->tag( \`Text\`
                                 )->a( n = \`text\` v = \`{PRICE}\` ).
 
     client->view_display( view->stringify( ) ).
@@ -150,22 +150,22 @@ CLASS zcl_my_app IMPLEMENTATION.
 
   METHOD view_display.
 
-    DATA(view) = z2ui5_cl_ai_xml=>factory( ).
-    view->open( n = \`View\` ns = \`mvc\`
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
         )->a( n = \`xmlns\`     v = \`sap.m\`
         )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
-        )->open( \`Page\`
+        )->ele( \`Page\`
             )->a( n = \`title\` v = \`Form\`
-            )->open( \`VBox\`
-                )->leaf( \`Label\`
+            )->ele( \`VBox\`
+                )->tag( \`Label\`
                     )->a( n = \`text\` v = \`Name\`
-                )->leaf( \`Input\`
+                )->tag( \`Input\`
                     )->a( n = \`value\` v = client->_bind( mv_name )
-                )->leaf( \`Label\`
+                )->tag( \`Label\`
                     )->a( n = \`text\` v = \`E-mail\`
-                )->leaf( \`Input\`
+                )->tag( \`Input\`
                     )->a( n = \`value\` v = client->_bind( mv_email )
-                )->leaf( \`Button\`
+                )->tag( \`Button\`
                     )->a( n = \`text\`  v = \`Save\`
                     )->a( n = \`press\` v = client->_event( \`SAVE\` ) ).
 
@@ -219,25 +219,25 @@ CLASS zcl_my_app IMPLEMENTATION.
 
   METHOD view_display.
 
-    DATA(view) = z2ui5_cl_ai_xml=>factory( ).
-    view->open( n = \`View\` ns = \`mvc\`
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
         )->a( n = \`xmlns\`     v = \`sap.m\`
         )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
-        )->open( \`Page\`
+        )->ele( \`Page\`
             )->a( n = \`title\` v = \`Master & Detail\`
-            )->open( \`List\`
+            )->ele( \`List\`
                 )->a( n = \`headerText\` v = \`Items\`
                 )->a( n = \`items\`      v = client->_bind( mt_items )
-                )->leaf( \`StandardListItem\`
+                )->tag( \`StandardListItem\`
                     )->a( n = \`title\`       v = \`{TITLE}\`
                     )->a( n = \`description\` v = \`{DESCR}\`
                     )->a( n = \`type\`        v = \`Active\`
                     )->a( n = \`press\`       v = client->_event( val = \`PICK\` t_arg = VALUE #( ( \`\${TITLE}\` ) ) )
 
-            )->shut(
-            )->open( \`Panel\`
+            )->end(
+            )->ele( \`Panel\`
                 )->a( n = \`headerText\` v = \`Detail\`
-                )->leaf( \`Text\`
+                )->tag( \`Text\`
                     )->a( n = \`text\` v = client->_bind( mv_selected ) ).
 
     client->view_display( view->stringify( ) ).
@@ -249,7 +249,6 @@ CLASS zcl_my_app IMPLEMENTATION.
     CASE client->get( )-event.
       WHEN \`PICK\`.
         mv_selected = client->get_event_arg( ).
-        client->view_model_update( ).
     ENDCASE.
 
   ENDMETHOD.
@@ -292,13 +291,13 @@ CLASS zcl_my_app IMPLEMENTATION.
 
   METHOD view_display.
 
-    DATA(view) = z2ui5_cl_ai_xml=>factory( ).
-    view->open( n = \`View\` ns = \`mvc\`
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
         )->a( n = \`xmlns\`     v = \`sap.m\`
         )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
-        )->open( \`Page\`
+        )->ele( \`Page\`
             )->a( n = \`title\` v = \`Popup\`
-            )->leaf( \`Button\`
+            )->tag( \`Button\`
                 )->a( n = \`text\`  v = \`Open dialog\`
                 )->a( n = \`press\` v = client->_event( \`OPEN\` ) ).
 
@@ -319,17 +318,17 @@ CLASS zcl_my_app IMPLEMENTATION.
 
   METHOD popup_open.
 
-    DATA(popup) = z2ui5_cl_ai_xml=>factory( ).
-    popup->open( \`Dialog\`
+    DATA(popup) = z2ui5_cl_ui5_view_builder=>factory( ).
+    popup->ele( \`Dialog\`
         )->a( n = \`xmlns\` v = \`sap.m\`
         )->a( n = \`title\` v = \`My Dialog\`
-        )->open( \`content\`
-            )->leaf( \`Text\`
+        )->ele( \`content\`
+            )->tag( \`Text\`
                 )->a( n = \`text\` v = \`Dialog content\`
 
-        )->shut(
-        )->open( \`buttons\`
-            )->leaf( \`Button\`
+        )->end(
+        )->ele( \`buttons\`
+            )->tag( \`Button\`
                 )->a( n = \`text\`  v = \`Close\`
                 )->a( n = \`press\` v = client->_event( \`POPUP_CLOSE\` ) ).
 

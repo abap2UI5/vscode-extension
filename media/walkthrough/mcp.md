@@ -7,6 +7,6 @@ abap2UI5 development loop **without an SAP system**: capability queries,
 static view validation, deploy into a local sandbox, build, and a headless
 run that returns errors *and a screenshot*.
 
-Clone the `abap2UI5` and `ai-demokit` repositories into one folder and point
+Clone the `abap2UI5` and `samples-controls` repositories into one folder and point
 `abap2ui5.mcp.reposRoot` at it. The server then appears in `MCP: List
 Servers` as **abap2UI5**; `abap2ui5.mcp.enabled: false` removes it.

@@ -53,7 +53,7 @@ test("completion opens right after the arrow and inside a partial name", () => {
   assert.ok(isClientCompletion("    client->view_"));
   assert.ok(isClientCompletion("x = me->client->nav"));
   assert.equal(isClientCompletion("    client"), false);
-  assert.equal(isClientCompletion("    view->open( "), false);
+  assert.equal(isClientCompletion("    view->ele( "), false);
 });
 
 test("the signature head is one line, for the completion detail", () => {

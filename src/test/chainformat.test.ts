@@ -3,29 +3,29 @@ import assert from "node:assert/strict";
 import { chainIndentEdits } from "../chainformat";
 
 /*
- * The canonical shape is the ai-demokit corpus style: an element one step
+ * The canonical shape is the samples-controls corpus style: an element one step
  * (4 spaces) under its parent, an attribute one step under its element, a
- * shut( ) on the level of the open( ) it closes. A file already in that
+ * end( ) on the level of the ele( ) it closes. A file already in that
  * shape must round-trip UNCHANGED - a formatter that touches canonical code
  * is how formatters lose trust.
  */
 
 const CANONICAL = [
   "  METHOD render.",
-  "    DATA(view) = z2ui5_cl_ai_xml=>factory( ).",
-  "    view->open( n = `View` ns = `mvc`",
+  "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).",
+  "    view->ele( n = `View` ns = `mvc`",
   "        )->a( n = `xmlns`     v = `sap.m`",
   "        )->a( n = `xmlns:mvc` v = `sap.ui.core.mvc`",
-  "        )->open( n = `Page`",
+  "        )->ele( n = `Page`",
   "            )->a( n = `title` v = `My Page`",
-  "            )->open( `content`",
-  "                )->leaf( `Text`",
+  "            )->ele( `content`",
+  "                )->tag( `Text`",
   "                    )->a( n = `text` v = `(parens) in a literal`",
-  "                )->leaf( `Button`",
+  "                )->tag( `Button`",
   "                    )->a( n = `text`  v = `Go`",
   "                    )->a( n = `press` v = client->_event( `GO` )",
-  "            )->shut(",
-  "        )->shut( ).",
+  "            )->end(",
+  "        )->end( ).",
   "    client->view_display( view->stringify( ) ).",
   "  ENDMETHOD.",
 ].join("\n");
@@ -65,11 +65,11 @@ test("lines outside a chain are never edited", () => {
 
 test("continuation lines of a multi-line value keep their bytes", () => {
   const source = [
-    "view->open( n = `View`",
-    "    )->leaf( `Text`",
+    "view->ele( n = `View`",
+    "    )->tag( `Text`",
     "        )->a( n = `text` v = |a value",
     "spanning lines|",
-    "    )->shut( ).",
+    "    )->end( ).",
   ].join("\n");
   // the continuation line does not start with )->verb, so no edit names it
   assert.ok(chainIndentEdits(source).every((e) => e.line !== 3));
@@ -77,12 +77,12 @@ test("continuation lines of a multi-line value keep their bytes", () => {
 
 test("two chains in one file are each formatted from their own base", () => {
   const source = [
-    "    view->open( n = `View`",
+    "    view->ele( n = `View`",
     ")->a( n = `xmlns` v = `sap.m`",
-    "    )->shut( ).",
-    "      popup->open( n = `Dialog`",
+    "    )->end( ).",
+    "      popup->ele( n = `Dialog`",
     "  )->a( n = `title` v = `T`",
-    "      )->shut( ).",
+    "      )->end( ).",
   ].join("\n");
   const edits = chainIndentEdits(source);
   const byLine = new Map(edits.map((e) => [e.line, e.indent]));

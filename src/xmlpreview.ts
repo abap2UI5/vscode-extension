@@ -20,7 +20,7 @@ import { formatDocument } from "./xmlformat";
  *
  * The reconstruction records which builder call wrote each node and
  * attribute, so the XML is not just readable but navigable: Go to Definition
- * on a line jumps to its `open( )` / `leaf( )` / `a( )` in the class, and the
+ * on a line jumps to its `ele( )` / `tag( )` / `a( )` in the class, and the
  * view check's findings are mirrored onto the XML lines they concern.
  */
 
@@ -156,7 +156,7 @@ export function registerXmlPreview(
     if (!prep.nodes.length) {
       const empty =
         `<!-- ${className}: no view could be reconstructed - the class calls ` +
-        `z2ui5_cl_ai_xml=>factory( ) but nothing checkable came out of the ` +
+        `z2ui5_cl_ui5_view_builder=>factory( ) but nothing checkable came out of the ` +
         `builder chain. -->\n`;
       lastContent = empty;
       lastOffsets = undefined;
@@ -179,7 +179,7 @@ export function registerXmlPreview(
       if (!source) {
         return (
           lastContent ??
-          "<!-- Open an ABAP class that builds views with z2ui5_cl_ai_xml " +
+          "<!-- Open an ABAP class that builds views with z2ui5_cl_ui5_view_builder " +
             "- the preview follows the class you are editing. -->\n"
         );
       }
@@ -244,7 +244,7 @@ export function registerXmlPreview(
       if (!doc || !isFollowable(doc)) {
         vscode.window.showInformationMessage(
           "abap2UI5: open an ABAP class that builds views with " +
-            "z2ui5_cl_ai_xml to see its reconstructed XML."
+            "z2ui5_cl_ui5_view_builder to see its reconstructed XML."
         );
         return;
       }

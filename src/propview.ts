@@ -63,7 +63,7 @@ export class PropertyEditorProvider implements vscode.WebviewViewProvider {
       void view.webview.postMessage({
         type: "none",
         reason:
-          "Open an ABAP class that builds views with z2ui5_cl_ai_xml - the " +
+          "Open an ABAP class that builds views with z2ui5_cl_ui5_view_builder - the " +
           "control under the cursor appears here.",
       });
       return;
@@ -75,7 +75,7 @@ export class PropertyEditorProvider implements vscode.WebviewViewProvider {
       void view.webview.postMessage({
         type: "none",
         reason:
-          "Place the cursor on an open( ) / leaf( ) builder call - its " +
+          "Place the cursor on an ele( ) / tag( ) builder call - its " +
           "control's properties appear here.",
       });
       return;

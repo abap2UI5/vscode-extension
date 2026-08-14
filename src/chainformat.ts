@@ -1,18 +1,18 @@
 /*
- * Indentation for z2ui5_cl_ai_xml builder chains.
+ * Indentation for z2ui5_cl_ui5_view_builder chains.
  *
  * The chain IS the view hierarchy, so its indentation is not taste but
  * structure: a child sits one step (4 spaces) deeper than the element that
- * contains it, an attribute one step deeper than its element, a shut( ) back
+ * contains it, an attribute one step deeper than its element, an end( ) back
  * on the level it closes. The reconstruction knows that nesting exactly;
  * this module turns it into per-line indents so Format Document repairs a
  * chain instead of a human counting parentheses.
  *
  * Deliberately conservative: only lines that BEGIN a builder verb
- * (`)->open/leaf/a/shut`) inside a chain statement are touched. Continuation
+ * (`)->ele/tag/a/end`) inside a chain statement are touched. Continuation
  * lines of a multi-line value, comments, and everything outside a chain keep
  * their bytes - a formatter that touches code it does not understand is how
- * formatters lose trust. The canonical shape is the ai-demokit corpus style,
+ * formatters lose trust. The canonical shape is the samples-controls corpus style,
  * which a formatted file round-trips unchanged.
  *
  * `vscode`-free: pure text -> edits, tested headless.
@@ -27,10 +27,10 @@ export interface IndentEdit {
 
 const STEP = 4;
 
-/** All builder verbs on one line, in order - `view->open(` at the chain
- *  start counts like a `)->open(`. */
+/** All builder verbs on one line, in order - `view->ele(` at the chain
+ *  start counts like a `)->ele(`. */
 function verbsOn(line: string): string[] {
-  return [...line.matchAll(/(?:\)|\b\w+)->\s*(open|leaf|a|shut)\s*\(/g)].map((m) => m[1]);
+  return [...line.matchAll(/(?:\)|\b\w+)->\s*(ele|tag|a|end)\s*\(/g)].map((m) => m[1]);
 }
 
 /** Paren balance of a line with backtick literals and |…| templates blanked,
@@ -70,39 +70,39 @@ export function chainIndentEdits(text: string): IndentEdit[] {
   let inChain = false;
   let base = "";
   let depth = 0; // element nesting inside the current chain
-  let lastLeaf = false;
+  let lastTag = false;
   let parens = 0; // raw paren balance of the chain statement
 
   for (let lineNo = 0; lineNo < lines.length; lineNo++) {
     const line = lines[lineNo];
     if (!inChain) {
       // a chain statement starts where a handle opens the root element
-      const start = /^(\s*)(?:DATA\(\w+\)\s*=\s*)?\w+->open\(/.exec(line);
+      const start = /^(\s*)(?:DATA\(\w+\)\s*=\s*)?\w+->ele\(/.exec(line);
       if (!start) {
         continue;
       }
       inChain = true;
       base = start[1];
       depth = 0;
-      lastLeaf = false;
+      lastTag = false;
       parens = 0;
-      // fall through - the first line carries the first open( )
+      // fall through - the first line carries the first ele( )
     }
 
     const trimmed = line.trimStart();
-    const startsWithVerb = /^\)->\s*(open|leaf|a|shut)\b/.exec(trimmed);
+    const startsWithVerb = /^\)->\s*(ele|tag|a|end)\b/.exec(trimmed);
     const verbs = verbsOn(line);
 
     if (startsWithVerb && verbs.length) {
       // the indent is decided by the FIRST verb on the line
       const verb = verbs[0];
       let level: number;
-      if (verb === "open" || verb === "leaf") {
+      if (verb === "ele" || verb === "tag") {
         level = depth;
       } else if (verb === "a") {
-        level = depth + (lastLeaf ? 1 : 0);
+        level = depth + (lastTag ? 1 : 0);
       } else {
-        level = Math.max(0, depth - 1); // shut closes the level it sits on
+        level = Math.max(0, depth - 1); // end closes the level it sits on
       }
       const want = base + " ".repeat(STEP * level);
       const have = line.slice(0, line.length - trimmed.length);
@@ -113,14 +113,14 @@ export function chainIndentEdits(text: string): IndentEdit[] {
 
     // bookkeeping AFTER deciding the line's own indent
     for (const verb of verbs) {
-      if (verb === "open") {
+      if (verb === "ele") {
         depth++;
-        lastLeaf = false;
-      } else if (verb === "leaf") {
-        lastLeaf = true;
-      } else if (verb === "shut") {
+        lastTag = false;
+      } else if (verb === "tag") {
+        lastTag = true;
+      } else if (verb === "end") {
         depth = Math.max(0, depth - 1);
-        lastLeaf = false;
+        lastTag = false;
       }
     }
 
