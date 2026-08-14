@@ -74,7 +74,7 @@ export function registerWebCheck(
       if (announce) {
         vscode.window.showInformationMessage(
           "abap2UI5: open an ABAP class that builds views with " +
-            "z2ui5_cl_ai_xml (or a *.view.xml file) to check it."
+            "z2ui5_cl_ui5_view_builder (or a *.view.xml file) to check it."
         );
       }
       return;

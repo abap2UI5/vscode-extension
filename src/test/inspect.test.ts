@@ -9,17 +9,17 @@ import { matchOutline } from "../inspect";
  */
 
 const SOURCE =
-  "DATA(view) = z2ui5_cl_ai_xml=>factory( ).\n" +
-  "view->open( n = `View` ns = `mvc`\n" +
+  "DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).\n" +
+  "view->ele( n = `View` ns = `mvc`\n" +
   "    )->a( n = `xmlns` v = `sap.m`\n" +
   "    )->a( n = `xmlns:mvc` v = `sap.ui.core.mvc`\n" +
-  "    )->open( n = `Page`\n" +
-  "    )->leaf( n = `Button` )->a( n = `text` v = `In the page` )\n" +
-  "    )->open( n = `List` )->a( n = `items` v = `{/ROWS}`\n" +
-  "    )->leaf( n = `CustomListItem`\n" +
-  "    )->leaf( n = `Button` )->a( n = `id` v = `rowButton` )->a( n = `text` v = `In the row` )\n" +
-  "    )->shut(\n" +
-  "    )->shut( ).\n";
+  "    )->ele( n = `Page`\n" +
+  "    )->tag( n = `Button` )->a( n = `text` v = `In the page` )\n" +
+  "    )->ele( n = `List` )->a( n = `items` v = `{/ROWS}`\n" +
+  "    )->tag( n = `CustomListItem`\n" +
+  "    )->tag( n = `Button` )->a( n = `id` v = `rowButton` )->a( n = `text` v = `In the row` )\n" +
+  "    )->end(\n" +
+  "    )->end( ).\n";
 
 const outline = () => viewOutline(SOURCE);
 const ns = () => abapNsMap(SOURCE);

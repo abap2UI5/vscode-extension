@@ -21,8 +21,8 @@ function at(marked: string) {
 }
 
 const HEAD =
-  "DATA(view) = z2ui5_cl_ai_xml=>factory( ).\n" +
-  "view->open( n = `View` ns = `mvc`\n" +
+  "DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).\n" +
+  "view->ele( n = `View` ns = `mvc`\n" +
   "    )->a( n = `xmlns` v = `sap.m`\n" +
   "    )->a( n = `xmlns:f` v = `sap.f`\n";
 
@@ -63,7 +63,7 @@ test("a *.view.xml is XML whatever it contains, ABAP is not", () => {
 // ---------------------------------------------------------------------------
 
 test("a control prefix offers the library's controls with docs", () => {
-  const offer = completeAbap(HEAD + "    )->leaf( n = `Butt‸` )");
+  const offer = completeAbap(HEAD + "    )->tag( n = `Butt‸` )");
   assert.ok(offer);
   const button = offer.entries.find((e) => e.label === "Button");
   assert.ok(button, "sap.m.Button is offered");
@@ -71,12 +71,12 @@ test("a control prefix offers the library's controls with docs", () => {
   assert.equal(button.detail, "sap.m");
   assert.ok(button.documentation?.includes("sap.m.Button"));
   // the span replaces exactly what was typed
-  const { source } = at(HEAD + "    )->leaf( n = `Butt‸` )");
+  const { source } = at(HEAD + "    )->tag( n = `Butt‸` )");
   assert.equal(source.slice(offer.start, offer.end), "Butt");
 });
 
 test("a deprecated control is marked, a current one is not", () => {
-  const offer = completeAbap(HEAD + "    )->leaf( n = `‸` )");
+  const offer = completeAbap(HEAD + "    )->tag( n = `‸` )");
   assert.ok(offer);
   const deprecated = offer.entries.filter((e) => e.deprecated);
   assert.ok(deprecated.length > 0, "sap.m ships deprecated controls");
@@ -85,7 +85,7 @@ test("a deprecated control is marked, a current one is not", () => {
 });
 
 test("members come with section kinds and properties-first sort", () => {
-  const offer = completeAbap(HEAD + "    )->leaf( n = `Button` )->a( n = `‸` )");
+  const offer = completeAbap(HEAD + "    )->tag( n = `Button` )->a( n = `‸` )");
   assert.ok(offer);
   const text = offer.entries.find((e) => e.label === "text");
   const press = offer.entries.find((e) => e.label === "press");
@@ -101,7 +101,7 @@ test("members come with section kinds and properties-first sort", () => {
 
 test("an enum member offers its values", () => {
   const offer = completeAbap(
-    HEAD + "    )->leaf( n = `Button` )->a( n = `type` v = `Emph‸` )"
+    HEAD + "    )->tag( n = `Button` )->a( n = `type` v = `Emph‸` )"
   );
   assert.ok(offer);
   const labels = offer.entries.map((e) => e.label);
@@ -110,7 +110,7 @@ test("an enum member offers its values", () => {
 });
 
 test("the ns argument completes to the declared prefixes", () => {
-  const offer = completeAbap(HEAD + "    )->leaf( n = `Card` ns = `‸` )");
+  const offer = completeAbap(HEAD + "    )->tag( n = `Card` ns = `‸` )");
   assert.ok(offer);
   const f = offer.entries.find((e) => e.label === "f");
   assert.ok(f, "the declared f prefix is offered");
@@ -121,7 +121,7 @@ test("the ns argument completes to the declared prefixes", () => {
 });
 
 test("outside anything completable there is no offer", () => {
-  assert.equal(completeAbap(HEAD + "    )->leaf( n = `Button` )‸ "), undefined);
+  assert.equal(completeAbap(HEAD + "    )->tag( n = `Button` )‸ "), undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ test("outside anything completable there is no offer", () => {
 
 test("a { in a value literal offers the model's absolute paths", () => {
   const offer = completeAbap(
-    HEAD + "    )->leaf( n = `Text` )->a( n = `text` v = `{/NA‸` )"
+    HEAD + "    )->tag( n = `Text` )->a( n = `text` v = `{/NA‸` )"
   );
   assert.ok(offer);
   const byLabel = new Map(offer.entries.map((e) => [e.label, e]));
@@ -142,8 +142,8 @@ test("a { in a value literal offers the model's absolute paths", () => {
 test("inside an aggregation template the row's fields come first", () => {
   const offer = completeAbap(
     HEAD +
-      "    )->open( n = `List` )->a( n = `items` v = `{/TRAVELS}`\n" +
-      "    )->leaf( n = `Text` )->a( n = `text` v = `{‸` )"
+      "    )->ele( n = `List` )->a( n = `items` v = `{/TRAVELS}`\n" +
+      "    )->tag( n = `Text` )->a( n = `text` v = `{‸` )"
   );
   assert.ok(offer);
   const status = offer.entries.find((e) => e.label === "STATUS");
@@ -155,7 +155,7 @@ test("inside an aggregation template the row's fields come first", () => {
 
 test("without a derived shape the binding offers nothing", () => {
   const offer = completeAbap(
-    HEAD + "    )->leaf( n = `Text` )->a( n = `text` v = `{/NA‸` )",
+    HEAD + "    )->tag( n = `Text` )->a( n = `text` v = `{/NA‸` )",
     null
   );
   assert.ok(offer, "the binding context itself is still recognised");
@@ -167,20 +167,20 @@ test("without a derived shape the binding offers nothing", () => {
 // ---------------------------------------------------------------------------
 
 test("hovering a control shows its description", () => {
-  const info = hoverAbap(HEAD + "    )->leaf( n = `But‸ton` )");
+  const info = hoverAbap(HEAD + "    )->tag( n = `But‸ton` )");
   assert.ok(info);
   assert.ok(info.text.includes("sap.m.Button"));
 });
 
 test("hovering a member shows its type", () => {
-  const info = hoverAbap(HEAD + "    )->leaf( n = `Button` )->a( n = `te‸xt` )");
+  const info = hoverAbap(HEAD + "    )->tag( n = `Button` )->a( n = `te‸xt` )");
   assert.ok(info);
   assert.ok(info.text.includes("string"));
 });
 
 test("hovering an enum value explains the member it belongs to", () => {
   const info = hoverAbap(
-    HEAD + "    )->leaf( n = `Button` )->a( n = `type` v = `Emphas‸ized` )"
+    HEAD + "    )->tag( n = `Button` )->a( n = `type` v = `Emphas‸ized` )"
   );
   assert.ok(info);
   assert.ok(info.text.includes("Emphasized"), "lists the allowed values");
@@ -188,7 +188,7 @@ test("hovering an enum value explains the member it belongs to", () => {
 
 test("hovering a resolving absolute path says the binding resolves", () => {
   const info = hoverAbap(
-    HEAD + "    )->leaf( n = `Text` )->a( n = `text` v = `{/NA‸ME}` )"
+    HEAD + "    )->tag( n = `Text` )->a( n = `text` v = `{/NA‸ME}` )"
   );
   assert.ok(info);
   assert.ok(info.text.includes("{/NAME}"));
@@ -197,7 +197,7 @@ test("hovering a resolving absolute path says the binding resolves", () => {
 
 test("hovering a missing path predicts the squiggle", () => {
   const info = hoverAbap(
-    HEAD + "    )->leaf( n = `Text` )->a( n = `text` v = `{/NO‸PE}` )"
+    HEAD + "    )->tag( n = `Text` )->a( n = `text` v = `{/NO‸PE}` )"
   );
   assert.ok(info);
   assert.ok(info.text.includes("unknown-binding-path"));
@@ -205,7 +205,7 @@ test("hovering a missing path predicts the squiggle", () => {
 
 test("hovering a table path says what an aggregation binds", () => {
   const info = hoverAbap(
-    HEAD + "    )->leaf( n = `Text` )->a( n = `text` v = `{/TRAV‸ELS}` )"
+    HEAD + "    )->tag( n = `Text` )->a( n = `text` v = `{/TRAV‸ELS}` )"
   );
   assert.ok(info);
   assert.ok(info.text.includes("**table**"));
@@ -214,8 +214,8 @@ test("hovering a table path says what an aggregation binds", () => {
 test("a relative path inside a template resolves against the row", () => {
   const info = hoverAbap(
     HEAD +
-      "    )->open( n = `List` )->a( n = `items` v = `{/TRAVELS}`\n" +
-      "    )->leaf( n = `Text` )->a( n = `text` v = `{STAT‸US}` )"
+      "    )->ele( n = `List` )->a( n = `items` v = `{/TRAVELS}`\n" +
+      "    )->tag( n = `Text` )->a( n = `text` v = `{STAT‸US}` )"
   );
   assert.ok(info);
   assert.ok(info.text.includes("the binding resolves"));
@@ -224,7 +224,7 @@ test("a relative path inside a template resolves against the row", () => {
 
 test("a relative path without an enclosing aggregation says so", () => {
   const info = hoverAbap(
-    HEAD + "    )->leaf( n = `Text` )->a( n = `text` v = `{STAT‸US}` )"
+    HEAD + "    )->tag( n = `Text` )->a( n = `text` v = `{STAT‸US}` )"
   );
   assert.ok(info);
   assert.ok(info.text.includes("none is in effect here"));
@@ -234,7 +234,7 @@ test("without a shape the binding hover falls back to the member", () => {
   // no derived model to explain the path with - the value hover still
   // says what the member is, instead of staying silent
   const info = hoverAbap(
-    HEAD + "    )->leaf( n = `Text` )->a( n = `text` v = `{/NA‸ME}` )",
+    HEAD + "    )->tag( n = `Text` )->a( n = `text` v = `{/NA‸ME}` )",
     null
   );
   assert.ok(info);

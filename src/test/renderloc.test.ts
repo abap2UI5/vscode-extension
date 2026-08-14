@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { renderErrorNeedles, renderErrorOffset } from "../renderloc";
 
 const SOURCE = [
-  "    view->open( n = `View` ns = `mvc`",
-  "        )->open( n = `Page`",
-  "        )->leaf( n = `Button`",
+  "    view->ele( n = `View` ns = `mvc`",
+  "        )->ele( n = `Page`",
+  "        )->tag( n = `Button`",
   "        )->a( n = `type` v = `Emphasised`",
-  "        )->shut( ).",
+  "        )->end( ).",
 ].join("\n");
 
 test("quoted tokens come first - they are what the error is about", () => {

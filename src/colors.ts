@@ -184,7 +184,7 @@ export function formatCssColor(color: RgbaColor): string {
 export type IsColorMember = (control: string, member: string) => boolean;
 
 const ABAP_CONTROL_RE =
-  /->\s*(?:open|leaf)\s*\(\s*(?:n\s*=\s*)?([`'"])([\w:.]+)\1(?:\s*ns\s*=\s*([`'"])([\w.]+)\3)?/g;
+  /->\s*(?:ele|tag)\s*\(\s*(?:n\s*=\s*)?([`'"])([\w:.]+)\1(?:\s*ns\s*=\s*([`'"])([\w.]+)\3)?/g;
 const ABAP_ATTR_RE =
   /->\s*a\s*\(\s*n\s*=\s*([`'"])([\w:.]+)\1\s*v\s*=\s*([`'"])([^`'"]*)\3/g;
 

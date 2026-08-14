@@ -17,13 +17,13 @@ const SOURCE = `CLASS zcl_demo DEFINITION PUBLIC.
 ENDCLASS.
 CLASS zcl_demo IMPLEMENTATION.
   METHOD z2ui5_if_app~main.
-    DATA(view) = z2ui5_cl_ai_xml=>factory( ).
-    view->open( n = \`View\` ns = \`mvc\`
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
         )->a( n = \`xmlns\` v = \`sap.m\`
         )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
-        )->open( n = \`Page\` )->a( n = \`title\` v = client->_bind( mv_title )
-        )->open( n = \`List\` )->a( n = \`items\` v = client->_bind( mt_travels )
-        )->leaf( n = \`StandardListItem\` )->a( n = \`title\` v = \`{STATUS}\` ).
+        )->ele( n = \`Page\` )->a( n = \`title\` v = client->_bind( mv_title )
+        )->ele( n = \`List\` )->a( n = \`items\` v = client->_bind( mt_travels )
+        )->tag( n = \`StandardListItem\` )->a( n = \`title\` v = \`{STATUS}\` ).
     client->view_display( view->stringify( ) ).
   ENDMETHOD.
 ENDCLASS.`;

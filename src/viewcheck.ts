@@ -537,13 +537,13 @@ export function registerViewCheck(
         log(
           doc
             ? `view-check: ${path.basename(doc.fileName)} is not checkable - ` +
-                "not an ABAP source calling z2ui5_cl_ai_xml=>factory and " +
+                "not an ABAP source calling z2ui5_cl_ui5_view_builder=>factory and " +
                 "not a *.view.xml"
             : "view-check: no text editor open"
         );
         vscode.window.showInformationMessage(
           "abap2UI5: open an ABAP class that builds views with " +
-            "z2ui5_cl_ai_xml (or a *.view.xml file) to check it."
+            "z2ui5_cl_ui5_view_builder (or a *.view.xml file) to check it."
         );
         return;
       }

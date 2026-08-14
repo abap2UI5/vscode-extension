@@ -273,6 +273,6 @@ Facts an agent cannot see from the code but will trip over:
 | --- | --- |
 | [abap2UI5](https://github.com/abap2UI5/abap2UI5) | Core framework |
 | [samples](https://github.com/abap2UI5/samples) | Sample applications |
-| [ai-demokit](https://github.com/abap2UI5/ai-demokit) | Ported demo-kit samples — where this extension used to live, until 0.6.0 |
+| [samples-controls](https://github.com/abap2UI5/samples-controls) | Ported demo-kit samples (formerly `abap2UI5-api`, before that `ai-demokit` — where this extension used to live, until 0.6.0) |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | The view checker behind `src/viewcheck.ts` (SHA-pinned package) and `src/rendergate.ts` (runtime bundle download) |
 | [ai-mcp](https://github.com/abap2UI5/ai-mcp) | The MCP server `src/mcp.ts` registers for MCP clients in the window |

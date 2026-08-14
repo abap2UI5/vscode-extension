@@ -26,7 +26,7 @@ export function isAppClass(source: string): boolean {
  * `z2ui5_cl_xml_view` — the typed builder — is on its way out of abap2UI5 and
  * deliberately not checked.
  */
-export const BUILDER_FACTORY_RE = /z2ui5_cl_ai_xml\s*=>\s*factory/i;
+export const BUILDER_FACTORY_RE = /z2ui5_cl_ui5_view_builder\s*=>\s*factory/i;
 
 /** True when the source builds its view with the generic builder. */
 export function usesBuilder(source: string): boolean {

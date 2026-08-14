@@ -10,16 +10,16 @@ const SOURCE = `CLASS zcl_x DEFINITION PUBLIC.
 ENDCLASS.
 CLASS zcl_x IMPLEMENTATION.
   METHOD z2ui5_if_app~main.
-    DATA(view) = z2ui5_cl_ai_xml=>factory( ).
-    view->open( n = \`View\` ns = \`mvc\`
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
         )->a( n = \`xmlns\` v = \`sap.m\`
         )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
-        )->open( \`Page\`
+        )->ele( \`Page\`
             )->a( n = \`title\` v = \`Hello\`
-            )->leaf( \`Button\`
+            )->tag( \`Button\`
                 )->a( n = \`text\`  v = \`Press me\`
                 )->a( n = \`press\` v = client->_event( \`GO\` )
-            )->leaf( \`Input\`
+            )->tag( \`Input\`
                 )->a( n = \`value\` v = client->_bind( mv_value ) ).
     client->view_display( view->stringify( ) ).
   ENDMETHOD.
@@ -92,22 +92,22 @@ test("removeAttributeEdit drops the whole chain line", () => {
   const edit = removeAttributeEdit(SOURCE, call, "text")!;
   const next = apply(SOURCE, edit);
   assert.ok(!next.includes("Press me"));
-  // the chain stays intact: leaf directly followed by the press attribute
+  // the chain stays intact: tag directly followed by the press attribute
   assert.ok(
-    next.includes(")->leaf( `Button`\n                )->a( n = `press`")
+    next.includes(")->tag( `Button`\n                )->a( n = `press`")
   );
 });
 
 test("a control with no attributes appends one step under its own line", () => {
-  const source = `    view->open( n = \`View\` ns = \`mvc\`
+  const source = `    view->ele( n = \`View\` ns = \`mvc\`
         )->a( n = \`xmlns\` v = \`sap.m\`
-        )->leaf( \`Text\`
-        )->shut( ).`;
+        )->tag( \`Text\`
+        )->end( ).`;
   const call = controlCallAt(source, source.indexOf("`Text`"))!;
   assert.equal(call.attrs.length, 0);
   const edit = setAttributeEdit(source, call, "text", "hi")!;
   const next = apply(source, edit);
   assert.ok(
-    next.includes(")->leaf( `Text`\n            )->a( n = `text` v = `hi`\n")
+    next.includes(")->tag( `Text`\n            )->a( n = `text` v = `hi`\n")
   );
 });

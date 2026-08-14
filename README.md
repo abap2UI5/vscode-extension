@@ -55,7 +55,7 @@ tying the extension to a system is the launch URL you configure once.
   (`sap.ui.core.CSSColor` and friends) gets VS Code's inline swatch and
   picker, in builder chains and raw view XML alike.
 - **Convert XML to a builder chain** – Paste a UI5 demo kit sample (or any
-  view XML) and get the `z2ui5_cl_ai_xml` chain in the corpus style —
+  view XML) and get the `z2ui5_cl_ui5_view_builder` chain in the corpus style —
   the reverse of the reconstructed XML view. See
   [XML to builder chain](#xml-to-builder-chain).
 - **App navigation map** – Every `z2ui5_if_app` class in the workspace and
@@ -68,7 +68,7 @@ tying the extension to a system is the launch URL you configure once.
   credentials are stored per host. See [Systems](#systems-abap2ui5systems).
 - **Login without a 401** – For the embedded view the extension ships a local
   auth proxy (see below).
-- **Static view checks** – A class that builds views with `z2ui5_cl_ai_xml`
+- **Static view checks** – A class that builds views with `z2ui5_cl_ui5_view_builder`
   (or a raw `*.view.xml`) is validated against the UI5 metadata *while you
   type*: too-new or deprecated controls and properties land in the Problems
   panel before the app ever reaches a system. See
@@ -89,7 +89,7 @@ tying the extension to a system is the launch URL you configure once.
   produce, as a live, syntax-highlighted document next to the class — with
   the findings mirrored in and **Go to Definition** back to the builder
   call. See [Reconstructed XML](#reconstructed-xml).
-- **Navigate the view** – The `open( )`/`leaf( )` hierarchy as a tree in the
+- **Navigate the view** – The `ele( )`/`tag( )` hierarchy as a tree in the
   Outline pane, and Go to Definition between `_event( 'GO' )` and the
   `WHEN 'GO'` that handles it — in both directions.
 - **Run without the class open** – *"Run a Recently Launched App"* lists
@@ -104,8 +104,8 @@ tying the extension to a system is the launch URL you configure once.
 - **The abap2UI5 MCP server for AI agents** – Copilot agent mode (and every
   other MCP client in the window) gets the abap2UI5 dev loop without an SAP
   system. See [MCP server](#mcp-server-abap2ui5mcp).
-- **Snippets** for ABAP files: `z2ui5app`, `z2ui5main`, `z2ui5open`,
-  `z2ui5leaf`, `z2ui5button`, `z2ui5input`, `z2ui5table`, `z2ui5event`,
+- **Snippets** for ABAP files: `z2ui5app`, `z2ui5main`, `z2ui5ele`,
+  `z2ui5tag`, `z2ui5button`, `z2ui5input`, `z2ui5table`, `z2ui5event`,
   `z2ui5popup`, `z2ui5popover`, `z2ui5toast`, `z2ui5msgbox`, `z2ui5navto`,
   `z2ui5navback`, `z2ui5eventarg`, `z2ui5disable`.
 - **New App from Template** – A template gallery instead of one skeleton:
@@ -219,7 +219,7 @@ Two more toolbar buttons talk to the running app through the same hook:
 
 - **Inspect (🎯)** starts a one-shot pick, like the element picker in
   browser devtools: the hovered control is outlined, a click jumps to the
-  `open( )` / `leaf( )` call in the class that wrote it, Esc cancels. The
+  `ele( )` / `tag( )` call in the class that wrote it, Esc cancels. The
   clicked control's type and parent chain are matched against the
   reconstructed view — a row inside a bound list lands on its template, two
   same-typed controls are told apart by their surroundings, and an `id`
@@ -281,7 +281,7 @@ form" is two clicks.
 
 *"abap2UI5: Convert XML View to Builder Chain"* is the reverse direction of
 the reconstructed XML view: UI5 view XML in — the selection, the active
-document, or the clipboard — and the `z2ui5_cl_ai_xml` chain comes out as a
+document, or the clipboard — and the `z2ui5_cl_ui5_view_builder` chain comes out as a
 new ABAP document, in the corpus style (Format Document is a no-op on the
 result). Text content and other things the builder cannot express are listed
 as `TODO` comments instead of dropped silently. Porting a demo kit sample
@@ -372,7 +372,7 @@ gates instead, in the editor:
   `npx playwright install chromium` done), or set
   `abap2ui5.viewCheck.command`.
 
-Checked are ABAP classes building views with the generic `z2ui5_cl_ai_xml`
+Checked are ABAP classes building views with the generic `z2ui5_cl_ui5_view_builder`
 builder and raw `*.view.xml` / `*.fragment.xml` files. Documents from the ABAP
 remote filesystem (`adt` scheme) and unsaved buffers work too.
 
@@ -436,7 +436,7 @@ The UI5 metadata snapshot the property gate validates against is a complete
 API reference, and it ships with the extension. So it is also offered while
 the view is being written:
 
-- **Control names** in the `n` argument of ``open( )`` / ``leaf( )``, resolved
+- **Control names** in the `n` argument of ``ele( )`` / ``tag( )``, resolved
   through the namespace in play — an ``ns`` of ``f`` offers `sap.f`, a name
   written as `core:Icon` offers `sap.ui.core`.
 - **Members of exactly that control** in the `n` argument of the ``a( )``
@@ -470,8 +470,8 @@ check already uses.
 
 The builder chain IS the view hierarchy, so its indentation is structure,
 not taste. **Format Document** (Shift+Alt+F) repairs it: a child one step
-under its parent, an attribute one step under its element, a `shut( )` on
-the level of the `open( )` it closes — the canonical corpus style.
+under its parent, an attribute one step under its element, an `end( )` on
+the level of the `ele( )` it closes — the canonical corpus style.
 Deliberately conservative: only lines beginning with a builder verb inside a
 chain are touched; comments, multi-line values and everything outside a
 chain keep their bytes.
@@ -493,12 +493,12 @@ more than one view (a popup next to its main view) shows them all, labelled.
 The reconstruction remembers which builder call wrote each node and
 attribute, and the preview uses that both ways: the view check's findings
 are **mirrored onto the XML lines** they concern, and **Go to Definition**
-(F12, or Ctrl+click) on any line jumps to the `open( )` / `leaf( )` /
+(F12, or Ctrl+click) on any line jumps to the `ele( )` / `tag( )` /
 `a( )` in the class that produced it.
 
 ### Outline and event navigation
 
-The Outline pane (and the breadcrumb bar) shows the `open( )`/`leaf( )`
+The Outline pane (and the breadcrumb bar) shows the `ele( )`/`tag( )`
 hierarchy of a view-building class as a tree — labelled `abap2UI5 view`,
 next to whatever outline your ABAP extension contributes — with the `id` a
 chain sets shown alongside. Clicking a node jumps to its builder call.
@@ -540,11 +540,11 @@ an AI agent the full abap2UI5 development loop **without an SAP system**:
 | `run_app` | Boot the app headless, return errors **and a screenshot** |
 
 The server orchestrates local checkouts of `abap2UI5` and
-[`ai-demokit`](https://github.com/abap2UI5/ai-demokit) (plus optionally
-`linter` and `ai-mcp` itself). Clone them into one folder and point
-`abap2ui5.mcp.reposRoot` at it — the extension passes the matching
-`A2UI5_HOME` / `AI_DEMOKIT_HOME` / `AI_VIEW_CHECK_HOME` variables to the
-server and prefers the local `ai-mcp` checkout over downloading via npx.
+[`samples-controls`](https://github.com/abap2UI5/samples-controls) (plus
+optionally `linter` and `ai-mcp` itself). Clone them into one folder and
+point `abap2ui5.mcp.reposRoot` at it — the extension passes the matching
+`A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `AI_VIEW_CHECK_HOME` variables to
+the server and prefers the local `ai-mcp` checkout over downloading via npx.
 The server appears in the MCP view (`MCP: List Servers`) as **abap2UI5**;
 `abap2ui5.mcp.enabled: false` removes it.
 
@@ -585,7 +585,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2ui5.mcp.enabled` | `true` | Offer the abap2UI5 MCP server to MCP clients |
 | `abap2ui5.mcp.system` | `true` | Also offer the abap2UI5 System MCP server (real-system tools) |
 | `abap2ui5.mcp.command` | – | Command starting the MCP server (empty = local checkout or npx) |
-| `abap2ui5.mcp.reposRoot` | – | Folder with the `abap2UI5` / `ai-demokit` / `linter` / `ai-mcp` checkouts |
+| `abap2ui5.mcp.reposRoot` | – | Folder with the `abap2UI5` / `samples-controls` / `linter` / `ai-mcp` checkouts |
 
 ## Commands
 
@@ -607,7 +607,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2UI5: Install Render Gate` | Downloads the render-gate checker and Chromium into the extension's storage |
 | `abap2UI5: Take App Screenshot` | Renders the running app headless and opens the PNG |
 | `abap2UI5: Show Traffic Log` | Opens the proxy's request log with roundtrip timings |
-| `abap2UI5: Convert XML View to Builder Chain` | Turns view XML (selection, document or clipboard) into a `z2ui5_cl_ai_xml` chain |
+| `abap2UI5: Convert XML View to Builder Chain` | Turns view XML (selection, document or clipboard) into a `z2ui5_cl_ui5_view_builder` chain |
 | `abap2UI5: Show App Navigation Map` | Draws the workspace's apps and their `nav_app_call( )`s as a clickable graph |
 | `abap2UI5: Set Launch URL` | Sets (or changes) the launch URL template |
 | `abap2UI5: New App from Template` | Template gallery: pick a skeleton, name the class |

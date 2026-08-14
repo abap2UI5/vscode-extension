@@ -13,7 +13,7 @@
  * builder call that wrote it (and scrub( ) is offset-preserving, so those are
  * offsets into the class as it stands). The formatter carries them through as
  * a line -> source-offset map, which is what makes the XML clickable: a line
- * knows the `open( )` / `leaf( )` / `a( )` it came from.
+ * knows the `ele( )` / `tag( )` / `a( )` it came from.
  *
  * `vscode`-free: nodes in, string out - covered by the test suite.
  */
@@ -115,7 +115,7 @@ export function formatDocument(
   const out: Out = { lines: [], offsets: [] };
   push(
     out,
-    `<!-- ${className}: the view(s) reconstructed from the z2ui5_cl_ai_xml ` +
+    `<!-- ${className}: the view(s) reconstructed from the z2ui5_cl_ui5_view_builder ` +
       `builder calls - what the abap2UI5 view check validates. Read-only, ` +
       `regenerated as the class changes. Go to Definition jumps to the ` +
       `builder call. -->`,

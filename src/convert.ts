@@ -4,7 +4,7 @@ import { xmlToAbap } from "./xmltoabap";
 /*
  * "Convert XML View to Builder Chain" - the reverse direction of the
  * reconstructed XML view. A sample from the UI5 demo kit (or any existing
- * *.view.xml) goes in, the z2ui5_cl_ai_xml chain a port writes by hand comes
+ * *.view.xml) goes in, the z2ui5_cl_ui5_view_builder chain a port writes by hand comes
  * out - in the corpus style the chain formatter enforces, so Format Document
  * is a no-op on the result.
  *

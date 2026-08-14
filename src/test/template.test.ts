@@ -37,7 +37,7 @@ test("every template is an app class building views with the ai builder", () => 
     );
     assert.ok(
       usesBuilder(template.source),
-      `${template.id} uses z2ui5_cl_ai_xml - the builder the view check reconstructs`
+      `${template.id} uses z2ui5_cl_ui5_view_builder - the builder the view check reconstructs`
     );
     assert.ok(
       !/z2ui5_cl_xml_view/i.test(template.source),

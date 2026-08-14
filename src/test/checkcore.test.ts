@@ -18,7 +18,7 @@ import {
 const BUILDER_CLASS =
   "CLASS zcl_app DEFINITION PUBLIC.\nENDCLASS.\n" +
   "CLASS zcl_app IMPLEMENTATION.\n  METHOD z2ui5_if_app~main.\n" +
-  "    DATA(view) = z2ui5_cl_ai_xml=>factory( ).\n" +
+  "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).\n" +
   "  ENDMETHOD.\nENDCLASS.\n";
 
 // ---------------------------------------------------------------------------

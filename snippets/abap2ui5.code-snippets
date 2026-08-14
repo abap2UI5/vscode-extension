@@ -11,13 +11,13 @@
       "CLASS ${1:zcl_my_app} IMPLEMENTATION.",
       "  METHOD z2ui5_if_app~main.",
       "",
-      "    DATA(view) = z2ui5_cl_ai_xml=>factory( ).",
-      "    view->open( n = `View` ns = `mvc`",
+      "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).",
+      "    view->ele( n = `View` ns = `mvc`",
       "        )->a( n = `xmlns`     v = `sap.m`",
       "        )->a( n = `xmlns:mvc` v = `sap.ui.core.mvc`",
-      "        )->open( n = `Page`",
+      "        )->ele( n = `Page`",
       "        )->a( n = `title` v = `${2:Hello abap2UI5}`",
-      "        )->leaf( n = `Text`",
+      "        )->tag( n = `Text`",
       "        )->a( n = `text` v = `${3:My first app}` ).",
       "",
       "    client->view_display( view->stringify( ) ).",
@@ -28,28 +28,28 @@
     ]
   },
   "abap2UI5 Control": {
-    "prefix": "z2ui5leaf",
+    "prefix": "z2ui5tag",
     "description": "A childless control with one attribute",
     "body": [
-      "leaf( n = `${1:Text}`",
+      "tag( n = `${1:Text}`",
       "    )->a( n = `${2:text}` v = `${3:Hello}`",
       "    )$0"
     ]
   },
   "abap2UI5 Container": {
-    "prefix": "z2ui5open",
-    "description": "A control that takes children - open, fill, shut",
+    "prefix": "z2ui5ele",
+    "description": "A control that takes children - ele, fill, end",
     "body": [
-      "open( n = `${1:VBox}`",
+      "ele( n = `${1:VBox}`",
       "    )->$0",
-      "shut( )"
+      "end( )"
     ]
   },
   "abap2UI5 Button": {
     "prefix": "z2ui5button",
     "description": "abap2UI5 button with an event",
     "body": [
-      "leaf( n = `Button`",
+      "tag( n = `Button`",
       "    )->a( n = `text`  v = `${1:Press me}`",
       "    )->a( n = `press` v = client->_event( `${2:BUTTON_CLICK}` )",
       "    )$0"
@@ -59,7 +59,7 @@
     "prefix": "z2ui5input",
     "description": "Input bound two-way to a class attribute",
     "body": [
-      "leaf( n = `Input`",
+      "tag( n = `Input`",
       "    )->a( n = `value` v = client->_bind( ${1:mv_value} )",
       "    )$0"
     ]
@@ -68,19 +68,19 @@
     "prefix": "z2ui5table",
     "description": "Table over an internal table, with one column",
     "body": [
-      "open( n = `Table`",
+      "ele( n = `Table`",
       "    )->a( n = `items` v = client->_bind( ${1:mt_data} )",
-      "    )->open( n = `columns`",
-      "    )->open( n = `Column`",
-      "    )->leaf( n = `Text`",
+      "    )->ele( n = `columns`",
+      "    )->ele( n = `Column`",
+      "    )->tag( n = `Text`",
       "    )->a( n = `text` v = `${2:Column}`",
-      "    )->shut( )->shut(",
-      "    )->open( n = `items`",
-      "    )->open( n = `ColumnListItem`",
-      "    )->open( n = `cells`",
-      "    )->leaf( n = `Text`",
+      "    )->end( )->end(",
+      "    )->ele( n = `items`",
+      "    )->ele( n = `ColumnListItem`",
+      "    )->ele( n = `cells`",
+      "    )->tag( n = `Text`",
       "    )->a( n = `text` v = `{${3:FIELD}}`",
-      "    )->shut( )->shut( )->shut(",
+      "    )->end( )->end( )->end(",
       "    )$0"
     ]
   },
@@ -122,19 +122,19 @@
     "prefix": "z2ui5popup",
     "description": "Build a Dialog and display it as a popup",
     "body": [
-      "DATA(popup) = z2ui5_cl_ai_xml=>factory( ).",
-      "popup->open( n = `Dialog`",
+      "DATA(popup) = z2ui5_cl_ui5_view_builder=>factory( ).",
+      "popup->ele( n = `Dialog`",
       "    )->a( n = `xmlns` v = `sap.m`",
       "    )->a( n = `title` v = `${1:My Popup}`",
-      "    )->open( n = `content`",
-      "    )->leaf( n = `Text`",
+      "    )->ele( n = `content`",
+      "    )->tag( n = `Text`",
       "    )->a( n = `text` v = `${2:Popup content}`",
-      "    )->shut(",
-      "    )->open( n = `buttons`",
-      "    )->leaf( n = `Button`",
+      "    )->end(",
+      "    )->ele( n = `buttons`",
+      "    )->tag( n = `Button`",
       "    )->a( n = `text`  v = `Close`",
       "    )->a( n = `press` v = client->_event( `${3:POPUP_CLOSE}` )",
-      "    )->shut( ).",
+      "    )->end( ).",
       "",
       "client->popup_display( popup->stringify( ) ).",
       "$0"
@@ -144,11 +144,11 @@
     "prefix": "z2ui5popover",
     "description": "Build a Popover and open it next to a control (by its id)",
     "body": [
-      "DATA(popover) = z2ui5_cl_ai_xml=>factory( ).",
-      "popover->open( n = `Popover`",
+      "DATA(popover) = z2ui5_cl_ui5_view_builder=>factory( ).",
+      "popover->ele( n = `Popover`",
       "    )->a( n = `xmlns` v = `sap.m`",
       "    )->a( n = `title` v = `${1:Details}`",
-      "    )->leaf( n = `Text`",
+      "    )->tag( n = `Text`",
       "    )->a( n = `text` v = `${2:Popover content}` ).",
       "",
       "client->popover_display( xml   = popover->stringify( )",

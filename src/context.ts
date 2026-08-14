@@ -2,12 +2,12 @@
  * "What is being written here?" — the position analysis behind completion and
  * hover.
  *
- * abap2UI5 views are built by chaining calls on `z2ui5_cl_ai_xml`, so the
+ * abap2UI5 views are built by chaining calls on `z2ui5_cl_ui5_view_builder`, so the
  * control a property belongs to is not lexically around the cursor the way it
- * is in XML — it sits in the `open( )` / `leaf( )` call the `a( )` is chained
+ * is in XML — it sits in the `ele( )` / `tag( )` call the `a( )` is chained
  * to. Getting that relationship right is the whole job of this module:
  *
- *   view->open( n = `VBox` )->leaf( n = `Button` )->a( n = `text` v = `Hi` )
+ *   view->ele( n = `VBox` )->tag( n = `Button` )->a( n = `text` v = `Hi` )
  *                                        ^ the control            ^ its member
  *
  * Raw `*.view.xml` / `*.fragment.xml` files are handled too, where the same
@@ -126,7 +126,7 @@ interface AbapScan {
  * Walks the source once, tracking ABAP's two literal forms (`'…'` and
  * `` `…` ``, both escaped by doubling), its two comment forms (`*` in column
  * one, `"` anywhere else) and the parenthesis nesting. Everything the context
- * analysis needs comes out of this: a `leaf(` inside a comment or a string
+ * analysis needs comes out of this: a `tag(` inside a comment or a string
  * never becomes a control, which is exactly the confusion a plain backwards
  * regex search would produce.
  */
@@ -250,8 +250,8 @@ function argNameBefore(source: string, from: number, to: number): string | undef
   return m ? m[1].toLowerCase() : undefined;
 }
 
-/** The control an `a( )` call attaches to: the last `open( )` / `leaf( )`
- *  started before it — exactly the rule z2ui5_cl_ai_xml itself follows. */
+/** The control an `a( )` call attaches to: the last `ele( )` / `tag( )`
+ *  started before it — exactly the rule z2ui5_cl_ui5_view_builder itself follows. */
 function controlCallBefore(calls: Call[], before: number): Call | undefined {
   let found: Call | undefined;
   for (const call of calls) {
@@ -259,14 +259,14 @@ function controlCallBefore(calls: Call[], before: number): Call | undefined {
       break;
     }
     const name = call.name.toLowerCase();
-    if (name === "open" || name === "leaf") {
+    if (name === "ele" || name === "tag") {
       found = call;
     }
   }
   return found;
 }
 
-/** Library-qualified control name of an `open( )` / `leaf( )` call. */
+/** Library-qualified control name of an `ele( )` / `tag( )` call. */
 function controlOf(
   source: string,
   call: Call,
@@ -295,7 +295,7 @@ export interface BindingContext {
   start: number;
   end: number;
   /**
-   * Bound aggregation paths of the `open( )` chain around the cursor's
+   * Bound aggregation paths of the `ele( )` chain around the cursor's
    * control, outermost first - `/TRAVELS`, then `SUBITEMS` for a list nested
    * in a list. A relative path resolves against the row the innermost of
    * these hands down, exactly as the linter's gate resolves it.
@@ -344,9 +344,9 @@ function bindCallPathOf(args: string): string | undefined {
 }
 
 /**
- * The `open( )` containers still open around `before`, outermost first.
- * Mirrors the builder's own nesting: `open` pushes a level, `shut` pops it,
- * `leaf` never nests, and a fresh `factory( )` starts over.
+ * The `ele( )` containers still open around `before`, outermost first.
+ * Mirrors the builder's own nesting: `ele` pushes a level, `end` pops it,
+ * `tag` never nests, and a fresh `factory( )` starts over.
  */
 function openContainersBefore(calls: Call[], before: number): Call[] {
   const stack: Call[] = [];
@@ -357,9 +357,9 @@ function openContainersBefore(calls: Call[], before: number): Call[] {
     const name = call.name.toLowerCase();
     if (name === "factory" || name === "stringify") {
       stack.length = 0;
-    } else if (name === "open") {
+    } else if (name === "ele") {
       stack.push(call);
-    } else if (name === "shut") {
+    } else if (name === "end") {
       stack.pop();
     }
   }
@@ -373,7 +373,7 @@ function attributeCallsOf(calls: Call[], owner: Call): Call[] {
   const from = calls.indexOf(owner);
   for (let i = from + 1; i < calls.length && i > 0; i++) {
     const name = calls[i].name.toLowerCase();
-    if (["open", "leaf", "shut", "factory", "stringify"].includes(name)) {
+    if (["ele", "tag", "end", "factory", "stringify"].includes(name)) {
       break;
     }
     if (name === "a") {
@@ -456,7 +456,7 @@ export function abapBindingContextAt(
 }
 
 // ---------------------------------------------------------------------------
-// Outline: the open( )/leaf( ) hierarchy as a tree
+// Outline: the ele( )/tag( ) hierarchy as a tree
 // ---------------------------------------------------------------------------
 
 /** One control in the view outline. */
@@ -471,21 +471,21 @@ export interface OutlineNode {
   /** The call name itself - what selecting the symbol reveals. */
   selStart: number;
   selEnd: number;
-  /** True for `open( )` - a container. */
+  /** True for `ele( )` - a container. */
   container: boolean;
   children: OutlineNode[];
 }
 
 /**
- * The view hierarchy of a class, as `z2ui5_cl_ai_xml` itself would nest it:
- * `open` pushes a level, `shut` pops it, `leaf` never nests, `factory( )`
- * starts a new document. A long view method reads as a tree again.
+ * The view hierarchy of a class, as `z2ui5_cl_ui5_view_builder` itself would
+ * nest it: `ele` pushes a level, `end` pops it, `tag` never nests,
+ * `factory( )` starts a new document. A long view method reads as a tree again.
  */
 export function viewOutline(source: string): OutlineNode[] {
   const { calls } = scanAbap(source, source.length);
   const roots: OutlineNode[] = [];
   const stack: OutlineNode[] = [];
-  let current: OutlineNode | undefined; // last open/leaf, for a( ) attributes
+  let current: OutlineNode | undefined; // last ele/tag, for a( ) attributes
 
   const attach = (node: OutlineNode) => {
     (stack.length ? stack[stack.length - 1].children : roots).push(node);
@@ -505,7 +505,7 @@ export function viewOutline(source: string): OutlineNode[] {
       current = undefined;
       continue;
     }
-    if (name === "open" || name === "leaf") {
+    if (name === "ele" || name === "tag") {
       const args = argsOf(source, call);
       const written = argLiteral(args, "n");
       const prefix = argLiteral(args, "ns");
@@ -519,12 +519,12 @@ export function viewOutline(source: string): OutlineNode[] {
         end: endOf,
         selStart: call.open - call.name.length,
         selEnd: call.open,
-        container: name === "open",
+        container: name === "ele",
         children: [],
       };
       attach(node);
       current = node;
-      if (name === "open") {
+      if (name === "ele") {
         stack.push(node);
       }
       continue;
@@ -542,7 +542,7 @@ export function viewOutline(source: string): OutlineNode[] {
       }
       continue;
     }
-    if (name === "shut") {
+    if (name === "end") {
       const node = stack.pop();
       if (node) {
         node.end = Math.max(node.end, endOf);
@@ -552,7 +552,7 @@ export function viewOutline(source: string): OutlineNode[] {
   }
   closeAll(calls.length ? Math.max(...calls.map((c) => c.close ?? c.open)) : 0);
 
-  // A parent must span its children - an unshut container ends where its
+  // A parent must span its children - an unclosed container ends where its
   // last child does.
   const widen = (node: OutlineNode): number => {
     for (const child of node.children) {
@@ -652,10 +652,10 @@ function argExpressionSpan(
   return { start, end };
 }
 
-const STRUCTURAL = ["open", "leaf", "shut", "factory", "stringify"];
+const STRUCTURAL = ["ele", "tag", "end", "factory", "stringify"];
 
 /**
- * The `open( )` / `leaf( )` whose block (the call plus its chained `a( )`
+ * The `ele( )` / `tag( )` whose block (the call plus its chained `a( )`
  * lines) contains `offset`, with every attribute's spans - or undefined when
  * the cursor is not on a builder control. The last matching control wins,
  * which is the innermost one on shared lines.
@@ -671,7 +671,7 @@ export function controlCallAt(
   for (let i = 0; i < calls.length; i++) {
     const call = calls[i];
     const name = call.name.toLowerCase();
-    if (name !== "open" && name !== "leaf") {
+    if (name !== "ele" && name !== "tag") {
       continue;
     }
     const tokenStart = call.open - call.name.length;
@@ -744,7 +744,7 @@ export function controlCallAt(
     const anchorIndent = anchorLine.slice(0, anchorLine.length - anchorLine.trimStart().length);
     const appendIndent = attrCalls.length ? anchorIndent : anchorIndent + "    ";
 
-    // The corpus writes a lone name positionally (`leaf( \`Button\` )`) -
+    // The corpus writes a lone name positionally (`tag( \`Button\` )`) -
     // fall back to the first bare literal when no `n =` is written.
     const callArgs = argsOf(source, call);
     const written =
@@ -896,7 +896,7 @@ export function abapContextAt(
   const ns = abapNsMap(source);
   const span = { prefix: source.slice(literal.start, offset), ...literal };
 
-  if (name === "open" || name === "leaf") {
+  if (name === "ele" || name === "tag") {
     if (arg === "n") {
       // The builder takes the namespace either as its own argument or baked
       // into the name (`core:Icon`); a prefix in the name wins, and the

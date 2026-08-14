@@ -74,17 +74,17 @@ function wrap(expanded: string): string {
     // a whole method (z2ui5main)
     return `${SCAFFOLD_HEAD}\n${expanded}\n${SCAFFOLD_FOOT}`;
   }
-  if (/^(open|leaf|a)\(/i.test(expanded)) {
+  if (/^(ele|tag|a)\(/i.test(expanded)) {
     // a chain fragment - inserted where the corpus inserts it: after `)->`
     // inside a view being built
     return `${SCAFFOLD_HEAD}
   METHOD z2ui5_if_app~main.
-    DATA(view) = z2ui5_cl_ai_xml=>factory( ).
-    view->open( n = \`View\` ns = \`mvc\`
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
         )->a( n = \`xmlns\` v = \`sap.m\`
         )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
-        )->open( n = \`Page\`
-        )->${expanded}->shut( ).
+        )->ele( n = \`Page\`
+        )->${expanded}->end( ).
     client->view_display( view->stringify( ) ).
   ENDMETHOD.
 ${SCAFFOLD_FOOT}`;
