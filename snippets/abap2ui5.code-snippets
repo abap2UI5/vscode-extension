@@ -179,11 +179,6 @@
     "description": "Return to the calling app",
     "body": ["client->nav_app_leave( client->get_app_prev( ) ).$0"]
   },
-  "abap2UI5 Model Update": {
-    "prefix": "z2ui5modelupdate",
-    "description": "Push the changed model to the running view (no re-render)",
-    "body": ["client->view_model_update( ).$0"]
-  },
   "abap2UI5 Event Argument": {
     "prefix": "z2ui5eventarg",
     "description": "Read an argument the event's t_arg carried",

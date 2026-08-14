@@ -249,7 +249,6 @@ CLASS zcl_my_app IMPLEMENTATION.
     CASE client->get( )-event.
       WHEN \`PICK\`.
         mv_selected = client->get_event_arg( ).
-        client->view_model_update( ).
     ENDCASE.
 
   ENDMETHOD.

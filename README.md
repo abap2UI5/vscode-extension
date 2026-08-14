@@ -107,7 +107,7 @@ tying the extension to a system is the launch URL you configure once.
 - **Snippets** for ABAP files: `z2ui5app`, `z2ui5main`, `z2ui5open`,
   `z2ui5leaf`, `z2ui5button`, `z2ui5input`, `z2ui5table`, `z2ui5event`,
   `z2ui5popup`, `z2ui5popover`, `z2ui5toast`, `z2ui5msgbox`, `z2ui5navto`,
-  `z2ui5navback`, `z2ui5modelupdate`, `z2ui5eventarg`, `z2ui5disable`.
+  `z2ui5navback`, `z2ui5eventarg`, `z2ui5disable`.
 - **New App from Template** – A template gallery instead of one skeleton:
   empty view, list, form, master & detail, popup — pick one, name the
   class, done. Every template ships linter-clean (the test suite enforces
