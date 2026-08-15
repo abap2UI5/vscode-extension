@@ -32,9 +32,11 @@ name: Release
 #           npx ovsx create-namespace abap2ui5 -p <token>
 #     3. Store the token as the repository secret OVSX_PAT.
 #
-# Both publish steps are skipped while their secret is unset, so a release
-# without either account still produces a tagged GitHub release with the
-# .vsix attached.
+# Each publish is skipped while its secret is unset, so a release without
+# either account still produces a tagged GitHub release with the .vsix
+# attached - and a release that reached only ONE marketplace is finished by
+# re-running this workflow, which publishes the missing half and treats the
+# other's "already exists" as done.
 # ---------------------------------------------------------------------------
 on:
   push:
@@ -166,21 +168,66 @@ jobs:
             echo "::notice::OVSX_PAT secret not configured - skipping the Open VSX publish"
           fi
 
-      # Publish the same .vsix to the VS Code Marketplace. VSCE_PAT is an
-      # Azure DevOps personal access token with the "Marketplace → Manage"
-      # scope for the abap2ui5 publisher, see
-      # https://code.visualstudio.com/api/working-with-extensions/publishing-extension
-      - name: Publish to the VS Code Marketplace
-        if: steps.tokens.outputs.vsce == 'true'
+      # The two publishes are independent, and either can fail on its own
+      # credential - so each has to be re-runnable without the other standing
+      # in the way. Neither marketplace lets a version be replaced, which
+      # means the SECOND attempt meets "already exists" from the one that
+      # succeeded the first time round, and the run dies before reaching the
+      # one that did not. Treating "this exact version is already up there"
+      # as the desired end state is what makes a half-published release
+      # finishable: re-run, and only the missing half is actually published.
+      #
+      # Only that one message is swallowed. Every other failure - a bad
+      # token, a missing namespace, a rejected manifest - still fails the run.
+      - name: Publish the same .vsix to both marketplaces
+        if: steps.tokens.outputs.vsce == 'true' || steps.tokens.outputs.ovsx == 'true'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx vsce publish --packagePath "${{ steps.meta.outputs.vsix }}"
-
-      # Same for Open VSX (VSCodium, Theia, SAP Business Application Studio
-      # and friends). OVSX_PAT is a token from open-vsx.org for the abap2ui5
-      # namespace.
-      - name: Publish to Open VSX
-        if: steps.tokens.outputs.ovsx == 'true'
-        env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx --yes ovsx publish "${{ steps.meta.outputs.vsix }}" -p "$OVSX_PAT"
+          VSIX: ${{ steps.meta.outputs.vsix }}
+          VSCE: ${{ steps.tokens.outputs.vsce }}
+          OVSX: ${{ steps.tokens.outputs.ovsx }}
+        run: |
+          # Runs one publish command, and reports whether the version is now
+          # up there - by publishing it, or by having been there already.
+          publish() {
+            local what="$1"; shift
+            local out status
+            set +e
+            out=$("$@" 2>&1); status=$?
+            set -e
+            printf '%s\n' "$out"
+            if [ $status -ne 0 ] && printf '%s' "$out" | grep -qiE 'already (exists|published)'; then
+              echo "::notice::$VSIX is already on $what - nothing to publish"
+              return 0
+            fi
+            return $status
+          }
+
+          failed=
+
+          # VSCE_PAT is an Azure DevOps personal access token for the
+          # abap2ui5 publisher, scope "Marketplace → Manage", issued for ALL
+          # accessible organizations - a token scoped to a single org is
+          # rejected with TF400813, which reads like a permission problem on
+          # the publisher and is not one.
+          # https://code.visualstudio.com/api/working-with-extensions/publishing-extension
+          if [ "$VSCE" = "true" ]; then
+            publish "the VS Code Marketplace" npx vsce publish --packagePath "$VSIX" || failed="$failed marketplace"
+          fi
+
+          # Open VSX serves VSCodium, Theia and SAP Business Application
+          # Studio. OVSX_PAT is a token from open-vsx.org; the `abap2ui5`
+          # namespace has to exist first (`ovsx create-namespace`) and the
+          # Eclipse publisher agreement has to be signed.
+          # https://github.com/eclipse/openvsx/wiki/Publishing-Extensions
+          if [ "$OVSX" = "true" ]; then
+            publish "Open VSX" npx --yes ovsx publish "$VSIX" -p "$OVSX_PAT" || failed="$failed open-vsx"
+          fi
+
+          # Both are attempted before the job gives up, so one broken token
+          # never hides the state of the other half.
+          if [ -n "$failed" ]; then
+            echo "::error::publish failed for:$failed"
+            exit 1
+          fi

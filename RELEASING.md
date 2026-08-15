@@ -66,6 +66,12 @@ Useful properties when something goes wrong:
   than failing the run, and a tag already pointing at the same commit is
   treated as a retry — so a run that died on an expired token can simply be
   re-run once the secret is fixed.
+- **Half-published releases can be finished.** The two marketplaces have
+  separate credentials and fail independently. Neither lets a version be
+  replaced, so a re-run meets `already exists` from whichever one succeeded;
+  that message counts as done, and only the missing half is published. Both
+  are attempted before the job gives up, so one broken token never hides the
+  state of the other.
 - **A wrong tag is not a release.** Before the publish steps run,
   `git push --delete origin vX.Y.Z` undoes it completely.
 
