@@ -2,6 +2,19 @@
 
 ## 0.23.0
 
+- **New Project from Template.** **New App from Template** hands you a class,
+  which is the right thing when you already have a repository — and leaves you
+  with the one artefact the extension cannot check properly when you do not.
+  Without an `abap2ui5lint.jsonc` the view check falls back to VS Code
+  settings, so the first CI run in that repository disagrees with what the
+  editor had been telling you. The new command scaffolds the whole thing into
+  an empty folder: the class and its abapGit sidecars, `abap2ui5lint.jsonc`
+  and `abaplint.jsonc`, a `package.json` whose `npm run check` is exactly what
+  the workflow it also writes runs, and a README. Same three templates, same
+  linter, and the config the editor reads is now the config CI reads. It
+  refuses a folder that already looks like a project rather than writing over
+  it. [abap2UI5/app-template](https://github.com/abap2UI5/app-template) stays
+  the fuller starting point — the notification links there.
 - **The auth proxy only answers its own preview.** While a system is
   connected the extension runs a small proxy on 127.0.0.1 that adds your
   credentials to every request it forwards, so the app in the preview never

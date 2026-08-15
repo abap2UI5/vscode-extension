@@ -110,6 +110,10 @@
         "title": "abap2UI5: New App from Template"
       },
       {
+        "command": "abap2ui5.newProject",
+        "title": "abap2UI5: New Project from Template"
+      },
+      {
         "command": "abap2ui5.screenshot",
         "title": "abap2UI5: Take App Screenshot",
         "icon": "$(device-camera)"

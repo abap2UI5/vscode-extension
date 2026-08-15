@@ -122,3 +122,93 @@ test("the wizard renames the class case-insensitively and everywhere", () => {
     assert.match(renamed, /CLASS zcl_mixed_case IMPLEMENTATION/);
   }
 });
+
+/*
+ * The project scaffold. What matters is not that files appear but that the
+ * result is a project the gates accept: the config the extension itself
+ * looks for, an abapGit sidecar whose CLSNAME matches its file name, and a
+ * class that passes the bundled linter - the same bar the single-class
+ * templates are held to.
+ */
+test("the project scaffold writes what a project needs", () => {
+  const { scaffoldFiles } = require("../scaffold") as typeof import("../scaffold");
+  for (const template of APP_TEMPLATES) {
+    const files = scaffoldFiles("my-app", "zcl_my_app", template);
+    const paths = files.map((f) => f.path);
+    for (const needed of [
+      "abap2ui5lint.jsonc",   // the one the extension searches for
+      "abaplint.jsonc",
+      "package.json",
+      ".abapgit.xml",
+      "src/package.devc.xml",
+      "src/zcl_my_app.clas.abap",
+      "src/zcl_my_app.clas.xml",
+      ".github/workflows/check.yml",
+    ]) {
+      assert.ok(paths.includes(needed), `${template.id}: scaffold has ${needed}`);
+    }
+
+    const xml = files.find((f) => f.path === "src/zcl_my_app.clas.xml")!;
+    assert.match(xml.content, /<CLSNAME>ZCL_MY_APP<\/CLSNAME>/,
+      `${template.id}: the sidecar names the class its file is named after`);
+    assert.equal(xml.bom, true, `${template.id}: abapGit XML is written with a BOM`);
+
+    const cfg = files.find((f) => f.path === "abap2ui5lint.jsonc")!.content;
+    assert.match(cfg, /"render":\s*true/,
+      `${template.id}: the render gate is ASKED for, so a missing runtime fails`);
+
+    const pkg = JSON.parse(files.find((f) => f.path === "package.json")!.content);
+    assert.ok(pkg.scripts.check, `${template.id}: there is one command that runs the gates`);
+    assert.ok(pkg.devDependencies["@abap2ui5/linter"], `${template.id}: the linter is pinned`);
+  }
+});
+
+test("the scaffolded class is the same class the templates are", () => {
+  const { scaffoldFiles } = require("../scaffold") as typeof import("../scaffold");
+  for (const template of APP_TEMPLATES) {
+    const files = scaffoldFiles("my-app", "zcl_my_app", template);
+    const source = files.find((f) => f.path === "src/zcl_my_app.clas.abap")!.content;
+    assert.ok(isAppClass(source), `${template.id}: scaffolded class implements z2ui5_if_app`);
+    assert.ok(usesBuilder(source), `${template.id}: scaffolded class uses the current builder`);
+    assert.ok(source.includes("zcl_my_app"), `${template.id}: the class carries the chosen name`);
+    assert.ok(!source.includes("zcl_my_app".toUpperCase() + " DEFINITION"),
+      `${template.id}: the ABAP keeps the lower-case name the file is named after`);
+    // the same reconstruction bar the single-class templates are held to
+    const prep = prepareAbap(source);
+    assert.ok(prep.usesBuilder && prep.nodes.length > 0,
+      `${template.id}: the view check can reconstruct what the scaffold writes`);
+  }
+});
+
+/*
+ * abapGit serializes its XML with a UTF-8 BOM. A scaffold that writes those
+ * files without one produces a repository that comes back changed on the
+ * first pull, for every developer - and the missing character is invisible in
+ * every diff that would show it.
+ */
+test("the abapGit XML carries a BOM and nothing else does", () => {
+  const { scaffoldFiles, scaffoldText } = require("../scaffold") as typeof import("../scaffold");
+  const files = scaffoldFiles("my-app", "zcl_my_app", APP_TEMPLATES[0]);
+  const withBom = files.filter((f) => scaffoldText(f).charCodeAt(0) === 0xfeff);
+  assert.deepEqual(
+    withBom.map((f) => f.path).sort(),
+    [".abapgit.xml", "src/package.devc.xml", "src/zcl_my_app.clas.xml"],
+    "exactly the abapGit-serialized files"
+  );
+  for (const file of withBom) {
+    assert.ok(
+      scaffoldText(file).startsWith(
+        String.fromCharCode(0xfeff) + '<?xml version="1.0" encoding="utf-8"?>'
+      ),
+      `${file.path}: the BOM sits before the declaration, not inside it`
+    );
+  }
+});
+
+test("a folder name becomes a usable npm/package name", () => {
+  const { projectNameFrom } = require("../scaffold") as typeof import("../scaffold");
+  assert.equal(projectNameFrom("My App"), "my-app");
+  assert.equal(projectNameFrom(".hidden"), "hidden");
+  assert.equal(projectNameFrom("ok-name"), "ok-name");
+  assert.equal(projectNameFrom("***"), "abap2ui5-app", "never an empty name");
+});
