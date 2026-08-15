@@ -44,7 +44,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/inspect.ts` | Inspect mode's matcher: runtime control chain -> outline node (the builder call to jump to) |
 | `src/modelview.ts` | The live-model document the preview's `{ }` button fills |
 | `src/webview.ts` | HTML for the preview and the welcome screen (theme variables, CSP nonce, theme/language pickers, the open-mode-aware empty state) |
-| `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401 |
+| `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401; authorized by the token in its own url |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
 | `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability, the render-gate command ladder, scratch-file naming, the JSON report parsing |
@@ -190,6 +190,17 @@ identity (see Conventions).
   proxy holds them in memory only, as a prepared header. They are keyed by
   origin (`abap2ui5.user:<origin>`); the unscoped pre-0.14 keys are migrated
   on first use, so do not reuse those names for anything else.
+- **Every local listener carries a secret in its path.** Both the auth proxy
+  (`proxy.ts`) and the system MCP server (`mcpsystem.ts`) forward or act with
+  the system credentials, and a port on 127.0.0.1 is reachable by every
+  process on the machine and by any page that resolves a name to loopback.
+  So: a `randomBytes(16)` token in the url, everything else answered 404, and
+  a `Host` that is not loopback refused outright. `proxy.origin` hands the
+  token out as part of the base url — callers swap the system origin for it
+  and never see the token, and what the app asks for afterwards is relative
+  to it. The one path that cannot inherit a prefix, an absolute bootstrap
+  like `/sap/public/...`, is covered by the HttpOnly cookie the first
+  authorized answer plants. Do not add a second listener without both.
 - **A setting that names a program to start is `"scope": "machine"`.**
   `viewCheck.command`, `mcp.command` and `mcp.reposRoot` decide which binary
   the extension spawns; machine scope keeps a cloned repository's

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.23.0
+
+- **The auth proxy only answers its own preview.** While a system is
+  connected the extension runs a small proxy on 127.0.0.1 that adds your
+  credentials to every request it forwards, so the app in the preview never
+  sees a logon prompt. It used to add them for *any* caller: the port is
+  random, but a random port is a scannable port, and a web page you happen to
+  have open can reach loopback too — so anything on your machine could have
+  driven an authenticated session against your SAP system through it, ADT
+  included. Now every url the proxy hands out carries a per-session token,
+  requests without it are answered 404, and a request that arrives under a
+  hostname other than loopback — what a DNS rebinding attempt looks like from
+  this side — is refused outright. Nothing to configure: the preview, **Open
+  in Browser** and the MCP tools all get the token as part of the address.
+- **A hung system no longer hangs the preview.** A forwarded request that
+  gets no answer within two minutes is dropped with the proxy's own 502
+  instead of being held open for as long as the socket lives. Credentials are
+  also cleared when the proxy stops, rather than lingering until the next
+  connect.
+
 ## 0.22.1
 
 - **The abap2UI5 logo, everywhere the extension shows an icon.** The generic

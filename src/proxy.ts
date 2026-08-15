@@ -1,5 +1,6 @@
 import * as http from "http";
 import * as https from "https";
+import { randomBytes } from "crypto";
 import { URL } from "url";
 
 /** Non-2xx answer from the ADT class lookup, with the status to decide on. */
@@ -258,11 +259,45 @@ export function parseAdtClassNames(xml: string): string[] {
   return names;
 }
 
+/** First segment of every url the proxy hands out, so the token that follows
+ *  cannot be mistaken for a path on the system. */
+const TOKEN_SEGMENT = "__abap2ui5";
+
+/** Carries the token on requests whose path the proxy never sees prefixed -
+ *  an app configured with an absolute bootstrap (`/sap/public/...`) asks for
+ *  it from the server root. Planted on the first answer, HttpOnly so the page
+ *  itself cannot read it back out. */
+const TOKEN_COOKIE = "__abap2ui5_proxy";
+
+/** The loopback names a browser can have connected through. Anything else in
+ *  the Host header means the request arrived under a different hostname than
+ *  the one the proxy hands out - the shape of a DNS rebinding attempt. */
+const LOOPBACK_HOST = /^(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?$/i;
+
+/** How long a forwarded request may take before the proxy gives up. Without
+ *  it a system that accepts the connection and then goes quiet holds the
+ *  request - and the preview - open with nothing to show for it. */
+const FORWARD_TIMEOUT_MS = 120_000;
+
 export class SapProxy {
   private server?: http.Server;
   private port?: number;
   private target?: URL;
   private authHeader?: string;
+  /**
+   * The shared secret in the proxy's own urls. The port is random but
+   * scannable, and every request the proxy forwards carries the system
+   * credentials - so without a secret any process on this machine, and any
+   * web page that reaches loopback, could drive an authenticated session
+   * against the SAP system (ADT included). Same construction the system MCP
+   * server uses for the same reason (see mcpsystem.ts).
+   *
+   * It sits in the path rather than in a header because the browser has to
+   * carry it on its own: the preview loads the app page, and the app page
+   * then asks for `resources/sap-ui-core.js` and posts its roundtrips
+   * RELATIVE to that url, so a prefix travels with them at no cost.
+   */
+  private token?: string;
 
   /**
    * Whether requests to the system may proceed when its TLS certificate
@@ -287,14 +322,20 @@ export class SapProxy {
   /** Starts the proxy (or just refreshes auth if the target stays the same). */
   async start(targetOrigin: string, user: string, pass: string): Promise<number> {
     const target = new URL(targetOrigin);
-    this.authHeader = "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
+    const authHeader =
+      "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
 
     if (this.server && this.target && this.target.origin === target.origin) {
+      this.authHeader = authHeader;
       return this.port!;
     }
 
+    // assigned after stop( ), which clears the credentials of the proxy it
+    // tears down - including, before this order, the ones just handed in
     await this.stop();
+    this.authHeader = authHeader;
     this.target = target;
+    this.token = randomBytes(16).toString("base64url");
     this.server = http.createServer((req, res) => this.handle(req, res));
 
     await new Promise<void>((resolve, reject) => {
@@ -307,13 +348,51 @@ export class SapProxy {
     return this.port;
   }
 
+  /**
+   * Base url of the running proxy, token included - swap the system's origin
+   * for this one and the resulting url is both routed and authorized. Callers
+   * do not have to know about the token: it is part of what they replace, and
+   * everything the page asks for afterwards is relative to it.
+   */
   get origin(): string {
-    return `http://127.0.0.1:${this.port}`;
+    return `http://127.0.0.1:${this.port}/${TOKEN_SEGMENT}/${this.token}`;
   }
 
   /** True once start() succeeded, i.e. target and credentials are known. */
   get isRunning(): boolean {
     return !!this.server && !!this.target && !!this.authHeader;
+  }
+
+  /**
+   * The system path an incoming request is asking for, or undefined when the
+   * request has no business here. Two ways to be authorized, and a request
+   * that is neither is answered 404 rather than told what it got wrong.
+   */
+  private route(req: http.IncomingMessage): string | undefined {
+    // A browser sends the host it connected to. Ours is always loopback, so
+    // anything else is a name that resolves here without being ours - which
+    // is what DNS rebinding looks like from this side.
+    if (!LOOPBACK_HOST.test(String(req.headers.host ?? ""))) {
+      return undefined;
+    }
+
+    const url = String(req.url ?? "/");
+    const prefix = `/${TOKEN_SEGMENT}/${this.token}`;
+    if (url === prefix) {
+      return "/";
+    }
+    if (url.startsWith(`${prefix}/`) || url.startsWith(`${prefix}?`)) {
+      return url.slice(prefix.length);
+    }
+
+    // no prefix: only the cookie from an earlier authorized answer counts
+    const cookie = String(req.headers.cookie ?? "")
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${TOKEN_COOKIE}=`));
+    return cookie?.slice(TOKEN_COOKIE.length + 1) === this.token
+      ? url
+      : undefined;
   }
 
   /**
@@ -369,6 +448,9 @@ export class SapProxy {
             }
           });
           res.on("end", () => resolve({ status, body }));
+          // a connection that dies mid-body emits on the RESPONSE stream, and
+          // an unhandled "error" there takes the extension host down with it
+          res.on("error", reject);
         }
       );
       req.setTimeout(8000, () =>
@@ -401,6 +483,15 @@ export class SapProxy {
   }
 
   private handle(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const path = this.route(req);
+    if (path === undefined) {
+      res.writeHead(404).end();
+      return;
+    }
+    // an authorized request that came in prefixed leaves with the cookie, so
+    // that an absolute-path resource is authorized too
+    const seedCookie = String(req.url ?? "").startsWith(`/${TOKEN_SEGMENT}/`);
+
     const target = this.target!;
     const isHttps = target.protocol === "https:";
     const mod = isHttps ? https : http;
@@ -410,6 +501,18 @@ export class SapProxy {
     const headers: http.OutgoingHttpHeaders = { ...req.headers };
     headers.host = target.host;
     headers.authorization = this.authHeader;
+    // the token is the proxy's own business and stops here
+    if (headers.cookie) {
+      const kept = String(headers.cookie)
+        .split(";")
+        .map((part) => part.trim())
+        .filter((part) => part && !part.startsWith(`${TOKEN_COOKIE}=`));
+      if (kept.length > 0) {
+        headers.cookie = kept.join("; ");
+      } else {
+        delete headers.cookie;
+      }
+    }
 
     // A document request may get the runtime hook injected below. Injecting
     // means reading the body, so ask for it uncompressed - for the handful of
@@ -443,7 +546,7 @@ export class SapProxy {
       hostname: target.hostname,
       port: target.port || (isHttps ? 443 : 80),
       method: req.method,
-      path: req.url,
+      path,
       headers,
       // dev systems often have self-signed certificates - verification is
       // opt-in via the abap2ui5.allowUnauthorizedCerts setting
@@ -505,10 +608,18 @@ export class SapProxy {
 
       // Make cookies valid on localhost: strip Domain + Secure
       const setCookie = proxyRes.headers["set-cookie"];
-      if (setCookie) {
-        outHeaders["set-cookie"] = setCookie.map((c) =>
-          c.replace(/;\s*Domain=[^;]+/i, "").replace(/;\s*Secure/i, "")
+      const cookies = setCookie
+        ? setCookie.map((c) =>
+            c.replace(/;\s*Domain=[^;]+/i, "").replace(/;\s*Secure/i, "")
+          )
+        : [];
+      if (seedCookie) {
+        cookies.push(
+          `${TOKEN_COOKIE}=${this.token}; Path=/; HttpOnly; SameSite=Lax`
         );
+      }
+      if (cookies.length > 0) {
+        outHeaders["set-cookie"] = cookies;
       }
 
       // HTML documents get the runtime hook planted (see above). Anything
@@ -561,6 +672,12 @@ export class SapProxy {
       proxyRes.on("error", () => res.end());
     });
 
+    // a system that accepts the connection and then says nothing would
+    // otherwise hold this request open for as long as the socket lives
+    proxyReq.setTimeout(FORWARD_TIMEOUT_MS, () =>
+      proxyReq.destroy(new Error(`no answer within ${FORWARD_TIMEOUT_MS} ms`))
+    );
+
     proxyReq.on("error", (err) => {
       if (!res.headersSent) {
         res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
@@ -576,6 +693,10 @@ export class SapProxy {
     this.server = undefined;
     this.port = undefined;
     this.target = undefined;
+    // the credentials and the token outlived the server they belonged to,
+    // and isRunning read true for a proxy that had already been stopped
+    this.authHeader = undefined;
+    this.token = undefined;
     if (server) {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
