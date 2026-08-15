@@ -2,6 +2,15 @@
 
 ## 0.23.0
 
+- **The scaffolded configs are now checked by the tools that read them.** Every
+  template's SOURCE was already linted, but the files written AROUND it were
+  not: a rule id the linter later renames, or a stray comma in the JSONC, would
+  have turned *New Project from Template* into a project that fails on its
+  first `npm run check` — with nothing in this repository noticing. The
+  linter's own `loadConfig` now parses the generated `abap2ui5lint.jsonc`,
+  `abaplint.jsonc` has to parse, and every `npm run <x>` a generated script
+  chains has to name a script that exists.
+
 - **New Project from Template.** **New App from Template** hands you a class,
   which is the right thing when you already have a repository — and leaves you
   with the one artefact the extension cannot check properly when you do not.

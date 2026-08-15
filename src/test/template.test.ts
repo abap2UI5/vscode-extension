@@ -163,6 +163,56 @@ test("the project scaffold writes what a project needs", () => {
   }
 });
 
+/* The generated CONFIG is the half nothing checked. `snippets.test.ts` lints
+ * every template's SOURCE, but a project is only usable if the files written
+ * around it parse too - and a rule id that the linter later renames, or a
+ * stray comma in the JSONC, turns "New Project from Template" into a project
+ * that fails on its first `npm run check`. The linter's own loader is what
+ * decides, so it is what this asks. */
+test("the scaffolded configs are ones the tools accept", () => {
+  const { scaffoldFiles } = require("../scaffold") as typeof import("../scaffold");
+  const { loadConfig } = require("@abap2ui5/linter/config") as {
+    loadConfig: (file: string) => Record<string, unknown>;
+  };
+  const os = require("os") as typeof import("os");
+  const fs = require("fs") as typeof import("fs");
+  const path = require("path") as typeof import("path");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "a2ui5-scaffold-"));
+  try {
+    for (const template of APP_TEMPLATES) {
+      const files = scaffoldFiles("my-app", "zcl_my_app", template);
+
+      const lintFile = path.join(dir, "abap2ui5lint.jsonc");
+      fs.writeFileSync(lintFile, files.find((f) => f.path === "abap2ui5lint.jsonc")!.content);
+      // throws with a precise message on an unknown key, a bad rule id or
+      // malformed JSONC - which is exactly what has to fail here, not later
+      const cfg = loadConfig(lintFile);
+      assert.equal(cfg.render, true, `${template.id}: the render gate stays asked-for`);
+
+      for (const jsonc of ["abaplint.jsonc"]) {
+        const raw = files.find((f) => f.path === jsonc)!.content;
+        const stripped = raw.replace(/^\s*\/\/.*$/gm, "");
+        assert.doesNotThrow(() => JSON.parse(stripped), `${template.id}: ${jsonc} parses`);
+      }
+
+      const workflow = files.find((f) => f.path === ".github/workflows/check.yml")!.content;
+      assert.match(workflow, /npm ci/, `${template.id}: CI installs before it checks`);
+      const pkg = JSON.parse(files.find((f) => f.path === "package.json")!.content);
+      for (const script of Object.values(pkg.scripts as Record<string, string>)) {
+        for (const step of script.split("&&").map((s) => s.trim())) {
+          const inner = step.startsWith("npm run ") ? step.slice(8) : null;
+          if (inner) {
+            assert.ok(pkg.scripts[inner], `${template.id}: "${step}" names a script that exists`);
+          }
+        }
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the scaffolded class is the same class the templates are", () => {
   const { scaffoldFiles } = require("../scaffold") as typeof import("../scaffold");
   for (const template of APP_TEMPLATES) {
