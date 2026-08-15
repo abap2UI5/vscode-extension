@@ -4,8 +4,10 @@ src/**
 dist-test/**
 scripts/**
 AGENTS.md
+RELEASING.md
 node_modules/**
 esbuild.js
+eslint.config.mjs
 tsconfig.json
 **/*.map
 **/.gitignore
