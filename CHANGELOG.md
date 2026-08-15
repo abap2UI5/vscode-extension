@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.23.0
+## 0.22.1
 
 - **The abap2UI5 logo, everywhere the extension shows an icon.** The generic
   placeholder is gone: the red abap2UI5 disc is now the Marketplace tile, the
