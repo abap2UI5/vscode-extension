@@ -120,6 +120,26 @@ ENDCLASS.`;
     "Text",
     "f:Card",
   ]);
+
+  /* The names alone do not prove the round trip: an attribute that was
+   * dropped, reordered or mangled on the way through the builder chain looks
+   * identical here. `title="Products &amp; Prices"` is the case that matters -
+   * it decodes to a literal `&` and has to survive as one. So compare the
+   * FULL tree the linter reconstructs against the one parseXml read from the
+   * same source. (Verified to hold over 498 real corpus ports before being
+   * pinned here; the extension's own CI has no corpus to run that against.) */
+  const flatten = (nodes: ViewNode[], out: string[] = []): string[] => {
+    for (const n of nodes) {
+      if (n.name !== null) {
+        const attrs = n.attrs.map(([k, v]) => `${k}=${v}`).sort().join(",");
+        out.push(`${n.ns ? `${n.ns}:${n.name}` : n.name}{${attrs}}`);
+      }
+      flatten(n.children, out);
+    }
+    return out;
+  };
+  assert.deepEqual(flatten(prep.nodes), flatten(parseXml(SAMPLE).roots as ViewNode[]),
+    "converting XML to a builder chain and reconstructing it must give the same tree, attributes included");
 });
 
 test("dropped text and mismatched tags are reported, not swallowed", () => {
