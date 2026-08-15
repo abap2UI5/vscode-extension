@@ -77,7 +77,17 @@ jobs:
             # the expected way to finish such a release, so let it through.
             # Anywhere else it means the version was already released.
             if [ -n "$remote" ] && [ "$remote" != "$GITHUB_SHA" ]; then
-              echo "::error::$tag is already released from another commit - bump the version in package.json and add a CHANGELOG.md section first"
+              # Two different situations end up here, and only one of them
+              # wants a version bump - so name both rather than assume.
+              echo "Tag $tag exists on ${remote:0:12}, this run is on ${GITHUB_SHA:0:12}."
+              echo "If that release only reached ONE marketplace, do not re-release: publish the"
+              echo "missing half from the .vsix that was actually released, so both marketplaces"
+              echo "carry identical bytes for $tag -"
+              echo "    gh release download $tag --pattern '*.vsix'"
+              echo "    npx ovsx publish abap2ui5-$version.vsix -p <token>   # or: npx vsce publish --packagePath ..."
+              echo "Otherwise this is a new release: bump the version in package.json and add a"
+              echo "CHANGELOG.md section for it."
+              echo "::error::$tag is already released from commit ${remote:0:12} - releasing it again from here would publish different content under a version that is already out"
               exit 1
             fi
             if [ -n "$remote" ]; then
