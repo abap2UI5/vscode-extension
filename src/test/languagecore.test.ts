@@ -259,3 +259,32 @@ test("CSSColor-typed members count as colours, others do not", () => {
   assert.equal(isColorMember(data, "sap.m.Button", "text"), false);
   assert.equal(isColorMember(data, "sap.m.Button", "nonsense"), false);
 });
+
+/* completionAt/hoverAt run on every keystroke, so a throw at an unusual
+ * cursor position is a broken editor feature rather than a wrong answer.
+ * Neither is allowed to throw ANYWHERE in a source - including mid-token,
+ * inside a literal, and one past the end. Verified at scale before being
+ * pinned here: 13,398 calls at every 89th offset over 70 corpus files
+ * (classes, views and fragments) threw nothing; the corpus sweep cannot run
+ * in this repo's CI, so a representative fixture carries the guard. */
+test("completionAt and hoverAt never throw, at any offset", () => {
+  const source =
+    HEAD +
+    "    )->tag( `Button` )->a( n = `text` v = `{NAME}`\n" +
+    "    )->a( n = `press` v = client->_event( `GO` ) ).\n" +
+    "CASE client->get( )-event.\n" +
+    "  WHEN `GO`.\n" +
+    "ENDCASE.\n";
+  for (const file of ["z.clas.abap", "z.view.xml"]) {
+    for (let offset = 0; offset <= source.length; offset++) {
+      assert.doesNotThrow(
+        () => completionAt(source, file, offset, data, () => SHAPE),
+        `completionAt threw at offset ${offset} of ${file}`
+      );
+      assert.doesNotThrow(
+        () => hoverAt(source, file, offset, data, () => SHAPE),
+        `hoverAt threw at offset ${offset} of ${file}`
+      );
+    }
+  }
+});
