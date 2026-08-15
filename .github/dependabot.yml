@@ -1,0 +1,37 @@
+# Weekly dependency updates, opened as pull requests so `npm test`, the
+# typecheck and the web smoke decide whether they are safe.
+#
+# @abap2ui5/linter is deliberately NOT here. It is a git dependency pinned to
+# a commit, and bump-linter.yml already owns it: once a week that workflow
+# re-resolves the pin against the linter's main, runs the full gate, and opens
+# a pull request only if it passed. Letting Dependabot bump it too would mean
+# two pull requests for one decision, and the one without the gate run would
+# be the one that looks simpler to merge.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: tuesday
+      # Tuesday, so a bump lands on a lockfile bump-linter.yml has already
+      # settled on Monday rather than racing it.
+      time: "06:30"
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "@abap2ui5/linter"
+    groups:
+      toolchain:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: "06:30"
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
