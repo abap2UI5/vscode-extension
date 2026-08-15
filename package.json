@@ -403,6 +403,8 @@
         "abap2ui5.viewCheck.minUi5": {
           "type": "string",
           "default": "1.71",
+          "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+          "patternErrorMessage": "Must be a UI5 version like 1.71 or 1.120.3. A value that is not a version is silently ignored by the check, which then runs against the default floor.",
           "markdownDescription": "The UI5 version to check against - **the version your system runs**. A control or property introduced after it is reported (it would not exist on your system), and a deprecation is only reported once it is in effect at that version. The metadata itself comes from the bundled snapshot; see the abap2UI5 output channel for the version it was generated from.\n\nA workspace's `abap2ui5lint.jsonc` wins over this setting - that is the file CI checks against."
         },
         "abap2ui5.viewCheck.render": {
