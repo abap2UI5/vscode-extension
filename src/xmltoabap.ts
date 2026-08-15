@@ -40,16 +40,24 @@ const ENTITIES: Record<string, string> = {
   apos: "'",
 };
 
+/** A numeric entity that names no character is left as written, like an
+ *  unknown named one - String.fromCodePoint THROWS above U+10FFFF, and a
+ *  pasted view is not worth crashing the conversion over. */
+function fromCodePoint(code: number, whole: string): string {
+  if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) {
+    return whole;
+  }
+  return String.fromCodePoint(code);
+}
+
 /** Entity-decodes an attribute value or text node. */
 export function decodeEntities(text: string): string {
   return text.replace(/&(#x?[0-9a-fA-F]+|\w+);/g, (whole, body: string) => {
     if (body.startsWith("#x") || body.startsWith("#X")) {
-      const code = parseInt(body.slice(2), 16);
-      return isNaN(code) ? whole : String.fromCodePoint(code);
+      return fromCodePoint(parseInt(body.slice(2), 16), whole);
     }
     if (body.startsWith("#")) {
-      const code = parseInt(body.slice(1), 10);
-      return isNaN(code) ? whole : String.fromCodePoint(code);
+      return fromCodePoint(parseInt(body.slice(1), 10), whole);
     }
     return ENTITIES[body] ?? whole;
   });

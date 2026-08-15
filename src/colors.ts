@@ -119,7 +119,25 @@ function hslChannel(p: number, q: number, t: number): number {
 }
 
 /** One CSS colour value, or undefined when the text is not a colour. */
+/* CSS CLAMPS an out-of-range channel, it does not reject it: `rgb(300,0,0)`
+ * is red and `hsl(0,300%,50%)` is red too. Carrying the raw number through
+ * breaks both ends - VS Code's Color wants 0..1 for the swatch, and an alpha
+ * outside it comes back out of formatCssColor as `rgba(0,0,0,-1)`, which is
+ * not a colour at all and would be written into the user's source the moment
+ * they touch the picker. */
+const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
+
 export function parseCssColor(value: string): RgbaColor | undefined {
+  const c = parseCssColorUnclamped(value);
+  return c && {
+    red: clamp01(c.red),
+    green: clamp01(c.green),
+    blue: clamp01(c.blue),
+    alpha: clamp01(c.alpha),
+  };
+}
+
+function parseCssColorUnclamped(value: string): RgbaColor | undefined {
   const v = value.trim();
   if (v.startsWith("#")) {
     return fromHex(v.slice(1));
@@ -167,12 +185,14 @@ export function parseCssColor(value: string): RgbaColor | undefined {
 /** The colour written back when the picker chooses one: hex while opaque,
  *  rgba() once an alpha rides along. */
 export function formatCssColor(color: RgbaColor): string {
-  const to255 = (c: number) => Math.round(Math.min(1, Math.max(0, c)) * 255);
+  const to255 = (c: number) => Math.round(clamp01(c) * 255);
   if (color.alpha >= 1) {
     const hex = (c: number) => to255(c).toString(16).padStart(2, "0");
     return `#${hex(color.red)}${hex(color.green)}${hex(color.blue)}`;
   }
-  return `rgba(${to255(color.red)},${to255(color.green)},${to255(color.blue)},${Number(color.alpha.toFixed(2))})`;
+  // alpha is clamped like the other three - it is written verbatim into the
+  // source, so a negative one would emit `rgba(…,-1)`
+  return `rgba(${to255(color.red)},${to255(color.green)},${to255(color.blue)},${Number(clamp01(color.alpha).toFixed(2))})`;
 }
 
 // ---------------------------------------------------------------------------
