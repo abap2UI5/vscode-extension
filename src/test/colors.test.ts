@@ -38,6 +38,26 @@ test("parseCssColor covers hex, rgb(), hsl() and named colours", () => {
     alpha: 1,
   });
   assert.equal(parseCssColor("Highlight"), undefined); // not a CSS colour
+});
+
+/* CSS clamps an out-of-range channel instead of rejecting it, so these are
+ * real colours a stylesheet may carry. Unclamped they broke both ends: the
+ * swatch got a Color outside 0..1, and formatCssColor wrote a negative alpha
+ * straight back as `rgba(0,0,0,-1)` - not a colour - the moment the user
+ * touched the picker. */
+test("parseCssColor clamps out-of-range channels the way CSS does", () => {
+  assert.deepEqual(parseCssColor("rgb(300, 0, 0)"), { red: 1, green: 0, blue: 0, alpha: 1 });
+  assert.deepEqual(parseCssColor("rgb(110%, 0%, 0%)"), { red: 1, green: 0, blue: 0, alpha: 1 });
+  assert.deepEqual(parseCssColor("rgb(-20,0,0)"), { red: 0, green: 0, blue: 0, alpha: 1 });
+  assert.deepEqual(parseCssColor("hsl(0, 300%, 50%)"), { red: 1, green: 0, blue: 0, alpha: 1 });
+  assert.equal(parseCssColor("rgba(0,0,0,5)")!.alpha, 1);
+  assert.equal(parseCssColor("rgba(0,0,0,-1)")!.alpha, 0);
+});
+
+test("formatCssColor never emits a channel outside CSS range", () => {
+  assert.equal(formatCssColor({ red: 2, green: -1, blue: 0.5, alpha: 1 }), "#ff0080");
+  assert.equal(formatCssColor({ red: 0, green: 0, blue: 0, alpha: -1 }), "rgba(0,0,0,0)");
+  assert.equal(formatCssColor({ red: 0, green: 0, blue: 0, alpha: 0.5 }), "rgba(0,0,0,0.5)");
   assert.equal(parseCssColor("{/COLOR}"), undefined); // a binding, not a value
   assert.equal(parseCssColor(""), undefined);
 });
