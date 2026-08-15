@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.23.0
+
+- **The abap2UI5 logo, everywhere the extension shows an icon.** The generic
+  placeholder is gone: the red abap2UI5 disc is now the Marketplace tile, the
+  icon of the **abap2UI5** tab in the bottom panel, and the tab icon of the
+  app preview and the navigation map. The panel tab gets a version with the
+  wordmark punched out of the disc rather than painted on it — VS Code tints
+  that icon with the theme colour and keeps only its silhouette, so a
+  knocked-out wordmark is what survives the tint.
+
 ## 0.22.0
 
 - **TLS verification is configurable.** The auth proxy used to accept any
