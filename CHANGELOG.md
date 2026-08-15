@@ -5,10 +5,12 @@
 - **The abap2UI5 logo, everywhere the extension shows an icon.** The generic
   placeholder is gone: the red abap2UI5 disc is now the Marketplace tile, the
   icon of the **abap2UI5** tab in the bottom panel, and the tab icon of the
-  app preview and the navigation map. The panel tab gets a version with the
-  wordmark punched out of the disc rather than painted on it — VS Code tints
-  that icon with the theme colour and keeps only its silhouette, so a
-  knocked-out wordmark is what survives the tint.
+  app preview and the navigation map. The Marketplace tile carries the full
+  logo; the three small icons are 16 and 24 pixels wide, where two lines of
+  wordmark are a smudge, so they carry a short mark — the logo's own **a** and
+  **2**, in the logo's own type, side by side on the disc. The panel tab has
+  them punched out of the disc rather than painted on it, because VS Code
+  tints that icon with the theme colour and keeps only its silhouette.
 
 ## 0.22.0
 
