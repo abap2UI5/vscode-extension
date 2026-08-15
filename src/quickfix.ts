@@ -1,8 +1,7 @@
 import * as vscode from "vscode";
-import * as fs from "fs";
 import * as path from "path";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
-import { baselineBase, findingKey } from "@abap2ui5/linter/baseline";
+import { addToBaseline } from "./baselinefile";
 import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
 
 /*
@@ -226,52 +225,6 @@ function applyAll(
   const edit = new vscode.WorkspaceEdit();
   edit.set(doc.uri, edits);
   return { edit, count: edits.length };
-}
-
-/**
- * Appends one finding to the repo's baseline file - the same key and count
- * semantics `--update-baseline` writes, so the CLI recognises the entry. The
- * file watcher on the baseline is not ours; the next check simply reads the
- * new mtime and the diagnostic disappears.
- */
-function addToBaseline(
-  baselineFile: string,
-  sourceFile: string,
-  finding: PropertyFinding
-): string {
-  let raw: { note?: string; findings?: Record<string, number> } = {};
-  try {
-    raw = JSON.parse(fs.readFileSync(baselineFile, "utf8"));
-  } catch {
-    // a missing or empty file starts a fresh baseline
-  }
-  const findings: Record<string, number> = raw.findings ?? {};
-  const rel = path
-    .relative(baselineBase(baselineFile), sourceFile)
-    .split(path.sep)
-    .join("/");
-  const key = findingKey(rel, finding);
-  findings[key] = (findings[key] ?? 0) + 1;
-  const sorted: Record<string, number> = {};
-  for (const k of Object.keys(findings).sort()) {
-    sorted[k] = findings[k];
-  }
-  fs.writeFileSync(
-    baselineFile,
-    `${JSON.stringify(
-      {
-        note:
-          raw.note ??
-          "abap2ui5-linter baseline: findings that existed when the linter " +
-            "was adopted. Suppressed on every run; NEW findings still fail, " +
-            "a STALE entry fails too. Regenerate with --update-baseline.",
-        findings: sorted,
-      },
-      null,
-      2
-    )}\n`
-  );
-  return key;
 }
 
 export function registerQuickFix(
