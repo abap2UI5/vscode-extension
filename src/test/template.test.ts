@@ -190,6 +190,24 @@ test("the scaffolded configs are ones the tools accept", () => {
       const cfg = loadConfig(lintFile);
       assert.equal(cfg.render, true, `${template.id}: the render gate stays asked-for`);
 
+      /* The scaffolded abaplint config and abap2UI5/app-template's are the
+       * same curated 56-rule core, arrived at once and then copied — which is
+       * exactly the shape that drifts. Nothing here can read the other
+       * repository, so what is pinned is the SIZE and the anchors: a rule
+       * quietly dropped from this copy changes the count, and the four
+       * headline rules are the ones whose absence would be hardest to notice
+       * in a starter project (an unchecked sy-subrc, a type that does not
+       * activate on 7.02, a SELECT without ORDER BY, a void type on cloud). */
+      const abaplint = files.find((f) => f.path === "abaplint.jsonc")!.content;
+      const ruleCount = (abaplint.match(/^\s{4}"[a-z_0-9]+":/gm) || []).length;
+      assert.ok(
+        ruleCount >= 70,
+        `${template.id}: the curated core is still there (${ruleCount} rules, expected >= 70)`
+      );
+      for (const rule of ["check_subrc", "fully_type_itabs", "select_add_order_by", "forbidden_void_type"]) {
+        assert.match(abaplint, new RegExp(`"${rule}"`), `${template.id}: ${rule} is in the core`);
+      }
+
       for (const jsonc of ["abaplint.jsonc"]) {
         const raw = files.find((f) => f.path === jsonc)!.content;
         const stripped = raw.replace(/^\s*\/\/.*$/gm, "");

@@ -110,6 +110,87 @@ const ABAPLINT_CONFIG = `{
     "parser_error": true,
     "unknown_types": true,
     "obsolete_statement": true,
+
+    // ---- The curated core -------------------------------------------------
+    //
+    // The same 56 rules abap2UI5/app-template carries, and the same reason:
+    // abap2UI5 itself runs 152 abaplint rules, a starter project ran 17, so
+    // the framework held itself to a standard it did not hand on. Of the 136
+    // in between, 42 cannot fire in an abap2UI5 app at all (CDS, dynpro,
+    // FORM, macros, message classes, IDoc) and 38 are taste a template must
+    // not impose. These 56 are correctness, portability, SQL, dead weight and
+    // the abapGit round trip.
+    //
+    // Measured before adopting: on abap2UI5/samples (317 files) they report
+    // 127 findings, every one a genuine defect class; on a scaffolded project,
+    // zero.
+
+    // Correctness - a defect, not a preference
+    "ambiguous_statement": true,
+    "catch_and_raise": true,
+    "check_abstract": true,
+    "check_subrc": true,
+    "classic_exceptions_overlap": true,
+    "cyclic_oo": true,
+    "dangerous_statement": true,
+    "empty_statement": true,
+    "identical_conditions": true,
+    "identical_contents": true,
+    "identical_descriptions": true,
+    "identical_move": true,
+    "index_completely_contained": true,
+    "invalid_table_index": true,
+    "method_overwrites_builtin": true,
+    "no_chained_assignment": true,
+    "parser_bad_exceptions": true,
+    "parser_missing_space": true,
+    "sy_modification": true,
+    "try_without_catch": true,
+    "uncaught_exception": true,
+    "unnecessary_return": true,
+    "unreachable_code": true,
+    "use_class_based_exceptions": true,
+    "when_others_last": true,
+
+    // Portability - the app has to survive 7.02, the cloud, and the transpiler
+    "cloud_types": true,
+    "downport": true,
+    "forbidden_void_type": true,
+    "fully_type_constants": true,
+    "fully_type_itabs": true,
+    "inline_data_old_versions": true,
+    "parser_702_chaining": true,
+
+    // SQL - correctness and performance of what reaches the database
+    "db_operation_in_loop": true,
+    "modify_only_own_db_tables": true,
+    "select_add_order_by": true,
+    "select_performance": true,
+    "select_single_full_key": true,
+    "sql_escape_host_variables": true,
+    "sql_value_conversion": true,
+    "strict_sql": true,
+    "unsecure_fae": true,
+
+    // Dead weight - shipped, serialized, read by nobody
+    "empty_event": true,
+    "empty_structure": true,
+    "superfluous_value": true,
+    "unnecessary_chaining": true,
+    "unnecessary_pragma": true,
+    "unused_ddic": true,
+    "unused_methods": true,
+    "unused_types": true,
+    "unused_variables": true,
+
+    // The abapGit round trip - the file has to come back byte-identical
+    "colon_missing_space": true,
+    "contains_tab": true,
+    "description_empty": true,
+    "line_break_style": true,
+    "local_testclass_consistency": true,
+    "main_file_contents": true,
+
     // CLSNAME in the .clas.xml against the file name - the mistake that
     // happens when you copy a class and rename half of it
     "xml_consistency": true,
