@@ -9,9 +9,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # The bundled linter declares engines >= 22; npm only warns today,
           # but there is no reason for CI to build on a version the toolchain
@@ -35,7 +35,7 @@ jobs:
       - run: npm run test:web
 
       # The .vsix of every branch, installable straight from the run page.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vsix
           path: "*.vsix"
