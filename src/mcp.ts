@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { CORPUS_DIRS, VIEW_CHECK_DIRS } from "./repolayout";
+import { CORPUS_DIRS, VIEW_CHECK_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
 
 /*
  * MCP server registration: exposes the abap2UI5 MCP server
@@ -12,8 +12,9 @@ import { CORPUS_DIRS, VIEW_CHECK_DIRS } from "./repolayout";
  * build, headless run with screenshot.
  *
  * The server orchestrates sibling checkouts (abap2UI5, samples-controls,
- * linter). Point `abap2ui5.mcp.reposRoot` at the folder containing
- * them and the matching *_HOME environment variables are passed along.
+ * samples, samples-stack, linter). Point `abap2ui5.mcp.reposRoot` at the
+ * folder containing them and the matching *_HOME environment variables are
+ * passed along.
  */
 
 const CONFIG_SECTION = "abap2ui5";
@@ -25,6 +26,13 @@ const HOME_VARS: ReadonlyArray<readonly [string, string]> = [
   ["abap2UI5", "A2UI5_HOME"],
   ...CORPUS_DIRS.map((d) => [d, "SAMPLES_CONTROLS_HOME"] as const),
   ...VIEW_CHECK_DIRS.map((d) => [d, "AI_VIEW_CHECK_HOME"] as const),
+  /* The `examples` tool searches THREE sample catalogues, and until it did,
+   * only the corpus needed an env var here. A checkout the extension does not
+   * point at is not an error over there - the tool answers from the ones it
+   * can read - so a missing one costs a third of the answer silently, which
+   * is exactly why both are passed whenever they are present. */
+  ...SAMPLES_DIRS.map((d) => [d, "SAMPLES_HOME"] as const),
+  ...SAMPLES_STACK_DIRS.map((d) => [d, "SAMPLES_STACK_HOME"] as const),
 ];
 
 function config() {

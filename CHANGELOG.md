@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **The linter pin moves to 0.2.1, and the MCP server gets the two catalogues
+  it grew.** The pinned linter stops reading the `ELSE` of a `COND #( ... )` as
+  the end of a lifecycle branch, which is the false positive that kept the
+  sample corpora and the documentation on the longer
+  `IF check_on_init( ) OR check_on_navigated( )` dispatcher. The render-gate
+  bundle for that commit is published, so the pinned-bundle path stays exact.
+
+  `ai-mcp`'s `examples` tool searches three sample repositories now
+  (`samples`, `samples-controls`, `samples-stack`) rather than one, so
+  `SAMPLES_HOME` and `SAMPLES_STACK_HOME` are passed from the repos root
+  alongside the two that were already there. A catalogue this extension does
+  not point at is not an error over there — the tool answers from the ones it
+  can read — so a missing variable would have cost a third of the answer
+  silently.
+
 ## 0.23.0
 
 - **The scaffolded configs are now checked by the tools that read them.** Every

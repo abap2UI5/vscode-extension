@@ -17,3 +17,13 @@ export const VIEW_CHECK_DIRS = ["linter", "abap2UI5-linter", "ai-view-check"] as
  *  `ai-demokit` before that); ai-mcp's lib/repos.mjs carries the same
  *  CORPUS_DIRS for its own resolution. */
 export const CORPUS_DIRS = ["samples-controls", "abap2UI5-api", "ai-demokit"] as const;
+
+/** Directory names the pattern-sample checkout can carry, newest first
+ *  (github.com/abap2UI5/samples). One of the three catalogues the MCP
+ *  server's `examples` tool searches. */
+export const SAMPLES_DIRS = ["samples", "abap2UI5-samples"] as const;
+
+/** Directory names the stack-sample checkout can carry, newest first
+ *  (github.com/abap2UI5/samples-stack) - the apps that need an OData
+ *  service, RAP, APC or the Fiori launchpad. The third catalogue. */
+export const SAMPLES_STACK_DIRS = ["samples-stack", "abap2UI5-samples-stack"] as const;
