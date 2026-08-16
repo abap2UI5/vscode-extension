@@ -3,7 +3,7 @@ import { setSnapshotText, snapshotError } from "../snapshot";
 import { registerLanguageFeatures } from "../language";
 import { registerXmlPreview } from "../xmlpreview";
 import { registerWebCheck, webFindingsNow } from "../webcheck";
-import { registerNewApp } from "../wizard";
+import { registerNewApp, registerNewProject } from "../wizard";
 import { registerConvert } from "../convert";
 
 /*
@@ -57,6 +57,7 @@ export async function activate(
   registerWebCheck(context, log);
   registerXmlPreview(context, log, webFindingsNow);
   registerNewApp(context);
+  registerNewProject(context);
   registerConvert(context, log);
 
   context.subscriptions.push(

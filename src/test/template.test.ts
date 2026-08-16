@@ -122,3 +122,143 @@ test("the wizard renames the class case-insensitively and everywhere", () => {
     assert.match(renamed, /CLASS zcl_mixed_case IMPLEMENTATION/);
   }
 });
+
+/*
+ * The project scaffold. What matters is not that files appear but that the
+ * result is a project the gates accept: the config the extension itself
+ * looks for, an abapGit sidecar whose CLSNAME matches its file name, and a
+ * class that passes the bundled linter - the same bar the single-class
+ * templates are held to.
+ */
+test("the project scaffold writes what a project needs", () => {
+  const { scaffoldFiles } = require("../scaffold") as typeof import("../scaffold");
+  for (const template of APP_TEMPLATES) {
+    const files = scaffoldFiles("my-app", "zcl_my_app", template);
+    const paths = files.map((f) => f.path);
+    for (const needed of [
+      "abap2ui5lint.jsonc",   // the one the extension searches for
+      "abaplint.jsonc",
+      "package.json",
+      ".abapgit.xml",
+      "src/package.devc.xml",
+      "src/zcl_my_app.clas.abap",
+      "src/zcl_my_app.clas.xml",
+      ".github/workflows/check.yml",
+    ]) {
+      assert.ok(paths.includes(needed), `${template.id}: scaffold has ${needed}`);
+    }
+
+    const xml = files.find((f) => f.path === "src/zcl_my_app.clas.xml")!;
+    assert.match(xml.content, /<CLSNAME>ZCL_MY_APP<\/CLSNAME>/,
+      `${template.id}: the sidecar names the class its file is named after`);
+    assert.equal(xml.bom, true, `${template.id}: abapGit XML is written with a BOM`);
+
+    const cfg = files.find((f) => f.path === "abap2ui5lint.jsonc")!.content;
+    assert.match(cfg, /"render":\s*true/,
+      `${template.id}: the render gate is ASKED for, so a missing runtime fails`);
+
+    const pkg = JSON.parse(files.find((f) => f.path === "package.json")!.content);
+    assert.ok(pkg.scripts.check, `${template.id}: there is one command that runs the gates`);
+    assert.ok(pkg.devDependencies["@abap2ui5/linter"], `${template.id}: the linter is pinned`);
+  }
+});
+
+/* The generated CONFIG is the half nothing checked. `snippets.test.ts` lints
+ * every template's SOURCE, but a project is only usable if the files written
+ * around it parse too - and a rule id that the linter later renames, or a
+ * stray comma in the JSONC, turns "New Project from Template" into a project
+ * that fails on its first `npm run check`. The linter's own loader is what
+ * decides, so it is what this asks. */
+test("the scaffolded configs are ones the tools accept", () => {
+  const { scaffoldFiles } = require("../scaffold") as typeof import("../scaffold");
+  const { loadConfig } = require("@abap2ui5/linter/config") as {
+    loadConfig: (file: string) => Record<string, unknown>;
+  };
+  const os = require("os") as typeof import("os");
+  const fs = require("fs") as typeof import("fs");
+  const path = require("path") as typeof import("path");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "a2ui5-scaffold-"));
+  try {
+    for (const template of APP_TEMPLATES) {
+      const files = scaffoldFiles("my-app", "zcl_my_app", template);
+
+      const lintFile = path.join(dir, "abap2ui5lint.jsonc");
+      fs.writeFileSync(lintFile, files.find((f) => f.path === "abap2ui5lint.jsonc")!.content);
+      // throws with a precise message on an unknown key, a bad rule id or
+      // malformed JSONC - which is exactly what has to fail here, not later
+      const cfg = loadConfig(lintFile);
+      assert.equal(cfg.render, true, `${template.id}: the render gate stays asked-for`);
+
+      for (const jsonc of ["abaplint.jsonc"]) {
+        const raw = files.find((f) => f.path === jsonc)!.content;
+        const stripped = raw.replace(/^\s*\/\/.*$/gm, "");
+        assert.doesNotThrow(() => JSON.parse(stripped), `${template.id}: ${jsonc} parses`);
+      }
+
+      const workflow = files.find((f) => f.path === ".github/workflows/check.yml")!.content;
+      assert.match(workflow, /npm ci/, `${template.id}: CI installs before it checks`);
+      const pkg = JSON.parse(files.find((f) => f.path === "package.json")!.content);
+      for (const script of Object.values(pkg.scripts as Record<string, string>)) {
+        for (const step of script.split("&&").map((s) => s.trim())) {
+          const inner = step.startsWith("npm run ") ? step.slice(8) : null;
+          if (inner) {
+            assert.ok(pkg.scripts[inner], `${template.id}: "${step}" names a script that exists`);
+          }
+        }
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the scaffolded class is the same class the templates are", () => {
+  const { scaffoldFiles } = require("../scaffold") as typeof import("../scaffold");
+  for (const template of APP_TEMPLATES) {
+    const files = scaffoldFiles("my-app", "zcl_my_app", template);
+    const source = files.find((f) => f.path === "src/zcl_my_app.clas.abap")!.content;
+    assert.ok(isAppClass(source), `${template.id}: scaffolded class implements z2ui5_if_app`);
+    assert.ok(usesBuilder(source), `${template.id}: scaffolded class uses the current builder`);
+    assert.ok(source.includes("zcl_my_app"), `${template.id}: the class carries the chosen name`);
+    assert.ok(!source.includes("zcl_my_app".toUpperCase() + " DEFINITION"),
+      `${template.id}: the ABAP keeps the lower-case name the file is named after`);
+    // the same reconstruction bar the single-class templates are held to
+    const prep = prepareAbap(source);
+    assert.ok(prep.usesBuilder && prep.nodes.length > 0,
+      `${template.id}: the view check can reconstruct what the scaffold writes`);
+  }
+});
+
+/*
+ * abapGit serializes its XML with a UTF-8 BOM. A scaffold that writes those
+ * files without one produces a repository that comes back changed on the
+ * first pull, for every developer - and the missing character is invisible in
+ * every diff that would show it.
+ */
+test("the abapGit XML carries a BOM and nothing else does", () => {
+  const { scaffoldFiles, scaffoldText } = require("../scaffold") as typeof import("../scaffold");
+  const files = scaffoldFiles("my-app", "zcl_my_app", APP_TEMPLATES[0]);
+  const withBom = files.filter((f) => scaffoldText(f).charCodeAt(0) === 0xfeff);
+  assert.deepEqual(
+    withBom.map((f) => f.path).sort(),
+    [".abapgit.xml", "src/package.devc.xml", "src/zcl_my_app.clas.xml"],
+    "exactly the abapGit-serialized files"
+  );
+  for (const file of withBom) {
+    assert.ok(
+      scaffoldText(file).startsWith(
+        String.fromCharCode(0xfeff) + '<?xml version="1.0" encoding="utf-8"?>'
+      ),
+      `${file.path}: the BOM sits before the declaration, not inside it`
+    );
+  }
+});
+
+test("a folder name becomes a usable npm/package name", () => {
+  const { projectNameFrom } = require("../scaffold") as typeof import("../scaffold");
+  assert.equal(projectNameFrom("My App"), "my-app");
+  assert.equal(projectNameFrom(".hidden"), "hidden");
+  assert.equal(projectNameFrom("ok-name"), "ok-name");
+  assert.equal(projectNameFrom("***"), "abap2ui5-app", "never an empty name");
+});

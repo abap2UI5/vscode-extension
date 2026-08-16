@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.23.0
+
+- **The scaffolded configs are now checked by the tools that read them.** Every
+  template's SOURCE was already linted, but the files written AROUND it were
+  not: a rule id the linter later renames, or a stray comma in the JSONC, would
+  have turned *New Project from Template* into a project that fails on its
+  first `npm run check` — with nothing in this repository noticing. The
+  linter's own `loadConfig` now parses the generated `abap2ui5lint.jsonc`,
+  `abaplint.jsonc` has to parse, and every `npm run <x>` a generated script
+  chains has to name a script that exists.
+
+- **New Project from Template.** **New App from Template** hands you a class,
+  which is the right thing when you already have a repository — and leaves you
+  with the one artefact the extension cannot check properly when you do not.
+  Without an `abap2ui5lint.jsonc` the view check falls back to VS Code
+  settings, so the first CI run in that repository disagrees with what the
+  editor had been telling you. The new command scaffolds the whole thing into
+  an empty folder: the class and its abapGit sidecars, `abap2ui5lint.jsonc`
+  and `abaplint.jsonc`, a `package.json` whose `npm run check` is exactly what
+  the workflow it also writes runs, and a README. Same three templates, same
+  linter, and the config the editor reads is now the config CI reads. It
+  refuses a folder that already looks like a project rather than writing over
+  it. [abap2UI5/app-template](https://github.com/abap2UI5/app-template) stays
+  the fuller starting point — the notification links there.
+- **The auth proxy only answers its own preview.** While a system is
+  connected the extension runs a small proxy on 127.0.0.1 that adds your
+  credentials to every request it forwards, so the app in the preview never
+  sees a logon prompt. It used to add them for *any* caller: the port is
+  random, but a random port is a scannable port, and a web page you happen to
+  have open can reach loopback too — so anything on your machine could have
+  driven an authenticated session against your SAP system through it, ADT
+  included. Now every url the proxy hands out carries a per-session token,
+  requests without it are answered 404, and a request that arrives under a
+  hostname other than loopback — what a DNS rebinding attempt looks like from
+  this side — is refused outright. Nothing to configure: the preview, **Open
+  in Browser** and the MCP tools all get the token as part of the address.
+- **A hung system no longer hangs the preview.** A forwarded request that
+  gets no answer within two minutes is dropped with the proxy's own 502
+  instead of being held open for as long as the socket lives. Credentials are
+  also cleared when the proxy stops, rather than lingering until the next
+  connect.
+
 ## 0.22.1
 
 - **The abap2UI5 logo, everywhere the extension shows an icon.** The generic

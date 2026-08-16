@@ -193,3 +193,219 @@ test("ADT search answers reduce to unique class names", () => {
   </adtcore:objectReferences>`;
   assert.deepEqual(parseAdtClassNames(xml), ["ZCL_APP_ONE", "ZCL_APP_TWO"]);
 });
+
+// ---------------------------------------------------------------------------
+// Who may use the proxy - the token, the Host check and the cookie
+// ---------------------------------------------------------------------------
+
+/** A plain http "SAP system" that keeps what it was asked for. */
+function recordingSystem(): Promise<{
+  origin: string;
+  seen: { path: string; cookie?: string }[];
+  close: () => void;
+}> {
+  const seen: { path: string; cookie?: string }[] = [];
+  const server = http.createServer((req, res) => {
+    seen.push({ path: String(req.url), cookie: req.headers.cookie });
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("system answer");
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      resolve({
+        origin: `http://127.0.0.1:${port}`,
+        seen,
+        close: () => server.close(),
+      });
+    });
+  });
+}
+
+/** One GET straight at the proxy's port, so the url and the headers are the
+ *  test's to choose - what an attacker has and `throughProxy` does not. */
+function rawGet(
+  proxy: SapProxy,
+  path: string,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: string; setCookie: string[] }> {
+  const port = new URL(proxy.origin).port;
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, path, method: "GET", headers },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c: string) => (body += c));
+        res.on("end", () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            body,
+            setCookie: res.headers["set-cookie"] ?? [],
+          })
+        );
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/** The `/__abap2ui5/<token>` part of what the proxy hands out. */
+const tokenPath = (proxy: SapProxy) => new URL(proxy.origin).pathname;
+
+test("a request without the token never reaches the system", async () => {
+  // the port is random but scannable, and every forwarded request carries the
+  // system credentials - so this is the difference between a local port and
+  // an authenticated session against the SAP system
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const answer = await rawGet(proxy, "/sap/bc/z2ui5");
+    assert.equal(answer.status, 404);
+    assert.deepEqual(system.seen, [], "nothing was forwarded");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a guessed token is refused as well", async () => {
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const answer = await rawGet(proxy, "/__abap2ui5/not-the-token/sap/bc/z2ui5");
+    assert.equal(answer.status, 404);
+    assert.deepEqual(system.seen, []);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("with the token the system is reached, and sees its own path", async () => {
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const answer = await throughProxy(proxy, "/sap/bc/z2ui5?app_start=zcl_x");
+    assert.equal(answer.status, 200);
+    assert.equal(answer.body, "system answer");
+    // the token is the proxy's own business - the system is asked for the
+    // path it actually serves
+    assert.equal(system.seen[0].path, "/sap/bc/z2ui5?app_start=zcl_x");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a foreign Host is refused - the shape of DNS rebinding", async () => {
+  // a page on evil.example.com whose name resolves to 127.0.0.1 reaches this
+  // port, but it reaches it under its own name
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const answer = await rawGet(proxy, `${tokenPath(proxy)}/sap/bc/z2ui5`, {
+      host: "evil.example.com",
+    });
+    assert.equal(answer.status, 404);
+    assert.deepEqual(system.seen, []);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the first answer plants the cookie an absolute path needs", async () => {
+  // an app configured with an absolute bootstrap asks for /sap/public/... from
+  // the server root, where no prefix of ours can travel with it
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const entry = await rawGet(proxy, `${tokenPath(proxy)}/sap/bc/z2ui5`);
+    assert.equal(entry.status, 200);
+    const planted = entry.setCookie.find((c) =>
+      c.startsWith("__abap2ui5_proxy=")
+    );
+    assert.ok(planted, "the answer carries the cookie");
+    assert.match(planted!, /HttpOnly/, "the page cannot read it back out");
+
+    const cookie = planted!.split(";")[0];
+    const absolute = await rawGet(proxy, "/sap/public/bc/ui5_ui5/x.js", {
+      cookie,
+    });
+    assert.equal(absolute.status, 200);
+    assert.equal(system.seen[1].path, "/sap/public/bc/ui5_ui5/x.js");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the proxy's own cookie stops at the proxy", async () => {
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const token = tokenPath(proxy).split("/")[2];
+    await rawGet(proxy, `${tokenPath(proxy)}/sap/bc/z2ui5`, {
+      cookie: `sap-usercontext=x; __abap2ui5_proxy=${token}`,
+    });
+    assert.equal(system.seen[0].cookie, "sap-usercontext=x");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("stopping takes the credentials with it", async () => {
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    assert.equal(proxy.isRunning, true);
+    await proxy.stop();
+    assert.equal(proxy.isRunning, false, "no credentials left behind");
+  } finally {
+    system.close();
+  }
+});
+
+test("re-entering the same system keeps the proxy usable", async () => {
+  // regression: the credentials are handed in before stop( ) runs, and stop( )
+  // is what clears them - assigning in that order left a started proxy with
+  // no authorization at all
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const first = proxy.origin;
+    await proxy.start(system.origin, "user", "changed");
+    assert.equal(proxy.origin, first, "same server, same token");
+    assert.equal((await throughProxy(proxy, "/probe")).status, 200);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a different system gets a different token", async () => {
+  const one = await recordingSystem();
+  const two = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(one.origin, "user", "pass");
+    const before = tokenPath(proxy);
+    await proxy.start(two.origin, "user", "pass");
+    assert.notEqual(tokenPath(proxy), before, "the old url is dead");
+  } finally {
+    await proxy.stop();
+    one.close();
+    two.close();
+  }
+});

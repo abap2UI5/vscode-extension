@@ -11,7 +11,7 @@ import { registerCodeLens } from "./codelens";
 import { classNameOf, isAppClass } from "./abap";
 import { originOf } from "./urls";
 import { registerAppSearch } from "./appsearch";
-import { registerNewApp } from "./wizard";
+import { registerNewApp, registerNewProject } from "./wizard";
 import { registerConvert } from "./convert";
 import { registerNavMap } from "./navview";
 import { registerPropertyEditor } from "./propview";
@@ -333,6 +333,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push({ dispose: () => systemMcp.dispose() });
 
   registerNewApp(context);
+  registerNewProject(context);
   registerConvert(context, log);
   registerNavMap(context, log);
   registerPropertyEditor(context, log);
