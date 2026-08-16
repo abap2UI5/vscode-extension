@@ -21,20 +21,40 @@ jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
 
-      # Re-resolve the git dependency; only the lockfile moves.
+      # Re-resolve the git dependency. The SHA lives in BOTH manifests - the
+      # spec in package.json carries `#<sha>` so a plain `npm install` cannot
+      # drift to whatever main happens to be, and package-lock.json records
+      # the same commit for `npm ci`. `npm install` rewrites the spec to the
+      # bare form, so it is written back explicitly here; both files then move
+      # together, and both are committed below.
       - run: npm install @abap2ui5/linter@github:abap2UI5/linter
+      - name: Write the resolved commit back into package.json
+        run: |
+          sha=$(node -p "
+            const l = require('./package-lock.json');
+            const k = Object.keys(l.packages).find(k => k.endsWith('@abap2ui5/linter'));
+            l.packages[k].resolved.replace(/^.*#/, '')
+          ")
+          node -e "
+            const fs = require('fs');
+            const t = fs.readFileSync('package.json', 'utf8');
+            fs.writeFileSync('package.json', t.replace(
+              /(\"@abap2ui5\/linter\": \"github:abap2UI5\/linter)(#[0-9a-f]{40})?\"/,
+              '\$1#$sha\"'));
+          "
+          node -e "require('./package.json')"   # it still has to parse
 
       - name: Check whether the pin moved
         id: diff
         run: |
-          if git diff --quiet package-lock.json; then
+          if git diff --quiet package.json package-lock.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -52,7 +72,7 @@ jobs:
         run: npm run vsix
 
       - if: steps.diff.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           branch: bump-linter
           title: "chore: bump the pinned abap2UI5-linter commit"
@@ -65,5 +85,6 @@ jobs:
             The full gate (lint, test, package, vsix) ran on the updated
             lockfile in the workflow that opened this PR; CI repeats it here.
           add-paths: |
+            package.json
             package-lock.json
           delete-branch: true

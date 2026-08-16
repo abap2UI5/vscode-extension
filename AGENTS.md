@@ -216,15 +216,23 @@ identity (see Conventions).
 
 Facts an agent cannot see from the code but will trip over:
 
-- **The linter is a git devDependency pinned to a COMMIT in the lockfile.**
-  `"@abap2ui5/linter": "github:abap2UI5/linter"` resolves in
-  `package-lock.json` to a fixed SHA (as a `git+ssh://` URL — `npm ci` can
+- **The linter is a git devDependency pinned to a COMMIT — in BOTH manifests.**
+  `package.json` carries the spec with the SHA appended
+  (`"github:abap2UI5/linter#<sha>"`), so a plain `npm install` cannot drift to
+  whatever the linter's main happens to be that day, and `package-lock.json`
+  records the same commit for `npm ci` (as a `git+ssh://` URL — `npm ci` can
   fail in HTTPS-only/tokenless environments, and it pulls the linter's full
-  tree: all `@openui5/*` packages plus playwright, hundreds of MB).
+  tree: all `@openui5/*` packages plus playwright, hundreds of MB. In a sandbox
+  without the playwright CDN, `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci`).
   Consequences: a new linter finding type is **invisible in the editor until
-  the lock is bumped** — bump deliberately with
-  `npm install @abap2ui5/linter@github:abap2UI5/linter` and commit
-  the lockfile (this has been done by hand before; it is the release lever).
+  the pin is bumped** — bump deliberately with
+  `npm install @abap2ui5/linter@github:abap2UI5/linter`, which rewrites the
+  spec to the BARE form, so append the resolved SHA back into `package.json`
+  and commit both files. `bump-linter.yml` does exactly that once a week; it
+  used to commit the lockfile alone, which would have left the two manifests
+  naming different commits.
+  This is the release lever: it tracks the linter's `main`, not its npm
+  releases, so a rule reaches the editor before it reaches a version number.
 - **`esbuild.js` carries two load-bearing hacks** — do not "clean them up":
   the `import.meta.url` define + `scripts/import-meta-url-shim.mjs` inject
   (ESM linter modules bundled into CJS), and `copySnapshot()`, which copies
