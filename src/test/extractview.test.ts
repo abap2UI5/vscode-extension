@@ -130,3 +130,28 @@ test("the first call of a chain has no head to leave behind", () => {
   const plan = planExtract(SOURCE, SOURCE.indexOf("view->ele( n = `View`") + 4, "render_all");
   assert.ok("error" in plan && /No chain call starts here/.test(plan.error));
 });
+
+test("an apostrophe in a comment does not move the statement's end", () => {
+  // regression: the literal scan ignored comments, so `don't` opened a
+  // literal that ran on and every period after it was read as being inside
+  // one - the statement then ran past its real end and the cut was wrong
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+  PROTECTED SECTION.
+ENDCLASS.
+
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    " don't touch the layout below
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`Page\`
+        )->ele( n = \`VBox\`
+            )->a( n = \`text\` v = \`Hi\`
+        )->end( ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const at = source.indexOf(")->ele( n = `VBox`");
+  const plan = planExtract(source, at, "render_box");
+  assert.ok(!("error" in plan), `refused: ${JSON.stringify(plan)}`);
+});

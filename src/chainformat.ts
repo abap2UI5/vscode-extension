@@ -18,6 +18,8 @@
  * `vscode`-free: pure text -> edits, tested headless.
  */
 
+import { blankNonCode } from "./abapscan";
+
 export interface IndentEdit {
   /** 0-based line number. */
   line: number;
@@ -33,26 +35,11 @@ function verbsOn(line: string): string[] {
   return [...line.matchAll(/(?:\)|\b\w+)->\s*(ele|tag|a|end)\s*\(/g)].map((m) => m[1]);
 }
 
-/** Paren balance of a line with backtick literals and |…| templates blanked,
- *  so a parenthesis inside a string never counts. */
+/** Paren balance of a line that has already been blanked, so a parenthesis
+ *  inside a literal, a template or a comment never counts. */
 function parenDelta(line: string): number {
   let depth = 0;
-  let str: string | null = null;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (str === "`") {
-      if (c === "`") str = null;
-      continue;
-    }
-    if (str === "|") {
-      if (c === "\\") i++;
-      else if (c === "|") str = null;
-      continue;
-    }
-    if (c === "`" || c === "|") {
-      str = c;
-      continue;
-    }
+  for (const c of line) {
     if (c === "(") depth++;
     else if (c === ")") depth--;
   }
@@ -65,6 +52,16 @@ function parenDelta(line: string): number {
  */
 export function chainIndentEdits(text: string): IndentEdit[] {
   const lines = text.split("\n");
+  /*
+   * Every decision below is made on the BLANKED source (see `abapscan.ts`):
+   * same offsets and same leading whitespace, with literals, templates and
+   * comments emptied out. A commented-out `)->end( ).` used to be counted as
+   * a real one, so the chain left a level it had never entered and every line
+   * after it was "corrected" to the wrong indent; an unbalanced `(` inside a
+   * `'...'` literal or a trailing `" note (` kept the statement open forever,
+   * and lines far below were then formatted against a chain that had ended.
+   */
+  const codeLines = blankNonCode(text).split("\n");
   const edits: IndentEdit[] = [];
 
   let inChain = false;
@@ -74,7 +71,7 @@ export function chainIndentEdits(text: string): IndentEdit[] {
   let parens = 0; // raw paren balance of the chain statement
 
   for (let lineNo = 0; lineNo < lines.length; lineNo++) {
-    const line = lines[lineNo];
+    const line = codeLines[lineNo] ?? "";
     if (!inChain) {
       // a chain statement starts where a handle opens the root element
       const start = /^(\s*)(?:DATA\(\w+\)\s*=\s*)?\w+->ele\(/.exec(line);

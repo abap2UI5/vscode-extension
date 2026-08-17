@@ -18,6 +18,8 @@
  * and the test suite drives it directly.
  */
 
+import { abapSpans } from "./abapscan";
+
 /** Which of the three writable positions the cursor sits in. */
 export type ContextKind = "control" | "member" | "value" | "namespace";
 
@@ -123,9 +125,8 @@ interface AbapScan {
 }
 
 /**
- * Walks the source once, tracking ABAP's two literal forms (`'…'` and
- * `` `…` ``, both escaped by doubling), its two comment forms (`*` in column
- * one, `"` anywhere else) and the parenthesis nesting. Everything the context
+ * Walks the source once, over the literal/comment/template spans `abapscan.ts`
+ * found and the parenthesis nesting on top of them. Everything the context
  * analysis needs comes out of this: a `tag(` inside a comment or a string
  * never becomes a control, which is exactly the confusion a plain backwards
  * regex search would produce.
@@ -142,65 +143,37 @@ function scanAbap(source: string, offset: number): AbapScan {
     }
   };
 
+  // The spans come out in order, so one index walks along with the scan.
+  const spans = abapSpans(source);
+  let nextSpan = 0;
+
   let i = 0;
   while (i < source.length) {
     if (stackAtCursor === undefined && i > offset) {
       snapshot();
     }
-    const c = source[i];
 
-    // `*` in column one comments out the whole line.
-    if (c === "*" && (i === 0 || source[i - 1] === "\n")) {
-      const nl = source.indexOf("\n", i);
-      i = nl < 0 ? source.length : nl + 1;
-      continue;
+    while (nextSpan < spans.length && spans[nextSpan].to <= i) {
+      nextSpan++;
     }
-    // `"` starts a comment to the end of the line — it is not a string
-    // delimiter in ABAP.
-    if (c === '"') {
-      const nl = source.indexOf("\n", i);
-      i = nl < 0 ? source.length : nl + 1;
-      continue;
-    }
-    if (c === "'" || c === "`") {
-      const start = i + 1;
-      let j = start;
-      while (j < source.length && source[j] !== "\n") {
-        if (source[j] === c) {
-          if (source[j + 1] === c) {
-            j += 2; // doubled quote: an escaped one, the literal goes on
-            continue;
-          }
-          break;
-        }
-        j++;
-      }
-      if (offset >= start && offset <= j) {
-        literal = { start, end: j };
+    const span = spans[nextSpan];
+    if (span && span.from === i) {
+      // The literal the cursor sits in is the one thing the scan keeps -
+      // completion offers values inside it. Comments and templates are only
+      // skipped: what matters is that their content is not read as code.
+      if (
+        span.kind === "literal" &&
+        offset >= span.start &&
+        offset <= span.end
+      ) {
+        literal = { start: span.start, end: span.end };
         snapshot();
       }
-      i = j + 1;
+      i = Math.max(span.to, i + 1);
       continue;
     }
-    // A string template. It is skipped rather than offered for completion -
-    // what matters is that its content is not read as code: a `"` inside one
-    // would otherwise start a comment and swallow the rest of the line,
-    // including the `)` that closes the call.
-    if (c === "|") {
-      let j = i + 1;
-      while (j < source.length) {
-        if (source[j] === "\\") {
-          j += 2;
-          continue;
-        }
-        if (source[j] === "|") {
-          break;
-        }
-        j++;
-      }
-      i = j + 1;
-      continue;
-    }
+
+    const c = source[i];
     if (c === "(") {
       // The method name is the identifier run right in front of the paren.
       let k = i;

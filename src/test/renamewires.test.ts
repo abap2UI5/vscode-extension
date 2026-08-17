@@ -109,3 +109,57 @@ test("the attribute is found from either of its two spellings", () => {
   assert.equal(attributeAt(SOURCE, SOURCE.indexOf("DATA mv_title") + 6)?.name, "mv_title");
   assert.equal(attributeAt(SOURCE, SOURCE.indexOf("{/MV_TITLE}") + 3)?.name, "MV_TITLE");
 });
+
+// ---------------------------------------------------------------------------
+// What a comment must not do to a rename
+// ---------------------------------------------------------------------------
+
+test("an apostrophe in a comment does not hide the wires", () => {
+  // regression: the scan read `don't` as the start of a literal, which then
+  // ran to the next apostrophe anywhere in the file - every id after it
+  // became invisible, so F2 renamed the declaration and left the wire behind
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+ENDCLASS.
+
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    " don't rename one end of this and not the other
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`Page\` )->ele( n = \`Table\` )->a( n = \`id\` v = \`TABLE\` ).
+    client->follow_up_action( client->_event_client(
+        action = z2ui5_if_client=>cs_event-control_by_id
+        t_arg  = VALUE #( ( \`TABLE\` ) ( \`setSelected\` ) ) ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const spans = idSpans(source, "TABLE");
+  assert.equal(spans.length, 2, "both ends of the wire are found");
+  for (const span of spans) {
+    assert.equal(source.slice(span.start, span.end), "TABLE");
+  }
+});
+
+test("a type name is not an attribute that can be renamed", () => {
+  // regression: any word inside a declaration statement counted as declared,
+  // so F2 on `string` offered to rewrite every TYPE clause in the class
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    DATA mv_title TYPE string.
+    DATA mv_other TYPE string.
+ENDCLASS.`;
+  const at = source.indexOf("string");
+  assert.equal(attributeAt(source, at + 1), undefined, "no rename on a type");
+  // the attribute itself is still renamable
+  const attr = attributeAt(source, source.indexOf("mv_title") + 1);
+  assert.equal(attr?.name, "mv_title");
+});
+
+test("a chained declaration makes every entry renamable", () => {
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    DATA: mv_title TYPE string,
+          mv_count TYPE i.
+ENDCLASS.`;
+  assert.equal(attributeAt(source, source.indexOf("mv_count") + 1)?.name, "mv_count");
+});
