@@ -165,10 +165,24 @@ function render(
         resolve({
           files: [],
           errors: [],
+          /*
+           * Reinstalling was the advice here, and it could not possibly
+           * help: the installer fetches the bundle built from the linter
+           * commit this extension pins, so running it again produces the
+           * same gate that just refused the option. Saying "update it" sent
+           * people round that loop as often as they were willing.
+           *
+           * The honest version names the one thing that does move it - a
+           * newer bundle published by the linter - and points at the setting
+           * for anyone who has a current checkout of their own.
+           */
           problem: screenshotUnsupported(stderr)
-            ? "The installed render gate does not know --screenshot yet. " +
-              'Run "abap2UI5: Install Render Gate" to update it - the view ' +
-              "check keeps working either way."
+            ? "This render gate is older than the picture feature: its " +
+              "checker does not know --screenshot. Reinstalling fetches the " +
+              "same version again, so it will not help - the bundle for a " +
+              "linter new enough has to be published first. With a local " +
+              "linter checkout you can point abap2ui5.viewCheck.command at " +
+              "its cli.mjs instead. The view check works either way."
             : parseScreenshotErrors(stderr)[0] ??
               "Nothing could be rendered from this file.",
         });
