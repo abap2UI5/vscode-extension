@@ -12,6 +12,8 @@ import {
   plannedFixes,
   screenshotArgs,
   screenshotUnsupported,
+  shotLabel,
+  viewportCount,
   resolveCheckerCommand,
   scratchFileName,
 } from "../checkcore";
@@ -309,4 +311,37 @@ test("the tooltip spells out the counts and whether a fix exists", () => {
     findingsBarTooltip({ errors: 0, warnings: 1, hints: 0, fixable: 0 }),
     /None of them can be corrected/
   );
+});
+
+// ---------------------------------------------------------------------------
+// The device matrix and what a written picture is of
+// ---------------------------------------------------------------------------
+
+test("a viewport setting may name several devices", () => {
+  assert.equal(viewportCount("1280x900"), 1);
+  assert.equal(viewportCount("390x844,1280x900"), 2);
+  // a broken setting is one viewport - the CLI default - not a crash
+  assert.equal(viewportCount("wide"), 1);
+});
+
+test("the matrix reaches the CLI as one flag, whitespace and all", () => {
+  const args = screenshotArgs({ ...SHOT, viewport: "390x844 , 1280x900" });
+  assert.ok(args.includes("--screenshot-size"));
+  assert.equal(args[args.indexOf("--screenshot-size") + 1], "390x844,1280x900");
+});
+
+test("preview data travels as its own flag, and only when there is some", () => {
+  assert.ok(!screenshotArgs(SHOT).includes("--screenshot-model"));
+  const args = screenshotArgs({ ...SHOT, model: "/ws/zcl_app.mock.json" });
+  assert.equal(args[args.indexOf("--screenshot-model") + 1], "/ws/zcl_app.mock.json");
+});
+
+test("a picture says what it is of, read back from its name", () => {
+  // the CLI names files rather than reporting a structure - one path per line
+  // is the whole machine contract
+  assert.equal(shotLabel("/tmp/x/view-zcl_app-390x844.png", 2), "390x844");
+  assert.equal(shotLabel("/tmp/x/view-zcl_app-2-1280x900.png", 2), "1280x900 · view 2");
+  // one viewport: the size is noise, the document index is not
+  assert.equal(shotLabel("/tmp/x/view-zcl_app-2.png", 1), "view 2");
+  assert.equal(shotLabel("/tmp/x/view.png", 1), "view.png");
 });

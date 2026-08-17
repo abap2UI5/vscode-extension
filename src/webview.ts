@@ -920,6 +920,10 @@ export interface ViewPreviewOptions {
   /** Theme and viewport the pictures were taken in, for the caption. */
   theme: string;
   viewport: string;
+  /** Where the model came from - a mock file, or the class itself. An empty
+   *  table is a correct rendering of a model with no rows, and without this
+   *  nobody can tell that from a broken binding. */
+  data: string;
   /** Render errors that came WITH the pictures - shown, never hidden: a view
    *  with one broken binding still renders, and the picture is of the half
    *  that came up. */
@@ -942,8 +946,8 @@ export interface ViewPreviewOptions {
  * it is honest about being one.
  */
 export function viewPreviewHtml(options: ViewPreviewOptions): string {
-  const { nonce, cspSource, title, shots, theme, viewport, errors, busy, problem } = options;
-  const caption = `${escapeHtml(theme)} · ${escapeHtml(viewport)}`;
+  const { nonce, cspSource, title, shots, theme, viewport, data, errors, busy, problem } = options;
+  const caption = `${escapeHtml(theme)} · ${escapeHtml(viewport)} · ${escapeHtml(data)}`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -955,7 +959,11 @@ ${BASE_CSS}
   body { padding: 12px 16px; overflow: auto; }
   h2 { font-size: 1.05em; margin: 0 0 2px; font-weight: 600; }
   .meta { opacity: 0.65; margin: 0 0 14px; font-size: 0.92em; }
-  .shot { margin: 0 0 18px; }
+  /* Side by side as soon as there is more than one: a device matrix and a
+   * before/after comparison are both about seeing two pictures AT ONCE, and
+   * stacked they would be a scroll apart. */
+  .shots { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+  .shot { margin: 0 0 18px; flex: 1 1 320px; min-width: 0; }
   .shot img {
     max-width: 100%;
     border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.4));
@@ -987,7 +995,7 @@ ${BASE_CSS}
           .join("")}</ul></div>`
       : ""
   }
-  <div class="${busy ? "busy" : ""}">
+  <div class="shots ${busy ? "busy" : ""}">
   ${shots
     .map(
       (shot) => `<figure class="shot">

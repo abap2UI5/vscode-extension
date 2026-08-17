@@ -165,6 +165,11 @@
         "icon": "$(device-camera)"
       },
       {
+        "command": "abap2ui5.previewDiff",
+        "title": "abap2UI5: Preview View - Compare with HEAD",
+        "icon": "$(git-compare)"
+      },
+      {
         "command": "abap2ui5.showReconstructedXml",
         "title": "abap2UI5: Show Reconstructed XML View",
         "icon": "$(file-code)"
@@ -240,6 +245,10 @@
         },
         {
           "command": "abap2ui5.previewView",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.previewDiff",
           "when": "!isWeb"
         },
         {
@@ -466,8 +475,8 @@
         "abap2ui5.viewPreview.viewport": {
           "type": "string",
           "default": "1280x900",
-          "pattern": "^\\d{2,5}x\\d{2,5}$",
-          "markdownDescription": "The viewport the systemless preview renders at, `<width>x<height>` in CSS pixels - e.g. `390x844` to see the view the way a phone lays it out. The picture is taken full-page, so a view taller than the viewport is shown whole."
+          "pattern": "^\\d{2,5}x\\d{2,5}(?:\\s*,\\s*\\d{2,5}x\\d{2,5})*$",
+          "markdownDescription": "The viewport(s) the systemless preview renders at, `<width>x<height>` in CSS pixels - e.g. `390x844` to see the view the way a phone lays it out. **Several, comma-separated, become a device matrix**: `390x844,1280x900` renders both in one browser session and shows them side by side. The picture is taken full-page, so a view taller than the viewport is shown whole."
         },
         "abap2ui5.mcp.enabled": {
           "type": "boolean",

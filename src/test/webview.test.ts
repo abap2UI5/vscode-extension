@@ -98,6 +98,7 @@ const SHOT = {
   title: "ZCL_MY_APP",
   theme: "sap_horizon",
   viewport: "1280x900",
+  data: "model derived from the class",
 } as const;
 
 test("the preview shows the picture it was given, and what it is of", () => {
@@ -147,4 +148,34 @@ test("a class name from the buffer is escaped, not injected", () => {
   assert.ok(!html.includes("<img src=x"));
   assert.ok(!html.includes("<script>alert"));
   assert.ok(html.includes("&lt;img"));
+});
+
+test("the caption says which data the picture shows", () => {
+  // an empty table is a correct rendering of a model with no rows - without
+  // this line it is indistinguishable from a broken binding
+  const derived = viewPreviewHtml({ ...SHOT, shots: [], errors: [] });
+  assert.ok(derived.includes("model derived from the class"));
+  const mocked = viewPreviewHtml({
+    ...SHOT,
+    data: "zcl_travel.mock.json",
+    shots: [{ uri: "u", label: "1280x900" }],
+    errors: [],
+  });
+  assert.ok(mocked.includes("zcl_travel.mock.json"));
+});
+
+test("several pictures are laid out to be seen at once", () => {
+  // a device matrix and a before/after comparison are both about comparing,
+  // and stacked they would be a scroll apart
+  const html = viewPreviewHtml({
+    ...SHOT,
+    viewport: "390x844,1280x900",
+    shots: [
+      { uri: "a", label: "390x844" },
+      { uri: "b", label: "1280x900" },
+    ],
+    errors: [],
+  });
+  assert.ok(html.includes('class="shots'));
+  assert.ok(html.includes("390x844") && html.includes("1280x900"));
 });

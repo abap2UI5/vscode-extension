@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **The preview shows data, several devices, and what changed.** Three things
+  that turned the systemless preview from a nice picture into the panel you
+  leave open.
+
+  **Preview data.** The model behind a picture is derived from what the class
+  seeds *literally*, so a table filled by a `SELECT` photographed as *No data* —
+  which is most real apps, and made the preview least useful exactly where
+  layout matters most. A `zcl_app.mock.json` next to the class now fills it,
+  merged over the derived model so two lines are enough to fill one table. The
+  caption says which of the two the picture used: an empty table is a correct
+  rendering of a model with no rows, and that has to be distinguishable from a
+  broken binding.
+
+  **A device matrix.** `abap2ui5.viewPreview.viewport` takes a list —
+  `390x844,1280x900` — and renders every viewport in ONE browser session, side
+  by side in the panel. The launch and the UI5 boot cost more than the renders,
+  so the second device is nearly free, and responsive layout is precisely what
+  nobody has in their head.
+
+  **Before and after.** *"Preview View - Compare with HEAD"* renders the
+  committed version of the file next to the working tree, from the same data.
+  It answers the question no linter can: did my change do what I meant to the
+  view? A file git does not know says so rather than comparing against nothing.
+
 - **The panel tab says what is in it.** With the default `openMode` of `tab`
   the app preview goes to an editor tab, so the bottom panel only ever shows
   the *Control Properties* form — under a tab labelled just `abap2UI5`, which

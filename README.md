@@ -537,6 +537,30 @@ Render errors appear above the picture rather than instead of it: a view with
 one broken binding still comes up, and the half that rendered is usually the
 part worth looking at.
 
+**Preview data.** The model behind the picture is derived from what the class
+seeds *literally*, so a table filled by a `SELECT` renders as *No data* — which
+is most real apps. Put a JSON file next to the class and it fills:
+
+```
+src/zcl_travel_list.clas.abap
+src/zcl_travel_list.mock.json    ->  { "MT_ROWS": [ { "NAME": "Berlin - Rome" } ] }
+```
+
+It is merged over the derived model, so the file only has to name the table you
+want to see. The caption above the picture always says which of the two it
+used — an empty table is a perfectly correct rendering of a model with no rows,
+and that has to be distinguishable from a broken binding.
+
+**A device matrix.** `abap2ui5.viewPreview.viewport` takes a comma-separated
+list: `390x844,1280x900` renders both in one browser session and puts them side
+by side. The browser launch costs more than the renders, so the second viewport
+is nearly free.
+
+**Before and after.** *"abap2UI5: Preview View – Compare with HEAD"* renders the
+committed version of the file next to the working tree, both from the same
+data. It answers what no linter can: *did my change do what I meant to the
+view?*
+
 It needs the **render gate** installed (*"abap2UI5: Install Render Gate"*, one
 click) — it is the same runtime. And it is not the app: nothing round-trips, no
 event reaches ABAP, and the data is the derived mock model rather than what a
@@ -669,7 +693,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2ui5.viewCheck.render` | `false` | Also run the headless render gate |
 | `abap2ui5.viewCheck.allow` | `[]` | Accepted deviations, e.g. `sap.m.GenericTile.systemInfo` |
 | `abap2ui5.viewPreview.theme` | `sap_horizon` | UI5 theme the systemless preview renders in |
-| `abap2ui5.viewPreview.viewport` | `1280x900` | Viewport it renders at, e.g. `390x844` for a phone |
+| `abap2ui5.viewPreview.viewport` | `1280x900` | Viewport(s) it renders at; a comma-separated list is a device matrix |
 | `abap2ui5.mcp.enabled` | `true` | Offer the abap2UI5 MCP server to MCP clients |
 | `abap2ui5.mcp.system` | `true` | Also offer the abap2UI5 System MCP server (real-system tools) |
 | `abap2ui5.mcp.command` | – | Command starting the MCP server (empty = local checkout or npx) |
@@ -695,6 +719,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2UI5: Fix All View Findings in the Workspace` | Applies every mechanical fix across the workspace, as one undo step |
 | `abap2UI5: Rebuild the View-Check Baseline` | Rewrites the repo's baseline from what the workspace reports now |
 | `abap2UI5: Preview View (No System)` | Renders the current class's view headless and shows the picture |
+| `abap2UI5: Preview View - Compare with HEAD` | The same, with the committed version rendered beside it |
 | `abap2UI5: Fix All View Findings in This File` | Applies every mechanical fix at once |
 | `abap2UI5: Install Render Gate` | Downloads the render-gate checker and Chromium into the extension's storage |
 | `abap2UI5: Take App Screenshot` | Renders the running app headless and opens the PNG |

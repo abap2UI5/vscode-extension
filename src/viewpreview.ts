@@ -9,6 +9,8 @@ import {
   scratchFileName,
   screenshotArgs,
   screenshotUnsupported,
+  shotLabel,
+  viewportCount,
 } from "./checkcore";
 import { classNameOf } from "./abap";
 import { checkerCommand, isCheckable, pickDocument, spawnEnv } from "./viewcheck";
@@ -76,28 +78,54 @@ function titleOf(doc: vscode.TextDocument): string {
 }
 
 /**
- * Run the linter's screenshot mode over the current buffer.
+ * The preview data for a document, by the linter's own convention: a
+ * `zcl_app.mock.json` next to `zcl_app.clas.abap`.
  *
- * The buffer, not the file: a view is previewed while it is being written, and
- * an unsaved editor is the normal case. It is written to a scratch file under
- * the name the CLI recognises (`scratchFileName`), exactly as the render gate
- * does it.
+ * It has to be passed explicitly rather than left to the convention, because
+ * what is rendered is a scratch copy in a temp directory - nothing is next to
+ * it there. Without one the picture shows the model derived from the class's
+ * literal seeds, which for a table filled by a SELECT is an empty table.
+ */
+function mockFileFor(doc: vscode.TextDocument): string | undefined {
+  if (doc.uri.scheme !== "file") {
+    return undefined;
+  }
+  const candidate = doc.uri.fsPath.replace(
+    /\.(clas\.abap|abap|view\.xml|fragment\.xml|xml)$/i,
+    ".mock.json"
+  );
+  return candidate !== doc.uri.fsPath && fs.existsSync(candidate)
+    ? candidate
+    : undefined;
+}
+
+/**
+ * Run the linter's screenshot mode over a source text.
+ *
+ * The text rather than the file: a view is previewed while it is being
+ * written, and an unsaved editor is the normal case - the comparison mode
+ * renders a text that is in no file at all (the committed version). It goes to
+ * a scratch file under the name the CLI recognises (`scratchFileName`),
+ * exactly as the render gate does it.
  */
 function render(
-  doc: vscode.TextDocument,
+  source: { text: string; fileName: string; mock?: string; prefix: string },
   dir: string,
   log: (m: string) => void
 ): Promise<{ files: string[]; errors: string[]; problem?: string }> {
-  const scratch = path.join(dir, scratchFileName(doc.fileName));
-  fs.writeFileSync(scratch, doc.getText());
+  const scratchDir = path.join(dir, source.prefix);
+  fs.mkdirSync(scratchDir, { recursive: true });
+  const scratch = path.join(scratchDir, scratchFileName(source.fileName));
+  fs.writeFileSync(scratch, source.text);
   const checker = checkerCommand();
   const args = [
     ...checker.args,
     ...screenshotArgs({
       target: scratch,
-      out: path.join(dir, "view.png"),
+      out: path.join(scratchDir, "view.png"),
       theme: config().get<string>("viewPreview.theme", "sap_horizon"),
       viewport: config().get<string>("viewPreview.viewport", "1280x900"),
+      model: source.mock,
     }),
   ];
   log(`view-preview: ${checker.cmd} ${args.join(" ")}`);
@@ -158,6 +186,7 @@ function paint(
   doc: vscode.TextDocument,
   state: { shots: Shot[]; errors: string[]; busy?: boolean; problem?: string }
 ): void {
+  const mock = mockFileFor(doc);
   target.webview.html = viewPreviewHtml({
     nonce: createNonce(),
     cspSource: target.webview.cspSource,
@@ -165,42 +194,152 @@ function paint(
     shots: state.shots,
     theme: config().get<string>("viewPreview.theme", "sap_horizon"),
     viewport: config().get<string>("viewPreview.viewport", "1280x900"),
+    /* Which data the picture shows is not a detail: an empty table is a
+     * perfectly correct rendering of a model with no rows, and without this
+     * line nobody can tell that from a broken binding. */
+    data: mock ? path.basename(mock) : "model derived from the class",
     errors: state.errors,
     busy: state.busy,
     problem: state.problem,
   });
 }
 
-async function refresh(doc: vscode.TextDocument, log: (m: string) => void): Promise<void> {
+/**
+ * The committed text of a document - what the comparison renders as "before".
+ *
+ * `git show HEAD:<path>`, because that is the version the question is about:
+ * "what did my change do to the view" means the change against what is
+ * committed, not against what was last saved. A file git does not know has no
+ * before, and says so.
+ */
+function committedText(doc: vscode.TextDocument): Promise<string | undefined> {
+  const folder = vscode.workspace.getWorkspaceFolder(doc.uri);
+  if (!folder || doc.uri.scheme !== "file") {
+    return Promise.resolve(undefined);
+  }
+  const relative = path
+    .relative(folder.uri.fsPath, doc.uri.fsPath)
+    .split(path.sep)
+    .join("/");
+  return new Promise((resolve) => {
+    const child = spawn("git", ["show", `HEAD:${relative}`], {
+      cwd: folder.uri.fsPath,
+      env: spawnEnv(),
+      shell: process.platform === "win32",
+    });
+    let stdout = "";
+    child.stdout.on("data", (c) => (stdout += String(c)));
+    child.on("error", () => resolve(undefined));
+    child.on("close", (code) => resolve(code === 0 ? stdout : undefined));
+  });
+}
+
+async function refresh(
+  doc: vscode.TextDocument,
+  log: (m: string) => void,
+  options: { compare?: boolean } = {}
+): Promise<void> {
   if (!panel || !workDir || running) {
     return;
   }
   running = true;
   const target = panel;
   const dir = workDir;
+  const sizes = viewportCount(config().get<string>("viewPreview.viewport", "1280x900"));
+  const mock = mockFileFor(doc);
   try {
     paint(target, doc, { ...shown, busy: true });
-    const result = await render(doc, dir, log);
-    if (target !== panel) {
-      return; // the panel went away while the browser was starting
+    const runs: Array<{ prefix: string; caption: string; text: string }> = [];
+    if (options.compare) {
+      const before = await committedText(doc);
+      if (before === undefined) {
+        paint(target, doc, {
+          ...shown,
+          problem:
+            "There is no committed version of this file to compare with - " +
+            "it is outside a git repository, or git does not know it yet.",
+        });
+        return;
+      }
+      runs.push({ prefix: "head", caption: "HEAD", text: before });
     }
-    const shots = result.files.map((file, index) => ({
-      uri: `${target.webview.asWebviewUri(vscode.Uri.file(file))}?v=${++generation}`,
-      label:
-        result.files.length === 1
-          ? path.basename(file)
-          : `view ${index + 1} of ${result.files.length} - ${path.basename(file)}`,
-    }));
+    runs.push({
+      prefix: "now",
+      caption: options.compare ? "working tree" : "",
+      text: doc.getText(),
+    });
+
+    const shots: Shot[] = [];
+    const errors: string[] = [];
+    let problem: string | undefined;
+    for (const run of runs) {
+      const result = await render(
+        { text: run.text, fileName: doc.fileName, mock, prefix: run.prefix },
+        dir,
+        log
+      );
+      if (target !== panel) {
+        return; // the panel went away while the browser was starting
+      }
+      problem ??= result.problem;
+      errors.push(
+        ...result.errors.map((e) => (run.caption ? `${run.caption}: ${e}` : e))
+      );
+      for (const file of result.files) {
+        const label = shotLabel(file, sizes);
+        shots.push({
+          uri: `${target.webview.asWebviewUri(vscode.Uri.file(file))}?v=${++generation}`,
+          label: run.caption ? `${run.caption} · ${label}` : label,
+        });
+      }
+    }
     // a failed re-render keeps the last good pictures and says what went
     // wrong above them; a first render that fails has none to keep
-    shown = result.files.length ? { shots, errors: result.errors } : shown;
-    paint(target, doc, { ...shown, problem: result.problem });
+    shown = shots.length ? { shots, errors } : shown;
+    paint(target, doc, { ...shown, problem });
     log(
-      `view-preview: ${shots.length} picture(s), ${result.errors.length} render error(s)`
+      `view-preview: ${shots.length} picture(s), ${errors.length} render error(s)` +
+        (mock ? `, data from ${path.basename(mock)}` : "")
     );
   } finally {
     running = false;
   }
+}
+
+/** The panel, revealed and pointed at this document. Both commands go through
+ *  here so a comparison and a plain preview cannot end up in two panels
+ *  fighting over one temp directory. */
+function openPanel(doc: vscode.TextDocument): void {
+  // a preview of another class starts from nothing: the old pictures are of
+  // the old view, and keeping them up while the new ones render would show
+  // the wrong app
+  if (previewed?.toString() !== doc.uri.toString()) {
+    shown = { shots: [], errors: [] };
+  }
+  previewed = doc.uri;
+  if (!workDir) {
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), "abap2ui5-preview-"));
+  }
+  if (!panel) {
+    panel = vscode.window.createWebviewPanel(
+      "abap2ui5.viewPreview",
+      "abap2UI5 View Preview",
+      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+      {
+        retainContextWhenHidden: true,
+        // pictures only - the panel runs no script of its own, so it is
+        // given no permission to
+        localResourceRoots: [vscode.Uri.file(workDir)],
+      }
+    );
+    panel.onDidDispose(() => {
+      panel = undefined;
+      previewed = undefined;
+      shown = { shots: [], errors: [] };
+      disposeWorkDir();
+    });
+  }
+  panel.reveal(vscode.ViewColumn.Beside, true);
 }
 
 export function registerViewPreview(
@@ -219,37 +358,21 @@ export function registerViewPreview(
         );
         return;
       }
-      // a preview of another class starts from nothing: the old pictures are
-      // of the old view, and keeping them up while the new ones render would
-      // show the wrong app
-      if (previewed?.toString() !== doc.uri.toString()) {
-        shown = { shots: [], errors: [] };
-      }
-      previewed = doc.uri;
-      if (!workDir) {
-        workDir = fs.mkdtempSync(path.join(os.tmpdir(), "abap2ui5-preview-"));
-      }
-      if (!panel) {
-        panel = vscode.window.createWebviewPanel(
-          "abap2ui5.viewPreview",
-          "abap2UI5 View Preview",
-          { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-          {
-            retainContextWhenHidden: true,
-            // pictures only - the panel runs no script of its own, so it is
-            // given no permission to
-            localResourceRoots: [vscode.Uri.file(workDir)],
-          }
-        );
-        panel.onDidDispose(() => {
-          panel = undefined;
-          previewed = undefined;
-          shown = { shots: [], errors: [] };
-          disposeWorkDir();
-        });
-      }
-      panel.reveal(vscode.ViewColumn.Beside, true);
+      openPanel(doc);
       await refresh(doc, log);
+    }),
+
+    vscode.commands.registerCommand("abap2ui5.previewDiff", async () => {
+      const doc = pickDocument();
+      if (!doc || !isCheckable(doc)) {
+        vscode.window.showInformationMessage(
+          "abap2UI5: no view here to compare - open an ABAP class building " +
+            "views with z2ui5_cl_ui5_view_builder, or a *.view.xml."
+        );
+        return;
+      }
+      openPanel(doc);
+      await refresh(doc, log, { compare: true });
     }),
 
     /* A save is the moment the author is done with a thought, and the render

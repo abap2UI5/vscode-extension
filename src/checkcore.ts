@@ -185,8 +185,9 @@ export function findingsBarTooltip(counts: FindingCounts): string {
 // The screenshot run behind the systemless preview
 // ---------------------------------------------------------------------------
 
-/** A viewport as the CLI takes it: `1280x900`, `390x844`. */
-export const VIEWPORT_RE = /^\d{2,5}x\d{2,5}$/i;
+/** A viewport as the CLI takes it - or a comma-separated list of them, which
+ *  is the device matrix: `1280x900`, `390x844,1280x900`. */
+export const VIEWPORT_RE = /^\d{2,5}x\d{2,5}(?:\s*,\s*\d{2,5}x\d{2,5})*$/i;
 /** A UI5 theme name - a resource path inside the runtime, so an identifier. */
 const THEME_RE = /^[a-z][a-z0-9_]*$/i;
 
@@ -197,6 +198,8 @@ export interface ScreenshotRequest {
   out: string;
   theme: string;
   viewport: string;
+  /** Preview data file - the model the picture is rendered with. */
+  model?: string;
 }
 
 /**
@@ -208,8 +211,36 @@ export interface ScreenshotRequest {
 export function screenshotArgs(request: ScreenshotRequest): string[] {
   const args = [request.target, "--screenshot", request.out];
   if (THEME_RE.test(request.theme)) args.push("--screenshot-theme", request.theme);
-  if (VIEWPORT_RE.test(request.viewport)) args.push("--screenshot-size", request.viewport);
+  if (VIEWPORT_RE.test(request.viewport)) {
+    args.push("--screenshot-size", request.viewport.replace(/\s+/g, ""));
+  }
+  if (request.model) args.push("--screenshot-model", request.model);
   return args;
+}
+
+/**
+ * What one written picture is OF, read back from the name the CLI gave it.
+ *
+ * The CLI names its files rather than reporting a structure - one path per
+ * line is the whole machine contract - so the viewport and the document index
+ * come back out of the name. Anything unrecognised keeps the bare file name,
+ * which is still a truthful label.
+ */
+export function shotLabel(file: string, sizes: number): string {
+  const name = file.replace(/^.*[\\/]/, "").replace(/\.png$/i, "");
+  const size = /-(\d{2,5}x\d{2,5})$/.exec(name);
+  const rest = size ? name.slice(0, -size[0].length) : name;
+  const doc = /-(\d+)$/.exec(rest);
+  const parts = [
+    size && sizes > 1 ? size[1] : "",
+    doc ? `view ${doc[1]}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : `${name}.png`;
+}
+
+/** How many viewports a `viewport` setting asks for. */
+export function viewportCount(viewport: string): number {
+  return VIEWPORT_RE.test(viewport) ? viewport.split(",").length : 1;
 }
 
 /** The written PNG paths - the CLI prints those and nothing else on stdout,
