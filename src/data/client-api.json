@@ -177,7 +177,7 @@
     {
       "name": "check_on_init",
       "signature": "METHODS check_on_init\n    RETURNING\n      VALUE(result) TYPE abap_bool.",
-      "doc": ""
+      "doc": "TRUE on the first roundtrip of THIS app instance, and only that one -\nthe framework flips the flag after the first response, so an app that\nruns for an hour sees it once.\n\nIt is NOT \"the app starts\": an app reached again through the app stack,\na value help handing control back or a restored bookmark are all\nroundtrips of an EXISTING instance, and check_on_init( ) is false on\nevery one of them. Gating the view on it alone is the most common way\nto end up with a screen that does not refresh - see\ncheck_on_navigated( ), which is true on all of those AND on the first\nroundtrip, and is therefore the branch to display in."
     },
     {
       "name": "check_app_prev_stack",
@@ -187,7 +187,7 @@
     {
       "name": "check_on_navigated",
       "signature": "METHODS check_on_navigated\n    RETURNING\n      VALUE(result) TYPE abap_bool.",
-      "doc": ""
+      "doc": "TRUE whenever this roundtrip has to put the app on screen: the first\nstart of a new instance, a called app returning through the app stack,\none of the built-in value-help popups closing, and a bookmarked draft\nbeing restored.\n\nThe first start is included ON PURPOSE and is part of the contract, not\nan accident of the current factory: z2ui5_cl_ui5_action=>factory_first_start\nsets the flag for a fresh CREATE OBJECT as well as for a draft restore.\nSo `check_on_init( )` being true implies this is true, which makes\n\n    IF client->check_on_navigated( ).\n      view_display( ).\n    ENDIF.\n\nthe complete display condition on its own - no OR with check_on_init( )\nis needed, and the samples and documentation are written that way.\nWhoever changes the factory keeps this true, or 530 apps stop rendering\non their first start with nothing raised anywhere."
     },
     {
       "name": "get_app_prev",
