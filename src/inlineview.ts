@@ -85,7 +85,11 @@ export function registerInlineAnnotations(
       ) {
         continue;
       }
-      const line = diagnostic.range.start.line;
+      // Diagnostics are published as they were computed, and a document that
+      // has shrunk since (deleting the last lines) still carries them - so the
+      // line may be past its end, where lineAt throws and the whole paint dies
+      // with the previous decorations left standing.
+      const line = Math.min(diagnostic.range.start.line, doc.lineCount - 1);
       const list = out.get(diagnostic.severity) ?? [];
       list.push({
         range: doc.lineAt(line).range,
@@ -164,6 +168,14 @@ export function registerInlineAnnotations(
         taken.add(entry.range.start.line);
       }
     }
+    // Remembered so that findings DISAPPEARING still repaints: by then the
+    // document no longer carries any of ours, which is indistinguishable from
+    // an event that never concerned us.
+    if (taken.size) {
+      painted.add(doc.uri.toString());
+    } else {
+      painted.delete(doc.uri.toString());
+    }
     const info: vscode.DecorationOptions[] = [];
     const warn: vscode.DecorationOptions[] = [];
     for (const annotation of metadataLines(doc)) {
@@ -182,21 +194,59 @@ export function registerInlineAnnotations(
     editor.setDecorations(styles.warn, warn);
   };
 
+  /** Documents whose visible annotations came from our findings. */
+  const painted = new Set<string>();
+
   const paintAll = () => vscode.window.visibleTextEditors.forEach(paint);
+
+  /*
+   * Painting is not free: the `@since` and cost halves reconstruct the class
+   * (`prepareAbap` over the whole source) and read the mock file next to it.
+   * Doing that on the keystroke itself meant three full parses of the same
+   * buffer per character - this one, the view check's and the XML preview's,
+   * of which only this one was undebounced.
+   */
+  const PAINT_DEBOUNCE_MS = 300;
+  let pending: NodeJS.Timeout | undefined;
+  const paintAllSoon = () => {
+    if (pending) {
+      clearTimeout(pending);
+    }
+    pending = setTimeout(() => {
+      pending = undefined;
+      paintAll();
+    }, PAINT_DEBOUNCE_MS);
+  };
 
   context.subscriptions.push(
     ...Object.values(styles),
+    new vscode.Disposable(() => pending && clearTimeout(pending)),
     vscode.window.onDidChangeActiveTextEditor(paint),
     vscode.window.onDidChangeVisibleTextEditors(paintAll),
     vscode.workspace.onDidChangeTextDocument((e) => {
-      for (const editor of vscode.window.visibleTextEditors) {
-        if (editor.document === e.document) {
-          paint(editor);
-        }
+      if (
+        vscode.window.visibleTextEditors.some(
+          (editor) => editor.document === e.document
+        )
+      ) {
+        paintAllSoon();
       }
     }),
-    // the findings half follows the check, exactly like the status bar does
-    vscode.languages.onDidChangeDiagnostics(paintAll),
+    // The findings half follows the check, exactly like the status bar does.
+    // Every extension in the window fires this, so a repaint of everything
+    // visible only happens when one of OUR findings moved.
+    vscode.languages.onDidChangeDiagnostics((e) => {
+      const ours = e.uris.some(
+        (uri) =>
+          painted.has(uri.toString()) ||
+          vscode.languages
+            .getDiagnostics(uri)
+            .some((d) => d.source === DIAG_SOURCE)
+      );
+      if (ours) {
+        paintAllSoon();
+      }
+    }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (
         e.affectsConfiguration("abap2ui5.inlineFindings") ||
