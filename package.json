@@ -216,6 +216,11 @@
         "command": "abap2ui5.checkApp",
         "title": "abap2UI5: Check this App's Views",
         "icon": "$(checklist)"
+      },
+      {
+        "command": "abap2ui5.copyAppName",
+        "title": "abap2UI5: Copy the App's Class Name",
+        "icon": "$(copy)"
       }
     ],
     "mcpServerDefinitionProviders": [
@@ -333,6 +338,10 @@
         {
           "command": "abap2ui5.refreshApps",
           "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.copyAppName",
+          "when": "false"
         }
       ],
       "editor/title": [
@@ -372,6 +381,11 @@
           "command": "abap2ui5.refreshApps",
           "when": "view == abap2ui5.apps",
           "group": "navigation@1"
+        },
+        {
+          "command": "abap2ui5.runFromSystem",
+          "when": "view == abap2ui5.apps && !isWeb",
+          "group": "navigation@0"
         }
       ],
       "view/item/context": [
@@ -394,6 +408,11 @@
           "command": "abap2ui5.checkApp",
           "when": "view == abap2ui5.apps && viewItem == abap2ui5.app.view",
           "group": "inline@3"
+        },
+        {
+          "command": "abap2ui5.copyAppName",
+          "when": "view == abap2ui5.apps",
+          "group": "9_copy"
         }
       ],
       "editor/context": [

@@ -147,6 +147,19 @@ export function registerAppView(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand("abap2ui5.checkApp", (node: AppNode) =>
       withOpenClass(node, "abap2ui5.checkViews")
-    )
+    ),
+    // The name is what an ADT workflow pastes on: into the class search, a
+    // transport, a colleague's message. The tree knows it exactly - reading
+    // it off the title bar and retyping it is where the typo comes from.
+    vscode.commands.registerCommand("abap2ui5.copyAppName", async (node: AppNode) => {
+      if (!node?.className) {
+        return;
+      }
+      await vscode.env.clipboard.writeText(node.className);
+      vscode.window.setStatusBarMessage(
+        `abap2UI5: ${node.className} copied`,
+        3000
+      );
+    })
   );
 }
