@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The panel tab says what is in it.** With the default `openMode` of `tab`
+  the app preview goes to an editor tab, so the bottom panel only ever shows
+  the *Control Properties* form — under a tab labelled just `abap2UI5`, which
+  named the extension rather than the thing on screen. It is
+  **abap2UI5 Control View** now. (VS Code capitalises the first letter of a
+  panel title itself, so it renders as *Abap2UI5 Control View* whatever the
+  manifest says.)
+
 - **Preview the view without a system.** An abap2UI5 view exists at runtime and
   nowhere else, so looking at one has meant a system: activate the class,
   launch the app, wait for the roundtrip — a long way to go to find out that a

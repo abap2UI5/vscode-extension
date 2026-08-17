@@ -313,7 +313,7 @@
       "panel": [
         {
           "id": "abap2ui5Panel",
-          "title": "abap2UI5",
+          "title": "abap2UI5 Control View",
           "icon": "media/icon.svg"
         }
       ]
@@ -386,7 +386,7 @@
             "Open in the default browser (reuses your existing SAP session/SSO)."
           ],
           "default": "tab",
-          "markdownDescription": "How F9 opens the app.\n\n- `tab`: embedded in an editor tab. Runs through a **local auth proxy** that injects your SAP credentials (asked for once) - no 401.\n- `panel`: the same, but in the bottom panel area - the **abap2UI5** view next to Terminal and Output.\n- `external`: in the normal browser (reuses your existing login, no proxy needed).\n\nThe commands **\"abap2UI5: Show the Preview in the Panel\"** and **\"abap2UI5: Show the Preview in an Editor Tab\"** switch this setting and take a running app along, so the choice does not have to be made up front.\n\nTo reset the credentials, run the command **\"abap2UI5: Clear Stored SAP Credentials\"**."
+          "markdownDescription": "How F9 opens the app.\n\n- `tab`: embedded in an editor tab. Runs through a **local auth proxy** that injects your SAP credentials (asked for once) - no 401.\n- `panel`: the same, but in the bottom panel area - the **abap2UI5 Control View** tab next to Terminal and Output.\n- `external`: in the normal browser (reuses your existing login, no proxy needed).\n\nThe commands **\"abap2UI5: Show the Preview in the Panel\"** and **\"abap2UI5: Show the Preview in an Editor Tab\"** switch this setting and take a running app along, so the choice does not have to be made up front.\n\nTo reset the credentials, run the command **\"abap2UI5: Clear Stored SAP Credentials\"**."
         },
         "abap2ui5.reloadOn": {
           "type": "string",

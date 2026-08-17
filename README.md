@@ -164,7 +164,7 @@ the list as soon as you add a second one.
 | Mode | Behaviour |
 | --- | --- |
 | `tab` (default) | App embedded in an editor tab next to the code, through the local auth proxy |
-| `panel` | The same, but in the bottom panel area next to Terminal/Output |
+| `panel` | The same, but in the **abap2UI5 Control View** tab next to Terminal/Output |
 | `external` | In the normal browser (reuses your existing SAP session/SSO, no proxy needed) |
 
 The choice does not have to be made in the settings: **abap2UI5: Show the
