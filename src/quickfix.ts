@@ -3,6 +3,7 @@ import * as path from "path";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
 import { addToBaseline } from "./baselinefile";
 import { plannedFixes } from "./checkcore";
+import { clearBaselineCache } from "./lintconfig";
 import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
 
 /*
@@ -249,6 +250,9 @@ export function registerQuickFix(
         try {
           const key = addToBaseline(baselineFile, sourceFile, finding);
           log(`quick-fix: baselined ${key} in ${baselineFile}`);
+          // the memo is keyed on mtime, and this write may land in the same
+          // second as the read that filled it
+          clearBaselineCache(baselineFile);
           recheckOpenDocuments();
         } catch (err) {
           vscode.window.showWarningMessage(

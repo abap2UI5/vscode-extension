@@ -25,6 +25,7 @@ import { rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
   CheckOptions,
+  clearBaselineCache,
   clearConfigCache,
   describeOptions,
   resolveOptions,
@@ -57,6 +58,12 @@ const LIVE_DEBOUNCE_MS = 400;
 /** Set when spawning the external render checker failed once - avoids a
  *  warning on every save. */
 let spawnFailed = false;
+
+/** True while a workspace sweep runs. The sweep opens every file it reports
+ *  on (finding ranges are computed against real lines), and each open fires
+ *  onDidOpenTextDocument - which scheduled a second full check of the same
+ *  file, doubling the sweep's work and racing its own diagnostics.set. */
+let sweeping = false;
 
 /** The target/metadata versions are logged once per session, and again
  *  whenever they change (a different config file governs the document). */
@@ -346,6 +353,13 @@ interface CheckRequest {
 const timers = new Map<string, NodeJS.Timeout>();
 const generations = new Map<string, number>();
 
+/** Generations are drawn from one counter for the whole session, so a number
+ *  is never handed out twice. That is what makes dropping a closed document's
+ *  entry safe: a run still in flight for it compares against a number no
+ *  later run can be given, instead of against one a reopened file might
+ *  reach again. */
+let nextGeneration = 0;
+
 function schedule(
   doc: vscode.TextDocument,
   delay: number,
@@ -375,7 +389,7 @@ function cancelScheduled(uri: vscode.Uri): void {
     timers.delete(key);
   }
   // Any run still in flight for this document is now stale.
-  generations.set(key, (generations.get(key) ?? 0) + 1);
+  generations.set(key, ++nextGeneration);
 }
 
 async function checkDocument(
@@ -385,7 +399,7 @@ async function checkDocument(
   request: CheckRequest
 ): Promise<void> {
   const key = doc.uri.toString();
-  const gen = (generations.get(key) ?? 0) + 1;
+  const gen = ++nextGeneration;
   generations.set(key, gen);
   // The buffer counts as much as a newer run does: findings carry offsets into
   // the text they were computed from, and a render takes seconds. Publishing
@@ -499,6 +513,15 @@ async function checkDocument(
 const WORKSPACE_GLOB = "**/*.{abap,view.xml,fragment.xml}";
 
 /** One checkable file of the workspace, with what the gate says about it. */
+/** What a sweep found, and whether it got to the end. A cancelled sweep has
+ *  looked at part of the workspace, which is not the same answer - reporting
+ *  "nothing found" for it, or applying its fixes as if they were the
+ *  workspace's, says more than was actually checked. */
+export interface SweepResult {
+  files: SweptFile[];
+  cancelled: boolean;
+}
+
 export interface SweptFile {
   uri: vscode.Uri;
   findings: PropertyFinding[];
@@ -518,8 +541,9 @@ export interface SweptFile {
 async function sweepWorkspace(
   progress: vscode.Progress<{ message?: string; increment?: number }>,
   token: vscode.CancellationToken,
-  options: { baseline: boolean }
-): Promise<SweptFile[]> {
+  options: { baseline: boolean },
+  log: (m: string) => void
+): Promise<SweepResult> {
   const files = await vscode.workspace.findFiles(
     WORKSPACE_GLOB,
     "**/{node_modules,.git,dist,out}/**"
@@ -548,7 +572,14 @@ async function sweepWorkspace(
       distribution: config().get<string>("viewCheck.distribution", "sapui5"),
       allow: config().get<string[]>("viewCheck.allow", []),
     });
-    const gate = runGate(text, uri.fsPath, isXml, opts);
+    let gate: GateResult;
+    try {
+      gate = runGate(text, uri.fsPath, isXml, opts);
+    } catch (err) {
+      // one file that cannot be parsed is not a reason to abandon the sweep
+      log(`view-check: ${path.basename(uri.fsPath)} skipped - ${String(err)}`);
+      continue;
+    }
     if (gate.nothingChecked) {
       continue;
     }
@@ -557,7 +588,7 @@ async function sweepWorkspace(
     }
     swept.push({ uri, findings: gate.findings });
   }
-  return swept;
+  return { files: swept, cancelled: token.isCancellationRequested };
 }
 
 /**
@@ -577,24 +608,42 @@ async function checkWorkspace(
       cancellable: true,
     },
     async (progress, token) => {
-      const swept = await sweepWorkspace(progress, token, { baseline: true });
-      let problems = 0;
-      for (const file of swept) {
-        // The file is opened as a text document so the finding ranges are
-        // computed against real lines, exactly like the on-save check does.
-        const doc = await vscode.workspace.openTextDocument(file.uri);
-        const diags = toDiagnostics(doc, file.findings, []);
-        diagnostics.set(file.uri, diags);
-        problems += diags.length;
+      sweeping = true;
+      let swept: SweepResult;
+      try {
+        swept = await sweepWorkspace(progress, token, { baseline: true }, log);
+        // What the sweep did not find is no longer a problem: a file that was
+        // fixed, reverted or deleted since the last run kept its diagnostics
+        // forever, because only the files it DID report were written.
+        if (!swept.cancelled) {
+          diagnostics.clear();
+        }
+        let problems = 0;
+        for (const file of swept.files) {
+          // The file is opened as a text document so the finding ranges are
+          // computed against real lines, exactly like the on-save check does.
+          const doc = await vscode.workspace.openTextDocument(file.uri);
+          const diags = toDiagnostics(doc, file.findings, []);
+          diagnostics.set(file.uri, diags);
+          problems += diags.length;
+        }
+        log(
+          `view-check: workspace sweep - ${swept.files.length} file(s), ` +
+            `${problems} problem(s)${swept.cancelled ? " (cancelled)" : ""}`
+        );
+        vscode.window.showInformationMessage(
+          swept.cancelled
+            ? `abap2UI5: cancelled after ${swept.files.length} file(s) - ` +
+                `${problems} problem(s) so far.`
+            : !swept.files.length
+              ? "abap2UI5: no checkable ABAP or view files found in this workspace."
+              : problems
+                ? `abap2UI5: ${problems} problem(s) in ${swept.files.length} file(s) - see the Problems panel.`
+                : `abap2UI5: ${swept.files.length} file(s) checked, nothing found.`
+        );
+      } finally {
+        sweeping = false;
       }
-      log(`view-check: workspace sweep - ${swept.length} file(s), ${problems} problem(s)`);
-      vscode.window.showInformationMessage(
-        !swept.length
-          ? "abap2UI5: no checkable ABAP or view files found in this workspace."
-          : problems
-            ? `abap2UI5: ${problems} problem(s) in ${swept.length} file(s) - see the Problems panel.`
-            : `abap2UI5: ${swept.length} file(s) checked, nothing found.`
-      );
     }
   );
 }
@@ -620,11 +669,24 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
       cancellable: true,
     },
     async (progress, token) => {
-      const swept = await sweepWorkspace(progress, token, { baseline: true });
+      sweeping = true;
+      let swept: SweepResult;
+      try {
+        swept = await sweepWorkspace(progress, token, { baseline: true }, log);
+      } finally {
+        sweeping = false;
+      }
+      if (swept.cancelled) {
+        // half a workspace's fixes applied as if they were the workspace's
+        vscode.window.showInformationMessage(
+          "abap2UI5: cancelled - nothing was changed."
+        );
+        return;
+      }
       const edit = new vscode.WorkspaceEdit();
       let fixes = 0;
       let files = 0;
-      for (const file of swept) {
+      for (const file of swept.files) {
         const planned = plannedFixes(file.findings);
         if (!planned.length) {
           continue;
@@ -645,7 +707,7 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
       }
       if (!fixes) {
         vscode.window.showInformationMessage(
-          `abap2UI5: nothing in ${swept.length} file(s) can be corrected mechanically.`
+          `abap2UI5: nothing in ${swept.files.length} file(s) can be corrected mechanically.`
         );
         return;
       }
@@ -712,8 +774,14 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
     async (progress, token) => {
       // unfiltered on purpose: the baseline is what is being written, so it
       // must not be applied to the findings that write it
-      const swept = await sweepWorkspace(progress, token, { baseline: false });
-      if (token.isCancellationRequested) {
+      sweeping = true;
+      let swept: SweepResult;
+      try {
+        swept = await sweepWorkspace(progress, token, { baseline: false }, log);
+      } finally {
+        sweeping = false;
+      }
+      if (swept.cancelled) {
         vscode.window.showInformationMessage(
           "abap2UI5: cancelled - the baseline is unchanged."
         );
@@ -722,8 +790,14 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
       try {
         const written = rebuildBaseline(
           baselineFile,
-          swept.map((file) => ({ file: file.uri.fsPath, findings: file.findings }))
+          swept.files.map((file) => ({
+            file: file.uri.fsPath,
+            findings: file.findings,
+          }))
         );
+        // the file just changed; its memo is keyed on an mtime that may not
+        // have moved yet
+        clearBaselineCache(baselineFile);
         recheckOpenDocuments();
         log(
           `view-check: baseline rebuilt - ${written.findings} finding(s) in ` +
@@ -731,7 +805,7 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
         );
         vscode.window.showInformationMessage(
           `abap2UI5: ${path.basename(baselineFile)} now waives ` +
-            `${written.findings} finding(s) from ${swept.length} file(s).`
+            `${written.findings} finding(s) from ${swept.files.length} file(s).`
         );
       } catch (err) {
         vscode.window.showWarningMessage(
@@ -841,7 +915,7 @@ export function registerViewCheck(
 
     // Opening a file should show what is wrong with it, without a save first.
     vscode.workspace.onDidOpenTextDocument((doc) => {
-      if (isCheckable(doc)) {
+      if (isCheckable(doc) && !sweeping) {
         check(doc, 0, { render: false, announce: false });
       }
     }),
@@ -849,6 +923,10 @@ export function registerViewCheck(
     vscode.workspace.onDidCloseTextDocument((doc) => {
       cancelScheduled(doc.uri);
       diagnostics.delete(doc.uri);
+      // Nothing compares against this entry any more: cancelScheduled has
+      // just made every in-flight run for the document stale, and the
+      // generation it was given cannot be handed out again.
+      generations.delete(doc.uri.toString());
     }),
 
     vscode.workspace.onDidChangeConfiguration((e) => {
