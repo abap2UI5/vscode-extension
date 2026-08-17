@@ -80,7 +80,9 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/colors.ts` | Colour spans for colour-typed property values (the swatch/picker provider's logic) |
 | `src/xmltoabap.ts` | "Convert XML View to Builder Chain": XML parser + corpus-style chain emitter |
 | `src/convert.ts` | The convert command's plumbing (source pick, result document) |
-| `src/wizard.ts` | "New App from Template": template gallery pick + class name input |
+| `src/wizard.ts` | "New App from Template" and "New Project from Template": template gallery pick, class name input, writing the project |
+| `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's own files copied from `src/data/app-template.json`, the name-carrying ones written here |
+| `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
 | `src/propedit.ts` | Property-editor edits: set/add/remove one `a( )` attribute as a span edit |
 | `src/propview.ts` | The "Control Properties" webview view: cursor -> `controlCallAt` -> form -> WorkspaceEdit |
 | `src/navmap.ts` | App navigation graph: nav_app_call extraction, column layout, SVG rendering |
@@ -99,7 +101,7 @@ not committed.
 **The `vscode`-free boundary is load-bearing.** `abap.ts`, `urls.ts`,
 `context.ts`, `metadata.ts`, `lintconfig.ts`, `snapshot.ts`,
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
-`clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`,
+`clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
@@ -294,6 +296,24 @@ Facts an agent cannot see from the code but will trip over:
   `viewcheck.ts` applies the linter's `applyRules` and `applyDirectives`. Any
   new knob the linter's config grows belongs in that merge — and never as a
   second implementation of the JSONC parsing or the directive syntax here.
+- **"New Project from Template" hands out abap2UI5/app-template's own files,
+  from a snapshot.** `src/data/app-template.json` carries that repository's
+  `abaplint.jsonc`, `abap2ui5lint.jsonc`, `.claude/settings.json`,
+  `.gitattributes`, `.gitignore`, `dependabot.yml`, `AGENTS.md`, its
+  `package.json` and its `check.yml`; `scaffold.ts` writes the first six
+  verbatim and reads the dependency versions, the framework pin, the linter
+  action's pin and the app-building guide out of the rest. A snapshot rather
+  than a clone because `abap2ui5.newProject` is registered in the WEB entry
+  too and vscode.dev has neither git nor a child process — and because the
+  content is then data the test suite can run through the bundled linter.
+  The cost is drift, which is why there are two halves and only one of them
+  runs in CI: `src/test/scaffold.test.ts` holds the scaffold to the snapshot
+  (`npm test`), and `npm run app-template:check` holds the snapshot to
+  app-template's main — weekly, through `bump-app-template.yml`, because this
+  repository's build must not go red when somebody merges a pull request in
+  another one. **Do not re-type any of those files here.** That is precisely
+  how the scaffold came to emit `@abap2ui5/linter@^0.1.1` against an ecosystem
+  on 0.2.1, with no framework pin at all.
 - The MCP registration (`src/mcp.ts`) and the view checker (`src/viewcheck.ts`)
   both probe checkout directories by name: `linter` (the checker's own
   repository name) plus the **pre-rename aliases** `abap2UI5-linter` and

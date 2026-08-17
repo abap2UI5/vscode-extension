@@ -99,8 +99,13 @@ export function runGate(
       Object.assign(controlIds, collectControlIds(node));
     }
     // rules that need the class itself, not just the view tree - the id map
-    // and the snapshot let the CONTROL_BY_ID rules judge wire types
-    findings.push(...checkAbapRules(text, { data, controlIds }));
+    // and the snapshot let the CONTROL_BY_ID rules judge wire types.
+    // `rules` has to go in HERE, not only into applyRules below: an OPT-IN
+    // rule (chain-house-layout) is not produced at all unless the config asks
+    // for it, so leaving it out kept the editor silent about a rule the
+    // repository's own `abap2ui5lint.jsonc` switches on - and CI reported it.
+    // That is exactly the editor/CI divergence this gate exists to close.
+    findings.push(...checkAbapRules(text, { data, controlIds, rules: options.rules }));
     attachNamespaceFixes(findings, text);
     renderable = prep.docs.length > 0 && prep.helperTokens === 0;
     if (prep.helperTokens > 0) {

@@ -37,10 +37,12 @@ CLASS zcl_my_app IMPLEMENTATION.
     view->ele( n = \`View\` ns = \`mvc\`
         )->a( n = \`xmlns\`     v = \`sap.m\`
         )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
+
         )->ele( n = \`Page\`
-        )->a( n = \`title\` v = \`Hello abap2UI5\`
-        )->tag( n = \`Text\`
-        )->a( n = \`text\` v = \`My first app\` ).
+            )->a( n = \`title\` v = \`Hello abap2UI5\`
+
+            )->tag( n = \`Text\`
+                )->a( n = \`text\` v = \`My first app\` ).
 
     client->view_display( view->stringify( ) ).
 
