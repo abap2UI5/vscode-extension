@@ -97,6 +97,12 @@ export async function installRenderGate(
   }
   installing = true;
   const dir = baseDir(context);
+  // Built next to the real directory and swapped in only once it holds a
+  // working gate: installing over the top used to delete the installation
+  // first, so re-running the command offline left the user with no gate at
+  // all instead of the one they already had.
+  const staging = `${dir}.installing`;
+  const previous = `${dir}.previous`;
   try {
     return await vscode.window.withProgress(
       {
@@ -107,9 +113,9 @@ export async function installRenderGate(
       async (progress) => {
         progress.report({ message: "downloading the checker bundle (~30 MB)..." });
         log(`render-gate: installing to ${dir}`);
-        fs.rmSync(dir, { recursive: true, force: true });
-        fs.mkdirSync(dir, { recursive: true });
-        const tgz = path.join(dir, "bundle.tgz");
+        fs.rmSync(staging, { recursive: true, force: true });
+        fs.mkdirSync(staging, { recursive: true });
+        const tgz = path.join(staging, "bundle.tgz");
         if (PINNED_BUNDLE_URL) {
           try {
             await download(PINNED_BUNDLE_URL, tgz);
@@ -125,9 +131,9 @@ export async function installRenderGate(
         }
 
         progress.report({ message: "extracting..." });
-        await tar.x({ file: tgz, cwd: dir });
+        await tar.x({ file: tgz, cwd: staging });
         fs.rmSync(tgz, { force: true });
-        if (!fs.existsSync(path.join(dir, "cli.mjs"))) {
+        if (!fs.existsSync(path.join(staging, "cli.mjs"))) {
           throw new Error("bundle did not contain cli.mjs");
         }
 
@@ -136,13 +142,29 @@ export async function installRenderGate(
         });
         await runWithVsCodeNode(
           [
-            path.join(dir, "node_modules", "playwright", "cli.js"),
+            path.join(staging, "node_modules", "playwright", "cli.js"),
             "install",
             "chromium",
           ],
-          { PLAYWRIGHT_BROWSERS_PATH: renderGateBrowsers(context) },
+          { PLAYWRIGHT_BROWSERS_PATH: path.join(staging, "browsers") },
           log
         );
+
+        // the download is through and the bundle is complete - only now does
+        // the installation that was there make way
+        fs.rmSync(previous, { recursive: true, force: true });
+        if (fs.existsSync(dir)) {
+          fs.renameSync(dir, previous);
+        }
+        try {
+          fs.renameSync(staging, dir);
+        } catch (err) {
+          if (fs.existsSync(previous) && !fs.existsSync(dir)) {
+            fs.renameSync(previous, dir); // put the old one back
+          }
+          throw err;
+        }
+        fs.rmSync(previous, { recursive: true, force: true });
 
         log("render-gate: installed");
         await vscode.workspace
@@ -157,7 +179,9 @@ export async function installRenderGate(
     );
   } catch (err) {
     log(`render-gate: install failed - ${String(err)}`);
-    fs.rmSync(dir, { recursive: true, force: true });
+    // only the half-built one goes - whatever was installed before is still
+    // where it was, and still works
+    fs.rmSync(staging, { recursive: true, force: true });
     vscode.window.showErrorMessage(
       `abap2UI5: render gate install failed (${String(err).slice(0, 120)}). ` +
         "Details in the abap2UI5 output channel."

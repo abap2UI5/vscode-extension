@@ -21,7 +21,7 @@ const TOOLS: McpTool[] = [
   },
 ];
 
-test("initialize echoes the client's protocol version", async () => {
+test("initialize answers a revision it implements", async () => {
   const res = (await handleMcpMessage(
     {
       jsonrpc: "2.0",
@@ -102,4 +102,20 @@ test("unknown tools and methods answer JSON-RPC errors", async () => {
     INFO
   )) as { error: { code: number } };
   assert.equal(unknownMethod.error.code, -32601);
+});
+
+test("a protocol revision we do not implement is not claimed back", async () => {
+  // the spec asks for a revision the SERVER supports; echoing the client's
+  // told a strict client it could use features this core does not have
+  const res = (await handleMcpMessage(
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2099-01-01" },
+    },
+    TOOLS,
+    INFO
+  )) as { result: { protocolVersion: string } };
+  assert.equal(res.result.protocolVersion, "2025-06-18");
 });

@@ -21,6 +21,8 @@ import type { ViewNode } from "@abap2ui5/linter/reconstruct";
  * and the decorations around it are plumbing.
  */
 
+import { abapStatements, declaredNames } from "./abapscan";
+
 export interface Annotation {
   /** Character offset the annotation belongs to - the caller turns it into a
    *  line and hangs the text off its end. */
@@ -155,42 +157,25 @@ export function publicAttributes(source: string): PublicAttribute[] {
     if (!/^\s*(?:CLASS-)?DATA\b/i.test(statement.text)) {
       continue;
     }
-    for (const declared of statement.text.matchAll(/([a-z_]\w*)\s+TYPE\b/gi)) {
+    // the names the statement DECLARES, not every word in it that is followed
+    // by TYPE: a commented-out chain entry (`" old: mv_b TYPE string`) is
+    // still part of the statement's text, and used to be annotated as if it
+    // were an attribute the class ships
+    for (const declared of declaredNames(statement.text)) {
       out.push({
-        name: declared[1],
-        offset: from + statement.start + (declared.index ?? 0),
+        name: declared.name,
+        offset: from + statement.start + declared.at,
       });
     }
   }
   return out;
 }
 
-/** ABAP statements of a source fragment: split at the periods that are not
- *  inside a string literal (`VALUE '3.14'` ends no statement). */
-function statements(source: string): Array<{ text: string; start: number }> {
-  const out: Array<{ text: string; start: number }> = [];
-  let start = 0;
-  let quote: string | undefined;
-  for (let i = 0; i < source.length; i++) {
-    const ch = source[i];
-    if (quote) {
-      if (ch === quote) {
-        quote = source[i + 1] === quote ? (i++, quote) : undefined;
-      }
-      continue;
-    }
-    if (ch === "'" || ch === "`") {
-      quote = ch;
-    } else if (ch === ".") {
-      out.push({ text: source.slice(start, i), start });
-      start = i + 1;
-    }
-  }
-  if (source.slice(start).trim()) {
-    out.push({ text: source.slice(start), start });
-  }
-  return out;
-}
+/** ABAP statements of a source fragment - see `abapStatements`. This used to
+ *  track literals but not comments, so a `" done.` ended a statement that was
+ *  still running and an `mv_b TYPE` inside a commented-out chain entry was
+ *  read as a declaration and annotated. */
+const statements = abapStatements;
 
 /**
  * What each PUBLIC attribute adds to a roundtrip.

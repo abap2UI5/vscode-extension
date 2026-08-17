@@ -43,8 +43,15 @@ interface RpcMessage {
   params?: Record<string, unknown>;
 }
 
-/** The protocol revision answered when the client's is unusable. */
-const FALLBACK_PROTOCOL = "2025-03-26";
+/** The protocol revisions this server actually implements, newest first. The
+ *  spec asks a server to answer `initialize` with one it SUPPORTS - echoing
+ *  whatever the client sent claimed support for revisions this minimal core
+ *  does not have (elicitation, structured output), which a strict client then
+ *  goes on to use. */
+const SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+
+/** The revision answered when the client asks for one that is not ours. */
+const FALLBACK_PROTOCOL = SUPPORTED_PROTOCOLS[0];
 
 function result(id: number | string | null, payload: unknown): object {
   return { jsonrpc: "2.0", id, result: payload };
@@ -85,7 +92,10 @@ export async function handleMcpMessage(
   if (method === "initialize") {
     const asked = msg.params?.protocolVersion;
     return result(id, {
-      protocolVersion: typeof asked === "string" ? asked : FALLBACK_PROTOCOL,
+      protocolVersion:
+        typeof asked === "string" && SUPPORTED_PROTOCOLS.includes(asked)
+          ? asked
+          : FALLBACK_PROTOCOL,
       capabilities: { tools: {} },
       serverInfo,
     });

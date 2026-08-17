@@ -13,7 +13,23 @@ export const DIAG_SOURCE = "abap2UI5-linter";
 
 /** The published rule reference - one anchor per rule id, which is what makes
  *  every diagnostic's code clickable. */
-const RULES_PAGE = "https://abap2ui5.github.io/linter/";
+export const RULES_PAGE = "https://abap2ui5.github.io/linter/";
+
+/** The rule id behind a diagnostic, whether or not it carries a docs link.
+ *  Lives here with the code that PUTS the id there - three modules had their
+ *  own copy of the unwrapping, next to their own copy of DIAG_SOURCE, so a
+ *  rename of either would have broken the status bar, the tree and the quick
+ *  fixes without a single failing type. */
+export function ruleOf(diagnostic: vscode.Diagnostic): string | undefined {
+  const code = diagnostic.code;
+  if (typeof code === "string") {
+    return code;
+  }
+  if (code && typeof code === "object" && "value" in code) {
+    return String(code.value);
+  }
+  return undefined;
+}
 
 /** What to underline: the member name, the control's local name, or - for
  *  the findings that are about a value rather than a member - that value. */

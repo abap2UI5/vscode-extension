@@ -450,10 +450,8 @@ ${BASE_CSS}
   const reloadBtn = document.getElementById('reload');
 
   let frameUrl = ${JSON.stringify(options.frameUrl)};
-  let externalUrl = ${JSON.stringify(options.externalUrl)};
   let slowTimer;
   let toastTimer;
-  let startedAt = Date.now();
 
   // Runtime errors forwarded by the hook the proxy plants into the app.
   const errorsEl = document.getElementById('errors');
@@ -553,7 +551,6 @@ ${BASE_CSS}
   }
 
   function beginLoad(message) {
-    startedAt = Date.now();
     body.dataset.state = 'loading';
     loadingText.textContent = message;
     clearTimeout(slowTimer);
@@ -699,7 +696,6 @@ ${BASE_CSS}
     if (msg.type !== 'load') { return; }
     const switched = msg.className && msg.className !== nameEl.textContent;
     frameUrl = msg.frameUrl;
-    externalUrl = msg.externalUrl;
     if (msg.className) { nameEl.textContent = msg.className; }
     urlEl.textContent = msg.shortUrl || msg.externalUrl;
     urlEl.title = msg.externalUrl;

@@ -20,6 +20,8 @@
  * the samples use.
  */
 
+import { blankNonCode } from "./abapscan";
+
 export interface ExtractEdit {
   start: number;
   end: number;
@@ -39,52 +41,45 @@ export interface ExtractRefusal {
 
 const CHAIN_CALL = /->\s*(ele|tag|a|end|shut|factory|stringify)\s*\(/i;
 
-/** Is this offset inside an ABAP string literal? Cutting a chain inside one
- *  would produce two halves that both parse and neither mean anything. */
-function insideLiteral(source: string, offset: number): boolean {
-  let quote: string | undefined;
-  for (let i = 0; i < offset; i++) {
-    const ch = source[i];
-    if (!quote && (ch === "'" || ch === "`")) {
-      quote = ch;
-    } else if (quote && ch === quote) {
-      quote = source[i + 1] === quote ? (i++, quote) : undefined;
-    }
-  }
-  return quote !== undefined;
-}
+/*
+ * Everything below reads the BLANKED source (see `abapscan.ts`): same length
+ * and same offsets, with the content of literals, comments and templates
+ * replaced by spaces. So a character that is still a `.` or a `-` there is one
+ * in code, and a `'` inside a `" don't` comment neither opens a literal nor
+ * hides the statement's real end. Scanning the source from the beginning to
+ * answer "is this offset inside a literal" was also quadratic - the cost the
+ * old version paid on every candidate, in a loop over the whole file.
+ */
 
 /** The ABAP statement around an offset: from after the previous `.` to the
- *  next one, both outside literals. */
+ *  next one, both outside literals and comments. */
 function statementAround(
-  source: string,
+  code: string,
   offset: number
 ): { start: number; end: number } | undefined {
   let start = 0;
   for (let i = offset; i > 0; i--) {
-    if (source[i - 1] === "." && !insideLiteral(source, i - 1)) {
+    if (code[i - 1] === ".") {
       start = i;
       break;
     }
   }
-  let end = -1;
-  for (let i = offset; i < source.length; i++) {
-    if (source[i] === "." && !insideLiteral(source, i)) {
-      end = i;
-      break;
-    }
-  }
+  const end = code.indexOf(".", offset);
   return end < 0 ? undefined : { start, end };
 }
 
 /** A `->` that begins a chain call, with the `)` closing the previous one
  *  staying behind. `view->ele(` is not one: it starts the chain, and there is
  *  nothing before it to leave behind. */
-function isBoundary(source: string, at: number): boolean {
-  if (source[at] !== "-" || source[at + 1] !== ">" || insideLiteral(source, at)) {
+function isBoundary(code: string, at: number): boolean {
+  if (code[at] !== "-" || code[at + 1] !== ">") {
     return false;
   }
-  return source.slice(0, at).trimEnd().endsWith(")");
+  let before = at - 1;
+  while (before >= 0 && /\s/.test(code[before])) {
+    before--;
+  }
+  return code[before] === ")";
 }
 
 /**
@@ -96,15 +91,15 @@ function isBoundary(source: string, at: number): boolean {
  * searching backwards alone would silently pick the previous call and extract
  * one section too much.
  */
-function boundaryAt(source: string, offset: number): number | undefined {
-  const lineEnd = source.indexOf("\n", offset);
-  for (let i = offset; i < (lineEnd < 0 ? source.length : lineEnd); i++) {
-    if (isBoundary(source, i)) {
+function boundaryAt(code: string, offset: number): number | undefined {
+  const lineEnd = code.indexOf("\n", offset);
+  for (let i = offset; i < (lineEnd < 0 ? code.length : lineEnd); i++) {
+    if (isBoundary(code, i)) {
       return i;
     }
   }
-  for (let i = Math.min(offset, source.length - 2); i > 1; i--) {
-    if (isBoundary(source, i)) {
+  for (let i = Math.min(offset, code.length - 2); i > 1; i--) {
+    if (isBoundary(code, i)) {
       return i;
     }
   }
@@ -174,7 +169,10 @@ export function planExtract(
   if (new RegExp(String.raw`\bMETHODS\s+${methodName}\b`, "i").test(source)) {
     return { error: `The class already declares a method called ${methodName}.` };
   }
-  const statement = statementAround(source, selectionStart);
+  // the statement and the cut are decided on code alone - a period or a `->`
+  // inside a literal or a comment is neither a statement end nor a boundary
+  const code = blankNonCode(source);
+  const statement = statementAround(code, selectionStart);
   if (!statement) {
     return { error: "The cursor is not inside a statement that ends with a period." };
   }
@@ -182,7 +180,7 @@ export function planExtract(
   if (!CHAIN_CALL.test(text)) {
     return { error: "This is not a view builder chain - put the cursor in one." };
   }
-  const boundary = boundaryAt(source, selectionStart);
+  const boundary = boundaryAt(code, selectionStart);
   if (boundary === undefined || boundary <= statement.start || boundary >= statement.end) {
     return {
       error:

@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { DIAG_SOURCE } from "./diagnostics";
+
 import { findingsBarText, findingsBarTooltip, FindingCounts } from "./checkcore";
 import { fixableCount } from "./quickfix";
 import { isCheckable } from "./viewcheck";
@@ -16,7 +18,6 @@ import { isCheckable } from "./viewcheck";
  * the line changes exactly when the check has something new to say.
  */
 
-const DIAG_SOURCE = "abap2UI5-linter";
 
 function countsFor(doc: vscode.TextDocument): FindingCounts {
   const counts: FindingCounts = { errors: 0, warnings: 0, hints: 0, fixable: 0 };

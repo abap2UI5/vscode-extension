@@ -1,8 +1,11 @@
 import * as vscode from "vscode";
+import { DIAG_SOURCE, ruleOf } from "./diagnostics";
+
 import * as path from "path";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
 import { addToBaseline } from "./baselinefile";
 import { plannedFixes } from "./checkcore";
+import { clearBaselineCache } from "./lintconfig";
 import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
 
 /*
@@ -23,7 +26,6 @@ import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck"
  * this editor knows about.
  */
 
-const DIAG_SOURCE = "abap2UI5-linter";
 
 /** Our slice of "fix all" - so a user can opt in per language without
  *  triggering every other extension's fixers. */
@@ -34,17 +36,6 @@ const FIX_ALL = vscode.CodeActionKind.SourceFixAll.append("abap2ui5");
 export { VIEW_SELECTOR } from "./selector";
 import { VIEW_SELECTOR } from "./selector";
 
-/** The rule id behind a diagnostic, whether or not it carries a docs link. */
-function ruleOf(diagnostic: vscode.Diagnostic): string | undefined {
-  const code = diagnostic.code;
-  if (typeof code === "string") {
-    return code;
-  }
-  if (code && typeof code === "object" && "value" in code) {
-    return String(code.value);
-  }
-  return undefined;
-}
 
 /** The edits one finding's fixes describe, in document coordinates. */
 function editsOf(doc: vscode.TextDocument, finding: PropertyFinding): vscode.TextEdit[] {
@@ -131,16 +122,18 @@ class ViewCheckActions implements vscode.CodeActionProvider {
     }
 
     // --- fix everything this file has ------------------------------------
+    // One action, under our own sub-kind. `source.fixAll.abap2ui5` matches a
+    // request filtering for `source.fixAll` (VS Code matches kinds by prefix),
+    // so codeActionsOnSave still finds it - while contributing both put two
+    // identical entries in the menu for every such request.
     const all = applyAll(doc, fixable);
     if (all) {
-      for (const kind of [FIX_ALL, vscode.CodeActionKind.SourceFixAll]) {
-        const action = new vscode.CodeAction(
-          `abap2UI5: fix all ${all.count} finding(s) in this file`,
-          kind
-        );
-        action.edit = all.edit;
-        actions.push(action);
-      }
+      const action = new vscode.CodeAction(
+        `abap2UI5: fix all ${all.findings} finding(s) in this file`,
+        FIX_ALL
+      );
+      action.edit = all.edit;
+      actions.push(action);
     }
 
     // --- waive one line, the way the CLI understands it -------------------
@@ -200,8 +193,9 @@ class ViewCheckActions implements vscode.CodeActionProvider {
 function applyAll(
   doc: vscode.TextDocument,
   findings: PropertyFinding[]
-): { edit: vscode.WorkspaceEdit; count: number } | undefined {
-  const edits = plannedFixes(findings).map(
+): { edit: vscode.WorkspaceEdit; count: number; findings: number } | undefined {
+  const planned = plannedFixes(findings);
+  const edits = planned.map(
     (fix) =>
       new vscode.TextEdit(
         new vscode.Range(doc.positionAt(fix.start), doc.positionAt(fix.end)),
@@ -211,9 +205,16 @@ function applyAll(
   if (!edits.length) {
     return undefined;
   }
+  // A finding may carry several fix spans, so the number of edits is not the
+  // number of findings - and "fix all 3 finding(s)" for one finding with
+  // three spans is a count of the wrong thing.
+  const applied = new Set(planned);
+  const covered = findings.filter((finding) =>
+    (finding.fixes ?? []).some((fix) => applied.has(fix))
+  ).length;
   const edit = new vscode.WorkspaceEdit();
   edit.set(doc.uri, edits);
-  return { edit, count: edits.length };
+  return { edit, count: edits.length, findings: covered };
 }
 
 /**
@@ -249,6 +250,9 @@ export function registerQuickFix(
         try {
           const key = addToBaseline(baselineFile, sourceFile, finding);
           log(`quick-fix: baselined ${key} in ${baselineFile}`);
+          // the memo is keyed on mtime, and this write may land in the same
+          // second as the read that filled it
+          clearBaselineCache(baselineFile);
           recheckOpenDocuments();
         } catch (err) {
           vscode.window.showWarningMessage(

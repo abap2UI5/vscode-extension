@@ -84,13 +84,26 @@ export function removeAttributeEdit(
     return undefined;
   }
   const lineStart = source.lastIndexOf("\n", attr.aOpen) + 1;
-  const line = source.slice(lineStart, source.indexOf("\n", lineStart));
-  if (!/^\s*\)->\s*a\s*\(/.test(line)) {
+  const lineEnd = source.indexOf("\n", lineStart);
+  const line = source.slice(lineStart, lineEnd < 0 ? source.length : lineEnd);
+  const opener = /^\s*\)->\s*a\s*\(/.exec(line);
+  if (!opener) {
     return undefined; // shares its line with another call - keep hands off
   }
   const closeLineStart = source.lastIndexOf("\n", attr.aClose) + 1;
-  if (closeLineStart <= lineStart) {
-    return undefined; // the close sits on the same line - not chain style
+  if (closeLineStart > lineStart) {
+    // the usual chain shape: the call's own `)` opens the next line, so the
+    // whole line (or lines, for a multi-line value) can go
+    return { start: lineStart, end: closeLineStart, text: "" };
   }
-  return { start: lineStart, end: closeLineStart, text: "" };
+  /*
+   * The call closes on its own line - which is what the LAST attribute of
+   * every chain statement looks like (`)->a( n = \`x\` v = \`y\` ).`), so
+   * refusing here refused the final attribute of every chain rather than an
+   * exotic layout. The leading `)` still has to close the previous call and
+   * whatever follows (`->end( ).`, the period) still has to run, so only the
+   * `->a( … )` between them is cut out.
+   */
+  const afterParen = lineStart + opener[0].indexOf(")") + 1;
+  return { start: afterParen, end: attr.aClose + 1, text: "" };
 }

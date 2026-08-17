@@ -329,6 +329,10 @@
         {
           "command": "abap2ui5.checkApp",
           "when": "false"
+        },
+        {
+          "command": "abap2ui5.refreshApps",
+          "when": "!isWeb"
         }
       ],
       "editor/title": [
@@ -421,20 +425,23 @@
           "id": "abap2ui5.apps",
           "name": "abap2UI5 Apps",
           "icon": "$(window)",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "when": "!isWeb"
         },
         {
           "id": "abap2ui5.findings",
           "name": "abap2UI5 Findings",
           "icon": "$(checklist)",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "when": "!isWeb"
         }
       ],
       "abap2ui5Panel": [
         {
           "id": "abap2ui5.preview",
           "name": "App Preview",
-          "type": "webview"
+          "type": "webview",
+          "when": "!isWeb"
         },
         {
           "id": "abap2ui5.properties",

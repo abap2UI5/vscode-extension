@@ -94,7 +94,12 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       PreviewViewProvider.viewId,
-      provider
+      provider,
+      // The running app - its server session, whatever popup or detail page it
+      // navigated to - would otherwise be torn down and reloaded from scratch
+      // on every Ctrl+J, and messages posted while the panel was hidden went
+      // nowhere. The tab surface has kept its context for the same reason.
+      { webviewOptions: { retainContextWhenHidden: true } }
     ),
     vscode.commands.registerCommand("abap2ui5.run", () =>
       runApp(session, provider)

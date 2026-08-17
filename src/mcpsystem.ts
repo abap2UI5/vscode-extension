@@ -138,7 +138,9 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
             true
           );
         }
-        const png = fs.readFileSync(file).toString("base64");
+        // async: a full-page PNG read and base64-encoded synchronously
+        // stalls the extension host for as long as it takes
+        const png = (await fs.promises.readFile(file)).toString("base64");
         return {
           content: [
             {
@@ -224,10 +226,17 @@ export function createSystemMcpServer(
     res.end(JSON.stringify(Array.isArray(parsed) ? answers : answers[0]));
   };
 
+  let disposed = false;
+
   return {
     url(): Promise<string> {
+      if (disposed) {
+        // nothing would ever close a server started after dispose( ) - the
+        // extension's own hook has already run
+        return Promise.reject(new Error("the system MCP server is disposed"));
+      }
       if (!starting) {
-        starting = new Promise((resolve, reject) => {
+        starting = new Promise<string>((resolve, reject) => {
           server = http.createServer((req, res) => {
             handle(req, res).catch((err) => {
               deps.log(`mcp-system: ${String(err)}`);
@@ -245,11 +254,18 @@ export function createSystemMcpServer(
             deps.log(`mcp-system: listening on 127.0.0.1:${port}`);
             resolve(url);
           });
+        }).catch((err) => {
+          // a listen that failed once must not be the answer forever: the
+          // setting that turns this on can be toggled, and retrying is free
+          starting = undefined;
+          server = undefined;
+          throw err;
         });
       }
       return starting;
     },
     dispose(): void {
+      disposed = true;
       server?.close();
       server = undefined;
       starting = undefined;

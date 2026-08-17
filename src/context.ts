@@ -18,6 +18,8 @@
  * and the test suite drives it directly.
  */
 
+import { abapSpans } from "./abapscan";
+
 /** Which of the three writable positions the cursor sits in. */
 export type ContextKind = "control" | "member" | "value" | "namespace";
 
@@ -55,7 +57,20 @@ export const DEFAULT_LIBRARY = "sap.m";
  *
  * The map is keyed by prefix, `""` for the default namespace.
  */
+/** Same story as the scan memo below: both context calls of one completion ask
+ *  for the namespace map of the same source. */
+let lastNsMap: { source: string; map: Record<string, string> } | undefined;
+
 export function abapNsMap(source: string): Record<string, string> {
+  if (lastNsMap && lastNsMap.source === source) {
+    return lastNsMap.map;
+  }
+  const map = abapNsMapUncached(source);
+  lastNsMap = { source, map };
+  return map;
+}
+
+function abapNsMapUncached(source: string): Record<string, string> {
   const map: Record<string, string> = {};
   const pair =
     /n\s*=\s*[`'"]xmlns(?::([\w.]+))?[`'"]\s*v\s*=\s*[`'"]([\w.]+)[`'"]/gi;
@@ -123,14 +138,37 @@ interface AbapScan {
 }
 
 /**
- * Walks the source once, tracking ABAP's two literal forms (`'…'` and
- * `` `…` ``, both escaped by doubling), its two comment forms (`*` in column
- * one, `"` anywhere else) and the parenthesis nesting. Everything the context
+ * Walks the source once, over the literal/comment/template spans `abapscan.ts`
+ * found and the parenthesis nesting on top of them. Everything the context
  * analysis needs comes out of this: a `tag(` inside a comment or a string
  * never becomes a control, which is exactly the confusion a plain backwards
  * regex search would produce.
  */
+/*
+ * One completion asks twice: `abapBindingContextAt` first (is a binding being
+ * written?) and `abapContextAt` after it, both over the whole document and
+ * both from scratch. Space is a trigger character, so that ran on essentially
+ * every space typed in any ABAP file. The two calls are always the same text
+ * at the same offset, so remembering the last answer is enough to halve it -
+ * and the comparison hits the identical string, which is a pointer compare.
+ *
+ * The scan's Call objects are read, never written, by the callers - so handing
+ * the same ones out twice is safe.
+ */
+let lastScan:
+  | { source: string; offset: number; scan: AbapScan }
+  | undefined;
+
 function scanAbap(source: string, offset: number): AbapScan {
+  if (lastScan && lastScan.offset === offset && lastScan.source === source) {
+    return lastScan.scan;
+  }
+  const scan = scanAbapUncached(source, offset);
+  lastScan = { source, offset, scan };
+  return scan;
+}
+
+function scanAbapUncached(source: string, offset: number): AbapScan {
   const stack: Call[] = [];
   const calls: Call[] = [];
   let literal: Literal | undefined;
@@ -142,65 +180,37 @@ function scanAbap(source: string, offset: number): AbapScan {
     }
   };
 
+  // The spans come out in order, so one index walks along with the scan.
+  const spans = abapSpans(source);
+  let nextSpan = 0;
+
   let i = 0;
   while (i < source.length) {
     if (stackAtCursor === undefined && i > offset) {
       snapshot();
     }
-    const c = source[i];
 
-    // `*` in column one comments out the whole line.
-    if (c === "*" && (i === 0 || source[i - 1] === "\n")) {
-      const nl = source.indexOf("\n", i);
-      i = nl < 0 ? source.length : nl + 1;
-      continue;
+    while (nextSpan < spans.length && spans[nextSpan].to <= i) {
+      nextSpan++;
     }
-    // `"` starts a comment to the end of the line — it is not a string
-    // delimiter in ABAP.
-    if (c === '"') {
-      const nl = source.indexOf("\n", i);
-      i = nl < 0 ? source.length : nl + 1;
-      continue;
-    }
-    if (c === "'" || c === "`") {
-      const start = i + 1;
-      let j = start;
-      while (j < source.length && source[j] !== "\n") {
-        if (source[j] === c) {
-          if (source[j + 1] === c) {
-            j += 2; // doubled quote: an escaped one, the literal goes on
-            continue;
-          }
-          break;
-        }
-        j++;
-      }
-      if (offset >= start && offset <= j) {
-        literal = { start, end: j };
+    const span = spans[nextSpan];
+    if (span && span.from === i) {
+      // The literal the cursor sits in is the one thing the scan keeps -
+      // completion offers values inside it. Comments and templates are only
+      // skipped: what matters is that their content is not read as code.
+      if (
+        span.kind === "literal" &&
+        offset >= span.start &&
+        offset <= span.end
+      ) {
+        literal = { start: span.start, end: span.end };
         snapshot();
       }
-      i = j + 1;
+      i = Math.max(span.to, i + 1);
       continue;
     }
-    // A string template. It is skipped rather than offered for completion -
-    // what matters is that its content is not read as code: a `"` inside one
-    // would otherwise start a comment and swallow the rest of the line,
-    // including the `)` that closes the call.
-    if (c === "|") {
-      let j = i + 1;
-      while (j < source.length) {
-        if (source[j] === "\\") {
-          j += 2;
-          continue;
-        }
-        if (source[j] === "|") {
-          break;
-        }
-        j++;
-      }
-      i = j + 1;
-      continue;
-    }
+
+    const c = source[i];
     if (c === "(") {
       // The method name is the identifier run right in front of the paren.
       let k = i;
@@ -250,6 +260,32 @@ function argNameBefore(source: string, from: number, to: number): string | undef
   return m ? m[1].toLowerCase() : undefined;
 }
 
+/** A lone literal written as the FIRST argument, with no `name =` in front of
+ *  it. */
+const POSITIONAL_LITERAL = /^\s*(?:`([^`]*)`|'([^']*)'|"([^"]*)")/;
+
+/**
+ * The name an `ele( )` / `tag( )` call writes, in either of the two shapes the
+ * corpus uses:
+ *
+ *     tag( n = `Button` )     named
+ *     tag( `Button` )         positional
+ *
+ * The positional one is not an exotic spelling: it is what the extension's own
+ * XML converter emits, because a lone `n =` trips abaplint's
+ * omit_parameter_name. Reading only the named form is why completion, hover
+ * and the outline used to go silent on generated code - the outline even
+ * labelled every such element "?".
+ */
+function writtenName(args: string): string | undefined {
+  return (
+    argLiteral(args, "n") ??
+    POSITIONAL_LITERAL.exec(args)
+      ?.slice(1)
+      .find((value) => value !== undefined)
+  );
+}
+
 /** The control an `a( )` call attaches to: the last `ele( )` / `tag( )`
  *  started before it — exactly the rule z2ui5_cl_ui5_view_builder itself follows. */
 function controlCallBefore(calls: Call[], before: number): Call | undefined {
@@ -273,7 +309,7 @@ function controlOf(
   ns: Record<string, string>
 ): string | undefined {
   const args = argsOf(source, call);
-  const written = argValue(args, "n");
+  const written = writtenName(args);
   if (!written) {
     return undefined;
   }
@@ -507,7 +543,7 @@ export function viewOutline(source: string): OutlineNode[] {
     }
     if (name === "ele" || name === "tag") {
       const args = argsOf(source, call);
-      const written = argLiteral(args, "n");
+      const written = writtenName(args); // named or positional
       const prefix = argLiteral(args, "ns");
       const node: OutlineNode = {
         label: written
@@ -744,15 +780,9 @@ export function controlCallAt(
     const anchorIndent = anchorLine.slice(0, anchorLine.length - anchorLine.trimStart().length);
     const appendIndent = attrCalls.length ? anchorIndent : anchorIndent + "    ";
 
-    // The corpus writes a lone name positionally (`tag( \`Button\` )`) -
-    // fall back to the first bare literal when no `n =` is written.
+    // named or positional - see `writtenName`
     const callArgs = argsOf(source, call);
-    const written =
-      argLiteral(callArgs, "n") ??
-      /^\s*(?:`([^`]*)`|'([^']*)'|"([^"]*)")/
-        .exec(callArgs)
-        ?.slice(1)
-        .find((v) => v !== undefined);
+    const written = writtenName(callArgs);
     const prefix = written ? splitName(written).prefix : "";
     const nsArg = argLiteral(callArgs, "ns") ?? "";
     const library = written
@@ -896,8 +926,14 @@ export function abapContextAt(
   const ns = abapNsMap(source);
   const span = { prefix: source.slice(literal.start, offset), ...literal };
 
+  // `tag( \`Button\` )` writes the name with nothing in front of it - the
+  // shape the XML converter emits, and one the cursor may just as well sit in
+  const positionalName =
+    arg === undefined &&
+    /^\s*$/.test(source.slice(call.open + 1, literal.start - 1));
+
   if (name === "ele" || name === "tag") {
-    if (arg === "n") {
+    if (arg === "n" || positionalName) {
       // The builder takes the namespace either as its own argument or baked
       // into the name (`core:Icon`); a prefix in the name wins, and the
       // completion then replaces only the local part.
@@ -944,6 +980,26 @@ export function abapContextAt(
 // Raw view / fragment XML
 // ---------------------------------------------------------------------------
 
+/**
+ * The quote character of an attribute value still open at the end of `attrs`,
+ * or undefined when the cursor stands between attributes. Walks rather than
+ * counts, so the `"` inside `title='He said "hi"'` belongs to the value it
+ * sits in instead of ending it.
+ */
+function unclosedQuote(attrs: string): '"' | "'" | undefined {
+  let open: '"' | "'" | undefined;
+  for (const ch of attrs) {
+    if (open) {
+      if (ch === open) {
+        open = undefined;
+      }
+    } else if (ch === '"' || ch === "'") {
+      open = ch;
+    }
+  }
+  return open;
+}
+
 /** The write position at `offset` in a view/fragment XML. */
 export function xmlContextAt(
   source: string,
@@ -989,13 +1045,18 @@ export function xmlContextAt(
   }
   const control = `${library}.${split.local}`;
 
-  // Inside an attribute value?
+  // Inside an attribute value? XML allows either quote around one, and the
+  // extension's own parser accepts both - counting only `"` meant the cursor
+  // in `type='Emph'` was read as an attribute NAME position, where completing
+  // would have replaced the value with a property name.
   const attrs = source.slice(nameEnd, offset);
-  const quotes = (attrs.match(/"/g) ?? []).length;
-  if (quotes % 2 === 1) {
-    const start = nameEnd + attrs.lastIndexOf('"') + 1;
-    const closeQuote = source.indexOf('"', start);
-    const member = /([\w:.]+)\s*=\s*"[^"]*$/.exec(attrs)?.[1];
+  const openQuote = unclosedQuote(attrs);
+  if (openQuote) {
+    const start = nameEnd + attrs.lastIndexOf(openQuote) + 1;
+    const closeQuote = source.indexOf(openQuote, start);
+    const member = new RegExp(
+      `([\\w:.]+)\\s*=\\s*${openQuote}[^${openQuote}]*$`
+    ).exec(attrs)?.[1];
     return member
       ? {
           kind: "value",

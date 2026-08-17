@@ -87,3 +87,19 @@ test("the SVG carries clickable app nodes and escapes names", () => {
   assert.ok(svg.includes('class="node ext"')); // the unresolved target
   assert.ok(svg.includes('marker-end="url(#arrow)"'));
 });
+
+test("a namespaced class is a nav target", () => {
+  // regression: the word pattern could only start at a letter, so `/dmo/...`
+  // never matched and the edge silently vanished from the map
+  const targets = navTargetsOf(
+    "client->nav_app_call( NEW /dmo/cl_travel_app( ) )."
+  );
+  assert.deepEqual(targets, ["/DMO/CL_TRAVEL_APP"]);
+});
+
+test("an ordinary target still resolves next to a namespaced one", () => {
+  assert.deepEqual(
+    navTargetsOf("client->nav_app_call( NEW zcl_next( ) )."),
+    ["ZCL_NEXT"]
+  );
+});

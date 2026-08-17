@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -8,12 +9,13 @@ import { installRenderGate, renderGateBrowsers, renderGateCli } from "./renderga
 import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
 import { usesBuilder } from "./abap";
-import { runGate, VIEW_XML_RE } from "./gate";
+import { GateResult, runGate, VIEW_XML_RE } from "./gate";
 import {
   augmentedPath,
   CheckerCommand,
   isCheckableSource,
   parseRenderReport,
+  quoteForShell,
   RenderResult,
   plannedFixes,
   resolveCheckerCommand,
@@ -24,6 +26,7 @@ import { rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
   CheckOptions,
+  clearBaselineCache,
   clearConfigCache,
   describeOptions,
   resolveOptions,
@@ -46,7 +49,6 @@ import {
  * runs on a keystroke - only on save and on demand.
  */
 
-const CONFIG_SECTION = "abap2ui5";
 
 /** How long to wait after the last keystroke before checking. Long enough
  *  that typing a control name does not flash three different errors, short
@@ -56,6 +58,12 @@ const LIVE_DEBOUNCE_MS = 400;
 /** Set when spawning the external render checker failed once - avoids a
  *  warning on every save. */
 let spawnFailed = false;
+
+/** True while a workspace sweep runs. The sweep opens every file it reports
+ *  on (finding ranges are computed against real lines), and each open fires
+ *  onDidOpenTextDocument - which scheduled a second full check of the same
+ *  file, doubling the sweep's work and racing its own diagnostics.set. */
+let sweeping = false;
 
 /** The target/metadata versions are logged once per session, and again
  *  whenever they change (a different config file governs the document). */
@@ -143,9 +151,19 @@ export function spawnEnv(): NodeJS.ProcessEnv {
   return PATH === process.env.PATH ? process.env : { ...process.env, PATH };
 }
 
+/**
+ * How long the render gate may take before it is killed. Launching Chromium
+ * and rendering a view is seconds; the npx fallback resolving a GitHub
+ * dependency on a slow line is tens of them. Beyond this something is stuck -
+ * and without a limit every save added another stuck child that nothing ever
+ * reaped, with `checkDocument` waiting on the first one forever.
+ */
+const RENDER_TIMEOUT_MS = 180_000;
+
 function runRenderGate(
   doc: vscode.TextDocument,
-  log: (m: string) => void
+  log: (m: string) => void,
+  superseded: () => boolean
 ): Promise<RenderResult | undefined> {
   const scratchDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "abap2ui5-viewcheck-")
@@ -154,13 +172,26 @@ function runRenderGate(
   fs.writeFileSync(scratch, doc.getText());
 
   const checker = checkerCommand();
-  const args = [...checker.args, scratch, "--json", "--advisory", "--no-properties"];
+  const useShell = checker.cmd !== "node" && process.platform === "win32";
+  const rawArgs = [...checker.args, scratch, "--json", "--advisory", "--no-properties"];
+  // with shell: true Node passes the args through unquoted, so a path with a
+  // space in it would arrive as two arguments
+  const args = useShell
+    ? rawArgs.map((arg) => quoteForShell(arg, process.platform))
+    : rawArgs;
   const cwd =
     vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath ?? os.homedir();
   log(`view-check: render gate - ${checker.cmd} ${args.join(" ")}`);
 
   return new Promise((resolve) => {
+    let settled = false;
     const done = (result: RenderResult | undefined) => {
+      if (settled) {
+        return; // a failed spawn emits "error" and may still emit "close"
+      }
+      settled = true;
+      clearInterval(watch);
+      clearTimeout(limit);
       fs.rmSync(scratchDir, { recursive: true, force: true });
       resolve(result);
     };
@@ -175,8 +206,46 @@ function runRenderGate(
         : spawn(checker.cmd, args, {
             cwd,
             env: { ...spawnEnv(), ...checker.env },
-            shell: process.platform === "win32",
+            shell: useShell,
           });
+
+    /** Kills the child and everything it started - npx spawns the real
+     *  checker, which spawns Chromium, and killing only the shell would
+     *  leave both behind. */
+    const kill = () => {
+      if (child.pid === undefined || child.killed) {
+        return;
+      }
+      try {
+        if (process.platform === "win32") {
+          spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"]);
+        } else {
+          child.kill("SIGKILL");
+        }
+      } catch {
+        /* the child is already gone */
+      }
+    };
+
+    const limit = setTimeout(() => {
+      log(
+        `view-check: render gate exceeded ${RENDER_TIMEOUT_MS} ms - killed, ` +
+          "the property gate's findings still stand"
+      );
+      kill();
+      done(undefined);
+    }, RENDER_TIMEOUT_MS);
+
+    // the buffer moved on, or the document was closed - nothing will be done
+    // with this answer, so stop paying for it
+    const watch = setInterval(() => {
+      if (superseded()) {
+        log("view-check: render gate no longer needed - killed");
+        kill();
+        done(undefined);
+      }
+    }, 500);
+
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (c) => (stdout += String(c)));
@@ -204,6 +273,9 @@ function runRenderGate(
       done(undefined);
     });
     child.on("close", () => {
+      if (settled) {
+        return;
+      }
       const parsed = parseRenderReport(stdout);
       if (!parsed.ok) {
         log(
@@ -281,6 +353,13 @@ interface CheckRequest {
 const timers = new Map<string, NodeJS.Timeout>();
 const generations = new Map<string, number>();
 
+/** Generations are drawn from one counter for the whole session, so a number
+ *  is never handed out twice. That is what makes dropping a closed document's
+ *  entry safe: a run still in flight for it compares against a number no
+ *  later run can be given, instead of against one a reopened file might
+ *  reach again. */
+let nextGeneration = 0;
+
 function schedule(
   doc: vscode.TextDocument,
   delay: number,
@@ -310,7 +389,7 @@ function cancelScheduled(uri: vscode.Uri): void {
     timers.delete(key);
   }
   // Any run still in flight for this document is now stale.
-  generations.set(key, (generations.get(key) ?? 0) + 1);
+  generations.set(key, ++nextGeneration);
 }
 
 async function checkDocument(
@@ -320,9 +399,15 @@ async function checkDocument(
   request: CheckRequest
 ): Promise<void> {
   const key = doc.uri.toString();
-  const gen = (generations.get(key) ?? 0) + 1;
+  const gen = ++nextGeneration;
   generations.set(key, gen);
-  const superseded = () => generations.get(key) !== gen;
+  // The buffer counts as much as a newer run does: findings carry offsets into
+  // the text they were computed from, and a render takes seconds. Publishing
+  // them onto a document that was edited meanwhile puts the squiggles on the
+  // wrong lines, where they stay until the next check.
+  const startVersion = doc.version;
+  const superseded = () =>
+    generations.get(key) !== gen || doc.version !== startVersion;
 
   const options = optionsFor(doc);
   const versionLine = describeOptions(options);
@@ -349,7 +434,21 @@ async function checkDocument(
   const text = doc.getText();
   const name = path.basename(doc.fileName);
   const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
-  const gate = runGate(text, doc.uri.fsPath || name, isXml, options);
+  // An unparsable buffer mid-edit throws out of the gate - on the live path
+  // that was one unhandled rejection per keystroke, and in a workspace sweep
+  // a single such file ended the whole run.
+  let gate: GateResult;
+  try {
+    gate = runGate(text, doc.uri.fsPath || name, isXml, options);
+  } catch (err) {
+    log(`view-check: ${name} - could not be checked (${String(err)})`);
+    if (request.announce) {
+      vscode.window.showWarningMessage(
+        `abap2UI5: ${name} could not be checked - ${String(err)}`
+      );
+    }
+    return;
+  }
   let baselined = 0;
   if (options.baseline && doc.uri.scheme === "file") {
     baselined = applyBaselineTo(gate.findings, options.baseline, doc.uri.fsPath);
@@ -374,7 +473,7 @@ async function checkDocument(
     gate.renderable &&
     !spawnFailed
   ) {
-    const render = await runRenderGate(doc, log);
+    const render = await runRenderGate(doc, log, superseded);
     if (superseded()) {
       return; // the document moved on while Chromium was busy
     }
@@ -414,6 +513,15 @@ async function checkDocument(
 const WORKSPACE_GLOB = "**/*.{abap,view.xml,fragment.xml}";
 
 /** One checkable file of the workspace, with what the gate says about it. */
+/** What a sweep found, and whether it got to the end. A cancelled sweep has
+ *  looked at part of the workspace, which is not the same answer - reporting
+ *  "nothing found" for it, or applying its fixes as if they were the
+ *  workspace's, says more than was actually checked. */
+export interface SweepResult {
+  files: SweptFile[];
+  cancelled: boolean;
+}
+
 export interface SweptFile {
   uri: vscode.Uri;
   findings: PropertyFinding[];
@@ -433,8 +541,9 @@ export interface SweptFile {
 async function sweepWorkspace(
   progress: vscode.Progress<{ message?: string; increment?: number }>,
   token: vscode.CancellationToken,
-  options: { baseline: boolean }
-): Promise<SweptFile[]> {
+  options: { baseline: boolean },
+  log: (m: string) => void
+): Promise<SweepResult> {
   const files = await vscode.workspace.findFiles(
     WORKSPACE_GLOB,
     "**/{node_modules,.git,dist,out}/**"
@@ -463,7 +572,14 @@ async function sweepWorkspace(
       distribution: config().get<string>("viewCheck.distribution", "sapui5"),
       allow: config().get<string[]>("viewCheck.allow", []),
     });
-    const gate = runGate(text, uri.fsPath, isXml, opts);
+    let gate: GateResult;
+    try {
+      gate = runGate(text, uri.fsPath, isXml, opts);
+    } catch (err) {
+      // one file that cannot be parsed is not a reason to abandon the sweep
+      log(`view-check: ${path.basename(uri.fsPath)} skipped - ${String(err)}`);
+      continue;
+    }
     if (gate.nothingChecked) {
       continue;
     }
@@ -472,7 +588,7 @@ async function sweepWorkspace(
     }
     swept.push({ uri, findings: gate.findings });
   }
-  return swept;
+  return { files: swept, cancelled: token.isCancellationRequested };
 }
 
 /**
@@ -492,24 +608,42 @@ async function checkWorkspace(
       cancellable: true,
     },
     async (progress, token) => {
-      const swept = await sweepWorkspace(progress, token, { baseline: true });
-      let problems = 0;
-      for (const file of swept) {
-        // The file is opened as a text document so the finding ranges are
-        // computed against real lines, exactly like the on-save check does.
-        const doc = await vscode.workspace.openTextDocument(file.uri);
-        const diags = toDiagnostics(doc, file.findings, []);
-        diagnostics.set(file.uri, diags);
-        problems += diags.length;
+      sweeping = true;
+      let swept: SweepResult;
+      try {
+        swept = await sweepWorkspace(progress, token, { baseline: true }, log);
+        // What the sweep did not find is no longer a problem: a file that was
+        // fixed, reverted or deleted since the last run kept its diagnostics
+        // forever, because only the files it DID report were written.
+        if (!swept.cancelled) {
+          diagnostics.clear();
+        }
+        let problems = 0;
+        for (const file of swept.files) {
+          // The file is opened as a text document so the finding ranges are
+          // computed against real lines, exactly like the on-save check does.
+          const doc = await vscode.workspace.openTextDocument(file.uri);
+          const diags = toDiagnostics(doc, file.findings, []);
+          diagnostics.set(file.uri, diags);
+          problems += diags.length;
+        }
+        log(
+          `view-check: workspace sweep - ${swept.files.length} file(s), ` +
+            `${problems} problem(s)${swept.cancelled ? " (cancelled)" : ""}`
+        );
+        vscode.window.showInformationMessage(
+          swept.cancelled
+            ? `abap2UI5: cancelled after ${swept.files.length} file(s) - ` +
+                `${problems} problem(s) so far.`
+            : !swept.files.length
+              ? "abap2UI5: no checkable ABAP or view files found in this workspace."
+              : problems
+                ? `abap2UI5: ${problems} problem(s) in ${swept.files.length} file(s) - see the Problems panel.`
+                : `abap2UI5: ${swept.files.length} file(s) checked, nothing found.`
+        );
+      } finally {
+        sweeping = false;
       }
-      log(`view-check: workspace sweep - ${swept.length} file(s), ${problems} problem(s)`);
-      vscode.window.showInformationMessage(
-        !swept.length
-          ? "abap2UI5: no checkable ABAP or view files found in this workspace."
-          : problems
-            ? `abap2UI5: ${problems} problem(s) in ${swept.length} file(s) - see the Problems panel.`
-            : `abap2UI5: ${swept.length} file(s) checked, nothing found.`
-      );
     }
   );
 }
@@ -535,11 +669,24 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
       cancellable: true,
     },
     async (progress, token) => {
-      const swept = await sweepWorkspace(progress, token, { baseline: true });
+      sweeping = true;
+      let swept: SweepResult;
+      try {
+        swept = await sweepWorkspace(progress, token, { baseline: true }, log);
+      } finally {
+        sweeping = false;
+      }
+      if (swept.cancelled) {
+        // half a workspace's fixes applied as if they were the workspace's
+        vscode.window.showInformationMessage(
+          "abap2UI5: cancelled - nothing was changed."
+        );
+        return;
+      }
       const edit = new vscode.WorkspaceEdit();
       let fixes = 0;
       let files = 0;
-      for (const file of swept) {
+      for (const file of swept.files) {
         const planned = plannedFixes(file.findings);
         if (!planned.length) {
           continue;
@@ -560,7 +707,7 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
       }
       if (!fixes) {
         vscode.window.showInformationMessage(
-          `abap2UI5: nothing in ${swept.length} file(s) can be corrected mechanically.`
+          `abap2UI5: nothing in ${swept.files.length} file(s) can be corrected mechanically.`
         );
         return;
       }
@@ -627,8 +774,14 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
     async (progress, token) => {
       // unfiltered on purpose: the baseline is what is being written, so it
       // must not be applied to the findings that write it
-      const swept = await sweepWorkspace(progress, token, { baseline: false });
-      if (token.isCancellationRequested) {
+      sweeping = true;
+      let swept: SweepResult;
+      try {
+        swept = await sweepWorkspace(progress, token, { baseline: false }, log);
+      } finally {
+        sweeping = false;
+      }
+      if (swept.cancelled) {
         vscode.window.showInformationMessage(
           "abap2UI5: cancelled - the baseline is unchanged."
         );
@@ -637,8 +790,14 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
       try {
         const written = rebuildBaseline(
           baselineFile,
-          swept.map((file) => ({ file: file.uri.fsPath, findings: file.findings }))
+          swept.files.map((file) => ({
+            file: file.uri.fsPath,
+            findings: file.findings,
+          }))
         );
+        // the file just changed; its memo is keyed on an mtime that may not
+        // have moved yet
+        clearBaselineCache(baselineFile);
         recheckOpenDocuments();
         log(
           `view-check: baseline rebuilt - ${written.findings} finding(s) in ` +
@@ -646,7 +805,7 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
         );
         vscode.window.showInformationMessage(
           `abap2UI5: ${path.basename(baselineFile)} now waives ` +
-            `${written.findings} finding(s) from ${swept.length} file(s).`
+            `${written.findings} finding(s) from ${swept.files.length} file(s).`
         );
       } catch (err) {
         vscode.window.showWarningMessage(
@@ -691,6 +850,10 @@ export function registerViewCheck(
   const configChanged = () => {
     clearConfigCache();
     lastVersionLine = "";
+    // the memoised findings behind the lightbulb and the "fix all" lens were
+    // computed under the old config - the version they are keyed on does not
+    // move when a config file does
+    recheckOpenDocuments();
     recheckOpen();
   };
 
@@ -752,7 +915,7 @@ export function registerViewCheck(
 
     // Opening a file should show what is wrong with it, without a save first.
     vscode.workspace.onDidOpenTextDocument((doc) => {
-      if (isCheckable(doc)) {
+      if (isCheckable(doc) && !sweeping) {
         check(doc, 0, { render: false, announce: false });
       }
     }),
@@ -760,11 +923,19 @@ export function registerViewCheck(
     vscode.workspace.onDidCloseTextDocument((doc) => {
       cancelScheduled(doc.uri);
       diagnostics.delete(doc.uri);
+      // Nothing compares against this entry any more: cancelScheduled has
+      // just made every in-flight run for the document stale, and the
+      // generation it was given cannot be handed out again.
+      generations.delete(doc.uri.toString());
     }),
 
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(`${CONFIG_SECTION}.viewCheck`)) {
         lastVersionLine = "";
+        // the checker that could not be started may be exactly what was just
+        // changed - without this the gate stayed off until the window reloaded
+        spawnFailed = false;
+        recheckOpenDocuments();
         recheckOpen();
       }
     })

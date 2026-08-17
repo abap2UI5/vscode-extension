@@ -111,3 +111,20 @@ test("a control with no attributes appends one step under its own line", () => {
     next.includes(")->tag( `Text`\n            )->a( n = `text` v = `hi`\n")
   );
 });
+
+test("the last attribute of a chain can be removed too", () => {
+  // its `)` sits on its own line (`)->a( … ).`), which used to be refused as
+  // "not chain style" - and that is the shape of the final attribute of
+  // every chain, not an exotic layout
+  const call = controlCallAt(SOURCE, SOURCE.indexOf("mv_value )"))!;
+  const edit = removeAttributeEdit(SOURCE, call, "value");
+  assert.ok(edit, "the edit is offered");
+  const next = apply(SOURCE, edit!);
+  assert.ok(!next.includes("n = `value`"), "the attribute is gone");
+  // the chain still closes and the statement still ends
+  assert.ok(next.includes(")->tag( `Input`\n                )."), next);
+  // and the parens still balance
+  const parens = (s: string, ch: string) => s.split(ch).length - 1;
+  const chain = next.slice(next.indexOf("DATA(view)"), next.indexOf("client->view_display"));
+  assert.equal(parens(chain, "("), parens(chain, ")"));
+});

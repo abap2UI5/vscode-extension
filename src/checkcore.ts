@@ -53,6 +53,61 @@ export interface CheckerCommand {
   installed: boolean;
 }
 
+/**
+ * A configured command line into program and arguments, honouring quotes.
+ * Splitting on whitespace alone made every path with a space in it
+ * unusable - `"C:\Program Files\nodejs\node.exe" cli.mjs` is the normal
+ * shape of this setting on Windows, and it arrived as four broken pieces.
+ */
+export function splitCommandLine(line: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | undefined;
+  let started = false;
+  for (const ch of line.trim()) {
+    if (quote) {
+      if (ch === quote) {
+        quote = undefined;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      started = true; // `""` is an argument, empty as it is
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (current || started) {
+        parts.push(current);
+        current = "";
+        started = false;
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (current || started) {
+    parts.push(current);
+  }
+  return parts;
+}
+
+/**
+ * One argument as a Windows shell swallows it. The checker is spawned through
+ * cmd.exe there (npx is a `.cmd`, which Node cannot exec directly), and with
+ * `shell: true` Node hands the arguments over unquoted - so a scratch file
+ * under `C:\Users\John Smith\AppData\...` arrived as two arguments and the
+ * gate answered "no JSON" for everyone whose profile has a space in it.
+ */
+export function quoteForShell(arg: string, platform: NodeJS.Platform): string {
+  if (platform !== "win32" || !/[\s&|<>^()"]/.test(arg)) {
+    return arg;
+  }
+  return `"${arg.replace(/"/g, '""')}"`;
+}
+
 /** Everything the command resolution reads - handed in, so the decision
  *  itself needs neither settings nor a filesystem. */
 export interface CheckerCommandInput {
@@ -75,7 +130,7 @@ export interface CheckerCommandInput {
 export function resolveCheckerCommand(input: CheckerCommandInput): CheckerCommand {
   const explicit = input.explicit.trim();
   if (explicit) {
-    const [cmd, ...args] = explicit.split(/\s+/);
+    const [cmd, ...args] = splitCommandLine(explicit);
     return { cmd, args, env: {}, installed: true };
   }
   if (input.installedGate) {

@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { DIAG_SOURCE, RULES_PAGE, ruleOf } from "./diagnostics";
+
 import * as path from "path";
 import {
   FindingSeverity,
@@ -24,8 +26,6 @@ import {
  * "Check All Views in the Workspace".
  */
 
-const DIAG_SOURCE = "abap2UI5-linter";
-const RULES_PAGE = "https://abap2ui5.github.io/linter/";
 
 type Node = RuleGroup | RuleEntry;
 
@@ -42,17 +42,6 @@ function severityOf(diagnostic: vscode.Diagnostic): FindingSeverity {
     : "hint";
 }
 
-/** The rule id behind a diagnostic, whether or not it carries a docs link. */
-function ruleOf(diagnostic: vscode.Diagnostic): string | undefined {
-  const code = diagnostic.code;
-  if (typeof code === "string") {
-    return code;
-  }
-  if (code && typeof code === "object" && "value" in code) {
-    return String(code.value);
-  }
-  return undefined;
-}
 
 const ICON: Record<FindingSeverity, vscode.ThemeIcon> = {
   error: new vscode.ThemeIcon("error", new vscode.ThemeColor("problemsErrorIcon.foreground")),
@@ -144,19 +133,49 @@ export function registerFindingsView(context: vscode.ExtensionContext): void {
     treeDataProvider: provider,
     showCollapseAll: true,
   });
+  let lastTotal = 0;
   const updateBadge = () => {
     const total = collect().length;
+    lastTotal = total;
     view.badge = total
       ? { value: total, tooltip: `${total} abap2UI5 finding(s)` }
       : undefined;
   };
+  /*
+   * onDidChangeDiagnostics fires for every provider in the window - the ABAP
+   * extension, the XML server, ESLint in a JS folder - and each firing walked
+   * every diagnostic in the workspace twice, once for the tree and once for
+   * the badge. Neither answer changes unless one of OUR diagnostics did, and
+   * a burst of them (a workspace sweep, a language server starting up) is
+   * exactly when the walk is most expensive.
+   */
+  let pending: NodeJS.Timeout | undefined;
+  const refreshSoon = (e: vscode.DiagnosticChangeEvent) => {
+    const ours = e.uris.some((uri) =>
+      vscode.languages
+        .getDiagnostics(uri)
+        .some((d) => d.source === DIAG_SOURCE)
+    );
+    // nothing of ours in the changed files, and nothing of ours on display -
+    // then this event cannot have changed what the tree says
+    if (!ours && lastTotal === 0) {
+      return;
+    }
+    if (pending) {
+      clearTimeout(pending);
+    }
+    pending = setTimeout(() => {
+      pending = undefined;
+      provider.refresh();
+      updateBadge();
+    }, 150);
+  };
+
   context.subscriptions.push(
     provider,
     view,
-    vscode.languages.onDidChangeDiagnostics(() => {
-      provider.refresh();
-      updateBadge();
-    }),
+    vscode.languages.onDidChangeDiagnostics(refreshSoon),
+    new vscode.Disposable(() => pending && clearTimeout(pending)),
     vscode.commands.registerCommand("abap2ui5.openRuleDocs", (node: Node) => {
       if (node && isGroup(node)) {
         void vscode.env.openExternal(

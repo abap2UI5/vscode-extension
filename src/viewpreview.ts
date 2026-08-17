@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -37,7 +38,6 @@ import { createNonce, viewPreviewHtml } from "./webview";
  * look at a view.
  */
 
-const CONFIG_SECTION = "abap2ui5";
 
 interface Shot {
   uri: string;
@@ -234,16 +234,28 @@ function committedText(doc: vscode.TextDocument): Promise<string | undefined> {
   });
 }
 
+/** A refresh asked for while one was running - the latest one, which is the
+ *  only one worth doing. */
+let queued: { doc: vscode.TextDocument; options: { compare?: boolean } } | undefined;
+
 async function refresh(
   doc: vscode.TextDocument,
   log: (m: string) => void,
   options: { compare?: boolean } = {}
 ): Promise<void> {
-  if (!panel || !workDir || running) {
+  if (!panel || !workDir) {
+    return;
+  }
+  if (running) {
+    // Dropping it left the panel showing a picture of an older buffer with
+    // nothing to say it was stale - a render takes seconds, and saving twice
+    // inside those seconds is normal.
+    queued = { doc, options };
     return;
   }
   running = true;
   const target = panel;
+  const startedFor = previewed?.toString();
   const dir = workDir;
   const sizes = viewportCount(config().get<string>("viewPreview.viewport", "1280x900"));
   const mock = mockFileFor(doc);
@@ -252,6 +264,9 @@ async function refresh(
     const runs: Array<{ prefix: string; caption: string; text: string }> = [];
     if (options.compare) {
       const before = await committedText(doc);
+      if (target !== panel) {
+        return; // closed while git was answering
+      }
       if (before === undefined) {
         paint(target, doc, {
           ...shown,
@@ -278,8 +293,10 @@ async function refresh(
         dir,
         log
       );
-      if (target !== panel) {
-        return; // the panel went away while the browser was starting
+      if (target !== panel || previewed?.toString() !== startedFor) {
+        // the panel went away while the browser was starting, or it was
+        // pointed at another document - whose pictures these are not
+        return;
       }
       problem ??= result.problem;
       errors.push(
@@ -301,8 +318,16 @@ async function refresh(
       `view-preview: ${shots.length} picture(s), ${errors.length} render error(s)` +
         (mock ? `, data from ${path.basename(mock)}` : "")
     );
+  } catch (err) {
+    // this runs from a save listener, where a rejection would land nowhere
+    log(`view-preview: refresh failed - ${String(err)}`);
   } finally {
     running = false;
+    const next = queued;
+    queued = undefined;
+    if (next && panel) {
+      void refresh(next.doc, log, next.options);
+    }
   }
 }
 

@@ -351,3 +351,84 @@ test("whenBranches and eventNameSpans see every naming of an event", () => {
     assert.equal(src.slice(span.start, span.end), "GO");
   }
 });
+
+// ---------------------------------------------------------------------------
+// The positional element name - the shape the XML converter emits
+// ---------------------------------------------------------------------------
+
+/*
+ * `tag( \`Button\` )` is not an exotic spelling: a lone `n =` trips abaplint's
+ * omit_parameter_name, so xmltoabap.ts writes the name positionally and the
+ * corpus does too. Reading only `n = \`Button\`` meant the extension went
+ * silent on the code it generates itself.
+ */
+
+test("a member belongs to a control named positionally", () => {
+  const context = abapAt(HEAD + "    )->tag( `Button` )->a( n = `te‸` )");
+  assert.equal(context?.kind, "member");
+  assert.equal(context?.control, "sap.m.Button");
+});
+
+test("a value completes for a control named positionally", () => {
+  const context = abapAt(
+    HEAD + "    )->tag( `Button` )->a( n = `type` v = `Emph‸` )"
+  );
+  assert.equal(context?.kind, "value");
+  assert.equal(context?.control, "sap.m.Button");
+  assert.equal(context?.member, "type");
+});
+
+test("the positional name itself completes as a control", () => {
+  const context = abapAt(HEAD + "    )->tag( `Butt‸` )");
+  assert.equal(context?.kind, "control");
+  assert.equal(context?.library, "sap.m");
+  assert.equal(context?.prefix, "Butt");
+});
+
+test("a positional container still supplies the row context", () => {
+  // the binding inside it is relative to the aggregation the container binds,
+  // and resolving the container is what naming it positionally used to defeat
+  const context = bindingAt(
+    HEAD +
+      "    )->ele( `List`\n" +
+      "        )->a( n = `items` v = `{/MT_TAB}`\n" +
+      "        )->tag( `Text` )->a( n = `text` v = `{‸}`\n"
+  );
+  assert.deepEqual(context?.aggregations, ["/MT_TAB"]);
+});
+
+test("the outline labels a positional element by its name", () => {
+  const { viewOutline } = require("../context") as typeof import("../context");
+  const src =
+    "DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).\n" +
+    "view->ele( `Page`\n" +
+    "    )->tag( `Button` )->a( n = `text` v = `Go`\n" +
+    ")->end( ).";
+  const roots = viewOutline(src);
+  assert.equal(roots[0].label, "Page", "not the old '?'");
+  assert.equal(roots[0].children[0].label, "Button");
+});
+
+test("a single-quoted attribute value is a value position", () => {
+  // regression: only `"` was counted, so the cursor here looked like an
+  // attribute NAME position and completing would have replaced the value
+  const context = xmlAt(`<mvc:View xmlns="sap.m"><Button type='Emph‸'/></mvc:View>`);
+  assert.equal(context?.kind, "value");
+  assert.equal(context?.control, "sap.m.Button");
+  assert.equal(context?.member, "type");
+  assert.equal(context?.prefix, "Emph");
+});
+
+test("a double quote inside a single-quoted value does not end it", () => {
+  const context = xmlAt(
+    `<mvc:View xmlns="sap.m"><Button text='say "hi"' type='Emph‸'/></mvc:View>`
+  );
+  assert.equal(context?.kind, "value");
+  assert.equal(context?.member, "type");
+});
+
+test("between attributes is still a name position", () => {
+  const context = xmlAt(`<mvc:View xmlns="sap.m"><Button text='Go' ty‸/></mvc:View>`);
+  assert.equal(context?.kind, "member");
+  assert.equal(context?.prefix, "ty");
+});

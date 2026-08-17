@@ -17,6 +17,13 @@
  * part and the WorkspaceEdit around it is not.
  */
 
+import {
+  abapLiterals,
+  abapSpans,
+  abapStatements,
+  declaredNames,
+} from "./abapscan";
+
 import type { NamedSpan } from "./context";
 
 /** The frontend actions whose first argument is a control id. Same set the
@@ -47,34 +54,21 @@ interface Literal {
 }
 
 /**
- * Every ABAP string literal with its content span. Both quote forms, both
- * escapes (`''` and ` `` `), and `|…|` templates are skipped rather than
- * parsed: a template is not where an id or a binding path is written, and
- * half-understanding one would be worse than leaving it alone.
+ * Every ABAP string literal with its content span, from the shared lexer.
+ *
+ * This used to be its own scan, and it read a `'` inside a `" comment` as the
+ * start of a literal - one apostrophe in one comment ("that's the wire") then
+ * swallowed the rest of the file, and F2 found no wires at all. Silently: the
+ * rename went through on the id alone and the binding it belonged to kept
+ * pointing at the old name, which is the exact defect this module exists to
+ * prevent.
  */
 function literals(source: string): Literal[] {
-  const out: Literal[] = [];
-  for (let i = 0; i < source.length; i++) {
-    const ch = source[i];
-    if (ch !== "'" && ch !== "`") {
-      continue;
-    }
-    const start = i + 1;
-    let j = start;
-    for (; j < source.length; j++) {
-      if (source[j] !== ch) {
-        continue;
-      }
-      if (source[j + 1] === ch) {
-        j++; // an escaped quote, still inside the literal
-        continue;
-      }
-      break;
-    }
-    out.push({ start, end: j, text: source.slice(start, j) });
-    i = j;
-  }
-  return out;
+  return abapLiterals(source).map((span) => ({
+    start: span.start,
+    end: span.end,
+    text: source.slice(span.start, span.end),
+  }));
 }
 
 /** The first literal starting after `from`, within reach. */
@@ -132,10 +126,16 @@ const ROOT_PATH_SEGMENT = /\/([A-Z_][A-Z0-9_]*)/gi;
  *  target rather than a coincidence: only a name the class DECLARES may be
  *  renamed, so a binding path into a nested structure is left alone. */
 function declares(source: string, name: string): boolean {
-  return new RegExp(
-    String.raw`\b(?:DATA|CLASS-DATA|CONSTANTS)\s*:?\s*(?:[\w,\s]*\b)?${name}\b`,
-    "i"
-  ).test(source);
+  // The name has to stand where a declaration puts the thing it introduces.
+  // Any word inside the statement used to count, so `TYPE`, `string` and
+  // `LENGTH` all looked declared - and F2 on the `string` in
+  // `DATA mv_x TYPE string.` offered a rename that would have rewritten every
+  // TYPE clause in the class.
+  return abapStatements(source).some((statement) =>
+    declaredNames(statement.text).some(
+      (declared) => declared.name.toUpperCase() === name.toUpperCase()
+    )
+  );
 }
 
 /** Is this offset inside one of the source's string literals? */
@@ -143,23 +143,13 @@ function insideLiteral(all: readonly Literal[], offset: number): boolean {
   return all.some((literal) => offset >= literal.start && offset < literal.end);
 }
 
-/** The comment lines of an ABAP source - `*` in column one, and everything
- *  after a `"` that is not inside a literal. */
-function commentRanges(source: string, all: readonly Literal[]): Array<[number, number]> {
-  const out: Array<[number, number]> = [];
-  let lineStart = 0;
-  for (const line of source.split("\n")) {
-    if (/^\s*\*/.test(line)) {
-      out.push([lineStart, lineStart + line.length]);
-    } else {
-      const quote = line.indexOf('"');
-      if (quote >= 0 && !insideLiteral(all, lineStart + quote)) {
-        out.push([lineStart + quote, lineStart + line.length]);
-      }
-    }
-    lineStart += line.length + 1;
-  }
-  return out;
+/** The comment spans of an ABAP source - `*` in column one and `"` to the end
+ *  of the line, as the shared lexer sees them (a `"` inside a literal is not
+ *  a comment, and it knows which is which). */
+function commentRanges(source: string): Array<[number, number]> {
+  return abapSpans(source)
+    .filter((span) => span.kind === "comment")
+    .map((span) => [span.from, span.to] as [number, number]);
 }
 
 /**
@@ -181,7 +171,7 @@ export function attributeSpans(source: string, name: string): NamedSpan[] {
     return [];
   }
   const all = literals(source);
-  const comments = commentRanges(source, all);
+  const comments = commentRanges(source);
   const inComment = (at: number) =>
     comments.some(([from, to]) => at >= from && at < to);
   const out: NamedSpan[] = [];

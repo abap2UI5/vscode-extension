@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CONFIG_SECTION } from "./settings";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { runGate, VIEW_XML_RE } from "./gate";
 import { toDiagnostics } from "./diagnostics";
@@ -33,11 +34,14 @@ import {
  * two ways of reading a file.
  */
 
-const CONFIG_SECTION = "abap2ui5";
 const LIVE_DEBOUNCE_MS = 400;
 
+function config() {
+  return vscode.workspace.getConfiguration(CONFIG_SECTION);
+}
+
 function settings(): SettingsOptions {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const cfg = config();
   return {
     minUi5: cfg.get<string>("viewCheck.minUi5", "1.71"),
     distribution: cfg.get<string>("viewCheck.distribution", "sapui5"),
@@ -155,7 +159,12 @@ export function webFindingsNow(doc: vscode.TextDocument): PropertyFinding[] {
   const text = doc.getText();
   const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
   const opts = options(doc);
-  const gate = runGate(text, doc.fileName, isXml, opts);
+  let gate;
+  try {
+    gate = runGate(text, doc.fileName, isXml, opts);
+  } catch {
+    return []; // an unparsable buffer mid-edit is not worth reporting
+  }
   applyBaselineFor(opts, doc, gate.findings);
   memo = { key, version: doc.version, findings: gate.findings };
   return gate.findings;
@@ -182,7 +191,15 @@ export function registerWebCheck(
     const text = doc.getText();
     const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
     const opts = options(doc);
-    const gate = runGate(text, doc.fileName, isXml, opts);
+    let gate;
+    try {
+      gate = runGate(text, doc.fileName, isXml, opts);
+    } catch (err) {
+      // one keystroke's worth of unparsable buffer, not a reason to throw
+      // out of a listener on every character
+      log(`web: ${doc.fileName} could not be checked (${String(err)})`);
+      return;
+    }
     const waived = applyBaselineFor(opts, doc, gate.findings);
     if (gate.nothingChecked) {
       diagnostics.delete(doc.uri);
@@ -235,8 +252,18 @@ export function registerWebCheck(
         check(doc, true);
       }
     }),
-    vscode.workspace.onDidSaveTextDocument((doc) => schedule(doc, 0)),
+    // The same two settings the desktop check honours. Turning live checking
+    // off and still being checked on every keystroke in the browser is the
+    // kind of difference nobody expects from the same setting.
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (config().get<boolean>("viewCheck.onSave", true)) {
+        schedule(doc, 0);
+      }
+    }),
     vscode.workspace.onDidChangeTextDocument((e) => {
+      if (!config().get<boolean>("viewCheck.live", true)) {
+        return;
+      }
       if (e.contentChanges.length) {
         schedule(e.document, LIVE_DEBOUNCE_MS);
       }
@@ -250,9 +277,15 @@ export function registerWebCheck(
 
   /* A config file is part of the answer for every file it governs, so a
    * change to one invalidates the cache and re-checks what is open - the same
-   * watcher the desktop build keeps. */
+   * watcher the desktop build keeps.
+   *
+   * The baseline files the configs name are watched with them: they are read
+   * once into `baselines` and nothing else re-reads them, so a pull that
+   * updated or emptied one left the editor waiving findings CI reports for
+   * the rest of the session - the editor/CI drift this module exists to
+   * prevent. Desktop re-reads per check and notices by itself. */
   const watcher = vscode.workspace.createFileSystemWatcher(
-    `**/{${CONFIG_FILE_NAMES.join(",")}}`
+    `**/{${CONFIG_FILE_NAMES.join(",")},*baseline*.json}`
   );
   const reload = async () => {
     await readWorkspaceConfigs(log);

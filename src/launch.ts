@@ -229,14 +229,23 @@ export function watchProxyStatus(session: Session): void {
         if (pick !== "Re-enter credentials" || !origin) {
           return;
         }
-        await clearCredentials(session.ctx, origin);
-        const creds = await ensureCredentials(session.ctx, origin);
-        if (!creds) {
-          return;
+        try {
+          await clearCredentials(session.ctx, origin);
+          const creds = await ensureCredentials(session.ctx, origin);
+          if (!creds) {
+            return;
+          }
+          await session.proxy.start(origin, creds.user, creds.pass);
+          session.lastAuthPrompt = 0;
+          reloadShownApp(session, "Reloaded with new credentials");
+        } catch (err) {
+          // the same start( ) F9 reports on - a rejection here had nowhere
+          // to land, so a system that refused the reconnect said nothing
+          session.log(`proxy: could not restart - ${String(err)}`);
+          vscode.window.showErrorMessage(
+            `abap2UI5: could not reconnect to the system - ${String(err)}`
+          );
         }
-        await session.proxy.start(origin, creds.user, creds.pass);
-        session.lastAuthPrompt = 0;
-        reloadShownApp(session, "Reloaded with new credentials");
       });
   };
 }

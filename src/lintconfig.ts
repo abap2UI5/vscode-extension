@@ -58,6 +58,7 @@ const cache = new Map<string, CacheEntry>();
 export function clearConfigCache(): void {
   cache.clear();
   baselineCache.clear();
+  discoveryCache.clear();
 }
 
 /**
@@ -93,17 +94,35 @@ function readConfig(file: string): CacheEntry {
   return entry;
 }
 
+/**
+ * Which config file governs a directory, memoised.
+ *
+ * Only the PARSING was cached before, on the file's mtime - the discovery
+ * itself walked the tree upward with a filesystem probe per level, on every
+ * live check, every code-action request and every code-lens evaluation, i.e.
+ * several times per keystroke. Both this and the parse memo are dropped by
+ * `clearConfigCache`, which the config-file watcher calls, so a config that
+ * appears or disappears is still noticed.
+ */
+const discoveryCache = new Map<string, string | undefined>();
+
 /** The config file governing `dir`, searching upward — the linter's own
  *  discovery, so editor and CLI find the same file. */
 export function findConfigFile(dir: string | undefined): string | undefined {
   if (!dir) {
     return undefined;
   }
-  try {
-    return findConfigFrom(dir) ?? undefined;
-  } catch {
-    return undefined;
+  if (discoveryCache.has(dir)) {
+    return discoveryCache.get(dir);
   }
+  let found: string | undefined;
+  try {
+    found = findConfigFrom(dir) ?? undefined;
+  } catch {
+    found = undefined;
+  }
+  discoveryCache.set(dir, found);
+  return found;
 }
 
 /**
@@ -167,6 +186,21 @@ function readBaseline(file: string): Map<string, number> | null {
   }
   baselineCache.set(file, { mtimeMs, map });
   return map;
+}
+
+/**
+ * Forgets one baseline file - for the moment right after this extension wrote
+ * it. The memo is keyed on the file's mtime, and filesystems whose timestamps
+ * have one-second granularity report the same one for a write that closely
+ * follows the read: the just-waived finding then kept its squiggle until
+ * something else moved the clock.
+ */
+export function clearBaselineCache(file?: string): void {
+  if (file) {
+    baselineCache.delete(file);
+  } else {
+    baselineCache.clear();
+  }
 }
 
 /**

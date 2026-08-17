@@ -16,7 +16,9 @@ import {
   screenshotUnsupported,
   shotLabel,
   viewportCount,
+  quoteForShell,
   resolveCheckerCommand,
+  splitCommandLine,
   scratchFileName,
 } from "../checkcore";
 
@@ -403,4 +405,59 @@ test("within a rule the findings are in reading order", () => {
 
 test("nothing found is an empty list, not a group of nothing", () => {
   assert.deepEqual(groupByRule([]), []);
+});
+
+// ---------------------------------------------------------------------------
+// Command lines with spaces in them
+// ---------------------------------------------------------------------------
+
+test("a quoted program path survives the split", () => {
+  // the normal shape of this setting on Windows - splitting on whitespace
+  // alone turned it into four pieces, none of which exist
+  const cmd = resolveCheckerCommand({
+    ...NO_GATE,
+    explicit: `"C:\\Program Files\\nodejs\\node.exe" "C:\\My Tools\\cli.mjs" --flag`,
+  });
+  assert.deepEqual(cmd, {
+    cmd: "C:\\Program Files\\nodejs\\node.exe",
+    args: ["C:\\My Tools\\cli.mjs", "--flag"],
+    env: {},
+    installed: true,
+  });
+});
+
+test("splitting a command line handles quotes, spacing and nothing at all", () => {
+  assert.deepEqual(splitCommandLine("node cli.mjs"), ["node", "cli.mjs"]);
+  assert.deepEqual(splitCommandLine("  node   cli.mjs  "), ["node", "cli.mjs"]);
+  assert.deepEqual(splitCommandLine(`'/opt/my tools/node' cli.mjs`), [
+    "/opt/my tools/node",
+    "cli.mjs",
+  ]);
+  assert.deepEqual(splitCommandLine(""), []);
+});
+
+test("a Windows shell argument with a space in it is quoted", () => {
+  // the render gate writes its scratch file under the user's TEMP, and a
+  // profile called "John Smith" made the gate answer "no JSON" for good
+  const scratch = "C:\\Users\\John Smith\\AppData\\Local\\Temp\\x.clas.abap";
+  assert.equal(quoteForShell(scratch, "win32"), `"${scratch}"`);
+  assert.equal(quoteForShell("--json", "win32"), "--json");
+  // no shell is involved off Windows, so nothing is quoted there
+  assert.equal(quoteForShell("/tmp/a b/x.abap", "linux"), "/tmp/a b/x.abap");
+});
+
+test("a finding with several fix spans is still one finding", () => {
+  // the "fix all N finding(s)" label counted edits, so one finding carrying
+  // three spans announced three findings
+  const findings = [
+    { fixes: [{ start: 0, end: 2, text: "a" }, { start: 4, end: 6, text: "b" }] },
+    { fixes: [{ start: 10, end: 12, text: "c" }] },
+  ];
+  const planned = plannedFixes(findings);
+  assert.equal(planned.length, 3, "three spans are applied");
+  const applied = new Set(planned);
+  const covered = findings.filter((f) =>
+    (f.fixes ?? []).some((fix) => applied.has(fix))
+  ).length;
+  assert.equal(covered, 2, "from two findings");
 });

@@ -2,6 +2,69 @@
 
 ## Unreleased
 
+- **Fixes from a pass over the whole extension.** Nothing here is new
+  behaviour; all of it is behaviour that was supposed to work already.
+
+  **The preview survives a system that drops a connection.** A SAP system
+  resetting the socket while an answer was still arriving took the whole
+  extension host down with it. Loads the preview cancels (every reload cancels
+  a few) now stop the request on the system too, instead of leaving it working
+  on an answer nobody is waiting for. Session cookies from systems configured
+  for cross-site use are no longer dropped, a logon page in a single-byte
+  charset keeps its umlauts, and the proxy's own token stays out of the output
+  channels — it used to ride along in the traffic log, where pasting the log
+  into an issue handed over a working authorized url.
+
+  **The render gate cannot pile up any more.** It had no time limit and was
+  never killed: on a slow line every save started another one and none of them
+  ever went away. It now gives up after three minutes, or as soon as you have
+  moved on from what it was rendering. On Windows it also works at all when
+  your user name has a space in it — the scratch file arrived as two arguments
+  and the gate answered "no JSON" for good — and `viewCheck.command` /
+  `mcp.command` accept a quoted program path.
+
+  **Completion, hover and the outline read ``tag( `Button` )``.** The
+  positional spelling is what "Convert XML View to Builder Chain" writes and
+  what the samples use, and only half the extension understood it: converted
+  code got no completions, and the outline showed every element as `?`.
+
+  **F2 rename finds both ends of a wire again.** One apostrophe in one comment
+  ("don't") used to hide every control id after it, so the rename went through
+  on one end and left the other pointing at the old name — silently, which is
+  the whole defect the rename exists to prevent. The formatter is no longer
+  fooled by a commented-out `)->end( )` either, and F2 on a type name no
+  longer offers to rewrite every `TYPE string` in the class.
+
+  **Checks stop showing what is no longer true.** Disabling a rule in
+  `abap2ui5lint.jsonc` used to leave the quick fix offering findings whose
+  squiggles had already gone. "Check All Views in the Workspace" clears files
+  that were fixed or deleted since the last run, checks each file once instead
+  of twice, and says it was cancelled instead of reporting a whole-workspace
+  result for part of one.
+
+  **The app keeps running when you collapse the panel.** Ctrl+J used to reload
+  it from scratch, losing the server session and any page it had navigated to.
+  Changing the theme or language no longer leaves the toolbar and the app
+  disagreeing about which url is loaded, and hiding the preview view no longer
+  breaks the next save.
+
+  **On vscode.dev, only what actually works is offered.** The App Preview, the
+  Apps tree and the Findings tree appeared there with nothing behind them and
+  loaded forever; the web check now also honours `viewCheck.live` and
+  `viewCheck.onSave` and notices a baseline file that changed.
+
+  **Typing is cheaper.** Inline annotations are debounced and no longer
+  repaint when an unrelated extension touches its own diagnostics, completion
+  reads the document once instead of twice, and the member and config lookups
+  behind it are cached — the work per keystroke was several times what it
+  needed to be on a long view.
+
+  Also: the last attribute of a chain can be removed in the property editor,
+  a namespaced class shows up on the navigation map, two systems with the same
+  name can both be selected, resetting credentials reaches systems removed
+  from the settings, and re-running "Install Render Gate" without a network no
+  longer deletes the gate you already had.
+
 - **Three things the editor now says about a line unasked.** One decoration
   pass, three ideas borrowed from the extensions that made them popular, all
   three fed by data this extension already ships.

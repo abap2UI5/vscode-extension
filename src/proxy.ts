@@ -205,6 +205,10 @@ function tryRestore(data,left){
 
 // ---- commands from the preview ------------------------------------------
 window.addEventListener('message',function(evt){
+  // only the preview that embeds this page may drive it: an iframe the app
+  // itself embeds can post here too, and 'restore' would let it write the
+  // app's model - which the app then sends on to the system
+  if(evt.source!==window.parent)return;
   var cmd=evt&&evt.data&&evt.data.__abap2ui5Cmd;
   if(!cmd)return;
   if(cmd==='inspect'){setInspect(!!evt.data.on);}
@@ -240,6 +244,42 @@ export function injectRuntimeHook(html: string): string {
 /** Documents bigger than this are streamed through untouched - an HTML this
  *  size is not the app page the hook is for. */
 const INJECT_MAX_BYTES = 5 * 1024 * 1024;
+
+/** The charset a `Content-Type` declares, lowercased, or "" when it is silent. */
+function charsetOf(contentType: string): string {
+  return (
+    /;\s*charset\s*=\s*"?([\w-]+)"?/i.exec(contentType)?.[1].toLowerCase() ?? ""
+  );
+}
+
+/**
+ * The body of an injectable document as text. Everything the hook is planted
+ * into gets re-encoded as UTF-8, so a document that arrived in one of the
+ * single-byte charsets an old ICM still serves its logon and error pages in
+ * has to be decoded as such first - `toString("utf8")` turned every umlaut on
+ * those pages into replacement characters.
+ */
+export function decodeBody(body: Buffer, contentType: string): string {
+  const charset = charsetOf(contentType);
+  const latin1 =
+    charset === "iso-8859-1" ||
+    charset === "iso8859-1" ||
+    charset === "latin1" ||
+    charset === "windows-1252" ||
+    charset === "cp1252";
+  return body.toString(latin1 ? "latin1" : "utf8");
+}
+
+/** The same `Content-Type` with its charset set to UTF-8, which is what the
+ *  injected document is encoded in when it leaves. */
+export function withUtf8Charset(contentType: string): string {
+  if (!contentType) {
+    return "text/html; charset=utf-8";
+  }
+  return charsetOf(contentType)
+    ? contentType.replace(/;\s*charset\s*=\s*"?[\w-]+"?/i, "; charset=utf-8")
+    : `${contentType}; charset=utf-8`;
+}
 
 /**
  * Class names out of an ADT quick-search answer. The tag's attribute order
@@ -319,8 +359,34 @@ export class SapProxy {
    *  what feeds the traffic log and the toolbar's roundtrip badge. */
   onTraffic?: (entry: TrafficEntry) => void;
 
+  /**
+   * Serialises start/stop. Both await the network, and two overlapping calls
+   * (F9 racing "Run an App from the System", or the 401 re-logon) used to
+   * close the same old server and then each assign `this.server` - leaving
+   * the loser listening forever with the credentials still injected, on a
+   * port nothing could close again.
+   */
+  private queue: Promise<unknown> = Promise.resolve();
+
+  private serialize<T>(op: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(op, op);
+    this.queue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
   /** Starts the proxy (or just refreshes auth if the target stays the same). */
-  async start(targetOrigin: string, user: string, pass: string): Promise<number> {
+  start(targetOrigin: string, user: string, pass: string): Promise<number> {
+    return this.serialize(() => this.startNow(targetOrigin, user, pass));
+  }
+
+  private async startNow(
+    targetOrigin: string,
+    user: string,
+    pass: string
+  ): Promise<number> {
     const target = new URL(targetOrigin);
     const authHeader =
       "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
@@ -332,7 +398,7 @@ export class SapProxy {
 
     // assigned after stop( ), which clears the credentials of the proxy it
     // tears down - including, before this order, the ones just handed in
-    await this.stop();
+    await this.stopNow();
     this.authHeader = authHeader;
     this.target = target;
     this.token = randomBytes(16).toString("base64url");
@@ -381,8 +447,14 @@ export class SapProxy {
     if (url === prefix) {
       return "/";
     }
-    if (url.startsWith(`${prefix}/`) || url.startsWith(`${prefix}?`)) {
+    if (url.startsWith(`${prefix}/`)) {
       return url.slice(prefix.length);
+    }
+    // a launch url without a path (`https://host:44300?app_start=...`) leaves
+    // the query directly behind the prefix - forwarding it as written would
+    // put `GET ?app_start=... HTTP/1.1` on the wire, which servers reject
+    if (url.startsWith(`${prefix}?`)) {
+      return "/" + url.slice(prefix.length);
     }
 
     // no prefix: only the cookie from an earlier authorized answer counts
@@ -395,18 +467,6 @@ export class SapProxy {
       : undefined;
   }
 
-  /**
-   * Reads the activation state of a class from the system's ADT service
-   * (`/sap/bc/adt/oo/classes/<name>`), using the credentials the proxy already
-   * injects. The root element's `adtcore:version` attribute is `inactive`
-   * while a saved-but-not-activated version exists and flips back to `active`
-   * on activation, and `adtcore:changedAt` moves with every change — together
-   * the only way to notice an activation done outside this extension, since
-   * VS Code has no event for it.
-   *
-   * Resolves to whatever of the two the answer carried. Rejects with an
-   * {@link AdtStatusError} on a non-2xx status.
-   */
   /**
    * One GET against the system with the credentials the proxy already holds -
    * what the ADT lookups and the UI5-version detection are built on. The
@@ -461,6 +521,18 @@ export class SapProxy {
     });
   }
 
+  /**
+   * Reads the activation state of a class from the system's ADT service
+   * (`/sap/bc/adt/oo/classes/<name>`), using the credentials the proxy already
+   * injects. The root element's `adtcore:version` attribute is `inactive`
+   * while a saved-but-not-activated version exists and flips back to `active`
+   * on activation, and `adtcore:changedAt` moves with every change — together
+   * the only way to notice an activation done outside this extension, since
+   * VS Code has no event for it.
+   *
+   * Resolves to whatever of the two the answer carried. Rejects with an
+   * {@link AdtStatusError} on a non-2xx status.
+   */
   async fetchClassState(
     className: string,
     sapClient?: string
@@ -491,6 +563,12 @@ export class SapProxy {
     // an authorized request that came in prefixed leaves with the cookie, so
     // that an absolute-path resource is authorized too
     const seedCookie = String(req.url ?? "").startsWith(`/${TOKEN_SEGMENT}/`);
+
+    // What the traffic log and the status reports are allowed to see. The
+    // incoming url carries the token, and those two end up in output channels
+    // users paste into issues - which would hand over a working authorized
+    // url for as long as the proxy runs. The forwarded path never has it.
+    const reportedPath = path;
 
     const target = this.target!;
     const isHttps = target.protocol === "https:";
@@ -554,9 +632,18 @@ export class SapProxy {
     };
 
     const proxyReq = mod.request(options, (proxyRes) => {
+      // An upstream that dies mid-body emits on the RESPONSE stream, and
+      // pipe( ) does not forward that to the destination - an unhandled
+      // "error" here used to take the whole extension host down. Attached
+      // before any branch below can return.
+      proxyRes.on("error", () => {
+        proxyRes.destroy();
+        res.destroy();
+      });
+
       this.onResponse?.({
         status: proxyRes.statusCode ?? 0,
-        path: String(req.url ?? ""),
+        path: reportedPath,
       });
       // The traffic log: measured to the last body byte, so the duration is
       // what the user actually waited for. The extra data listener rides
@@ -568,7 +655,7 @@ export class SapProxy {
       proxyRes.on("end", () => {
         this.onTraffic?.({
           method: String(req.method ?? "GET"),
-          path: String(req.url ?? ""),
+          path: reportedPath,
           status: proxyRes.statusCode ?? 0,
           durationMs: Date.now() - startedAt,
           bytes: receivedBytes,
@@ -606,12 +693,20 @@ export class SapProxy {
         );
       }
 
-      // Make cookies valid on localhost: strip Domain + Secure
+      // Make cookies valid on localhost: strip Domain, and Secure unless the
+      // cookie needs it. A `SameSite=None` cookie without `Secure` is dropped
+      // outright by the webview's Chromium, so stripping it there loses the
+      // session cookie of every system configured per SAP's cross-site notes
+      // - and loopback counts as a trustworthy origin, so Secure is accepted
+      // over http anyway.
       const setCookie = proxyRes.headers["set-cookie"];
       const cookies = setCookie
-        ? setCookie.map((c) =>
-            c.replace(/;\s*Domain=[^;]+/i, "").replace(/;\s*Secure/i, "")
-          )
+        ? setCookie.map((c) => {
+            const withoutDomain = c.replace(/;\s*Domain=[^;]+/i, "");
+            return /;\s*SameSite\s*=\s*None\b/i.test(withoutDomain)
+              ? withoutDomain
+              : withoutDomain.replace(/;\s*Secure/i, "");
+          })
         : [];
       if (seedCookie) {
         cookies.push(
@@ -640,36 +735,42 @@ export class SapProxy {
       const chunks: Buffer[] = [];
       let size = 0;
       let passedThrough = false;
-      proxyRes.on("data", (chunk: Buffer) => {
-        if (passedThrough) {
-          res.write(chunk);
-          return;
-        }
+      const buffer = (chunk: Buffer) => {
         chunks.push(chunk);
         size += chunk.length;
-        if (size > INJECT_MAX_BYTES) {
-          // Too big to be the app page - flush what is buffered and stream on.
-          passedThrough = true;
-          res.writeHead(proxyRes.statusCode || 502, outHeaders);
-          for (const buffered of chunks) {
-            res.write(buffered);
-          }
-          chunks.length = 0;
-        }
-      });
-      proxyRes.on("end", () => {
-        if (passedThrough) {
-          res.end();
+        if (size <= INJECT_MAX_BYTES) {
           return;
         }
-        const body = injectRuntimeHook(Buffer.concat(chunks).toString("utf8"));
+        // Too big to be the app page - flush what is buffered and hand the
+        // rest to pipe( ), which honours backpressure where a bare write( )
+        // in this listener would buffer the remainder in memory.
+        passedThrough = true;
+        proxyRes.off("data", buffer);
+        res.writeHead(proxyRes.statusCode || 502, outHeaders);
+        for (const buffered of chunks) {
+          res.write(buffered);
+        }
+        chunks.length = 0;
+        proxyRes.pipe(res);
+      };
+      proxyRes.on("data", buffer);
+      proxyRes.on("end", () => {
+        if (passedThrough) {
+          return; // pipe( ) ends the response itself
+        }
+        const body = injectRuntimeHook(
+          decodeBody(Buffer.concat(chunks), contentType)
+        );
         const payload = Buffer.from(body, "utf8");
+        // the body leaves as UTF-8 whatever it arrived as, so the declared
+        // charset has to move with it - an ISO-8859-1 logon page used to be
+        // decoded wrongly and then served under its original charset
+        outHeaders["content-type"] = withUtf8Charset(contentType);
         delete outHeaders["transfer-encoding"];
         outHeaders["content-length"] = payload.length;
         res.writeHead(proxyRes.statusCode || 502, outHeaders);
         res.end(payload);
       });
-      proxyRes.on("error", () => res.end());
     });
 
     // a system that accepts the connection and then says nothing would
@@ -679,16 +780,37 @@ export class SapProxy {
     );
 
     proxyReq.on("error", (err) => {
+      if (res.writableEnded || res.destroyed) {
+        return; // the client is already gone - nothing left to tell
+      }
       if (!res.headersSent) {
         res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
       }
       res.end("abap2UI5 proxy error: " + err.message);
     });
 
+    // The webview cancels in-flight loads on every reload and navigation.
+    // Without this the forwarded request runs to completion (or the two-minute
+    // timeout) against a client that stopped listening, holding a work process
+    // on the system and - on the injecting path - buffering into nothing.
+    res.on("close", () => {
+      if (!res.writableEnded) {
+        proxyReq.destroy();
+      }
+    });
+    // a body that stops arriving mid-upload otherwise lands as an unhandled
+    // "error" on the request stream
+    req.on("error", () => proxyReq.destroy());
+    res.on("error", () => proxyReq.destroy());
+
     req.pipe(proxyReq);
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    return this.serialize(() => this.stopNow());
+  }
+
+  private async stopNow(): Promise<void> {
     const server = this.server;
     this.server = undefined;
     this.port = undefined;

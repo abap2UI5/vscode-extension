@@ -50,10 +50,19 @@ export class PreviewViewProvider
   public static readonly viewId = "abap2ui5.preview";
 
   private view?: vscode.WebviewView;
-  private target?: AppTarget;
+  /** Whether the panel is showing the app rather than the welcome screen.
+   *  WHICH app is not this class's to remember - `session.currentTarget` is
+   *  the one answer, and keeping a copy meant the theme or language picker
+   *  updated the session while the panel reloaded from the url it had first. */
+  private showsApp = false;
   private previewRendered = false;
 
   constructor(private readonly session: Session) {}
+
+  /** The app this panel shows, straight from the session. */
+  private get target(): AppTarget | undefined {
+    return this.showsApp ? this.session.currentTarget : undefined;
+  }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -62,20 +71,31 @@ export class PreviewViewProvider
     view.webview.onDidReceiveMessage((msg) =>
       handleWebviewMessage(this.session, msg, this.target)
     );
+    // The user can take the view away (right-click the panel, uncheck it).
+    // Everything below would then post to a disposed webview, which throws -
+    // in the save handler, between stopping the activation watch and taking
+    // its new baseline.
+    view.onDidDispose(() => {
+      if (this.view === view) {
+        this.view = undefined;
+        this.previewRendered = false;
+      }
+    });
     this.render();
   }
 
   async show(target: AppTarget, reason?: string): Promise<void> {
-    this.target = target;
+    this.session.currentTarget = target;
+    this.showsApp = true;
+    const renderedBefore = this.previewRendered;
     await vscode.commands.executeCommand(`${PreviewViewProvider.viewId}.focus`);
-    this.render(reason);
-  }
-
-  /** Reloads the app already shown, without stealing the focus. */
-  reload(reason?: string): void {
-    if (this.target) {
-      this.post(loadMessageFor(this.session, this.target, reason));
+    // Focusing an unresolved view resolves it, and resolving renders the app -
+    // which starts loading it. Rendering again here would post a load message
+    // on top of that and restart the load that had just begun.
+    if (!renderedBefore && this.previewRendered) {
+      return;
     }
+    this.render(reason);
   }
 
   /** Posts to the rendered preview; ignored while the welcome screen is up. */
@@ -102,7 +122,7 @@ export class PreviewViewProvider
 
   /** Hands the app over to the tab: back to the empty state, no reload. */
   clear(): void {
-    this.target = undefined;
+    this.showsApp = false;
     this.render();
   }
 
@@ -112,7 +132,8 @@ export class PreviewViewProvider
       return;
     }
     const session = this.session;
-    if (!this.target) {
+    const target = this.target;
+    if (!target) {
       view.webview.html = welcomeHtml({
         nonce: createNonce(),
         hasLaunchUrl: session.hasLaunchUrl(),
@@ -128,17 +149,15 @@ export class PreviewViewProvider
     }
     if (!this.previewRendered) {
       view.webview.html = previewHtml({
-        ...this.target,
+        ...target,
         theme: session.theme(),
         language: session.language(),
-        modelRoots: modelRootsOf(this.target.className),
+        modelRoots: modelRootsOf(target.className),
         nonce: createNonce(),
       });
       this.previewRendered = true;
     } else {
-      void view.webview.postMessage(
-        loadMessageFor(session, this.target, reason)
-      );
+      void view.webview.postMessage(loadMessageFor(session, target, reason));
     }
   }
 }
