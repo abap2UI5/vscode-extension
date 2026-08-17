@@ -445,3 +445,19 @@ test("a Windows shell argument with a space in it is quoted", () => {
   // no shell is involved off Windows, so nothing is quoted there
   assert.equal(quoteForShell("/tmp/a b/x.abap", "linux"), "/tmp/a b/x.abap");
 });
+
+test("a finding with several fix spans is still one finding", () => {
+  // the "fix all N finding(s)" label counted edits, so one finding carrying
+  // three spans announced three findings
+  const findings = [
+    { fixes: [{ start: 0, end: 2, text: "a" }, { start: 4, end: 6, text: "b" }] },
+    { fixes: [{ start: 10, end: 12, text: "c" }] },
+  ];
+  const planned = plannedFixes(findings);
+  assert.equal(planned.length, 3, "three spans are applied");
+  const applied = new Set(planned);
+  const covered = findings.filter((f) =>
+    (f.fixes ?? []).some((fix) => applied.has(fix))
+  ).length;
+  assert.equal(covered, 2, "from two findings");
+});

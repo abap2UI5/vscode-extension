@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CONFIG_SECTION } from "./settings";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { runGate, VIEW_XML_RE } from "./gate";
 import { toDiagnostics } from "./diagnostics";
@@ -33,7 +34,6 @@ import {
  * two ways of reading a file.
  */
 
-const CONFIG_SECTION = "abap2ui5";
 const LIVE_DEBOUNCE_MS = 400;
 
 function config() {

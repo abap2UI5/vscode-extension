@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as path from "path";
 import { CORPUS_DIRS, VIEW_CHECK_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
@@ -18,7 +19,6 @@ import { splitCommandLine } from "./checkcore";
  * passed along.
  */
 
-const CONFIG_SECTION = "abap2ui5";
 const PROVIDER_ID = "abap2ui5.mcp";
 
 /** Repo-name -> env var the server resolves it with (see ai-mcp lib/repos.mjs,

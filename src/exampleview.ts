@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as path from "path";
 import { controlCallAt } from "./context";
@@ -16,7 +17,6 @@ import { CORPUS_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
  * the line.
  */
 
-const CONFIG_SECTION = "abap2ui5";
 
 /** Where the catalogues live, newest directory name first - the same names
  *  the MCP registration probes for. */

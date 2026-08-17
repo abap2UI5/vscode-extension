@@ -38,11 +38,14 @@ export function registerModelView(
         );
       },
     }),
-    vscode.workspace.onDidCloseTextDocument((doc) => {
-      if (doc.uri.scheme === SCHEME) {
-        contents.delete(doc.uri.toString());
-      }
-    })
+    /*
+     * The dump is deliberately NOT dropped when the document closes. VS Code
+     * closes a virtual document it has kept hidden for a few minutes and asks
+     * the provider again when the tab is returned to - so forgetting here
+     * showed the "no model dump yet" placeholder in a tab that was still
+     * open and had a dump a moment ago. The map is bounded by the number of
+     * classes a session dumps, and one dump per class at that.
+     */
   );
 
   return {

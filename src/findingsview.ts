@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { DIAG_SOURCE, RULES_PAGE, ruleOf } from "./diagnostics";
+
 import * as path from "path";
 import {
   FindingSeverity,
@@ -24,8 +26,6 @@ import {
  * "Check All Views in the Workspace".
  */
 
-const DIAG_SOURCE = "abap2UI5-linter";
-const RULES_PAGE = "https://abap2ui5.github.io/linter/";
 
 type Node = RuleGroup | RuleEntry;
 
@@ -42,17 +42,6 @@ function severityOf(diagnostic: vscode.Diagnostic): FindingSeverity {
     : "hint";
 }
 
-/** The rule id behind a diagnostic, whether or not it carries a docs link. */
-function ruleOf(diagnostic: vscode.Diagnostic): string | undefined {
-  const code = diagnostic.code;
-  if (typeof code === "string") {
-    return code;
-  }
-  if (code && typeof code === "object" && "value" in code) {
-    return String(code.value);
-  }
-  return undefined;
-}
 
 const ICON: Record<FindingSeverity, vscode.ThemeIcon> = {
   error: new vscode.ThemeIcon("error", new vscode.ThemeColor("problemsErrorIcon.foreground")),

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -48,7 +49,6 @@ import {
  * runs on a keystroke - only on save and on demand.
  */
 
-const CONFIG_SECTION = "abap2ui5";
 
 /** How long to wait after the last keystroke before checking. Long enough
  *  that typing a control name does not flash three different errors, short

@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import { CONFIG_SECTION } from "./settings";
+import { DIAG_SOURCE } from "./diagnostics";
+
 import * as fs from "fs";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import { memberInfo, controlInfo } from "./metadata";
@@ -29,8 +32,6 @@ import { usesBuilder } from "./abap";
  * thing that has to stay cheap.
  */
 
-const CONFIG_SECTION = "abap2ui5";
-const DIAG_SOURCE = "abap2UI5-linter";
 
 /** How far a decoration may sit from the end of the line - a chain line is
  *  long, and pushing the annotation past the viewport helps nobody. */

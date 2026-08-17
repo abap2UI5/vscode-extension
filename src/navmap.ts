@@ -50,9 +50,12 @@ export function navTargetsOf(source: string): string[] {
   const targets: string[] = [];
   for (const m of source.matchAll(/nav_app_call\s*\(([^)]*)/gi)) {
     const arg = m[1];
-    for (const word of arg.matchAll(/\b([a-z]\w+)\b/gi)) {
-      const name = word[1].toUpperCase();
-      if (NOT_A_CLASS.has(word[1].toLowerCase())) {
+    // `/dmo/cl_travel_app` counts as one word: the namespace is part of the
+    // class name, and a pattern that could only start at a letter never saw
+    // one of them - the `/^\//` branch below was unreachable
+    for (const word of arg.matchAll(/(\/\w+\/)?\b([a-z]\w+)\b/gi)) {
+      const name = (word[0].startsWith("/") ? word[0] : word[2]).toUpperCase();
+      if (NOT_A_CLASS.has(word[2].toLowerCase())) {
         continue;
       }
       // Only class-looking names: the customer namespaces and z2ui5's own.

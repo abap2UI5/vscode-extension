@@ -11,6 +11,8 @@
  * `vscode`-free: XML text in, ABAP text out - covered by the test suite.
  */
 
+import { splitName } from "./context";
+
 // ---------------------------------------------------------------------------
 // A small, forgiving XML parser - views are machine-written XML, so the
 // subset (elements, attributes, comments, CDATA, PIs) is the whole language.
@@ -177,13 +179,6 @@ function lit(value: string): string {
   return "`" + value.replace(/`/g, "``").replace(/\r?\n/g, " ") + "`";
 }
 
-/** Splits `f:Card` into prefix and local name. */
-function splitTag(name: string): { prefix: string; local: string } {
-  const ix = name.indexOf(":");
-  return ix > 0
-    ? { prefix: name.slice(0, ix), local: name.slice(ix + 1) }
-    : { prefix: "", local: name };
-}
 
 interface Op {
   verb: "ele" | "tag" | "a" | "end";
@@ -195,7 +190,7 @@ interface Op {
  *  needed (a lone `n =` trips abaplint's omit_parameter_name), named when a
  *  namespace prefix rides along. */
 function elementArgs(name: string): string {
-  const { prefix, local } = splitTag(name);
+  const { prefix, local } = splitName(name);
   return prefix ? `n = ${lit(local)} ns = ${lit(prefix)}` : lit(name);
 }
 

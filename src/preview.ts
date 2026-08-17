@@ -98,14 +98,6 @@ export class PreviewViewProvider
     this.render(reason);
   }
 
-  /** Reloads the app already shown, without stealing the focus. */
-  reload(reason?: string): void {
-    const target = this.target;
-    if (target) {
-      this.post(loadMessageFor(this.session, target, reason));
-    }
-  }
-
   /** Posts to the rendered preview; ignored while the welcome screen is up. */
   post(message: unknown): void {
     if (this.view && this.previewRendered) {

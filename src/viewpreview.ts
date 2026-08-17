@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -37,7 +38,6 @@ import { createNonce, viewPreviewHtml } from "./webview";
  * look at a view.
  */
 
-const CONFIG_SECTION = "abap2ui5";
 
 interface Shot {
   uri: string;

@@ -7,7 +7,9 @@ import { expandTemplate, sapClientOf, withParams } from "./urls";
 import { allSystems, SystemProfile } from "./systems";
 import { ModelView } from "./modelview";
 
-export const CONFIG_SECTION = "abap2ui5";
+import { CONFIG_SECTION } from "./settings";
+
+export { CONFIG_SECTION };
 export const TEMPLATE_KEY = "launchUrlTemplate";
 export const OPEN_MODE_KEY = "openMode";
 const RELOAD_KEY = "reloadOn";
@@ -28,7 +30,6 @@ const RECENT_MAX = 10;
  *  the concrete `PreviewViewProvider` lives in `preview.ts`. */
 export interface PreviewSurface {
   show(target: AppTarget, reason?: string): Promise<void>;
-  reload(reason?: string): void;
   post(message: unknown): void;
   readonly isShowing: boolean;
   refreshWelcome(): void;

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CONFIG_SECTION } from "./settings";
 import { isUsableTemplate, originOf, shortUrl } from "./urls";
 
 /*
@@ -16,7 +17,6 @@ import { isUsableTemplate, originOf, shortUrl } from "./urls";
  * a password that is already known.
  */
 
-const CONFIG_SECTION = "abap2ui5";
 const TEMPLATE_KEY = "launchUrlTemplate";
 const SYSTEMS_KEY = "systems";
 const ACTIVE_KEY = "abap2ui5.activeSystem";
@@ -64,10 +64,27 @@ function singleSystem(): SystemProfile | undefined {
 export function allSystems(): SystemProfile[] {
   const list = systems();
   const single = singleSystem();
-  if (single && !list.some((s) => s.template === single.template)) {
-    return [single, ...list];
-  }
-  return list;
+  const all =
+    single && !list.some((s) => s.template === single.template)
+      ? [single, ...list]
+      : list;
+  return withUniqueNames(all);
+}
+
+/**
+ * The name is how a system is addressed - the picker shows it, the active one
+ * is remembered by it, and a running app records which one it came from. Two
+ * profiles configured with the SAME name therefore both resolved to the first:
+ * the second could not be activated at all, and its checkmark sat on its
+ * twin. Rather than refuse the configuration, the later one is numbered.
+ */
+function withUniqueNames(all: SystemProfile[]): SystemProfile[] {
+  const seen = new Map<string, number>();
+  return all.map((system) => {
+    const taken = seen.get(system.name) ?? 0;
+    seen.set(system.name, taken + 1);
+    return taken ? { ...system, name: `${system.name} (${taken + 1})` } : system;
+  });
 }
 
 /** The system F9 launches against. */
@@ -267,6 +284,7 @@ export async function ensureCredentials(
       return undefined;
     }
     await secrets.store(keys.user, user);
+    await rememberOrigin(context, origin);
   }
 
   if (!pass) {
@@ -280,21 +298,46 @@ export async function ensureCredentials(
       return undefined;
     }
     await secrets.store(keys.pass, pass);
+    await rememberOrigin(context, origin);
   }
 
   return { user, pass };
 }
 
-/** Forgets the credentials of one origin, or of every configured system. */
+/**
+ * Origins this extension has stored credentials for. SecretStorage cannot be
+ * enumerated, so a system removed from the settings used to take its password
+ * out of reach: "Reset Credentials" only walked the CONFIGURED systems, and
+ * nothing else could ever delete it.
+ */
+const STORED_ORIGINS_KEY = "abap2ui5.credentialOrigins";
+
+async function rememberOrigin(
+  context: vscode.ExtensionContext,
+  origin: string
+): Promise<void> {
+  const known = context.globalState.get<string[]>(STORED_ORIGINS_KEY, []);
+  if (!known.includes(origin)) {
+    await context.globalState.update(STORED_ORIGINS_KEY, [...known, origin]);
+  }
+}
+
+/** Forgets the credentials of one origin, or of every system this extension
+ *  has ever stored some for - configured today or not. */
 export async function clearCredentials(
   context: vscode.ExtensionContext,
   origin?: string
 ): Promise<void> {
   const origins = origin
     ? [origin]
-    : allSystems()
-        .map((s) => originOf(s.template))
-        .filter((o): o is string => !!o);
+    : [
+        ...new Set([
+          ...allSystems()
+            .map((s) => originOf(s.template))
+            .filter((o): o is string => !!o),
+          ...context.globalState.get<string[]>(STORED_ORIGINS_KEY, []),
+        ]),
+      ];
   for (const each of origins) {
     const keys = keysFor(each);
     await context.secrets.delete(keys.user);
@@ -302,4 +345,13 @@ export async function clearCredentials(
   }
   await context.secrets.delete(LEGACY_USER);
   await context.secrets.delete(LEGACY_PASS);
+  if (!origin) {
+    await context.globalState.update(STORED_ORIGINS_KEY, undefined);
+  } else {
+    const known = context.globalState.get<string[]>(STORED_ORIGINS_KEY, []);
+    await context.globalState.update(
+      STORED_ORIGINS_KEY,
+      known.filter((each) => each !== origin)
+    );
+  }
 }
