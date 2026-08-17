@@ -337,7 +337,7 @@
         "abap2ui5.codeLens": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Show *Run*, *Activate & reload* and *Check views* above the class definition of an abap2UI5 app."
+          "markdownDescription": "Show *Run*, *Activate & reload*, *Check views* and *Autofix n findings* above the class definition of an abap2UI5 app. The autofix lens appears only while the view check has findings it can correct mechanically."
         },
         "abap2ui5.openMode": {
           "type": "string",

@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
 import { addToBaseline } from "./baselinefile";
+import { plannedFixes } from "./checkcore";
 import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
 
 /*
@@ -193,38 +194,45 @@ class ViewCheckActions implements vscode.CodeActionProvider {
 }
 
 /**
- * Every fix in the file as one edit. Overlapping spans are left for the next
- * run rather than resolved by guesswork - the same rule the CLI's `--fix`
- * follows, which is why both are expected to be run until they report
- * nothing.
+ * Every fix in the file as one edit - `plannedFixes( )` decides which of them
+ * survive together, in document coordinates here.
  */
 function applyAll(
   doc: vscode.TextDocument,
   findings: PropertyFinding[]
 ): { edit: vscode.WorkspaceEdit; count: number } | undefined {
-  const fixes = findings
-    .flatMap((f) => f.fixes ?? [])
-    .sort((a, b) => a.start - b.start || a.end - b.end);
-  const edits: vscode.TextEdit[] = [];
-  let cursor = 0;
-  for (const fix of fixes) {
-    if (fix.start < cursor) {
-      continue;
-    }
-    edits.push(
+  const edits = plannedFixes(findings).map(
+    (fix) =>
       new vscode.TextEdit(
         new vscode.Range(doc.positionAt(fix.start), doc.positionAt(fix.end)),
         fix.text
       )
-    );
-    cursor = fix.end;
-  }
+  );
   if (!edits.length) {
     return undefined;
   }
   const edit = new vscode.WorkspaceEdit();
   edit.set(doc.uri, edits);
   return { edit, count: edits.length };
+}
+
+/**
+ * How many corrections `abap2ui5.fixAll` would apply to this document right
+ * now - what the code lens above the class definition offers, so a run that
+ * would report "nothing here can be corrected mechanically" is never offered
+ * in the first place.
+ *
+ * Cheap enough for a lens: `findingsNow( )` is memoised per document version
+ * and shared with the code actions, so the gate runs once per edit no matter
+ * how many of the three ask. An unparsable buffer mid-edit has nothing to
+ * offer rather than something to report.
+ */
+export function fixableCount(doc: vscode.TextDocument): number {
+  try {
+    return plannedFixes(findingsNow(doc)).length;
+  } catch {
+    return 0;
+  }
 }
 
 export function registerQuickFix(

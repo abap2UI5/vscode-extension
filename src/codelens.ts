@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
 import { classDefinitionOffset, isAppClass, usesBuilder } from "./abap";
 import { eventUsagesOf, whenBranches } from "./context";
+import { fixableCount } from "./quickfix";
 
 /*
- * The three things you do to an app class, offered where the class is
- * declared.
+ * The things you do to an app class, offered where the class is declared.
  *
  * F9 and Ctrl+F3 are the fast path once you know them, but nothing in the
  * editor says they exist - the extension's whole dev loop was discoverable
@@ -62,10 +62,37 @@ class AppCodeLens implements vscode.CodeLensProvider {
           command: "abap2ui5.checkViews",
         })
       );
+      lenses.push(...fixLens(range, doc));
       lenses.push(...whenLenses(doc, text));
     }
     return lenses;
   }
+}
+
+/**
+ * The autofix, next to the check that finds the work: "Autofix n finding(s)",
+ * running the same `abap2ui5.fixAll` the palette and `source.fixAll.abap2ui5`
+ * do.
+ *
+ * It carries the count and disappears at zero on purpose. A lens that is
+ * always there says nothing about whether pressing it would do anything -
+ * and the mechanical fixes are exactly the findings nobody should have to
+ * read first, so the number is the whole message. Findings whose correction
+ * would have to guess carry no fix and are not counted here: those stay a
+ * lightbulb decision on the line itself.
+ */
+function fixLens(range: vscode.Range, doc: vscode.TextDocument): vscode.CodeLens[] {
+  const count = fixableCount(doc);
+  if (!count) {
+    return [];
+  }
+  return [
+    new vscode.CodeLens(range, {
+      title: `$(wrench) Autofix ${count} finding${count === 1 ? "" : "s"}`,
+      tooltip: "Apply every mechanical correction the view check found in this file",
+      command: "abap2ui5.fixAll",
+    }),
+  ];
 }
 
 /**
@@ -105,6 +132,20 @@ export function registerCodeLens(context: vscode.ExtensionContext): void {
     vscode.languages.registerCodeLensProvider({ language: "abap" }, provider),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("abap2ui5.codeLens")) {
+        provider.refresh();
+      }
+    }),
+    /* The autofix count follows the findings, and those change without the
+     * document changing: a settings switch, an adopted baseline, the check
+     * finishing after the keystroke that triggered it. Every one of them ends
+     * in published diagnostics, so that is what the lens listens to. */
+    vscode.languages.onDidChangeDiagnostics((e) => {
+      const open = new Set(
+        vscode.window.visibleTextEditors
+          .filter((editor) => editor.document.languageId === "abap")
+          .map((editor) => editor.document.uri.toString())
+      );
+      if (e.uris.some((uri) => open.has(uri.toString()))) {
         provider.refresh();
       }
     })

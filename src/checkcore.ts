@@ -123,6 +123,45 @@ export function augmentedPath(
 }
 
 // ---------------------------------------------------------------------------
+// What "fix all" would do
+// ---------------------------------------------------------------------------
+
+export interface PlannedFix {
+  start: number;
+  end: number;
+  text: string;
+}
+
+/**
+ * Every mechanical fix of a set of findings, as one ordered, non-overlapping
+ * list - what a "fix all" run applies, and therefore also what the code lens
+ * counts before anything is applied.
+ *
+ * Overlapping spans are left for the next run rather than resolved by
+ * guesswork: the same rule the CLI's `--fix` follows, which is why both are
+ * expected to be run until they report nothing. Zero-length insertions at the
+ * position the previous fix ended still make it in - they touch nothing that
+ * was already rewritten.
+ */
+export function plannedFixes(
+  findings: Array<{ fixes?: PlannedFix[] }>
+): PlannedFix[] {
+  const planned: PlannedFix[] = [];
+  let cursor = 0;
+  const all = findings
+    .flatMap((f) => f.fixes ?? [])
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  for (const fix of all) {
+    if (fix.start < cursor) {
+      continue;
+    }
+    planned.push(fix);
+    cursor = fix.end;
+  }
+  return planned;
+}
+
+// ---------------------------------------------------------------------------
 // The render gate's report
 // ---------------------------------------------------------------------------
 

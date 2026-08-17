@@ -5,6 +5,7 @@ import {
   augmentedPath,
   isCheckableSource,
   parseRenderReport,
+  plannedFixes,
   resolveCheckerCommand,
   scratchFileName,
 } from "../checkcore";
@@ -173,4 +174,41 @@ test("no JSON at all is told apart from broken JSON", () => {
   assert.ok(!broken.ok);
   assert.equal(broken.reason, "broken-json");
   assert.ok(broken.detail);
+});
+
+// ---------------------------------------------------------------------------
+// plannedFixes
+// ---------------------------------------------------------------------------
+
+test("fixes are planned in source order, across findings", () => {
+  const planned = plannedFixes([
+    { fixes: [{ start: 30, end: 34, text: "d" }] },
+    { fixes: [{ start: 4, end: 8, text: "a" }, { start: 10, end: 12, text: "b" }] },
+    { fixes: [{ start: 20, end: 22, text: "c" }] },
+  ]);
+  assert.deepEqual(
+    planned.map((f) => f.text),
+    ["a", "b", "c", "d"]
+  );
+});
+
+test("an overlapping fix is left for the next run, not merged", () => {
+  const planned = plannedFixes([
+    { fixes: [{ start: 10, end: 20, text: "wide" }] },
+    { fixes: [{ start: 15, end: 18, text: "inside" }] },
+  ]);
+  assert.deepEqual(planned, [{ start: 10, end: 20, text: "wide" }]);
+});
+
+test("a fix starting where the previous one ended still applies", () => {
+  const planned = plannedFixes([
+    { fixes: [{ start: 0, end: 5, text: "one" }] },
+    { fixes: [{ start: 5, end: 5, text: "$" }] },
+  ]);
+  assert.equal(planned.length, 2);
+});
+
+test("findings without fixes contribute nothing to count or plan", () => {
+  assert.deepEqual(plannedFixes([{}, { fixes: [] }]), []);
+  assert.deepEqual(plannedFixes([]), []);
 });

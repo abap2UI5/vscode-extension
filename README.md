@@ -389,8 +389,10 @@ Every finding whose correction is mechanical carries the correction with it,
 and the lightbulb offers it: the obsolete `client->_bind_edit( )`, a missing
 `$` in an event argument, an ABAP boolean written straight into the view. A
 rule whose correction would have to guess deliberately carries none. There is
-also *"fix all in this file"* — as a command and as
-`source.fixAll.abap2ui5`, so it can go into `editor.codeActionsOnSave`:
+also *"fix all in this file"* — as a command, as a CodeLens above the class
+definition (**Autofix n findings**, shown only while there is something to
+correct) and as `source.fixAll.abap2ui5`, so it can go into
+`editor.codeActionsOnSave`:
 
 ```jsonc
 "editor.codeActionsOnSave": { "source.fixAll.abap2ui5": "explicit" }
@@ -574,7 +576,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2ui5.systems` | `[]` | Named launch profiles, for more than one system |
 | `abap2ui5.openMode` | `tab` | `tab`, `panel` or `external` |
 | `abap2ui5.reloadOn` | `activation` | When the preview reloads on its own: `activation`, `save` or `never` |
-| `abap2ui5.codeLens` | `true` | Show Run / Activate & reload / Check views above the class definition |
+| `abap2ui5.codeLens` | `true` | Show Run / Activate & reload / Check views / Autofix above the class definition |
 | `abap2ui5.viewCheck.onSave` | `true` | Run the static view check when a checkable file is saved |
 | `abap2ui5.viewCheck.live` | `true` | Also run the property gate while typing |
 | `abap2ui5.viewCheck.command` | – | Command running the abap2UI5-linter CLI for the render gate (empty = local checkout or npx) |

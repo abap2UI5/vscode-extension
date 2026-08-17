@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **An autofix lens next to the check that finds the work.** The class
+  definition already carried *Run*, *Activate & reload* and *Check views*;
+  what it did not carry was the one action that needs no reading at all.
+  **Autofix n findings** now appears beside them whenever the view check has
+  corrections it can apply mechanically — the obsolete binder method, the
+  missing `$` in an event argument, the ABAP boolean written straight into the
+  view — and runs exactly what the palette's *Fix All View Findings in This
+  File* and `source.fixAll.abap2ui5` run. It carries the count and disappears
+  at zero, so it never offers a press that would answer "nothing here can be
+  corrected mechanically", and it follows the findings rather than the
+  keystrokes: a changed setting, an adopted baseline or a finished check
+  updates the number. Findings whose correction would have to guess are not
+  counted — those stay a lightbulb decision on the line itself. Switch the
+  lens row off with `abap2ui5.codeLens`, as before.
+
 - **The linter pin moves to 0.2.1, and the MCP server gets the two catalogues
   it grew.** The pinned linter stops reading the `ELSE` of a `COND #( ... )` as
   the end of a lifecycle branch, which is the false positive that kept the
