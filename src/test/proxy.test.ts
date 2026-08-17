@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import * as http from "http";
 import * as https from "https";
 import { AddressInfo } from "net";
-import { injectRuntimeHook, SapProxy } from "../proxy";
+import {
+  decodeBody,
+  injectRuntimeHook,
+  SapProxy,
+  withUtf8Charset,
+} from "../proxy";
 
 test("the hook lands right after <head>, before the UI5 bootstrap", () => {
   const html =
@@ -408,4 +413,185 @@ test("a different system gets a different token", async () => {
     one.close();
     two.close();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Stream lifecycle: what the system does to the extension host
+// ---------------------------------------------------------------------------
+
+test("a system that dies mid-body does not take the host down", async () => {
+  // regression: the pass-through path piped without an error listener on the
+  // response stream, and pipe( ) does not forward a source error - so an ICM
+  // resetting the socket mid-answer raised an unhandled "error" event
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, {
+      "content-type": "application/javascript",
+      "transfer-encoding": "chunked",
+    });
+    res.write("sap.ui.define(");
+    // the connection dies with the body half sent - a chunked answer cut
+    // short is what raises the error on the RESPONSE stream
+    setTimeout(() => res.socket?.destroy(), 20);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+
+  const proxy = new SapProxy();
+  const unhandled: unknown[] = [];
+  const onUnhandled = (err: unknown) => unhandled.push(err);
+  process.on("uncaughtException", onUnhandled);
+  try {
+    await proxy.start(`http://127.0.0.1:${port}`, "user", "pass");
+    // a client that watches both streams, so the only unhandled error left
+    // in the process can be the proxy's own
+    const settled = await Promise.race([
+      new Promise<string>((resolve) => {
+        const req = http.get(`${proxy.origin}/resources/x.js`, (res) => {
+          res.on("data", () => undefined);
+          res.on("error", () => resolve("settled"));
+          res.on("end", () => resolve("settled"));
+          res.on("close", () => resolve("settled"));
+        });
+        req.on("error", () => resolve("settled"));
+      }),
+      new Promise<string>((r) => setTimeout(() => r("hung"), 3000)),
+    ]);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual(unhandled, [], "the error stayed inside the proxy");
+    assert.equal(settled, "settled", "the client was not left hanging");
+  } finally {
+    process.off("uncaughtException", onUnhandled);
+    await proxy.stop();
+    server.close();
+  }
+});
+
+test("a client that gives up cancels the request to the system", async () => {
+  // the webview cancels in-flight loads on every reload; without this the
+  // system keeps working on an answer nobody is waiting for
+  let aborted = false;
+  const server = http.createServer((req, res) => {
+    req.on("aborted", () => (aborted = true));
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.write("start"); // and then never finishes
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(`http://127.0.0.1:${port}`, "user", "pass");
+    const proxyPort = new URL(proxy.origin).port;
+    await new Promise<void>((resolve) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: proxyPort,
+          path: `${tokenPath(proxy)}/slow`,
+          method: "GET",
+        },
+        (res) => {
+          res.on("data", () => req.destroy()); // give up on the first byte
+          res.on("error", () => undefined);
+        }
+      );
+      req.on("error", () => resolve());
+      req.on("close", () => resolve());
+      req.end();
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(aborted, true, "the forwarded request was cancelled");
+  } finally {
+    await proxy.stop();
+    server.close();
+  }
+});
+
+test("the traffic log and the status reports never carry the token", async () => {
+  // both end up in output channels users paste into issues, and the token is
+  // what authorizes a session against the system
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  const paths: string[] = [];
+  proxy.onResponse = (r) => paths.push(r.path);
+  proxy.onTraffic = (t) => paths.push(t.path);
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    await throughProxy(proxy, "/sap/bc/z2ui5?app_start=zcl_x");
+    const token = tokenPath(proxy).split("/")[2];
+    assert.ok(paths.length >= 2, "both hooks reported");
+    for (const path of paths) {
+      assert.ok(!path.includes(token), `no token in ${path}`);
+      assert.equal(path, "/sap/bc/z2ui5?app_start=zcl_x");
+    }
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a launch url without a path forwards a valid request line", async () => {
+  // `https://host:44300?app_start=zcl_x` leaves the query right behind the
+  // token, and `GET ?app_start=... HTTP/1.1` is not a request servers accept
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const answer = await rawGet(proxy, `${tokenPath(proxy)}?app_start=zcl_x`);
+    assert.equal(answer.status, 200);
+    assert.equal(system.seen[0].path, "/?app_start=zcl_x");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a SameSite=None cookie keeps the Secure it needs to survive", async () => {
+  // Chromium drops SameSite=None without Secure, so stripping it lost the
+  // session cookie of every system configured per SAP's cross-site notes
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, {
+      "content-type": "text/plain",
+      "set-cookie": [
+        "SAP_SESSIONID_A4H_001=abc; Path=/; Domain=sap.example.com; SameSite=None; Secure",
+        "sap-usercontext=sap-client=001; Path=/; Domain=sap.example.com; Secure",
+      ],
+    });
+    res.end("ok");
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(`http://127.0.0.1:${port}`, "user", "pass");
+    const answer = await rawGet(proxy, `${tokenPath(proxy)}/probe`);
+    const session = answer.setCookie.find((c) => c.startsWith("SAP_SESSIONID"));
+    const context = answer.setCookie.find((c) => c.startsWith("sap-usercontext"));
+    assert.ok(session?.includes("Secure"), "SameSite=None keeps Secure");
+    assert.ok(!session?.includes("Domain="), "the system's domain is gone");
+    assert.ok(!context?.includes("Secure"), "an ordinary cookie loses Secure");
+  } finally {
+    await proxy.stop();
+    server.close();
+  }
+});
+
+test("an ISO-8859-1 page is injected without mangling its umlauts", () => {
+  // an old ICM serves its logon and error pages in a single-byte charset;
+  // toString("utf8") turned every umlaut on them into a replacement character
+  const body = Buffer.from("<html><head></head><body>Anmeldung fehlgeschlagen: Prüfen</body></html>", "latin1");
+  const text = decodeBody(body, "text/html; charset=iso-8859-1");
+  assert.ok(text.includes("Prüfen"), "decoded with the declared charset");
+  assert.equal(
+    withUtf8Charset("text/html; charset=iso-8859-1"),
+    "text/html; charset=utf-8",
+    "and leaves declared as what it now is"
+  );
+});
+
+test("a body without a declared charset is read as UTF-8", () => {
+  const text = decodeBody(Buffer.from("<html>Prüfen</html>", "utf8"), "text/html");
+  assert.ok(text.includes("Prüfen"));
+  assert.equal(withUtf8Charset("text/html"), "text/html; charset=utf-8");
 });
