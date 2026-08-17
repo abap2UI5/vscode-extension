@@ -60,6 +60,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/viewpreview.ts` | "Preview View (No System)": runs the linter's `--screenshot` over the buffer and shows the PNGs in a panel that re-renders on save |
 | `src/xmlpreview.ts` | "Show Reconstructed XML View": virtual document + live refresh |
 | `src/xmlformat.ts` | Pretty-printer for the reconstructed view trees (`prepareAbap( ).nodes`) |
+| `src/examples.ts` | `vscode`-free: finds and ranks a control's uses in the sample catalogues |
+| `src/exampleview.ts` | "Show Examples for this Control": catalogue discovery, QuickPick, opens the hit |
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix above the class definition |
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (ai-mcp) and the in-extension system server for MCP clients in the window |
@@ -90,7 +92,7 @@ not committed.
 `context.ts`, `metadata.ts`, `lintconfig.ts`, `snapshot.ts`,
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`,
-`colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`,
+`colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain

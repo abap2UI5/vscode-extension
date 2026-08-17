@@ -1,0 +1,111 @@
+/*
+ * examples - finding a control in the abap2UI5 sample catalogues.
+ *
+ * The question this answers is the one every UI5 API reference leaves open:
+ * not "what properties does sap.m.Table have" (the metadata snapshot answers
+ * that, in completion and hover) but "what does a working one look like in an
+ * abap2UI5 class". There are three repositories full of the answer - samples,
+ * samples-controls (416 ports of the official demo kit), samples-stack - and
+ * until now the only thing in this window that could read them was the MCP
+ * server, on behalf of an agent.
+ *
+ * `vscode`-free: the walking and the search are plain string work, so both are
+ * testable without an editor. The command in `exampleview.ts` adds the
+ * QuickPick and the file opening.
+ */
+
+/** One builder call naming the searched control, with its chain around it. */
+export interface ExampleHit {
+  /** Absolute path of the class the hit is in. */
+  file: string;
+  /** Catalogue the file came from, e.g. `samples-controls`. */
+  catalogue: string;
+  /** 1-based line of the `ele( )` / `tag( )` call. */
+  line: number;
+  /** The call's own line, trimmed - what the pick shows. */
+  text: string;
+  /** Attributes written on the control, as a rough measure of how much this
+   *  example demonstrates. */
+  attributes: number;
+}
+
+/** `ele( n = \`Table\` )` and `tag( n = \`Table\` )`, in any of the quote forms
+ *  the builder accepts, with an optional namespace prefix. */
+function callRe(control: string): RegExp {
+  const local = control.includes(".") ? control.slice(control.lastIndexOf(".") + 1) : control;
+  const name = local.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    String.raw`\b(?:ele|tag)\s*\(\s*n\s*=\s*[\`'|]\s*(?:\w+:)?${name}\s*[\`'|]`,
+    "gi"
+  );
+}
+
+/**
+ * Every place a source builds the given control.
+ *
+ * Counting the attributes that follow is what makes the result useful rather
+ * than merely correct: a catalogue has hundreds of `Button`s, and the one
+ * worth reading first is the one that actually configures something. The
+ * count stops at the next structural call, so it is this control's attributes
+ * and not the rest of the chain's.
+ */
+export function findControlUses(
+  source: string,
+  control: string,
+  where: { file: string; catalogue: string }
+): ExampleHit[] {
+  const hits: ExampleHit[] = [];
+  const re = callRe(control);
+  for (const match of source.matchAll(re)) {
+    const at = match.index ?? 0;
+    const lineStart = source.lastIndexOf("\n", at) + 1;
+    const lineEnd = source.indexOf("\n", at);
+    const before = source.slice(0, at);
+    hits.push({
+      file: where.file,
+      catalogue: where.catalogue,
+      line: before.split("\n").length,
+      text: source.slice(lineStart, lineEnd < 0 ? source.length : lineEnd).trim(),
+      attributes: attributesAfter(source, at + match[0].length),
+    });
+  }
+  return hits;
+}
+
+/** How many `a( )` calls follow before the chain moves on to another element
+ *  - the attributes of this control. */
+function attributesAfter(source: string, from: number): number {
+  const rest = source.slice(from, from + 4000);
+  let count = 0;
+  for (const call of rest.matchAll(/\)->\s*(\w+)\s*\(/g)) {
+    if (call[1].toLowerCase() === "a") {
+      count++;
+      continue;
+    }
+    break; // ele/tag/end/shut - this control's attributes are over
+  }
+  return count;
+}
+
+/**
+ * Order the hits the way someone reading them wants them: the richest example
+ * of the control first, and never twenty from the same file before one from
+ * anywhere else - a catalogue where one app happens to use `Text` forty times
+ * would otherwise be the entire answer.
+ */
+export function rankExamples(hits: readonly ExampleHit[], perFile = 2): ExampleHit[] {
+  const sorted = [...hits].sort(
+    (a, b) => b.attributes - a.attributes || a.file.localeCompare(b.file) || a.line - b.line
+  );
+  const seen = new Map<string, number>();
+  const out: ExampleHit[] = [];
+  for (const hit of sorted) {
+    const taken = seen.get(hit.file) ?? 0;
+    if (taken >= perFile) {
+      continue;
+    }
+    seen.set(hit.file, taken + 1);
+    out.push(hit);
+  }
+  return out;
+}

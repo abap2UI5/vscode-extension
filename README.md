@@ -58,6 +58,9 @@ tying the extension to a system is the launch URL you configure once.
   view XML) and get the `z2ui5_cl_ui5_view_builder` chain in the corpus style —
   the reverse of the reconstructed XML view. See
   [XML to builder chain](#xml-to-builder-chain).
+- **Examples for the control under the cursor** – *"Show Examples for this
+  Control"* searches the abap2UI5 sample repositories for working uses of it
+  and opens the pick at the line. See [Examples](#examples-from-the-sample-catalogues).
 - **App navigation map** – Every `z2ui5_if_app` class in the workspace and
   each `nav_app_call( )` between them as a clickable graph. See
   [Navigation map](#app-navigation-map).
@@ -539,6 +542,28 @@ click) — it is the same runtime. And it is not the app: nothing round-trips, n
 event reaches ABAP, and the data is the derived mock model rather than what a
 system would serve. That is what **F9** is for.
 
+### Examples from the sample catalogues
+
+The metadata snapshot answers *what properties does `sap.m.Table` have* — in
+completion, in hover, in the property editor. The question it cannot answer is
+*what does a working one look like in an abap2UI5 class*, and there are three
+repositories full of that answer:
+[samples](https://github.com/abap2UI5/samples),
+[samples-controls](https://github.com/abap2UI5/samples-controls) (416 ports of
+the official UI5 demo kit) and
+[samples-stack](https://github.com/abap2UI5/samples-stack).
+
+Put the cursor on an `ele( )` / `tag( )` call and run *"abap2UI5: Show Examples
+for this Control"*: the catalogues are searched for that control and the hits
+are offered richest-first — the number of attributes each one configures is in
+the pick — opening at the line. Off a builder call the command asks for a
+control name instead.
+
+It reads the catalogues from **`abap2ui5.mcp.reposRoot`**, the same setting the
+MCP server uses to find them; they are git checkouts, not something the
+extension ships, so with none of them present the command says so and offers
+the setting rather than reporting "nothing found".
+
 ### Outline and event navigation
 
 The Outline pane (and the breadcrumb bar) shows the `ele( )`/`tag( )`
@@ -648,6 +673,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2UI5: Check Views (Static)` | Runs the static view check on the current file |
 | `abap2UI5: Check All Views in the Workspace` | Runs the same check over every ABAP class and view file |
 | `abap2UI5: Show Reconstructed XML View` | Opens the XML the builder calls produce, live beside the class |
+| `abap2UI5: Show Examples for this Control` | Finds the control under the cursor in the sample catalogues |
 | `abap2UI5: Fix All View Findings in the Workspace` | Applies every mechanical fix across the workspace, as one undo step |
 | `abap2UI5: Rebuild the View-Check Baseline` | Rewrites the repo's baseline from what the workspace reports now |
 | `abap2UI5: Preview View (No System)` | Renders the current class's view headless and shows the picture |

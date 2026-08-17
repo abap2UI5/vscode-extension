@@ -25,6 +25,19 @@
   not the app: nothing round-trips and no event reaches ABAP. That is what F9
   is for.
 
+- **Examples for the control under the cursor.** The bundled UI5 metadata says
+  what `sap.m.Table` *has*; it cannot say what a working one looks like in an
+  abap2UI5 class. Three repositories can — samples, samples-controls (416 ports
+  of the official demo kit) and samples-stack — and until now the only thing in
+  this window that could read them was the MCP server, on behalf of an agent.
+  *"Show Examples for this Control"* asks them the same question with the
+  cursor as the query, and offers the hits **richest first**: the number of
+  attributes each example configures decides the order, and no single file may
+  fill the list, so one app that happens to use `Text` forty times is not the
+  whole answer. It reads the catalogues from `abap2ui5.mcp.reposRoot`, and when
+  none is checked out it says exactly that instead of reporting "nothing
+  found" for a corpus that was never there.
+
 - **The view check has a line in the status bar.** Its findings go to the
   Problems panel, next to whatever the ABAP extension, the XML language server
   and every other contributor puts there — so "is the file I am looking at
