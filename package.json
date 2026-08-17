@@ -147,6 +147,11 @@
         "title": "abap2UI5: Check All Views in the Workspace"
       },
       {
+        "command": "abap2ui5.previewView",
+        "title": "abap2UI5: Preview View (No System)",
+        "icon": "$(device-camera)"
+      },
+      {
         "command": "abap2ui5.showReconstructedXml",
         "title": "abap2UI5: Show Reconstructed XML View",
         "icon": "$(file-code)"
@@ -218,6 +223,10 @@
         },
         {
           "command": "abap2ui5.checkWorkspace",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.previewView",
           "when": "!isWeb"
         },
         {
@@ -423,6 +432,17 @@
           },
           "default": [],
           "markdownDescription": "Accepted deviations for the property gate, e.g. `sap.m.GenericTile.systemInfo` - each entry is passed to the checker as `--allow`. Merges with the `allow` list of a workspace's `abap2ui5lint.jsonc`.\n\nTo waive a single line rather than a whole rule, put the linter's own directive above it: `\" abap2ui5lint-disable-next-line unknown-binding-path -- filled in a LOOP`. The quick fix on any finding writes it for you, and CI honours it too."
+        },
+        "abap2ui5.viewPreview.theme": {
+          "type": "string",
+          "default": "sap_horizon",
+          "markdownDescription": "The UI5 theme *\"abap2UI5: Preview View (No System)\"* renders in. Any theme name the runtime ships, e.g. `sap_horizon`, `sap_horizon_dark`, `sap_fiori_3`, `sap_belize`."
+        },
+        "abap2ui5.viewPreview.viewport": {
+          "type": "string",
+          "default": "1280x900",
+          "pattern": "^\\d{2,5}x\\d{2,5}$",
+          "markdownDescription": "The viewport the systemless preview renders at, `<width>x<height>` in CSS pixels - e.g. `390x844` to see the view the way a phone lays it out. The picture is taken full-page, so a view taller than the viewport is shown whole."
         },
         "abap2ui5.mcp.enabled": {
           "type": "boolean",

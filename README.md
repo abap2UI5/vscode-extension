@@ -85,6 +85,10 @@ tying the extension to a system is the launch URL you configure once.
 - **Format Document repairs a builder chain** – The indentation follows the
   view hierarchy the chain builds; only builder-verb lines are touched. See
   [Format Document](#format-document).
+- **Preview the view without a system** – *"Preview View (No System)"* renders
+  what the class builds and shows the picture beside it — the render gate kept
+  standing instead of thrown away. No system, no activation. See
+  [Preview without a system](#preview-the-view-without-a-system).
 - **Show Reconstructed XML View** – The XML the builder calls actually
   produce, as a live, syntax-highlighted document next to the class — with
   the findings mirrored in and **Go to Definition** back to the builder
@@ -498,6 +502,31 @@ are **mirrored onto the XML lines** they concern, and **Go to Definition**
 (F12, or Ctrl+click) on any line jumps to the `ele( )` / `tag( )` /
 `a( )` in the class that produced it.
 
+### Preview the view without a system
+
+*"abap2UI5: Preview View (No System)"* renders the view the current class
+builds and shows the **picture** beside it — no system, no transport, no
+activation, and no launch URL configured.
+
+It is the render gate turned around. That gate already loads exactly this view
+in a real browser to decide whether it survives creation; here the view is kept
+standing and photographed instead of thrown away. What you see is the
+reconstruction the view check validates, seeded with the model derived from the
+class's own `TYPES`/`DATA` and rendered against the local OpenUI5 runtime — in
+the theme (`abap2ui5.viewPreview.theme`) and viewport
+(`abap2ui5.viewPreview.viewport`, e.g. `390x844` for a phone) you choose. The
+picture refreshes on every **save** of the previewed file, and a class that
+builds several views (a popup next to its main view) shows them all, in order.
+
+Render errors appear above the picture rather than instead of it: a view with
+one broken binding still comes up, and the half that rendered is usually the
+part worth looking at.
+
+It needs the **render gate** installed (*"abap2UI5: Install Render Gate"*, one
+click) — it is the same runtime. And it is not the app: nothing round-trips, no
+event reaches ABAP, and the data is the derived mock model rather than what a
+system would serve. That is what **F9** is for.
+
 ### Outline and event navigation
 
 The Outline pane (and the breadcrumb bar) shows the `ele( )`/`tag( )`
@@ -584,6 +613,8 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2ui5.viewCheck.distribution` | `sapui5` | Which distribution the system serves: `sapui5` or `openui5` |
 | `abap2ui5.viewCheck.render` | `false` | Also run the headless render gate |
 | `abap2ui5.viewCheck.allow` | `[]` | Accepted deviations, e.g. `sap.m.GenericTile.systemInfo` |
+| `abap2ui5.viewPreview.theme` | `sap_horizon` | UI5 theme the systemless preview renders in |
+| `abap2ui5.viewPreview.viewport` | `1280x900` | Viewport it renders at, e.g. `390x844` for a phone |
 | `abap2ui5.mcp.enabled` | `true` | Offer the abap2UI5 MCP server to MCP clients |
 | `abap2ui5.mcp.system` | `true` | Also offer the abap2UI5 System MCP server (real-system tools) |
 | `abap2ui5.mcp.command` | – | Command starting the MCP server (empty = local checkout or npx) |
@@ -605,6 +636,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2UI5: Check Views (Static)` | Runs the static view check on the current file |
 | `abap2UI5: Check All Views in the Workspace` | Runs the same check over every ABAP class and view file |
 | `abap2UI5: Show Reconstructed XML View` | Opens the XML the builder calls produce, live beside the class |
+| `abap2UI5: Preview View (No System)` | Renders the current class's view headless and shows the picture |
 | `abap2UI5: Fix All View Findings in This File` | Applies every mechanical fix at once |
 | `abap2UI5: Install Render Gate` | Downloads the render-gate checker and Chromium into the extension's storage |
 | `abap2UI5: Take App Screenshot` | Renders the running app headless and opens the PNG |

@@ -5,7 +5,11 @@ import {
   augmentedPath,
   isCheckableSource,
   parseRenderReport,
+  parseScreenshotErrors,
+  parseScreenshotOutput,
   plannedFixes,
+  screenshotArgs,
+  screenshotUnsupported,
   resolveCheckerCommand,
   scratchFileName,
 } from "../checkcore";
@@ -211,4 +215,58 @@ test("a fix starting where the previous one ended still applies", () => {
 test("findings without fixes contribute nothing to count or plan", () => {
   assert.deepEqual(plannedFixes([{}, { fixes: [] }]), []);
   assert.deepEqual(plannedFixes([]), []);
+});
+
+// ---------------------------------------------------------------------------
+// The screenshot run behind the systemless preview
+// ---------------------------------------------------------------------------
+
+const SHOT = {
+  target: "/tmp/scratch/zcl_app.clas.abap",
+  out: "/tmp/scratch/view.png",
+  theme: "sap_horizon",
+  viewport: "390x844",
+};
+
+test("the screenshot call carries the file, the target and both dials", () => {
+  assert.deepEqual(screenshotArgs(SHOT), [
+    "/tmp/scratch/zcl_app.clas.abap",
+    "--screenshot",
+    "/tmp/scratch/view.png",
+    "--screenshot-theme",
+    "sap_horizon",
+    "--screenshot-size",
+    "390x844",
+  ]);
+});
+
+test("a settings typo falls back to the CLI default instead of failing the run", () => {
+  // the CLI refuses a bad value with exit 2 - which would turn a mistyped
+  // setting into a preview that only ever says "bad usage"
+  const args = screenshotArgs({ ...SHOT, theme: "sap horizon; rm -rf /", viewport: "big" });
+  assert.deepEqual(args, [SHOT.target, "--screenshot", SHOT.out]);
+});
+
+test("stdout is read as the written paths, and nothing else is", () => {
+  const stdout = "/tmp/x/view-zcl_app.png\n/tmp/x/view-zcl_app-2.png\n";
+  assert.deepEqual(parseScreenshotOutput(stdout), [
+    "/tmp/x/view-zcl_app.png",
+    "/tmp/x/view-zcl_app-2.png",
+  ]);
+  assert.deepEqual(parseScreenshotOutput("npm WARN something\n"), []);
+});
+
+test("render errors are lifted off stderr without the scratch path", () => {
+  const stderr =
+    "abap2ui5lint: /tmp/abap2ui5-preview-x/zcl_app.clas.abap - CREATE: no such control\n" +
+    "some unrelated line\n";
+  assert.deepEqual(parseScreenshotErrors(stderr), ["CREATE: no such control"]);
+});
+
+test("an older render gate is told apart from a broken run", () => {
+  assert.equal(
+    screenshotUnsupported("abap2ui5lint: unknown option '--screenshot'\nusage: ..."),
+    true
+  );
+  assert.equal(screenshotUnsupported("abap2ui5lint: no view to photograph"), false);
 });

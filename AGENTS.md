@@ -57,6 +57,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/renderloc.ts` | Places a render-gate error message on the source line quoting its token |
 | `scripts/generate-client-api.mjs` | Regenerates `src/data/client-api.json` from `z2ui5_if_client.intf.abap` (local checkout or GitHub raw) |
 | `src/bindingpaths.ts` | Binding-path offers from the model shape the linter derives (`prepareAbap( ).modelShape`) |
+| `src/viewpreview.ts` | "Preview View (No System)": runs the linter's `--screenshot` over the buffer and shows the PNGs in a panel that re-renders on save |
 | `src/xmlpreview.ts` | "Show Reconstructed XML View": virtual document + live refresh |
 | `src/xmlformat.ts` | Pretty-printer for the reconstructed view trees (`prepareAbap( ).nodes`) |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix above the class definition |

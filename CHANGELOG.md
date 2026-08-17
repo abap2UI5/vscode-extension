@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Preview the view without a system.** An abap2UI5 view exists at runtime and
+  nowhere else, so looking at one has meant a system: activate the class,
+  launch the app, wait for the roundtrip — a long way to go to find out that a
+  column is in the wrong order. *"abap2UI5: Preview View (No System)"* renders
+  what the class builds and puts the picture beside it. No system, no
+  transport, no activation, no launch URL.
+
+  It is the render gate turned around. That gate has been loading exactly this
+  view in a real browser all along to decide whether it survives creation; the
+  linter can now keep it standing and photograph it instead of throwing it
+  away, and this command is that, wired to a panel: the reconstruction the view
+  check validates, seeded with the model derived from the class's own
+  `TYPES`/`DATA`, in the theme (`abap2ui5.viewPreview.theme`) and viewport
+  (`abap2ui5.viewPreview.viewport` — `390x844` for a phone) you pick. It
+  re-renders on save, shows every view a class builds, and keeps the last
+  picture up while the next one is taken. Render errors appear *above* the
+  picture rather than instead of it: a view with one broken binding still comes
+  up, and the half that rendered is the part worth seeing.
+
+  It needs the render gate installed — the same runtime, one click — and it is
+  not the app: nothing round-trips and no event reaches ABAP. That is what F9
+  is for.
+
 - **An autofix lens next to the check that finds the work.** The class
   definition already carried *Run*, *Activate & reload* and *Check views*;
   what it did not carry was the one action that needs no reading at all.

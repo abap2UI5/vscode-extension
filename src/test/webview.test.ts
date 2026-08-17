@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { previewHtml, welcomeHtml } from "../webview";
+import { previewHtml, viewPreviewHtml, welcomeHtml } from "../webview";
 
 const BASE = { nonce: "n0nce", hasLaunchUrl: true } as const;
 
@@ -85,5 +85,66 @@ test("the class name is escaped, not injected", () => {
     runningClass: "<img src=x onerror=alert(1)>",
   });
   assert.ok(!html.includes("<img"));
+  assert.ok(html.includes("&lt;img"));
+});
+
+// ---------------------------------------------------------------------------
+// The systemless view preview
+// ---------------------------------------------------------------------------
+
+const SHOT = {
+  nonce: "n0nce",
+  cspSource: "vscode-resource:",
+  title: "ZCL_MY_APP",
+  theme: "sap_horizon",
+  viewport: "1280x900",
+} as const;
+
+test("the preview shows the picture it was given, and what it is of", () => {
+  const html = viewPreviewHtml({
+    ...SHOT,
+    shots: [{ uri: "vscode-resource://tmp/view.png?v=1", label: "view.png" }],
+    errors: [],
+  });
+  assert.ok(html.includes("vscode-resource://tmp/view.png?v=1"));
+  assert.ok(html.includes("ZCL_MY_APP"));
+  assert.ok(html.includes("sap_horizon"));
+  assert.ok(html.includes("1280x900"));
+  // images only, and only from the webview's own source
+  assert.ok(html.includes("img-src vscode-resource:"));
+  assert.ok(!html.includes("<script"));
+});
+
+test("render errors are shown WITH the picture, never instead of it", () => {
+  const html = viewPreviewHtml({
+    ...SHOT,
+    shots: [{ uri: "u", label: "view.png" }],
+    errors: ["CREATE: Cannot add direct child without default aggregation"],
+  });
+  assert.ok(html.includes("1 render error"));
+  assert.ok(html.includes("Cannot add direct child"));
+  assert.ok(html.includes('src="u"'));
+});
+
+test("no picture: the panel says why in one sentence", () => {
+  const html = viewPreviewHtml({
+    ...SHOT,
+    shots: [],
+    errors: [],
+    problem: "The installed render gate does not know --screenshot yet.",
+  });
+  assert.ok(html.includes("does not know --screenshot yet"));
+  assert.ok(!html.includes("<img"));
+});
+
+test("a class name from the buffer is escaped, not injected", () => {
+  const html = viewPreviewHtml({
+    ...SHOT,
+    title: "<img src=x onerror=alert(1)>",
+    shots: [],
+    errors: ["<script>alert(1)</script>"],
+  });
+  assert.ok(!html.includes("<img src=x"));
+  assert.ok(!html.includes("<script>alert"));
   assert.ok(html.includes("&lt;img"));
 });

@@ -123,6 +123,68 @@ export function augmentedPath(
 }
 
 // ---------------------------------------------------------------------------
+// The screenshot run behind the systemless preview
+// ---------------------------------------------------------------------------
+
+/** A viewport as the CLI takes it: `1280x900`, `390x844`. */
+export const VIEWPORT_RE = /^\d{2,5}x\d{2,5}$/i;
+/** A UI5 theme name - a resource path inside the runtime, so an identifier. */
+const THEME_RE = /^[a-z][a-z0-9_]*$/i;
+
+export interface ScreenshotRequest {
+  /** The file to photograph - the scratch copy of the buffer. */
+  target: string;
+  /** Where the PNG goes; several views number the name from here. */
+  out: string;
+  theme: string;
+  viewport: string;
+}
+
+/**
+ * The linter call behind the preview. A bad theme or viewport falls back to
+ * the CLI's own default rather than being passed on: the CLI would refuse the
+ * whole run (exit 2), and a settings typo must not turn the preview into an
+ * error message about argument syntax.
+ */
+export function screenshotArgs(request: ScreenshotRequest): string[] {
+  const args = [request.target, "--screenshot", request.out];
+  if (THEME_RE.test(request.theme)) args.push("--screenshot-theme", request.theme);
+  if (VIEWPORT_RE.test(request.viewport)) args.push("--screenshot-size", request.viewport);
+  return args;
+}
+
+/** The written PNG paths - the CLI prints those and nothing else on stdout,
+ *  which is the whole machine contract of `--screenshot`. */
+export function parseScreenshotOutput(stdout: string): string[] {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /\.png$/i.test(line));
+}
+
+/**
+ * Whether the resolved checker is simply too old to know the flag. The pinned
+ * render gate is a release behind the linter's main branch for most of its
+ * life, so "it does not do that yet" is a NORMAL state here and deserves the
+ * one message that helps (update the gate) rather than the CLI's usage text.
+ */
+export function screenshotUnsupported(stderr: string): boolean {
+  return /unknown option '--screenshot/.test(stderr);
+}
+
+/** The render errors the CLI reported alongside the pictures. They arrive on
+ *  stderr as `abap2ui5lint: <file> - <what>`; the file is the scratch copy and
+ *  says nothing to the reader, so only the message survives. */
+export function parseScreenshotErrors(stderr: string): string[] {
+  const out: string[] = [];
+  for (const line of stderr.split(/\r?\n/)) {
+    const hit = /^abap2ui5lint: .*? - (.+)$/.exec(line.trim());
+    if (hit) out.push(hit[1]);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // What "fix all" would do
 // ---------------------------------------------------------------------------
 

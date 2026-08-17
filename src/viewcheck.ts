@@ -68,14 +68,14 @@ function config() {
 }
 
 /** See `isCheckableSource` - this is only the document unwrapping. */
-function isCheckable(doc: vscode.TextDocument): boolean {
+export function isCheckable(doc: vscode.TextDocument): boolean {
   return isCheckableSource(doc.fileName, doc.languageId, doc.getText());
 }
 
 /** The document to check on demand: the active editor when it is checkable,
  *  otherwise the first checkable visible editor - the command should work
  *  even when the focus sits in the preview or another non-text tab. */
-function pickDocument(): vscode.TextDocument | undefined {
+export function pickDocument(): vscode.TextDocument | undefined {
   const active = vscode.window.activeTextEditor?.document;
   if (active && isCheckable(active)) {
     return active;
@@ -118,8 +118,10 @@ function optionsFor(doc: vscode.TextDocument): CheckOptions {
 // ---------------------------------------------------------------------------
 
 /** The render gate's command, resolved from the settings and what is
- *  installed - the decision itself lives in `checkcore.ts`. */
-function checkerCommand(): CheckerCommand {
+ *  installed - the decision itself lives in `checkcore.ts`. The systemless
+ *  preview spawns the same binary, so this is the one place that knows how to
+ *  find it. */
+export function checkerCommand(): CheckerCommand {
   const gateCli = extContext ? renderGateCli(extContext) : undefined;
   return resolveCheckerCommand({
     explicit: config().get<string>("viewCheck.command", ""),
@@ -134,7 +136,7 @@ function checkerCommand(): CheckerCommand {
 }
 
 /** See `augmentedPath` - the environment to spawn npx with. */
-function spawnEnv(): NodeJS.ProcessEnv {
+export function spawnEnv(): NodeJS.ProcessEnv {
   const PATH = augmentedPath(process.platform, process.env.PATH);
   return PATH === process.env.PATH ? process.env : { ...process.env, PATH };
 }
