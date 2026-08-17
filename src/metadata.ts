@@ -123,11 +123,41 @@ export function controlsIn(data: Snapshot, library: string): string[] {
 }
 
 /**
+ * Memo for {@link membersOf}, per snapshot. The snapshot is loaded once and
+ * never mutated, so what is derived from it holds for as long as it does; a
+ * WeakMap keeps a replaced snapshot (and everything derived from it)
+ * collectable.
+ *
+ * Without it one member completion rebuilt this list a few hundred times:
+ * `describeMember` asks per offered entry, and it asks twice - once for the
+ * member and once for its type's values - each time walking the whole
+ * inheritance chain and sorting the result. The same call also backs the
+ * aggregation test in every binding query and the colour pass over the
+ * document, both of which run per attribute.
+ */
+const memberCache = new WeakMap<Snapshot, Map<string, MemberInfo[]>>();
+
+/**
  * Every member the control accepts, walking the parent chain. A member
  * redeclared further down the chain wins — that is where its own `@since` and
  * `@deprecated` live.
  */
 export function membersOf(data: Snapshot, control: string): MemberInfo[] {
+  let perControl = memberCache.get(data);
+  if (!perControl) {
+    perControl = new Map();
+    memberCache.set(data, perControl);
+  }
+  const cached = perControl.get(control);
+  if (cached) {
+    return cached;
+  }
+  const members = computeMembersOf(data, control);
+  perControl.set(control, members);
+  return members;
+}
+
+function computeMembersOf(data: Snapshot, control: string): MemberInfo[] {
   const seen = new Map<string, MemberInfo>();
   for (const owner of chainOf(data, control)) {
     const entry = data[owner];
@@ -159,6 +189,12 @@ export function memberInfo(
   member: string
 ): MemberInfo | undefined {
   return membersOf(data, control).find((m) => m.name === member);
+}
+
+/** Drops the derived-member memo - for a test that swaps the snapshot for a
+ *  fixture with the same identity, which nothing in the extension does. */
+export function clearMemberCache(data: Snapshot): void {
+  memberCache.delete(data);
 }
 
 /** The values of an enum type, e.g. `sap.m.ButtonType` -> Default, Accept, … */

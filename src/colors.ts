@@ -225,8 +225,19 @@ export function abapColorSpans(
     }
   }
   const out: ColorSpan[] = [];
+  // Both lists come out in ascending offset order, so one index walks along
+  // the controls as the attributes advance. Copying and reversing the whole
+  // control list per attribute made this quadratic on exactly the long
+  // generated views it runs over, on every document change.
+  let ownerIndex = -1;
   for (const m of source.matchAll(ABAP_ATTR_RE)) {
-    const owner = [...controls].reverse().find((c) => c.at < m.index);
+    while (
+      ownerIndex + 1 < controls.length &&
+      controls[ownerIndex + 1].at < m.index
+    ) {
+      ownerIndex++;
+    }
+    const owner = ownerIndex >= 0 ? controls[ownerIndex] : undefined;
     if (!owner || !isColorMember(owner.control, m[2])) {
       continue;
     }

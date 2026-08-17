@@ -74,21 +74,32 @@ function markdown(text: string): vscode.MarkdownString {
 // Binding paths - offered from the model shape the linter derives
 // ---------------------------------------------------------------------------
 
-/** The derived model shape of a class, memoised on the document version -
- *  deriving it walks the whole source, and completion asks on keystrokes. */
-let shapeMemo:
-  | { key: string; version: number; shape: unknown }
-  | undefined;
+/**
+ * The derived model shape of a class, memoised on the document version -
+ * deriving it walks the whole source, and completion asks on keystrokes.
+ *
+ * Per document, not one global slot: with an app and its detail class open
+ * side by side, alternating requests evicted each other and every switch paid
+ * the full derivation again. Entries of closed documents are dropped so the
+ * map cannot outgrow what is open.
+ */
+const shapeMemo = new Map<string, { version: number; shape: unknown }>();
 
 function modelShapeOf(doc: vscode.TextDocument): unknown {
   const key = doc.uri.toString();
-  if (shapeMemo && shapeMemo.key === key && shapeMemo.version === doc.version) {
-    return shapeMemo.shape;
+  const cached = shapeMemo.get(key);
+  if (cached && cached.version === doc.version) {
+    return cached.shape;
   }
   const prep = prepareAbap(doc.getText());
   const shape = prep.usesBuilder ? prep.modelShape : undefined;
-  shapeMemo = { key, version: doc.version, shape };
+  shapeMemo.set(key, { version: doc.version, shape });
   return shape;
+}
+
+/** Called when a document closes - see `shapeMemo`. */
+function forgetModelShape(uri: vscode.Uri): void {
+  shapeMemo.delete(uri.toString());
 }
 
 class ViewCompletion implements vscode.CompletionItemProvider {
@@ -639,6 +650,7 @@ export function registerLanguageFeatures(
       new EventDefinition()
     ),
     vscode.languages.registerRenameProvider(ABAP_SELECTOR, new WireRename()),
+    vscode.workspace.onDidCloseTextDocument((doc) => forgetModelShape(doc.uri)),
 
     vscode.commands.registerCommand("abap2ui5.extractViewMethod", () =>
       extractViewMethod(log)
