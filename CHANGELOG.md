@@ -25,6 +25,24 @@
   not the app: nothing round-trips and no event reaches ABAP. That is what F9
   is for.
 
+- **F2 renames the strings the app is wired together with.** An abap2UI5 app
+  joins its two halves with literals: a control is `a( n = `id` v = `TABLE` )`
+  in the view and `TABLE` again in a `CONTROL_BY_ID` wire; an attribute is
+  `mv_title` in the class and `{/MV_TITLE}` in the view. Nothing in ABAP or in
+  UI5 connects those ends — to the compiler a string is a string — so renaming
+  one of them has been a grep, and missing one is *silent*: a wire that
+  addresses nothing does nothing at runtime, not even a console line, and a
+  binding path that resolves to nothing renders empty. F2 already did this for
+  event names; it now does it for **control ids** (the `id` attribute plus
+  `CONTROL_BY_ID`, `SET_FOCUS`, `SCROLL_TO`, `SCROLL_INTO_VIEW`,
+  `KEYBOARD_SET_MODE` and `popover_display( by_id = … )`) and for **bound
+  attributes** (the ABAP name and every binding path that resolves to it,
+  including the root segment of a path into a table row).
+
+  What makes it safe is that position decides what a literal is, never its
+  text: the `setBusy` sitting next to the id in the same wire is an argument
+  and stays put, and a name the class does not declare offers no rename at all.
+
 - **The browser build reads the repository's `abap2ui5lint.jsonc`.** It could
   not before, for a reason that was true of the reading and not of the file:
   discovery goes through `fs`, which a browser extension host does not have. So

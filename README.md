@@ -574,8 +574,26 @@ chain sets shown alongside. Clicking a node jumps to its builder call.
 Go to Definition on the event name in `client->_event( 'GO' )` jumps to the
 `WHEN 'GO'` branch that handles it; on the `WHEN` literal it goes the other
 way, to every place the view raises the event. A CodeLens over each `WHEN`
-the view raises says *raised n× in the view* and peeks the calls — and
-**F2** renames an event everywhere at once, raises and handler together.
+the view raises says *raised n× in the view* and peeks the calls.
+
+**F2 renames the strings an app is wired together with.** An abap2UI5 app ties
+its two halves together with literals, and nothing in ABAP or UI5 connects the
+ends — so renaming one of them is a grep, and missing one is silent. F2 takes
+all of them at once:
+
+- an **event**: every `client->_event( 'GO' )` and the `WHEN 'GO'` that handles
+  it,
+- a **control id**: the `a( n = ``id`` v = ``TABLE`` )` that declares it and
+  every wire that addresses it — `CONTROL_BY_ID`, `SET_FOCUS`, `SCROLL_TO`,
+  `SCROLL_INTO_VIEW`, `KEYBOARD_SET_MODE` and `popover_display( by_id = … )`,
+- a **bound attribute**: the ABAP name and the binding paths that resolve to
+  it, `mv_title` and `{/MV_TITLE}` together.
+
+Position decides what a literal is, never its text: the `setBusy` sitting next
+to the id in the same wire is an argument, not an id, and stays put. The rename
+covers the class you are in — an app class owns its model and its ids, and a
+rename reaching further on the strength of a regex would be a worse offer than
+a confident local one.
 
 Go to Definition works on binding paths too: `{/MT_TRAVELS/STATUS}` lands on
 the `TYPES` field (or the `DATA` line for a root path) that declares it. And

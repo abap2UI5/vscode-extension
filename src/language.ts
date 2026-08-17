@@ -5,6 +5,7 @@ import {
   eventNameAt,
   eventNameSpans,
   eventUsagesOf,
+  NamedSpan,
   OutlineNode,
   viewOutline,
   whenBranchOf,
@@ -30,6 +31,7 @@ import {
 import { abapColorSpans, formatCssColor, xmlColorSpans } from "./colors";
 import { snapshot } from "./snapshot";
 import { VIEW_SELECTOR } from "./selector";
+import { attributeAt, attributeSpans, idAt, idSpans } from "./renamewires";
 
 /*
  * Completion and hover from the bundled UI5 metadata.
@@ -468,21 +470,49 @@ class MethodWorkspaceSymbols implements vscode.WorkspaceSymbolProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Rename: an event name, everywhere it appears
+// Rename: a name an abap2UI5 app ties itself together with, everywhere it
+// appears - an event, a control id, a bound attribute
 // ---------------------------------------------------------------------------
 
-class EventRename implements vscode.RenameProvider {
-  /** Only event names are renameable here - anything else defers to other
-   *  providers by throwing, which is the protocol for "not mine". */
+/**
+ * What the cursor is on, in the order the three can be told apart: an event
+ * name (a literal in `_event( )` or `WHEN`), a control id (a literal in an
+ * `id` attribute or an id-taking wire), or an attribute the class declares.
+ */
+function renameTargetAt(text: string, offset: number): NamedSpan | undefined {
+  return (
+    eventNameAt(text, offset) ??
+    whenNameAt(text, offset) ??
+    idAt(text, offset) ??
+    attributeAt(text, offset)
+  );
+}
+
+/** Everywhere that name is written - resolved by the same order, so the kind
+ *  of thing decided in prepareRename is the kind of thing replaced. */
+function renameSpans(text: string, offset: number, name: string): NamedSpan[] {
+  if (eventNameAt(text, offset) ?? whenNameAt(text, offset)) {
+    return eventNameSpans(text, name);
+  }
+  if (idAt(text, offset)) {
+    return idSpans(text, name);
+  }
+  return attributeSpans(text, name);
+}
+
+class WireRename implements vscode.RenameProvider {
+  /** Only the three names above are renameable here - anything else defers
+   *  to other providers by throwing, which is the protocol for "not mine". */
   prepareRename(
     doc: vscode.TextDocument,
     position: vscode.Position
   ): { range: vscode.Range; placeholder: string } {
     const text = doc.getText();
-    const offset = doc.offsetAt(position);
-    const span = eventNameAt(text, offset) ?? whenNameAt(text, offset);
+    const span = renameTargetAt(text, doc.offsetAt(position));
     if (!span) {
-      throw new Error("Only event names can be renamed here.");
+      throw new Error(
+        "Only event names, control ids and bound attributes can be renamed here."
+      );
     }
     return {
       range: new vscode.Range(
@@ -500,19 +530,25 @@ class EventRename implements vscode.RenameProvider {
   ): vscode.WorkspaceEdit {
     if (!/^[\w-]+$/.test(newName)) {
       throw new Error(
-        "An event name may only contain letters, digits, _ and -."
+        "An event name, id or attribute may only contain letters, digits, _ and -."
       );
     }
     const text = doc.getText();
     const offset = doc.offsetAt(position);
-    const span = eventNameAt(text, offset) ?? whenNameAt(text, offset);
+    const span = renameTargetAt(text, offset);
     if (!span) {
-      throw new Error("Only event names can be renamed here.");
+      throw new Error(
+        "Only event names, control ids and bound attributes can be renamed here."
+      );
     }
     const edit = new vscode.WorkspaceEdit();
-    // Every literal naming the event - the _event( ) calls and the WHEN
-    // branches together, so the view and the dispatch cannot drift apart.
-    for (const target of eventNameSpans(text, span.name)) {
+    /* Every place the class writes this name, whichever half of the app
+     * writes it. The strings are what tie an abap2UI5 app together and
+     * nothing in ABAP or UI5 connects the two ends, so renaming one end and
+     * missing the other is silent: a wire that addresses nothing does
+     * nothing at runtime, and a binding path that resolves to nothing
+     * renders empty. Neither reports a thing. */
+    for (const target of renameSpans(text, offset, span.name)) {
       edit.replace(
         doc.uri,
         new vscode.Range(
@@ -585,7 +621,7 @@ export function registerLanguageFeatures(
       ABAP_SELECTOR,
       new EventDefinition()
     ),
-    vscode.languages.registerRenameProvider(ABAP_SELECTOR, new EventRename()),
+    vscode.languages.registerRenameProvider(ABAP_SELECTOR, new WireRename()),
     // The label keeps this outline apart from the ABAP extension's own.
     vscode.languages.registerDocumentSymbolProvider(
       ABAP_SELECTOR,
