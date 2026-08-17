@@ -147,6 +147,14 @@
         "title": "abap2UI5: Check All Views in the Workspace"
       },
       {
+        "command": "abap2ui5.fixWorkspace",
+        "title": "abap2UI5: Fix All View Findings in the Workspace"
+      },
+      {
+        "command": "abap2ui5.updateBaseline",
+        "title": "abap2UI5: Rebuild the View-Check Baseline"
+      },
+      {
         "command": "abap2ui5.previewView",
         "title": "abap2UI5: Preview View (No System)",
         "icon": "$(device-camera)"
@@ -227,6 +235,14 @@
         },
         {
           "command": "abap2ui5.previewView",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.fixWorkspace",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.updateBaseline",
           "when": "!isWeb"
         },
         {

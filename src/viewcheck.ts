@@ -15,10 +15,12 @@ import {
   isCheckableSource,
   parseRenderReport,
   RenderResult,
+  plannedFixes,
   resolveCheckerCommand,
   scratchFileName,
 } from "./checkcore";
 import { toDiagnostics } from "./diagnostics";
+import { rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
   CheckOptions,
@@ -411,6 +413,68 @@ async function checkDocument(
  *  collects. */
 const WORKSPACE_GLOB = "**/*.{abap,view.xml,fragment.xml}";
 
+/** One checkable file of the workspace, with what the gate says about it. */
+export interface SweptFile {
+  uri: vscode.Uri;
+  findings: PropertyFinding[];
+}
+
+/**
+ * Every checkable file in the workspace, gated once. Three commands are made
+ * of this - check, fix and baseline - and they must agree on what "the
+ * workspace says" means, down to which files are looked at and which config
+ * governs each one.
+ *
+ * `baseline` decides whether the repo's baseline is applied: the check and
+ * the fix want what the repo still considers a problem, while REBUILDING the
+ * baseline needs the unfiltered truth - filtering it first would write a file
+ * that waives nothing and calls every waived finding new on the next run.
+ */
+async function sweepWorkspace(
+  progress: vscode.Progress<{ message?: string; increment?: number }>,
+  token: vscode.CancellationToken,
+  options: { baseline: boolean }
+): Promise<SweptFile[]> {
+  const files = await vscode.workspace.findFiles(
+    WORKSPACE_GLOB,
+    "**/{node_modules,.git,dist,out}/**"
+  );
+  const swept: SweptFile[] = [];
+  for (const [index, uri] of files.entries()) {
+    if (token.isCancellationRequested) {
+      break;
+    }
+    progress.report({
+      message: `${index + 1}/${files.length} - ${path.basename(uri.fsPath)}`,
+      increment: 100 / files.length,
+    });
+    let text: string;
+    try {
+      text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+    } catch {
+      continue;
+    }
+    const isXml = VIEW_XML_RE.test(uri.fsPath);
+    if (!isXml && !usesBuilder(text)) {
+      continue;
+    }
+    const opts = resolveOptions(path.dirname(uri.fsPath), {
+      minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
+      distribution: config().get<string>("viewCheck.distribution", "sapui5"),
+      allow: config().get<string[]>("viewCheck.allow", []),
+    });
+    const gate = runGate(text, uri.fsPath, isXml, opts);
+    if (gate.nothingChecked) {
+      continue;
+    }
+    if (options.baseline && opts.baseline) {
+      applyBaselineTo(gate.findings, opts.baseline, uri.fsPath);
+    }
+    swept.push({ uri, findings: gate.findings });
+  }
+  return swept;
+}
+
 /**
  * Checks every checkable file in the workspace, the way CI does, and fills
  * the Problems panel with the result. The on-save check only ever sees what
@@ -421,16 +485,6 @@ async function checkWorkspace(
   diagnostics: vscode.DiagnosticCollection,
   log: (m: string) => void
 ): Promise<void> {
-  const files = await vscode.workspace.findFiles(
-    WORKSPACE_GLOB,
-    "**/{node_modules,.git,dist,out}/**"
-  );
-  if (!files.length) {
-    vscode.window.showInformationMessage(
-      "abap2UI5: no ABAP or view files found in this workspace."
-    );
-    return;
-  }
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -438,52 +492,167 @@ async function checkWorkspace(
       cancellable: true,
     },
     async (progress, token) => {
-      let checked = 0;
+      const swept = await sweepWorkspace(progress, token, { baseline: true });
       let problems = 0;
-      for (const [index, uri] of files.entries()) {
-        if (token.isCancellationRequested) {
-          break;
-        }
-        progress.report({
-          message: `${index + 1}/${files.length} - ${path.basename(uri.fsPath)}`,
-          increment: 100 / files.length,
-        });
-        let text: string;
-        try {
-          text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
-        } catch {
-          continue;
-        }
-        const isXml = VIEW_XML_RE.test(uri.fsPath);
-        if (!isXml && !usesBuilder(text)) {
-          continue;
-        }
-        const options = resolveOptions(path.dirname(uri.fsPath), {
-          minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
-          distribution: config().get<string>("viewCheck.distribution", "sapui5"),
-          allow: config().get<string[]>("viewCheck.allow", []),
-        });
-        const gate = runGate(text, uri.fsPath, isXml, options);
-        if (gate.nothingChecked) {
-          continue;
-        }
-        if (options.baseline) {
-          applyBaselineTo(gate.findings, options.baseline, uri.fsPath);
-        }
-        checked++;
+      for (const file of swept) {
         // The file is opened as a text document so the finding ranges are
         // computed against real lines, exactly like the on-save check does.
-        const doc = await vscode.workspace.openTextDocument(uri);
-        const diags = toDiagnostics(doc, gate.findings, []);
-        diagnostics.set(uri, diags);
+        const doc = await vscode.workspace.openTextDocument(file.uri);
+        const diags = toDiagnostics(doc, file.findings, []);
+        diagnostics.set(file.uri, diags);
         problems += diags.length;
       }
-      log(`view-check: workspace sweep - ${checked} file(s), ${problems} problem(s)`);
+      log(`view-check: workspace sweep - ${swept.length} file(s), ${problems} problem(s)`);
       vscode.window.showInformationMessage(
-        problems
-          ? `abap2UI5: ${problems} problem(s) in ${checked} file(s) - see the Problems panel.`
-          : `abap2UI5: ${checked} file(s) checked, nothing found.`
+        !swept.length
+          ? "abap2UI5: no checkable ABAP or view files found in this workspace."
+          : problems
+            ? `abap2UI5: ${problems} problem(s) in ${swept.length} file(s) - see the Problems panel.`
+            : `abap2UI5: ${swept.length} file(s) checked, nothing found.`
       );
+    }
+  );
+}
+
+/**
+ * Every mechanical fix in the workspace, in one edit.
+ *
+ * The per-file "fix all" is the right size while you are writing one class,
+ * and the wrong one for the two cases that actually hurt: adopting the linter
+ * on a repository that never ran it, and a rule whose autofix arrived after
+ * the code did. Both are workspace-shaped, and doing them file by file means
+ * opening every file to find out that most need nothing.
+ *
+ * It goes through a WorkspaceEdit rather than writing files: one undo step,
+ * the editor's own refactor preview, and unsaved buffers are respected
+ * instead of overwritten.
+ */
+async function fixWorkspace(log: (m: string) => void): Promise<void> {
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "abap2UI5: fixing views",
+      cancellable: true,
+    },
+    async (progress, token) => {
+      const swept = await sweepWorkspace(progress, token, { baseline: true });
+      const edit = new vscode.WorkspaceEdit();
+      let fixes = 0;
+      let files = 0;
+      for (const file of swept) {
+        const planned = plannedFixes(file.findings);
+        if (!planned.length) {
+          continue;
+        }
+        const doc = await vscode.workspace.openTextDocument(file.uri);
+        edit.set(
+          file.uri,
+          planned.map(
+            (fix) =>
+              new vscode.TextEdit(
+                new vscode.Range(doc.positionAt(fix.start), doc.positionAt(fix.end)),
+                fix.text
+              )
+          )
+        );
+        fixes += planned.length;
+        files++;
+      }
+      if (!fixes) {
+        vscode.window.showInformationMessage(
+          `abap2UI5: nothing in ${swept.length} file(s) can be corrected mechanically.`
+        );
+        return;
+      }
+      await vscode.workspace.applyEdit(edit);
+      log(`view-check: workspace fix - ${fixes} fix(es) in ${files} file(s)`);
+      /* Overlapping fixes are left for the next run, here as everywhere -
+       * so the count is what was applied, not what remains, and saying so is
+       * what tells someone to run it again. */
+      vscode.window.showInformationMessage(
+        `abap2UI5: applied ${fixes} fix(es) in ${files} file(s). ` +
+          "Run it again if fixes overlapped; the files are edited, not saved."
+      );
+    }
+  );
+}
+
+/**
+ * Rebuild the repo's baseline from what the workspace reports now - the
+ * editor's `--update-baseline`.
+ *
+ * Adopting the linter on a repository with history is the case this exists
+ * for: the lightbulb can waive findings one at a time, which is right when
+ * three are left and hopeless when four hundred are. The baseline file the
+ * CLI honours is the supported way to say "everything as of today is known",
+ * and until now writing it meant leaving the editor for the command line.
+ */
+async function updateBaseline(log: (m: string) => void): Promise<void> {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) {
+    vscode.window.showInformationMessage(
+      "abap2UI5: no folder is open - a baseline belongs to a repository."
+    );
+    return;
+  }
+  const baselineFile = resolveOptions(folder.uri.fsPath, {
+    minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
+    distribution: config().get<string>("viewCheck.distribution", "sapui5"),
+    allow: config().get<string[]>("viewCheck.allow", []),
+  }).baseline;
+  if (!baselineFile) {
+    vscode.window.showWarningMessage(
+      'abap2UI5: this repository names no baseline. Add "baseline": ' +
+        '"abap2ui5lint-baseline.json" to abap2ui5lint.jsonc first - the file ' +
+        "is only honoured by the CLI when the config points at it."
+    );
+    return;
+  }
+  const confirmed = await vscode.window.showWarningMessage(
+    `abap2UI5: rewrite ${path.basename(baselineFile)} from what the workspace ` +
+      "reports right now? Every finding that exists today becomes waived; " +
+      "the previous content is replaced.",
+    { modal: true },
+    "Rebuild baseline"
+  );
+  if (confirmed !== "Rebuild baseline") {
+    return;
+  }
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "abap2UI5: rebuilding the baseline",
+      cancellable: true,
+    },
+    async (progress, token) => {
+      // unfiltered on purpose: the baseline is what is being written, so it
+      // must not be applied to the findings that write it
+      const swept = await sweepWorkspace(progress, token, { baseline: false });
+      if (token.isCancellationRequested) {
+        vscode.window.showInformationMessage(
+          "abap2UI5: cancelled - the baseline is unchanged."
+        );
+        return;
+      }
+      try {
+        const written = rebuildBaseline(
+          baselineFile,
+          swept.map((file) => ({ file: file.uri.fsPath, findings: file.findings }))
+        );
+        recheckOpenDocuments();
+        log(
+          `view-check: baseline rebuilt - ${written.findings} finding(s) in ` +
+            `${written.entries} entries -> ${baselineFile}`
+        );
+        vscode.window.showInformationMessage(
+          `abap2UI5: ${path.basename(baselineFile)} now waives ` +
+            `${written.findings} finding(s) from ${swept.length} file(s).`
+        );
+      } catch (err) {
+        vscode.window.showWarningMessage(
+          `abap2UI5: could not write ${baselineFile} - ${String(err)}`
+        );
+      }
     }
   );
 }
@@ -556,6 +725,10 @@ export function registerViewCheck(
     vscode.commands.registerCommand("abap2ui5.checkWorkspace", () =>
       checkWorkspace(diagnostics, log)
     ),
+
+    vscode.commands.registerCommand("abap2ui5.fixWorkspace", () => fixWorkspace(log)),
+
+    vscode.commands.registerCommand("abap2ui5.updateBaseline", () => updateBaseline(log)),
 
     // Saving is the moment the expensive gate is allowed to run.
     vscode.workspace.onDidSaveTextDocument((doc) => {

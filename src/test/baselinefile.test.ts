@@ -3,7 +3,7 @@ import * as assert from "node:assert";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { addToBaseline, readBaseline } from "../baselinefile";
+import { addToBaseline, readBaseline, rebuildBaseline } from "../baselinefile";
 
 const FINDING = {
   type: "control-too-new",
@@ -65,4 +65,61 @@ test("addToBaseline keeps the existing entries and counts repeats", () => {
     2,
     "the same finding again raises the count"
   );
+});
+
+// ---------------------------------------------------------------------------
+// rebuildBaseline - the editor's --update-baseline
+// ---------------------------------------------------------------------------
+
+test("a rebuild replaces the file: today's findings, nothing else", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "a2u5-baseline-"));
+  const file = path.join(dir, "abap2ui5lint-baseline.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ note: "kept", findings: { "gone/zcl_old.clas.abap|dead-rule": 3 } })
+  );
+  const written = rebuildBaseline(file, [
+    {
+      file: path.join(dir, "src", "zcl_a.clas.abap"),
+      findings: [
+        { type: "unknown-binding-path", control: "sap.m.Input", value: "{/TYPO}" },
+        { type: "unknown-binding-path", control: "sap.m.Input", value: "{/TYPO}" },
+      ] as never,
+    },
+    {
+      file: path.join(dir, "src", "zcl_b.clas.abap"),
+      findings: [{ type: "event-without-handler", control: "sap.m.Button" }] as never,
+    },
+  ]);
+  const stored = JSON.parse(fs.readFileSync(file, "utf8"));
+  // the stale entry is GONE - a baseline that only grows is one the CLI fails on
+  assert.ok(!Object.keys(stored.findings).some((k) => k.includes("zcl_old")));
+  assert.equal(written.entries, 2);
+  assert.equal(written.findings, 3);
+  // repeated findings are counted, not deduplicated
+  assert.ok(Object.values(stored.findings).includes(2));
+  // keys are relative to the baseline file and sorted, as the CLI writes them
+  assert.ok(Object.keys(stored.findings).every((k) => k.startsWith("src/")));
+  assert.deepEqual(Object.keys(stored.findings), Object.keys(stored.findings).slice().sort());
+  assert.equal(stored.note, "kept");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a baseline that does not parse is not silently replaced", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "a2u5-baseline-"));
+  const file = path.join(dir, "abap2ui5lint-baseline.json");
+  fs.writeFileSync(file, "{ this is not json");
+  assert.throws(() => rebuildBaseline(file, []), /not a valid baseline file/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a workspace with nothing to waive writes an empty baseline, not a broken one", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "a2u5-baseline-"));
+  const file = path.join(dir, "abap2ui5lint-baseline.json");
+  const written = rebuildBaseline(file, [
+    { file: path.join(dir, "src", "zcl_clean.clas.abap"), findings: [] },
+  ]);
+  assert.deepEqual(written, { entries: 0, findings: 0 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).findings, {});
+  fs.rmSync(dir, { recursive: true, force: true });
 });

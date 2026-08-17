@@ -395,7 +395,8 @@ and the lightbulb offers it: the obsolete `client->_bind_edit( )`, a missing
 rule whose correction would have to guess deliberately carries none. There is
 also *"fix all in this file"* — as a command, as a CodeLens above the class
 definition (**Autofix n findings**, shown only while there is something to
-correct) and as `source.fixAll.abap2ui5`, so it can go into
+correct), as *"Fix All View Findings in the Workspace"* for the whole
+repository in one undo step, and as `source.fixAll.abap2ui5`, so it can go into
 `editor.codeActionsOnSave`:
 
 ```jsonc
@@ -435,6 +436,15 @@ the extension, so an unknown key or a misspelled rule id squiggles right in
 existing findings can name a `baseline` file in the config: the editor then
 drops exactly the findings CI drops (the output channel says how many), so
 the Problems panel shows only what is *new*.
+
+Writing that file is a command too. **add to baseline** waives one finding,
+which is right when three are left and hopeless when four hundred are;
+*"abap2UI5: Rebuild the View-Check Baseline"* sweeps the workspace and rewrites
+the whole file from what it finds — the editor's `--update-baseline`. It
+**replaces** rather than merges, on purpose: the CLI fails on a stale entry, so
+a baseline that only ever grows is one nobody can keep green. It asks before
+writing, and does nothing when the config names no baseline file — the CLI only
+honours one the config points at.
 
 ### Completion and hover
 
@@ -636,6 +646,8 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2UI5: Check Views (Static)` | Runs the static view check on the current file |
 | `abap2UI5: Check All Views in the Workspace` | Runs the same check over every ABAP class and view file |
 | `abap2UI5: Show Reconstructed XML View` | Opens the XML the builder calls produce, live beside the class |
+| `abap2UI5: Fix All View Findings in the Workspace` | Applies every mechanical fix across the workspace, as one undo step |
+| `abap2UI5: Rebuild the View-Check Baseline` | Rewrites the repo's baseline from what the workspace reports now |
 | `abap2UI5: Preview View (No System)` | Renders the current class's view headless and shows the picture |
 | `abap2UI5: Fix All View Findings in This File` | Applies every mechanical fix at once |
 | `abap2UI5: Install Render Gate` | Downloads the render-gate checker and Chromium into the extension's storage |

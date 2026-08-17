@@ -25,6 +25,23 @@
   not the app: nothing round-trips and no event reaches ABAP. That is what F9
   is for.
 
+- **The fixes and the baseline reach the whole workspace.** Two commands that
+  only existed one file at a time, in the cases where a repository is what you
+  are actually working on. *"Fix All View Findings in the Workspace"* sweeps
+  every checkable file and applies every mechanical correction as **one
+  WorkspaceEdit** — one undo step, the editor's own refactor preview, unsaved
+  buffers respected instead of overwritten — which is what adopting the linter
+  on an existing repository, or a rule whose autofix arrived after the code
+  did, actually needs. And *"Rebuild the View-Check Baseline"* writes the
+  baseline file from what the workspace reports right now: the editor's
+  `--update-baseline`, for the moment when the lightbulb's one-finding waiver
+  is hopeless because there are four hundred of them. It replaces rather than
+  merges (the CLI fails on a stale entry, so a baseline that only grows is one
+  nobody can keep green), asks before it writes, and says so when the config
+  names no baseline — the CLI only honours one the config points at. Both share
+  the check's own sweep, so "what the workspace says" means the same thing in
+  all three.
+
 - **An autofix lens next to the check that finds the work.** The class
   definition already carried *Run*, *Activate & reload* and *Check views*;
   what it did not carry was the one action that needs no reading at all.

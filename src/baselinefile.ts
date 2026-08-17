@@ -50,6 +50,55 @@ export function readBaseline(baselineFile: string): Baseline {
   }
 }
 
+/** The keys one file's findings contribute, with their counts - what both the
+ *  single-finding append and the whole-file rebuild are made of. */
+export function baselineKeys(
+  baselineFile: string,
+  sourceFile: string,
+  findings: readonly PropertyFinding[]
+): string[] {
+  const rel = path
+    .relative(baselineBase(baselineFile), sourceFile)
+    .split(path.sep)
+    .join("/");
+  return findings.map((finding) => findingKey(rel, finding));
+}
+
+/**
+ * Rewrite the baseline from what the whole workspace reports right now - the
+ * editor's form of `--update-baseline`.
+ *
+ * A REPLACEMENT, not a merge, and that is the point: the CLI fails on a stale
+ * entry (one nothing produces any more), so a baseline that only ever grows
+ * would be a file nobody can keep green. What it costs is that every waiver
+ * here is a waiver of something that exists today, which is exactly the
+ * promise a baseline makes.
+ */
+export function rebuildBaseline(
+  baselineFile: string,
+  files: ReadonlyArray<{ file: string; findings: readonly PropertyFinding[] }>
+): { entries: number; findings: number } {
+  const raw = readBaseline(baselineFile);
+  const counted: Record<string, number> = {};
+  for (const { file, findings } of files) {
+    for (const key of baselineKeys(baselineFile, file, findings)) {
+      counted[key] = (counted[key] ?? 0) + 1;
+    }
+  }
+  const sorted: Record<string, number> = {};
+  for (const k of Object.keys(counted).sort()) {
+    sorted[k] = counted[k];
+  }
+  fs.writeFileSync(
+    baselineFile,
+    `${JSON.stringify({ note: raw.note ?? NOTE, findings: sorted }, null, 2)}\n`
+  );
+  return {
+    entries: Object.keys(sorted).length,
+    findings: Object.values(sorted).reduce((a, b) => a + b, 0),
+  };
+}
+
 /**
  * Appends one finding to the baseline file - the same key and count semantics
  * `--update-baseline` writes, so the CLI recognises the entry. Returns the key
@@ -62,11 +111,7 @@ export function addToBaseline(
 ): string {
   const raw = readBaseline(baselineFile);
   const findings: Record<string, number> = raw.findings ?? {};
-  const rel = path
-    .relative(baselineBase(baselineFile), sourceFile)
-    .split(path.sep)
-    .join("/");
-  const key = findingKey(rel, finding);
+  const key = baselineKeys(baselineFile, sourceFile, [finding])[0];
   findings[key] = (findings[key] ?? 0) + 1;
   const sorted: Record<string, number> = {};
   for (const k of Object.keys(findings).sort()) {
