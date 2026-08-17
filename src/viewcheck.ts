@@ -8,12 +8,13 @@ import { installRenderGate, renderGateBrowsers, renderGateCli } from "./renderga
 import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
 import { usesBuilder } from "./abap";
-import { runGate, VIEW_XML_RE } from "./gate";
+import { GateResult, runGate, VIEW_XML_RE } from "./gate";
 import {
   augmentedPath,
   CheckerCommand,
   isCheckableSource,
   parseRenderReport,
+  quoteForShell,
   RenderResult,
   plannedFixes,
   resolveCheckerCommand,
@@ -143,9 +144,19 @@ export function spawnEnv(): NodeJS.ProcessEnv {
   return PATH === process.env.PATH ? process.env : { ...process.env, PATH };
 }
 
+/**
+ * How long the render gate may take before it is killed. Launching Chromium
+ * and rendering a view is seconds; the npx fallback resolving a GitHub
+ * dependency on a slow line is tens of them. Beyond this something is stuck -
+ * and without a limit every save added another stuck child that nothing ever
+ * reaped, with `checkDocument` waiting on the first one forever.
+ */
+const RENDER_TIMEOUT_MS = 180_000;
+
 function runRenderGate(
   doc: vscode.TextDocument,
-  log: (m: string) => void
+  log: (m: string) => void,
+  superseded: () => boolean
 ): Promise<RenderResult | undefined> {
   const scratchDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "abap2ui5-viewcheck-")
@@ -154,13 +165,26 @@ function runRenderGate(
   fs.writeFileSync(scratch, doc.getText());
 
   const checker = checkerCommand();
-  const args = [...checker.args, scratch, "--json", "--advisory", "--no-properties"];
+  const useShell = checker.cmd !== "node" && process.platform === "win32";
+  const rawArgs = [...checker.args, scratch, "--json", "--advisory", "--no-properties"];
+  // with shell: true Node passes the args through unquoted, so a path with a
+  // space in it would arrive as two arguments
+  const args = useShell
+    ? rawArgs.map((arg) => quoteForShell(arg, process.platform))
+    : rawArgs;
   const cwd =
     vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath ?? os.homedir();
   log(`view-check: render gate - ${checker.cmd} ${args.join(" ")}`);
 
   return new Promise((resolve) => {
+    let settled = false;
     const done = (result: RenderResult | undefined) => {
+      if (settled) {
+        return; // a failed spawn emits "error" and may still emit "close"
+      }
+      settled = true;
+      clearInterval(watch);
+      clearTimeout(limit);
       fs.rmSync(scratchDir, { recursive: true, force: true });
       resolve(result);
     };
@@ -175,8 +199,46 @@ function runRenderGate(
         : spawn(checker.cmd, args, {
             cwd,
             env: { ...spawnEnv(), ...checker.env },
-            shell: process.platform === "win32",
+            shell: useShell,
           });
+
+    /** Kills the child and everything it started - npx spawns the real
+     *  checker, which spawns Chromium, and killing only the shell would
+     *  leave both behind. */
+    const kill = () => {
+      if (child.pid === undefined || child.killed) {
+        return;
+      }
+      try {
+        if (process.platform === "win32") {
+          spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"]);
+        } else {
+          child.kill("SIGKILL");
+        }
+      } catch {
+        /* the child is already gone */
+      }
+    };
+
+    const limit = setTimeout(() => {
+      log(
+        `view-check: render gate exceeded ${RENDER_TIMEOUT_MS} ms - killed, ` +
+          "the property gate's findings still stand"
+      );
+      kill();
+      done(undefined);
+    }, RENDER_TIMEOUT_MS);
+
+    // the buffer moved on, or the document was closed - nothing will be done
+    // with this answer, so stop paying for it
+    const watch = setInterval(() => {
+      if (superseded()) {
+        log("view-check: render gate no longer needed - killed");
+        kill();
+        done(undefined);
+      }
+    }, 500);
+
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (c) => (stdout += String(c)));
@@ -204,6 +266,9 @@ function runRenderGate(
       done(undefined);
     });
     child.on("close", () => {
+      if (settled) {
+        return;
+      }
       const parsed = parseRenderReport(stdout);
       if (!parsed.ok) {
         log(
@@ -322,7 +387,13 @@ async function checkDocument(
   const key = doc.uri.toString();
   const gen = (generations.get(key) ?? 0) + 1;
   generations.set(key, gen);
-  const superseded = () => generations.get(key) !== gen;
+  // The buffer counts as much as a newer run does: findings carry offsets into
+  // the text they were computed from, and a render takes seconds. Publishing
+  // them onto a document that was edited meanwhile puts the squiggles on the
+  // wrong lines, where they stay until the next check.
+  const startVersion = doc.version;
+  const superseded = () =>
+    generations.get(key) !== gen || doc.version !== startVersion;
 
   const options = optionsFor(doc);
   const versionLine = describeOptions(options);
@@ -349,7 +420,21 @@ async function checkDocument(
   const text = doc.getText();
   const name = path.basename(doc.fileName);
   const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
-  const gate = runGate(text, doc.uri.fsPath || name, isXml, options);
+  // An unparsable buffer mid-edit throws out of the gate - on the live path
+  // that was one unhandled rejection per keystroke, and in a workspace sweep
+  // a single such file ended the whole run.
+  let gate: GateResult;
+  try {
+    gate = runGate(text, doc.uri.fsPath || name, isXml, options);
+  } catch (err) {
+    log(`view-check: ${name} - could not be checked (${String(err)})`);
+    if (request.announce) {
+      vscode.window.showWarningMessage(
+        `abap2UI5: ${name} could not be checked - ${String(err)}`
+      );
+    }
+    return;
+  }
   let baselined = 0;
   if (options.baseline && doc.uri.scheme === "file") {
     baselined = applyBaselineTo(gate.findings, options.baseline, doc.uri.fsPath);
@@ -374,7 +459,7 @@ async function checkDocument(
     gate.renderable &&
     !spawnFailed
   ) {
-    const render = await runRenderGate(doc, log);
+    const render = await runRenderGate(doc, log, superseded);
     if (superseded()) {
       return; // the document moved on while Chromium was busy
     }
@@ -691,6 +776,10 @@ export function registerViewCheck(
   const configChanged = () => {
     clearConfigCache();
     lastVersionLine = "";
+    // the memoised findings behind the lightbulb and the "fix all" lens were
+    // computed under the old config - the version they are keyed on does not
+    // move when a config file does
+    recheckOpenDocuments();
     recheckOpen();
   };
 
@@ -765,6 +854,10 @@ export function registerViewCheck(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(`${CONFIG_SECTION}.viewCheck`)) {
         lastVersionLine = "";
+        // the checker that could not be started may be exactly what was just
+        // changed - without this the gate stayed off until the window reloaded
+        spawnFailed = false;
+        recheckOpenDocuments();
         recheckOpen();
       }
     })

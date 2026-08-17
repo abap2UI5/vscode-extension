@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { CORPUS_DIRS, VIEW_CHECK_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
+import { splitCommandLine } from "./checkcore";
 
 /*
  * MCP server registration: exposes the abap2UI5 MCP server
@@ -45,7 +46,10 @@ function config() {
 function serverCommand(): string[] {
   const explicit = config().get<string>("mcp.command", "").trim();
   if (explicit) {
-    return explicit.split(/\s+/);
+    // quotes honoured: a program path with a space in it (the normal shape
+    // on Windows, and under "Application Support" on macOS) used to be split
+    // into pieces that spawn could only fail on
+    return splitCommandLine(explicit);
   }
   const root = config().get<string>("mcp.reposRoot", "").trim();
   if (root) {
