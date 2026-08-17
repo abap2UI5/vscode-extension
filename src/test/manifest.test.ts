@@ -19,6 +19,8 @@ interface Manifest {
     /** An entry is a command OR a nested submenu, never both. */
     menus?: Record<string, Array<{ command?: string; submenu?: string }>>;
     submenus?: Array<{ id: string; label: string }>;
+    viewsWelcome?: Array<{ view: string; contents: string }>;
+    views?: Record<string, Array<{ id: string }>>;
     keybindings?: Array<{ command: string }>;
   };
 }
@@ -157,6 +159,31 @@ test("menus and keybindings only reference contributed commands", () => {
       known.has(binding.command),
       `keybinding references unknown command ${binding.command}`
     );
+  }
+});
+
+test("the welcome text of an empty view links only to real commands", () => {
+  // These are the one thing a user sees when a tree has nothing to show, and
+  // a link to a command that no longer exists fails silently on click.
+  const known = new Set(contributed);
+  const viewIds = new Set(
+    Object.values(manifest.contributes.views ?? {}).flatMap((entries) =>
+      entries.map((entry) => entry.id)
+    )
+  );
+  for (const welcome of manifest.contributes.viewsWelcome ?? []) {
+    assert.ok(
+      viewIds.has(welcome.view),
+      `viewsWelcome targets ${welcome.view}, which is not a contributed view`
+    );
+    for (const [, command] of welcome.contents.matchAll(
+      /command:([\w.]+)/g
+    )) {
+      assert.ok(
+        known.has(command),
+        `the welcome text of ${welcome.view} links to unknown command ${command}`
+      );
+    }
   }
 });
 
