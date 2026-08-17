@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Extract to View Method.** A view built with the builder is one statement,
+  and a real screen is a long one; abap2UI5's answer is the handle idiom, a
+  helper method taking the builder and returning it, which the linter follows
+  so an extracted section stays reconstructable and checked. Doing it by hand
+  means splitting one statement without breaking its parenthesis balance,
+  inventing the parameter and remembering the declaration in the right section.
+  The command computes all three: the head is captured into a handle (keeping
+  its own name if it has one), the tail becomes `result = box->…` inside a new
+  method, and the call takes its place. It extracts a **tail** — a middle
+  section would have to hand the handle back for the rest of the chain to
+  continue from, which is neither the corpus idiom nor readable — and it
+  refuses rather than guesses: a cursor outside a chain, a name already taken
+  and a chain's own first call each come back with a sentence saying why.
+
 - **The preview shows data, several devices, and what changed.** Three things
   that turned the systemless preview from a nice picture into the panel you
   leave open.

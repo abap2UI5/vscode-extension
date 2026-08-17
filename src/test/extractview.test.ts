@@ -1,0 +1,132 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { ExtractPlan, planExtract } from "../extractview";
+
+/*
+ * Moving the tail of a chain into a method. What is asserted is what would
+ * otherwise have to be checked by hand every time: that the halves are both
+ * balanced ABAP, that the handle is passed rather than invented twice, and
+ * that everything the planner will not do is refused with a reason.
+ */
+
+const SOURCE = `CLASS zcl_app DEFINITION PUBLIC.
+
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    DATA name TYPE string.
+
+  PROTECTED SECTION.
+    DATA client TYPE REF TO z2ui5_if_client.
+
+ENDCLASS.
+
+CLASS zcl_app IMPLEMENTATION.
+
+  METHOD z2ui5_if_app~main.
+
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+
+    view->ele( n = \`View\` ns = \`mvc\`
+        )->a( n = \`xmlns\` v = \`sap.m\`
+        )->ele( n = \`Page\` )->a( n = \`title\` v = \`Demo\`
+        )->ele( n = \`content\`
+        )->tag( n = \`Button\` )->a( n = \`text\` v = \`Go\` ).
+
+    client->view_display( view->stringify( ) ).
+
+  ENDMETHOD.
+
+ENDCLASS.`;
+
+/** Apply a plan the way the command does - back to front. */
+function apply(source: string, plan: ExtractPlan): string {
+  let out = source;
+  for (const edit of plan.edits) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
+  }
+  return out;
+}
+
+function planAt(source: string, marker: string, name = "render_button") {
+  const plan = planExtract(source, source.indexOf(marker), name);
+  assert.ok(!("error" in plan), `refused: ${"error" in plan ? plan.error : ""}`);
+  return plan as ExtractPlan;
+}
+
+test("the tail becomes a method and the head keeps a handle", () => {
+  const out = apply(SOURCE, planAt(SOURCE, ")->tag( n = `Button`"));
+  // the head is captured and closed
+  assert.ok(out.includes("DATA(content) = view->ele( n = `View`"));
+  // the call takes the handle
+  assert.ok(out.includes("render_button( content )."));
+  // the method exists, is declared, and hangs off the parameter
+  assert.ok(out.includes("METHODS render_button"));
+  assert.ok(out.includes("box           TYPE REF TO z2ui5_cl_ui5_view_builder"));
+  assert.ok(out.includes("result = box->tag( n = `Button` )"));
+  assert.ok(out.includes("ENDMETHOD."));
+});
+
+test("both halves stay balanced ABAP", () => {
+  const out = apply(SOURCE, planAt(SOURCE, ")->ele( n = `content`"));
+  const opens = (out.match(/\(/g) ?? []).length;
+  const closes = (out.match(/\)/g) ?? []).length;
+  assert.equal(opens, closes);
+  // the chain that was one statement is now two, each ending in a period
+  assert.ok(/\)\.\n\n\s+render_button\( content \)\./.test(out));
+});
+
+test("a chain already captured keeps its own handle", () => {
+  const captured = SOURCE.replace("    view->ele( n = `View`", "    DATA(page) = view->ele( n = `View`");
+  const plan = planAt(captured, ")->tag( n = `Button`");
+  assert.equal(plan.handle, "page");
+  const out = apply(captured, plan);
+  assert.ok(out.includes("render_button( page )."));
+  // no second capture of the same chain
+  assert.ok(!out.includes("DATA(content)"));
+});
+
+test("the extracted block keeps the shape of the tree it draws", () => {
+  const out = apply(SOURCE, planAt(SOURCE, ")->ele( n = `Page`"));
+  const body = out.slice(out.indexOf("METHOD render_button"));
+  const first = body.split("\n").find((l) => l.includes("result = box"));
+  assert.ok(first);
+  // the statement starts at the method's own indent, and every continuation
+  // line of the chain stays deeper than it - which is the only picture of the
+  // view's tree a chain has
+  assert.equal(/^[ \t]*/.exec(first)?.[0].length, 4);
+  const continuations = body
+    .split("\n")
+    .filter((l) => l.trimStart().startsWith(")->"))
+    .map((l) => /^[ \t]*/.exec(l)?.[0].length ?? 0);
+  assert.ok(continuations.length >= 2);
+  assert.ok(
+    continuations.every((indent) => indent > 4),
+    `continuations stay deeper than the statement (${continuations.join(",")})`
+  );
+});
+
+// ---------------------------------------------------------------------------
+// What it refuses
+// ---------------------------------------------------------------------------
+
+test("a cursor outside a chain is refused, not guessed at", () => {
+  const plan = planExtract(SOURCE, SOURCE.indexOf("DATA name TYPE string"), "render_x");
+  assert.ok("error" in plan && /not a view builder chain/.test(plan.error));
+});
+
+test("a name that is not a name, or one already taken, is refused", () => {
+  const bad = planExtract(SOURCE, SOURCE.indexOf(")->tag("), "2fast");
+  assert.ok("error" in bad && /method name/i.test(bad.error));
+  const taken = planExtract(
+    SOURCE.replace("  PROTECTED SECTION.", "  PROTECTED SECTION.\n    METHODS render_button."),
+    SOURCE.indexOf(")->tag("),
+    "render_button"
+  );
+  assert.ok("error" in taken && /already declares/.test(taken.error));
+});
+
+test("the first call of a chain has no head to leave behind", () => {
+  // `view->ele( )` - there is nothing before it to keep
+  const plan = planExtract(SOURCE, SOURCE.indexOf("view->ele( n = `View`") + 4, "render_all");
+  assert.ok("error" in plan && /No chain call starts here/.test(plan.error));
+});

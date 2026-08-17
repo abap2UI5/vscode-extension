@@ -32,6 +32,7 @@ import { abapColorSpans, formatCssColor, xmlColorSpans } from "./colors";
 import { snapshot } from "./snapshot";
 import { VIEW_SELECTOR } from "./selector";
 import { attributeAt, attributeSpans, idAt, idSpans } from "./renamewires";
+import { planExtract } from "./extractview";
 
 /*
  * Completion and hover from the bundled UI5 metadata.
@@ -622,6 +623,10 @@ export function registerLanguageFeatures(
       new EventDefinition()
     ),
     vscode.languages.registerRenameProvider(ABAP_SELECTOR, new WireRename()),
+
+    vscode.commands.registerCommand("abap2ui5.extractViewMethod", () =>
+      extractViewMethod(log)
+    ),
     // The label keeps this outline apart from the ABAP extension's own.
     vscode.languages.registerDocumentSymbolProvider(
       ABAP_SELECTOR,
@@ -651,5 +656,69 @@ export function registerLanguageFeatures(
   log(
     "language: completion, hover, client API, chain formatting, " +
       "method navigation and view outline registered"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Extract a chain section into a view method
+// ---------------------------------------------------------------------------
+
+/**
+ * "Extract to View Method": the tail of the chain under the cursor moves into
+ * a method of its own, taking the builder as a handle.
+ *
+ * The idiom is abap2UI5's own - a helper `IMPORTING box RETURNING result`,
+ * both `TYPE REF TO z2ui5_cl_ui5_view_builder` - and the linter follows it, so
+ * the extracted view is still reconstructed and still checked. Doing it by
+ * hand means splitting one statement without breaking its parenthesis balance
+ * and remembering the declaration; `extractview.ts` computes both.
+ */
+async function extractViewMethod(
+  log: (m: string) => void
+): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== "abap") {
+    vscode.window.showInformationMessage(
+      "abap2UI5: open an ABAP class and put the cursor on the chain call to extract."
+    );
+    return;
+  }
+  const name = await vscode.window.showInputBox({
+    title: "abap2UI5: extract to view method",
+    prompt: "Name for the new method - it takes the builder and returns it",
+    value: "render_section",
+    validateInput: (value) =>
+      /^[a-z][a-z0-9_]{0,28}$/i.test(value)
+        ? undefined
+        : "A method name starts with a letter and holds letters, digits and _.",
+  });
+  if (!name) {
+    return;
+  }
+  const doc = editor.document;
+  const plan = planExtract(
+    doc.getText(),
+    doc.offsetAt(editor.selection.start),
+    name
+  );
+  if ("error" in plan) {
+    vscode.window.showWarningMessage(`abap2UI5: ${plan.error}`);
+    return;
+  }
+  const edit = new vscode.WorkspaceEdit();
+  edit.set(
+    doc.uri,
+    plan.edits.map(
+      (e) =>
+        new vscode.TextEdit(
+          new vscode.Range(doc.positionAt(e.start), doc.positionAt(e.end)),
+          e.text
+        )
+    )
+  );
+  await vscode.workspace.applyEdit(edit);
+  log(`extract: ${name}( ${plan.handle} ) created`);
+  vscode.window.showInformationMessage(
+    `abap2UI5: extracted into ${name}( ${plan.handle} ).`
   );
 }

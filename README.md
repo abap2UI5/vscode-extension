@@ -87,6 +87,10 @@ tying the extension to a system is the launch URL you configure once.
   class's model actually has**, offered inside `{…}`, and the
   **`client->` API** with signature and documentation on hover. See
   [Completion and hover](#completion-and-hover).
+- **Extract to View Method** – The tail of a long chain becomes a helper
+  method taking the builder handle, declaration and call included — the idiom
+  the samples use and the linter follows. See
+  [Extract](#extract-to-view-method).
 - **Format Document repairs a builder chain** – The indentation follows the
   view hierarchy the chain builds; only builder-verb lines are touched. See
   [Format Document](#format-document).
@@ -566,6 +570,37 @@ click) — it is the same runtime. And it is not the app: nothing round-trips, n
 event reaches ABAP, and the data is the derived mock model rather than what a
 system would serve. That is what **F9** is for.
 
+### Extract to View Method
+
+A view built with the builder is **one statement**, and a real screen is a long
+one. abap2UI5's own answer is the handle idiom — a helper method taking the
+builder and returning it — which the linter follows, so an extracted section is
+still reconstructed and still checked.
+
+*"abap2UI5: Extract to View Method"* performs it: put the cursor on the
+`)->ele( )` or `)->tag( )` that should start the new method, give it a name, and
+the chain is split. The head is captured into a handle (keeping its own name if
+it already has one), the tail becomes
+
+```abap
+  METHOD render_section.
+
+    result = box->tag( `Button`
+        )->a( n = `text` v = `Go` ).
+
+  ENDMETHOD.
+```
+
+with the `METHODS render_section IMPORTING box … RETURNING VALUE(result) …`
+declaration written into the class, and the call `render_section( content ).`
+left where the tail used to be.
+
+It extracts a **tail** — from the chain call under the cursor to the end of the
+statement. A middle section would have to hand the handle back for the rest of
+the chain to continue from, which is neither the corpus idiom nor readable. It
+refuses rather than guesses: a cursor outside a chain, a name already taken and
+the chain's own first call each come back with a sentence saying so.
+
 ### Examples from the sample catalogues
 
 The metadata snapshot answers *what properties does `sap.m.Table` have* — in
@@ -715,6 +750,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2UI5: Check Views (Static)` | Runs the static view check on the current file |
 | `abap2UI5: Check All Views in the Workspace` | Runs the same check over every ABAP class and view file |
 | `abap2UI5: Show Reconstructed XML View` | Opens the XML the builder calls produce, live beside the class |
+| `abap2UI5: Extract to View Method` | Moves the chain tail under the cursor into a handle-taking method |
 | `abap2UI5: Show Examples for this Control` | Finds the control under the cursor in the sample catalogues |
 | `abap2UI5: Fix All View Findings in the Workspace` | Applies every mechanical fix across the workspace, as one undo step |
 | `abap2UI5: Rebuild the View-Check Baseline` | Rewrites the repo's baseline from what the workspace reports now |

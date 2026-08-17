@@ -147,6 +147,11 @@
         "title": "abap2UI5: Check All Views in the Workspace"
       },
       {
+        "command": "abap2ui5.extractViewMethod",
+        "title": "abap2UI5: Extract to View Method",
+        "icon": "$(symbol-method)"
+      },
+      {
         "command": "abap2ui5.showExamples",
         "title": "abap2UI5: Show Examples for this Control",
         "icon": "$(library)"
