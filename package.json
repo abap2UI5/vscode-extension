@@ -152,6 +152,11 @@
         "icon": "$(book)"
       },
       {
+        "command": "abap2ui5.expandAbbreviation",
+        "title": "abap2UI5: Expand Abbreviation to a Chain",
+        "icon": "$(zap)"
+      },
+      {
         "command": "abap2ui5.extractViewMethod",
         "title": "abap2UI5: Extract to View Method",
         "icon": "$(symbol-method)"
@@ -191,6 +196,26 @@
       {
         "command": "abap2ui5.installRenderGate",
         "title": "abap2UI5: Install Render Gate"
+      },
+      {
+        "command": "abap2ui5.refreshApps",
+        "title": "abap2UI5: Refresh the App List",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "abap2ui5.runApp",
+        "title": "abap2UI5: Run this App",
+        "icon": "$(play)"
+      },
+      {
+        "command": "abap2ui5.previewApp",
+        "title": "abap2UI5: Preview this App's View",
+        "icon": "$(device-camera)"
+      },
+      {
+        "command": "abap2ui5.checkApp",
+        "title": "abap2UI5: Check this App's Views",
+        "icon": "$(checklist)"
       }
     ],
     "mcpServerDefinitionProviders": [
@@ -292,6 +317,18 @@
         {
           "command": "abap2ui5.openRuleDocs",
           "when": "false"
+        },
+        {
+          "command": "abap2ui5.runApp",
+          "when": "false"
+        },
+        {
+          "command": "abap2ui5.previewApp",
+          "when": "false"
+        },
+        {
+          "command": "abap2ui5.checkApp",
+          "when": "false"
         }
       ],
       "editor/title": [
@@ -326,6 +363,11 @@
           "command": "abap2ui5.fixWorkspace",
           "when": "view == abap2ui5.findings",
           "group": "navigation@2"
+        },
+        {
+          "command": "abap2ui5.refreshApps",
+          "when": "view == abap2ui5.apps",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
@@ -333,6 +375,21 @@
           "command": "abap2ui5.openRuleDocs",
           "when": "view == abap2ui5.findings && viewItem == abap2ui5.rule",
           "group": "inline"
+        },
+        {
+          "command": "abap2ui5.runApp",
+          "when": "view == abap2ui5.apps && !isWeb",
+          "group": "inline@1"
+        },
+        {
+          "command": "abap2ui5.previewApp",
+          "when": "view == abap2ui5.apps && viewItem == abap2ui5.app.view && !isWeb",
+          "group": "inline@2"
+        },
+        {
+          "command": "abap2ui5.checkApp",
+          "when": "view == abap2ui5.apps && viewItem == abap2ui5.app.view",
+          "group": "inline@3"
         }
       ]
     },
@@ -360,6 +417,12 @@
     },
     "views": {
       "explorer": [
+        {
+          "id": "abap2ui5.apps",
+          "name": "abap2UI5 Apps",
+          "icon": "$(window)",
+          "visibility": "collapsed"
+        },
         {
           "id": "abap2ui5.findings",
           "name": "abap2UI5 Findings",
@@ -505,6 +568,36 @@
           },
           "default": [],
           "markdownDescription": "Accepted deviations for the property gate, e.g. `sap.m.GenericTile.systemInfo` - each entry is passed to the checker as `--allow`. Merges with the `allow` list of a workspace's `abap2ui5lint.jsonc`.\n\nTo waive a single line rather than a whole rule, put the linter's own directive above it: `\" abap2ui5lint-disable-next-line unknown-binding-path -- filled in a LOOP`. The quick fix on any finding writes it for you, and CI honours it too."
+        },
+        "abap2ui5.inlineFindings": {
+          "type": "string",
+          "enum": [
+            "problems",
+            "all",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Errors and warnings only - the defects that are going to cost you something.",
+            "Every finding, hints included.",
+            "Nothing inline; the Problems panel and the squiggles are unaffected."
+          ],
+          "default": "problems",
+          "markdownDescription": "Show the view check's message at the end of the line it concerns, next to the squiggle. A builder chain is long and the Problems panel is far away, so the message is put where you are already looking.\n\nHints are off by default: they are worth knowing and never wrong by themselves, which in a forty-line chain is a lot of grey text for something you did not ask about."
+        },
+        "abap2ui5.inlineSince": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the UI5 version a control or attribute arrived in, at the end of its line - warned when it is above `#abap2ui5.viewCheck.minUi5#`. The metadata ships with the extension, so this answers *\"does my system have this yet?\"* while you write the line rather than after the check runs."
+        },
+        "abap2ui5.inlineRoundtripCost": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show what each **PUBLIC** attribute adds to a roundtrip, next to its declaration. abap2UI5 serializes every public attribute into the model on every roundtrip; the size is measured from the class's own literal seeds, or from a `<class>.mock.json` when there is one."
+        },
+        "abap2ui5.renamePreview": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the refactor preview when **F2** renames an event, a control id or a bound attribute, so every occurrence can be seen before it changes.\n\nThose renames cross from ABAP into view literals on the strength of *where* a string stands - the one refactoring in this extension worth looking at first. Switch it off to rename straight away; the preview stays reachable with `Ctrl+Shift+Enter` in the rename box."
         },
         "abap2ui5.viewPreview.theme": {
           "type": "string",

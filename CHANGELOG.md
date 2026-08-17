@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+- **Three things the editor now says about a line unasked.** One decoration
+  pass, three ideas borrowed from the extensions that made them popular, all
+  three fed by data this extension already ships.
+
+  **The finding, at the end of its line** — the *Error Lens* idea. A builder
+  chain is forty lines long and the Problems panel is somewhere else; the
+  squiggle is where you are looking and the message was not.
+  `abap2ui5.inlineFindings` takes `problems` (the default), `all` or `off`;
+  hints are out by default because "worth knowing, never wrong by itself" is a
+  lot of grey text in a long chain.
+
+  **The UI5 version something arrived in** — the *Version Lens* idea — warned
+  when it is above your floor. *Does my system have this yet?* is the permanent
+  abap2UI5 question and the answer has been sitting in the bundled metadata all
+  along, arriving only as a finding once the floor was already crossed.
+
+  **What a PUBLIC attribute costs per roundtrip** — the *Import Cost* idea.
+  abap2UI5 serializes every public attribute into the model on every single
+  roundtrip; the size is measured from the class's own seeds or from the
+  `<class>.mock.json`, and an attribute nothing is known about still says that
+  it is sent. A line that already carries a finding gets neither, because there
+  the defect is what matters.
+
+- **Emmet for builder chains.** `Page>content>Button*3` expands to the chain
+  that builds it — `>` child, `+` sibling, `*n` repeat, `#id`, `[a=b]`,
+  `{text}`. Inside an existing chain the expansion continues it (`)->ele( … )`,
+  no factory, no `view_display( )`); outside one it scaffolds the whole
+  statement. `>` binds tighter than `+` exactly as in Emmet, so
+  `Page>content>Button+Input` puts both controls in the content aggregation —
+  the obvious implementation, splitting on `+` first, makes the Input a sibling
+  of the Page, which reads the same and builds a different view. The chain
+  itself is written by the same emitter *Convert XML View* uses, so there is
+  one opinion about the house layout rather than two.
+
+- **The apps of this workspace, as a list.** Every toolchain extension has one
+  — npm scripts, Docker, Maven, Jest all put the things of the project in a
+  tree with a play button — and abap2UI5 had none: F9 works on the class you
+  happen to have open, and *Run a Recently Launched App* only knows what this
+  window already ran. Opening a repository with thirty apps in it, nothing said
+  which thirty. The **abap2UI5 Apps** view lists every class implementing
+  `z2ui5_if_app` with run, preview and check on the item.
+
+- **F2 shows the refactor preview.** The rename crosses from ABAP into view
+  literals on the strength of where a string stands, which is the one
+  refactoring here worth looking at before it happens: every occurrence is
+  listed with its line, and nothing changes until you say so.
+  `abap2ui5.renamePreview` switches it off for anyone who would rather just
+  rename.
+
 - **A findings view, grouped by rule.** The Problems panel lists findings per
   file, among every other contributor's — which answers "what is wrong in this
   file". The new **abap2UI5 Findings** view in the Explorer answers the other

@@ -87,6 +87,13 @@ tying the extension to a system is the launch URL you configure once.
   class's model actually has**, offered inside `{…}`, and the
   **`client->` API** with signature and documentation on hover. See
   [Completion and hover](#completion-and-hover).
+- **Inline annotations** – The finding at the end of its line, the UI5
+  `@since` of what you are writing, and what a PUBLIC attribute costs per
+  roundtrip. See [Inline annotations](#inline-annotations).
+- **Emmet for chains** – `Page>content>Button*3` expands to the builder chain
+  that builds it. See [Abbreviations](#abbreviations--emmet-for-chains).
+- **The apps of this workspace** – Every `z2ui5_if_app` class as a list with
+  run, preview and check on it. See [Apps](#the-apps-of-this-workspace).
 - **Findings by rule** – The **abap2UI5 Findings** view in the Explorer groups
   what the check found by the rule behind it, worst first. See
   [Findings view](#the-findings-view).
@@ -573,6 +580,59 @@ click) — it is the same runtime. And it is not the app: nothing round-trips, n
 event reaches ABAP, and the data is the derived mock model rather than what a
 system would serve. That is what **F9** is for.
 
+### Inline annotations
+
+Three things the editor says about a line without being asked — each borrowed
+from the extension that made the idea popular, each fed by data this extension
+already ships:
+
+- **The finding, at the end of its line** (the *Error Lens* idea). A builder
+  chain is forty lines long and the Problems panel is somewhere else; the
+  message belongs where the squiggle is. `abap2ui5.inlineFindings` takes
+  `problems` (errors and warnings, the default), `all` or `off` — hints are out
+  by default because "worth knowing, never wrong by itself" is a lot of grey
+  text in a long chain.
+- **The UI5 version something arrived in** (the *Version Lens* idea), warned
+  when it is above `abap2ui5.viewCheck.minUi5`. *Does my system have this yet?*
+  is the permanent abap2UI5 question, and the metadata answers it while you
+  write the line rather than after the check runs.
+  (`abap2ui5.inlineSince`)
+- **What a `PUBLIC` attribute costs per roundtrip** (the *Import Cost* idea).
+  abap2UI5 serializes every public attribute into the model on **every**
+  roundtrip; the size is measured from the class's own literal seeds, or from
+  the `<class>.mock.json` when there is one, and an attribute the model knows
+  nothing about still says that it is sent. (`abap2ui5.inlineRoundtripCost`)
+
+A line that already carries a finding gets no version or size next to it: the
+defect is what matters there.
+
+### Abbreviations — Emmet for chains
+
+`Page>content>Button*3`, then *"abap2UI5: Expand Abbreviation to a Chain"*, and
+the chain that builds it is written in the house layout:
+
+| | |
+| --- | --- |
+| `>` | child — `Page>content` |
+| `+` | sibling — `Button+Input` |
+| `*n` | repeat — `Button*3` |
+| `#id` | the `id` attribute — `Button#GO` |
+| `[a=b c="two words"]` | attributes |
+| `{text}` | the `text` attribute — `Button{Go}` |
+
+Inside an existing chain the expansion **continues** it (`)->ele( … )`, no
+factory, no `view_display( )`); outside one it scaffolds the whole statement.
+`>` binds tighter than `+`, exactly as in Emmet, so `Page>content>Button+Input`
+puts both controls in the content aggregation.
+
+### The apps of this workspace
+
+The **abap2UI5 Apps** view in the Explorer lists every class implementing
+`z2ui5_if_app`, with **run**, **preview** and **check** on the item — the list
+that says which thirty apps a repository has, which F9 (the class you happen to
+have open) and *Run a Recently Launched App* (what this window already ran)
+could not.
+
 ### The findings view
 
 The Problems panel lists findings **per file**, mixed in with what every other
@@ -747,6 +807,10 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2ui5.viewCheck.minUi5` | `1.71` | The UI5 version your system runs — checked against in both directions |
 | `abap2ui5.viewCheck.distribution` | `sapui5` | Which distribution the system serves: `sapui5` or `openui5` |
 | `abap2ui5.viewCheck.render` | `false` | Also run the headless render gate |
+| `abap2ui5.inlineFindings` | `problems` | Show the finding at the end of its line: `problems`, `all` or `off` |
+| `abap2ui5.inlineSince` | `true` | Show the UI5 version a control or attribute arrived in |
+| `abap2ui5.inlineRoundtripCost` | `true` | Show what a PUBLIC attribute adds to every roundtrip |
+| `abap2ui5.renamePreview` | `true` | F2 shows the refactor preview before the wires change |
 | `abap2ui5.viewCheck.allow` | `[]` | Accepted deviations, e.g. `sap.m.GenericTile.systemInfo` |
 | `abap2ui5.viewPreview.theme` | `sap_horizon` | UI5 theme the systemless preview renders in |
 | `abap2ui5.viewPreview.viewport` | `1280x900` | Viewport(s) it renders at; a comma-separated list is a device matrix |
@@ -771,6 +835,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2UI5: Check Views (Static)` | Runs the static view check on the current file |
 | `abap2UI5: Check All Views in the Workspace` | Runs the same check over every ABAP class and view file |
 | `abap2UI5: Show Reconstructed XML View` | Opens the XML the builder calls produce, live beside the class |
+| `abap2UI5: Expand Abbreviation to a Chain` | Turns `Page>content>Button*3` into the chain that builds it |
 | `abap2UI5: Extract to View Method` | Moves the chain tail under the cursor into a handle-taking method |
 | `abap2UI5: Show Examples for this Control` | Finds the control under the cursor in the sample catalogues |
 | `abap2UI5: Fix All View Findings in the Workspace` | Applies every mechanical fix across the workspace, as one undo step |

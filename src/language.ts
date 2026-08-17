@@ -33,6 +33,7 @@ import { snapshot } from "./snapshot";
 import { VIEW_SELECTOR } from "./selector";
 import { attributeAt, attributeSpans, idAt, idSpans } from "./renamewires";
 import { planExtract } from "./extractview";
+import { expandAbbreviation } from "./abbreviation";
 
 /*
  * Completion and hover from the bundled UI5 metadata.
@@ -549,15 +550,30 @@ class WireRename implements vscode.RenameProvider {
      * missing the other is silent: a wire that addresses nothing does
      * nothing at runtime, and a binding path that resolves to nothing
      * renders empty. Neither reports a thing. */
-    for (const target of renameSpans(text, offset, span.name)) {
-      edit.replace(
-        doc.uri,
-        new vscode.Range(
-          doc.positionAt(target.start),
-          doc.positionAt(target.end)
-        ),
-        newName
+    const targets = renameSpans(text, offset, span.name);
+    for (const [index, target] of targets.entries()) {
+      const range = new vscode.Range(
+        doc.positionAt(target.start),
+        doc.positionAt(target.end)
       );
+      /* Marking the edits as needing confirmation is what makes VS Code open
+       * the refactor PREVIEW instead of applying straight away - worth it for
+       * a rename that crosses from ABAP into view literals on the strength of
+       * where a string stands, and switchable for anyone who would rather
+       * just rename (the preview stays reachable with Ctrl+Shift+Enter, and
+       * the labels below are what it reads). */
+      edit.replace(doc.uri, range, newName, {
+        needsConfirmation: vscode.workspace
+          .getConfiguration("abap2ui5")
+          .get<boolean>("renamePreview", true),
+        label:
+          index === 0
+            ? `Rename ${span.name} to ${newName} - ${targets.length} occurrence${
+                targets.length === 1 ? "" : "s"
+              }`
+            : `${span.name} -> ${newName}`,
+        description: doc.lineAt(range.start.line).text.trim(),
+      });
     }
     return edit;
   }
@@ -626,6 +642,10 @@ export function registerLanguageFeatures(
 
     vscode.commands.registerCommand("abap2ui5.extractViewMethod", () =>
       extractViewMethod(log)
+    ),
+
+    vscode.commands.registerCommand("abap2ui5.expandAbbreviation", () =>
+      expandChainAbbreviation(log)
     ),
     // The label keeps this outline apart from the ABAP extension's own.
     vscode.languages.registerDocumentSymbolProvider(
@@ -721,4 +741,54 @@ async function extractViewMethod(
   vscode.window.showInformationMessage(
     `abap2UI5: extracted into ${name}( ${plan.handle} ).`
   );
+}
+
+// ---------------------------------------------------------------------------
+// Emmet for chains
+// ---------------------------------------------------------------------------
+
+/**
+ * "Expand Abbreviation": the word under the cursor - `Page>content>Button*3` -
+ * becomes the chain that builds it.
+ *
+ * Whether it scaffolds a whole view or continues the chain it is standing in
+ * is decided here, from the statement around the cursor: inside one, the
+ * expansion has to hang off the previous call and must not carry a factory or
+ * a `view_display( )`. Both shapes come out of `abbreviation.ts`; this reads
+ * the line and puts the result back.
+ */
+async function expandChainAbbreviation(log: (m: string) => void): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== "abap") {
+    vscode.window.showInformationMessage(
+      "abap2UI5: write an abbreviation like Page>content>Button*3 in an ABAP file first."
+    );
+    return;
+  }
+  const doc = editor.document;
+  const selection = editor.selection;
+  const line = doc.lineAt(selection.start.line);
+  const source = selection.isEmpty ? line.text.trim() : doc.getText(selection);
+  const range = selection.isEmpty
+    ? new vscode.Range(
+        line.range.start.translate(0, /^\s*/.exec(line.text)?.[0].length ?? 0),
+        line.range.end
+      )
+    : selection;
+
+  /* A chain is one statement, so "am I inside one" is answered by the text
+   * from the previous period to here: a builder call in it means the
+   * statement is open and the expansion continues it. */
+  const before = doc.getText(new vscode.Range(new vscode.Position(0, 0), range.start));
+  const statement = before.slice(before.lastIndexOf(".") + 1);
+  const continuation = /->\s*(?:ele|tag|a)\s*\(/i.test(statement);
+  const indent = /^[ \t]*/.exec(line.text)?.[0] ?? "";
+
+  const { abap, error } = expandAbbreviation(source, indent, continuation);
+  if (error) {
+    vscode.window.showWarningMessage(`abap2UI5: ${error}`);
+    return;
+  }
+  await editor.edit((builder) => builder.replace(range, abap.trimStart()));
+  log(`abbreviation: expanded "${source}"${continuation ? " into the open chain" : ""}`);
 }

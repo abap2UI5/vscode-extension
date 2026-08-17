@@ -12,6 +12,8 @@ import { registerViewPreview } from "./viewpreview";
 import { registerFindingsBar } from "./findingsbar";
 import { registerExamples } from "./exampleview";
 import { registerFindingsView } from "./findingsview";
+import { registerInlineAnnotations } from "./inlineview";
+import { registerAppView } from "./appview";
 import { classNameOf, isAppClass } from "./abap";
 import { originOf } from "./urls";
 import { registerAppSearch } from "./appsearch";
@@ -350,6 +352,8 @@ export function activate(context: vscode.ExtensionContext): void {
   registerFindingsBar(context);
   registerExamples(context, log);
   registerFindingsView(context);
+  registerInlineAnnotations(context, log);
+  registerAppView(context);
   registerRenderGate(context, log);
   registerMcp(context, log, systemMcp);
 }
