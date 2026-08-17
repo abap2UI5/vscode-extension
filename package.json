@@ -395,6 +395,60 @@
           "when": "view == abap2ui5.apps && viewItem == abap2ui5.app.view",
           "group": "inline@3"
         }
+      ],
+      "editor/context": [
+        {
+          "submenu": "abap2ui5.editorContext",
+          "group": "1_modification@100",
+          "when": "resourceLangId == abap || resourceExtname == .xml"
+        }
+      ],
+      "abap2ui5.editorContext": [
+        {
+          "command": "abap2ui5.run",
+          "group": "1_run@1",
+          "when": "!isWeb && resourceLangId == abap"
+        },
+        {
+          "command": "abap2ui5.activate",
+          "group": "1_run@2",
+          "when": "!isWeb && resourceLangId == abap"
+        },
+        {
+          "command": "abap2ui5.previewView",
+          "group": "2_look@1",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.showReconstructedXml",
+          "group": "2_look@2"
+        },
+        {
+          "command": "abap2ui5.showExamples",
+          "group": "2_look@3"
+        },
+        {
+          "command": "abap2ui5.checkViews",
+          "group": "3_check@1"
+        },
+        {
+          "command": "abap2ui5.fixAll",
+          "group": "3_check@2"
+        },
+        {
+          "command": "abap2ui5.extractViewMethod",
+          "group": "4_edit@1",
+          "when": "resourceLangId == abap"
+        },
+        {
+          "command": "abap2ui5.expandAbbreviation",
+          "group": "4_edit@2",
+          "when": "resourceLangId == abap"
+        },
+        {
+          "command": "abap2ui5.convertXml",
+          "group": "4_edit@3"
+        }
       ]
     },
     "keybindings": [
@@ -727,6 +781,12 @@
             }
           }
         ]
+      }
+    ],
+    "submenus": [
+      {
+        "id": "abap2ui5.editorContext",
+        "label": "abap2UI5"
       }
     ]
   },
