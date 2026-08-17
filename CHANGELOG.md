@@ -25,6 +25,18 @@
   not the app: nothing round-trips and no event reaches ABAP. That is what F9
   is for.
 
+- **The view check has a line in the status bar.** Its findings go to the
+  Problems panel, next to whatever the ABAP extension, the XML language server
+  and every other contributor puts there — so "is the file I am looking at
+  clean?" meant opening a panel and reading past other people's entries. The
+  status bar now answers it in place: counts per severity for the active file,
+  the wrench count of what an autofix would correct, the warning or error
+  colour behind it, and a click that opens the list the numbers came from. A
+  clean file says so rather than going blank, because silence is
+  indistinguishable from a check that never ran. It reads the published
+  diagnostics rather than running the gate again, so it changes exactly when
+  the check has something new to say.
+
 - **The fixes and the baseline reach the whole workspace.** Two commands that
   only existed one file at a time, in the cases where a repository is what you
   are actually working on. *"Fix All View Findings in the Workspace"* sweeps

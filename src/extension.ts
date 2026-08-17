@@ -9,6 +9,7 @@ import { registerQuickFix } from "./quickfix";
 import { registerLanguageFeatures } from "./language";
 import { registerCodeLens } from "./codelens";
 import { registerViewPreview } from "./viewpreview";
+import { registerFindingsBar } from "./findingsbar";
 import { classNameOf, isAppClass } from "./abap";
 import { originOf } from "./urls";
 import { registerAppSearch } from "./appsearch";
@@ -344,6 +345,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerQuickFix(context, log);
   registerLanguageFeatures(context, log);
   registerCodeLens(context);
+  registerFindingsBar(context);
   registerRenderGate(context, log);
   registerMcp(context, log, systemMcp);
 }

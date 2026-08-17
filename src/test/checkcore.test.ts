@@ -4,6 +4,8 @@ import * as path from "path";
 import {
   augmentedPath,
   isCheckableSource,
+  findingsBarText,
+  findingsBarTooltip,
   parseRenderReport,
   parseScreenshotErrors,
   parseScreenshotOutput,
@@ -269,4 +271,42 @@ test("an older render gate is told apart from a broken run", () => {
     true
   );
   assert.equal(screenshotUnsupported("abap2ui5lint: no view to photograph"), false);
+});
+
+// ---------------------------------------------------------------------------
+// The status bar's one line
+// ---------------------------------------------------------------------------
+
+test("a clean file says so rather than going blank", () => {
+  // silence is indistinguishable from a check that never ran
+  assert.equal(
+    findingsBarText({ errors: 0, warnings: 0, hints: 0, fixable: 0 }),
+    "$(check) abap2UI5"
+  );
+  assert.match(
+    findingsBarTooltip({ errors: 0, warnings: 0, hints: 0, fixable: 0 }),
+    /nothing found/
+  );
+});
+
+test("only the severities that occur take up room", () => {
+  assert.equal(
+    findingsBarText({ errors: 2, warnings: 0, hints: 0, fixable: 0 }),
+    "$(error) 2"
+  );
+  assert.equal(
+    findingsBarText({ errors: 1, warnings: 3, hints: 2, fixable: 4 }),
+    "$(error) 1 $(warning) 3 $(info) 2 $(wrench) 4"
+  );
+});
+
+test("the tooltip spells out the counts and whether a fix exists", () => {
+  assert.equal(
+    findingsBarTooltip({ errors: 1, warnings: 2, hints: 0, fixable: 1 }),
+    "abap2UI5 view check: 1 error, 2 warnings. 1 of them can be corrected mechanically."
+  );
+  assert.match(
+    findingsBarTooltip({ errors: 0, warnings: 1, hints: 0, fixable: 0 }),
+    /None of them can be corrected/
+  );
 });

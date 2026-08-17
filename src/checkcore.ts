@@ -123,6 +123,65 @@ export function augmentedPath(
 }
 
 // ---------------------------------------------------------------------------
+// The status bar's one line
+// ---------------------------------------------------------------------------
+
+export interface FindingCounts {
+  errors: number;
+  warnings: number;
+  hints: number;
+  /** How many of them `fixAll` would correct mechanically. */
+  fixable: number;
+}
+
+/**
+ * What the status bar says about the current file.
+ *
+ * The Problems panel already lists the findings - mixed in with whatever the
+ * ABAP extension, the XML language server and everything else reports, which
+ * is exactly why a count of OUR findings is worth one line: it answers "is
+ * this file clean?" without opening a panel and reading it.
+ *
+ * Clean says so out loud rather than going blank. A silent status bar is
+ * indistinguishable from a check that is not running, and "did it even look at
+ * this file?" is the question the check's own absence would raise.
+ */
+export function findingsBarText(counts: FindingCounts): string {
+  const { errors, warnings, hints, fixable } = counts;
+  const total = errors + warnings + hints;
+  if (!total) {
+    return "$(check) abap2UI5";
+  }
+  const parts = [
+    errors ? `$(error) ${errors}` : "",
+    warnings ? `$(warning) ${warnings}` : "",
+    hints ? `$(info) ${hints}` : "",
+    fixable ? `$(wrench) ${fixable}` : "",
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
+/** The sentence under it - the counts spelled out, plus what a click does. */
+export function findingsBarTooltip(counts: FindingCounts): string {
+  const { errors, warnings, hints, fixable } = counts;
+  const total = errors + warnings + hints;
+  if (!total) {
+    return "abap2UI5 view check: nothing found in this file.";
+  }
+  const spelled = [
+    errors ? `${errors} error${errors === 1 ? "" : "s"}` : "",
+    warnings ? `${warnings} warning${warnings === 1 ? "" : "s"}` : "",
+    hints ? `${hints} hint${hints === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  return (
+    `abap2UI5 view check: ${spelled.join(", ")}.` +
+    (fixable
+      ? ` ${fixable} of them can be corrected mechanically.`
+      : " None of them can be corrected mechanically.")
+  );
+}
+
+// ---------------------------------------------------------------------------
 // The screenshot run behind the systemless preview
 // ---------------------------------------------------------------------------
 

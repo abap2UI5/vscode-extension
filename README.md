@@ -62,7 +62,9 @@ tying the extension to a system is the launch URL you configure once.
   each `nav_app_call( )` between them as a clickable graph. See
   [Navigation map](#app-navigation-map).
 - **Status bar** – While an app is running the status bar shows the class and
-  the system; clicking it reloads the preview.
+  the system; clicking it reloads the preview. Next to it, the view check's
+  own verdict for the file you are in — counts per severity, how many of them
+  are mechanically fixable, and a click to the Problems panel.
 - **Several systems** – Name your systems in `abap2ui5.systems` and switch
   with *"abap2UI5: Select System"*. The choice is remembered per window and
   credentials are stored per host. See [Systems](#systems-abap2ui5systems).
