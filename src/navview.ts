@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { layoutGraph, navGraph, navMapSvg, NavSource } from "./navmap";
+import { abapSources } from "./abapsources";
 import { createNonce, navMapHtml } from "./webview";
 
 /*
@@ -15,26 +16,15 @@ const NAV_FILE_CAP = 500;
 async function workspaceSources(
   token: vscode.CancellationToken
 ): Promise<NavSource[]> {
-  const files = await vscode.workspace.findFiles(
-    "**/*.abap",
-    "**/{node_modules,.git,dist,out}/**",
-    NAV_FILE_CAP
-  );
+  // Files and open documents alike - a map drawn only from a folder is empty
+  // for anyone working straight against a system through ADT, where the apps
+  // that exist are the ones somebody opened.
   const sources: NavSource[] = [];
-  for (const uri of files) {
+  for (const source of await abapSources(NAV_FILE_CAP)) {
     if (token.isCancellationRequested) {
       break;
     }
-    try {
-      sources.push({
-        fileName: uri.toString(),
-        source: Buffer.from(
-          await vscode.workspace.fs.readFile(uri)
-        ).toString("utf8"),
-      });
-    } catch {
-      // unreadable file - the map simply does not know it
-    }
+    sources.push({ fileName: source.uri.toString(), source: source.text });
   }
   return sources;
 }

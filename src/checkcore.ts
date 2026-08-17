@@ -411,10 +411,37 @@ export function parseRenderReport(stdout: string): RenderReportParse {
 
 export type FindingSeverity = "error" | "warning" | "hint";
 
+/**
+ * How a source is named in a list. A file is its file name; a class opened
+ * through ADT is a service path whose last segment is often `source` or
+ * `main`, which names nothing - so the class name wins whenever the caller
+ * has one, and the deepest segment that still looks like a name is the
+ * fallback.
+ */
+export function sourceLabel(sourcePath: string, className?: string): string {
+  if (className) {
+    return className;
+  }
+  const segments = sourcePath.split("/").filter(Boolean);
+  const GENERIC = new Set(["source", "main", "content", "objects"]);
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (!GENERIC.has(segments[i].toLowerCase())) {
+      return segments[i];
+    }
+  }
+  return segments[segments.length - 1] ?? sourcePath;
+}
+
 export interface RuleEntry {
   rule: string;
   severity: FindingSeverity;
-  /** Absolute path of the file the finding is in. */
+  /**
+   * Identity of the source the finding is in - an absolute path for a file,
+   * the document uri for anything else. Only compared and counted here (how
+   * many sources a rule spans, and the order they are listed in), never
+   * resolved, so a class that lives on a system rather than on disk groups
+   * exactly like a file does.
+   */
   file: string;
   /** 0-based line, as VS Code counts them. */
   line: number;

@@ -86,17 +86,73 @@ function titleOf(doc: vscode.TextDocument): string {
  * it there. Without one the picture shows the model derived from the class's
  * literal seeds, which for a table filled by a SELECT is an empty table.
  */
-function mockFileFor(doc: vscode.TextDocument): string | undefined {
-  if (doc.uri.scheme !== "file") {
+export function mockFileFor(doc: vscode.TextDocument): string | undefined {
+  if (doc.uri.scheme === "file") {
+    const candidate = doc.uri.fsPath.replace(
+      /\.(clas\.abap|abap|view\.xml|fragment\.xml|xml)$/i,
+      ".mock.json"
+    );
+    if (candidate !== doc.uri.fsPath && fs.existsSync(candidate)) {
+      return candidate;
+    }
     return undefined;
   }
-  const candidate = doc.uri.fsPath.replace(
-    /\.(clas\.abap|abap|view\.xml|fragment\.xml|xml)$/i,
-    ".mock.json"
-  );
-  return candidate !== doc.uri.fsPath && fs.existsSync(candidate)
-    ? candidate
-    : undefined;
+  /*
+   * A class opened through ADT has nothing next to it - there is no "next
+   * to". The convention still has to be usable there, or the preview of a
+   * table filled by a SELECT stays empty for everyone who does not check out
+   * a repository: the same file is looked for by CLASS NAME in the open
+   * workspace folders, so `zcl_app.mock.json` anywhere in the project feeds
+   * the picture of ZCL_APP however the class itself was opened.
+   */
+  const className = classNameOf(doc.getText(), doc.uri.path).toLowerCase();
+  if (!className) {
+    return undefined;
+  }
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const hit = findMockByName(folder.uri.fsPath, `${className}.mock.json`, 0);
+    if (hit) {
+      return hit;
+    }
+  }
+  return undefined;
+}
+
+/** The named mock file under a directory. Shallow on purpose - a handful of
+ *  levels covers every repository layout, and walking a whole checkout on
+ *  every preview would cost more than the answer is worth. */
+function findMockByName(
+  dir: string,
+  name: string,
+  depth: number
+): string | undefined {
+  if (depth > 4) {
+    return undefined;
+  }
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.toLowerCase() === name) {
+      return path.join(dir, entry.name);
+    }
+  }
+  for (const entry of entries) {
+    if (
+      entry.isDirectory() &&
+      !entry.name.startsWith(".") &&
+      entry.name !== "node_modules"
+    ) {
+      const hit = findMockByName(path.join(dir, entry.name), name, depth + 1);
+      if (hit) {
+        return hit;
+      }
+    }
+  }
+  return undefined;
 }
 
 /**

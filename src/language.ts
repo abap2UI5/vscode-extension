@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
+import { abapSources } from "./abapsources";
 import {
   abapBindingContextAt,
   eventNameAt,
@@ -437,24 +438,14 @@ class MethodWorkspaceSymbols implements vscode.WorkspaceSymbolProvider {
     if (query.length < 2) {
       return []; // a one-letter query would match half of every file
     }
-    const files = await vscode.workspace.findFiles(
-      "**/*.abap",
-      "**/{node_modules,.git,dist,out}/**",
-      SYMBOL_FILE_CAP
-    );
+    // files and open documents, so the methods of a class opened through ADT
+    // are reachable from Ctrl+T like any other
+    const sources = await abapSources(SYMBOL_FILE_CAP);
     const needle = query.toLowerCase();
     const symbols: vscode.SymbolInformation[] = [];
-    for (const uri of files) {
+    for (const { uri, text } of sources) {
       if (token.isCancellationRequested) {
         break;
-      }
-      let text: string;
-      try {
-        text = Buffer.from(
-          await vscode.workspace.fs.readFile(uri)
-        ).toString("utf8");
-      } catch {
-        continue;
       }
       for (const m of methodImplementations(text)) {
         if (!m.name.toLowerCase().includes(needle)) {

@@ -10,6 +10,7 @@ import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
 import { usesBuilder } from "./abap";
 import { GateResult, runGate, VIEW_XML_RE } from "./gate";
+import { labelOf, noWorkspaceFolders } from "./abapsources";
 import {
   augmentedPath,
   CheckerCommand,
@@ -102,8 +103,15 @@ export function pickDocument(): vscode.TextDocument | undefined {
  *  folder, so a multi-root workspace resolves per file, exactly like the CLI
  *  invoked in that directory would. */
 function discoveryDir(doc: vscode.TextDocument): string | undefined {
-  if (doc.uri.scheme === "file") {
-    return path.dirname(doc.uri.fsPath);
+  return discoveryDirOf(doc.uri);
+}
+
+/** Same question for a uri: its own folder when it is a file, otherwise the
+ *  workspace's - a class opened through ADT is governed by the config of the
+ *  repository you have open, or by the settings when there is none. */
+function discoveryDirOf(uri: vscode.Uri): string | undefined {
+  if (uri.scheme === "file") {
+    return path.dirname(uri.fsPath);
   }
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
@@ -544,46 +552,70 @@ async function sweepWorkspace(
   options: { baseline: boolean },
   log: (m: string) => void
 ): Promise<SweepResult> {
-  const files = await vscode.workspace.findFiles(
+  /*
+   * The workspace's files, plus the checkable documents this window has open
+   * that are not among them. Without the second half a sweep run against a
+   * system through ADT reported "no checkable files found" while the classes
+   * were sitting open in the editor - and the on-save check had been
+   * checking them all along.
+   */
+  const found = await vscode.workspace.findFiles(
     WORKSPACE_GLOB,
     "**/{node_modules,.git,dist,out}/**"
   );
+  const targets: Array<{ uri: vscode.Uri; open?: vscode.TextDocument }> = found.map(
+    (uri) => ({ uri })
+  );
+  const known = new Set(found.map((uri) => uri.toString()));
+  for (const doc of vscode.workspace.textDocuments) {
+    if (!known.has(doc.uri.toString()) && isCheckable(doc)) {
+      targets.push({ uri: doc.uri, open: doc });
+    }
+  }
+
   const swept: SweptFile[] = [];
-  for (const [index, uri] of files.entries()) {
+  for (const [index, target] of targets.entries()) {
     if (token.isCancellationRequested) {
       break;
     }
+    const uri = target.uri;
     progress.report({
-      message: `${index + 1}/${files.length} - ${path.basename(uri.fsPath)}`,
-      increment: 100 / files.length,
+      message: `${index + 1}/${targets.length} - ${labelOf(uri)}`,
+      increment: 100 / targets.length,
     });
     let text: string;
-    try {
-      text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
-    } catch {
-      continue;
+    if (target.open) {
+      text = target.open.getText();
+    } else {
+      try {
+        text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+      } catch {
+        continue;
+      }
     }
-    const isXml = VIEW_XML_RE.test(uri.fsPath);
+    const isXml = VIEW_XML_RE.test(uri.path);
     if (!isXml && !usesBuilder(text)) {
       continue;
     }
-    const opts = resolveOptions(path.dirname(uri.fsPath), {
+    // a document with no path on disk has no directory to discover a config
+    // from - the workspace's own config governs it, as it does on the live path
+    const opts = resolveOptions(discoveryDirOf(uri), {
       minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
       distribution: config().get<string>("viewCheck.distribution", "sapui5"),
       allow: config().get<string[]>("viewCheck.allow", []),
     });
     let gate: GateResult;
     try {
-      gate = runGate(text, uri.fsPath, isXml, opts);
+      gate = runGate(text, uri.scheme === "file" ? uri.fsPath : uri.path, isXml, opts);
     } catch (err) {
       // one file that cannot be parsed is not a reason to abandon the sweep
-      log(`view-check: ${path.basename(uri.fsPath)} skipped - ${String(err)}`);
+      log(`view-check: ${labelOf(uri)} skipped - ${String(err)}`);
       continue;
     }
     if (gate.nothingChecked) {
       continue;
     }
-    if (options.baseline && opts.baseline) {
+    if (options.baseline && opts.baseline && uri.scheme === "file") {
       applyBaselineTo(gate.findings, opts.baseline, uri.fsPath);
     }
     swept.push({ uri, findings: gate.findings });
@@ -636,7 +668,11 @@ async function checkWorkspace(
             ? `abap2UI5: cancelled after ${swept.files.length} file(s) - ` +
                 `${problems} problem(s) so far.`
             : !swept.files.length
-              ? "abap2UI5: no checkable ABAP or view files found in this workspace."
+              ? noWorkspaceFolders()
+                ? "abap2UI5: nothing checkable is open. Without a folder in " +
+                  "the workspace there is nothing to search, so the check " +
+                  "covers the classes you have open - open one and run it again."
+                : "abap2UI5: no checkable ABAP or view files found in this workspace."
               : problems
                 ? `abap2UI5: ${problems} problem(s) in ${swept.files.length} file(s) - see the Problems panel.`
                 : `abap2UI5: ${swept.files.length} file(s) checked, nothing found.`

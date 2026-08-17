@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { classNameOf, isAppClass, usesBuilder } from "./abap";
+import { abapSources, isAbapDocument } from "./abapsources";
 
 /*
  * The apps of this workspace, as a tree with the actions on them.
@@ -16,11 +17,12 @@ import { classNameOf, isAppClass, usesBuilder } from "./abap";
  */
 
 const APP_GLOB = "**/*.clas.abap";
-const EXCLUDE = "**/{node_modules,.git,dist,out}/**";
 
 interface AppNode {
   className: string;
   uri: vscode.Uri;
+  /** Came from an open editor rather than from a file on disk. */
+  fromEditor?: boolean;
   /** A class building views is previewable without a system; one that only
    *  navigates is not. */
   buildsViews: boolean;
@@ -53,11 +55,17 @@ class AppTree implements vscode.TreeDataProvider<AppNode> {
   getTreeItem(node: AppNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.className, vscode.TreeItemCollapsibleState.None);
     item.resourceUri = node.uri;
-    item.description = vscode.workspace.asRelativePath(node.uri);
+    // asRelativePath answers with the full uri for anything outside a folder,
+    // which for an ADT document is a long service path nobody reads - the
+    // editor it is open in is the more useful thing to say
+    const where = node.fromEditor
+      ? "open in the editor"
+      : vscode.workspace.asRelativePath(node.uri);
+    item.description = where;
     item.iconPath = new vscode.ThemeIcon("window");
     item.contextValue = node.buildsViews ? "abap2ui5.app.view" : "abap2ui5.app";
     item.tooltip = new vscode.MarkdownString(
-      `**${node.className}**\n\n${vscode.workspace.asRelativePath(node.uri)}` +
+      `**${node.className}**\n\n${where}` +
         (node.buildsViews ? "" : "\n\nBuilds no view of its own.")
     );
     // clicking opens the class - the actions hang off the item, so a click
@@ -72,22 +80,18 @@ class AppTree implements vscode.TreeDataProvider<AppNode> {
 }
 
 async function scan(): Promise<AppNode[]> {
-  const files = await vscode.workspace.findFiles(APP_GLOB, EXCLUDE, 2000);
   const out: AppNode[] = [];
-  for (const uri of files) {
-    let text: string;
-    try {
-      text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
-    } catch {
-      continue;
-    }
-    if (!isAppClass(text)) {
+  // Files AND open documents - working straight against the system through
+  // ADT means there is no file to glob, and this tree was simply empty there.
+  for (const source of await abapSources()) {
+    if (!isAppClass(source.text)) {
       continue;
     }
     out.push({
-      className: classNameOf(text, uri.fsPath),
-      uri,
-      buildsViews: usesBuilder(text),
+      className: classNameOf(source.text, source.uri.path),
+      uri: source.uri,
+      buildsViews: usesBuilder(source.text),
+      fromEditor: source.fromEditor,
     });
   }
   return out.sort((a, b) => a.className.localeCompare(b.className));
@@ -117,7 +121,20 @@ export function registerAppView(context: vscode.ExtensionContext): void {
     watcher.onDidDelete(refresh),
     // a saved class can BECOME an app (or stop being one) - the tree follows
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (doc.fileName.endsWith(".clas.abap")) {
+      if (isAbapDocument(doc)) {
+        refresh();
+      }
+    }),
+    // Opening and closing an ABAP document changes the list itself when the
+    // classes come from editors rather than from a folder - which is the
+    // whole picture in the ADT case.
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      if (isAbapDocument(doc)) {
+        refresh();
+      }
+    }),
+    vscode.workspace.onDidCloseTextDocument((doc) => {
+      if (isAbapDocument(doc)) {
         refresh();
       }
     }),
