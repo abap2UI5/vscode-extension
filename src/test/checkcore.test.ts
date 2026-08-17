@@ -4,7 +4,18 @@ import * as path from "path";
 import {
   augmentedPath,
   isCheckableSource,
+  findingsBarText,
+  findingsBarTooltip,
+  groupByRule,
+  ruleSummary,
   parseRenderReport,
+  parseScreenshotErrors,
+  parseScreenshotOutput,
+  plannedFixes,
+  screenshotArgs,
+  screenshotUnsupported,
+  shotLabel,
+  viewportCount,
   resolveCheckerCommand,
   scratchFileName,
 } from "../checkcore";
@@ -173,4 +184,223 @@ test("no JSON at all is told apart from broken JSON", () => {
   assert.ok(!broken.ok);
   assert.equal(broken.reason, "broken-json");
   assert.ok(broken.detail);
+});
+
+// ---------------------------------------------------------------------------
+// plannedFixes
+// ---------------------------------------------------------------------------
+
+test("fixes are planned in source order, across findings", () => {
+  const planned = plannedFixes([
+    { fixes: [{ start: 30, end: 34, text: "d" }] },
+    { fixes: [{ start: 4, end: 8, text: "a" }, { start: 10, end: 12, text: "b" }] },
+    { fixes: [{ start: 20, end: 22, text: "c" }] },
+  ]);
+  assert.deepEqual(
+    planned.map((f) => f.text),
+    ["a", "b", "c", "d"]
+  );
+});
+
+test("an overlapping fix is left for the next run, not merged", () => {
+  const planned = plannedFixes([
+    { fixes: [{ start: 10, end: 20, text: "wide" }] },
+    { fixes: [{ start: 15, end: 18, text: "inside" }] },
+  ]);
+  assert.deepEqual(planned, [{ start: 10, end: 20, text: "wide" }]);
+});
+
+test("a fix starting where the previous one ended still applies", () => {
+  const planned = plannedFixes([
+    { fixes: [{ start: 0, end: 5, text: "one" }] },
+    { fixes: [{ start: 5, end: 5, text: "$" }] },
+  ]);
+  assert.equal(planned.length, 2);
+});
+
+test("findings without fixes contribute nothing to count or plan", () => {
+  assert.deepEqual(plannedFixes([{}, { fixes: [] }]), []);
+  assert.deepEqual(plannedFixes([]), []);
+});
+
+// ---------------------------------------------------------------------------
+// The screenshot run behind the systemless preview
+// ---------------------------------------------------------------------------
+
+const SHOT = {
+  target: "/tmp/scratch/zcl_app.clas.abap",
+  out: "/tmp/scratch/view.png",
+  theme: "sap_horizon",
+  viewport: "390x844",
+};
+
+test("the screenshot call carries the file, the target and both dials", () => {
+  assert.deepEqual(screenshotArgs(SHOT), [
+    "/tmp/scratch/zcl_app.clas.abap",
+    "--screenshot",
+    "/tmp/scratch/view.png",
+    "--screenshot-theme",
+    "sap_horizon",
+    "--screenshot-size",
+    "390x844",
+  ]);
+});
+
+test("a settings typo falls back to the CLI default instead of failing the run", () => {
+  // the CLI refuses a bad value with exit 2 - which would turn a mistyped
+  // setting into a preview that only ever says "bad usage"
+  const args = screenshotArgs({ ...SHOT, theme: "sap horizon; rm -rf /", viewport: "big" });
+  assert.deepEqual(args, [SHOT.target, "--screenshot", SHOT.out]);
+});
+
+test("stdout is read as the written paths, and nothing else is", () => {
+  const stdout = "/tmp/x/view-zcl_app.png\n/tmp/x/view-zcl_app-2.png\n";
+  assert.deepEqual(parseScreenshotOutput(stdout), [
+    "/tmp/x/view-zcl_app.png",
+    "/tmp/x/view-zcl_app-2.png",
+  ]);
+  assert.deepEqual(parseScreenshotOutput("npm WARN something\n"), []);
+});
+
+test("render errors are lifted off stderr without the scratch path", () => {
+  const stderr =
+    "abap2ui5lint: /tmp/abap2ui5-preview-x/zcl_app.clas.abap - CREATE: no such control\n" +
+    "some unrelated line\n";
+  assert.deepEqual(parseScreenshotErrors(stderr), ["CREATE: no such control"]);
+});
+
+test("an older render gate is told apart from a broken run", () => {
+  assert.equal(
+    screenshotUnsupported("abap2ui5lint: unknown option '--screenshot'\nusage: ..."),
+    true
+  );
+  assert.equal(screenshotUnsupported("abap2ui5lint: no view to photograph"), false);
+});
+
+// ---------------------------------------------------------------------------
+// The status bar's one line
+// ---------------------------------------------------------------------------
+
+test("a clean file says so rather than going blank", () => {
+  // silence is indistinguishable from a check that never ran
+  assert.equal(
+    findingsBarText({ errors: 0, warnings: 0, hints: 0, fixable: 0 }),
+    "$(check) abap2UI5"
+  );
+  assert.match(
+    findingsBarTooltip({ errors: 0, warnings: 0, hints: 0, fixable: 0 }),
+    /nothing found/
+  );
+});
+
+test("only the severities that occur take up room", () => {
+  assert.equal(
+    findingsBarText({ errors: 2, warnings: 0, hints: 0, fixable: 0 }),
+    "$(error) 2"
+  );
+  assert.equal(
+    findingsBarText({ errors: 1, warnings: 3, hints: 2, fixable: 4 }),
+    "$(error) 1 $(warning) 3 $(info) 2 $(wrench) 4"
+  );
+});
+
+test("the tooltip spells out the counts and whether a fix exists", () => {
+  assert.equal(
+    findingsBarTooltip({ errors: 1, warnings: 2, hints: 0, fixable: 1 }),
+    "abap2UI5 view check: 1 error, 2 warnings. 1 of them can be corrected mechanically."
+  );
+  assert.match(
+    findingsBarTooltip({ errors: 0, warnings: 1, hints: 0, fixable: 0 }),
+    /None of them can be corrected/
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The device matrix and what a written picture is of
+// ---------------------------------------------------------------------------
+
+test("a viewport setting may name several devices", () => {
+  assert.equal(viewportCount("1280x900"), 1);
+  assert.equal(viewportCount("390x844,1280x900"), 2);
+  // a broken setting is one viewport - the CLI default - not a crash
+  assert.equal(viewportCount("wide"), 1);
+});
+
+test("the matrix reaches the CLI as one flag, whitespace and all", () => {
+  const args = screenshotArgs({ ...SHOT, viewport: "390x844 , 1280x900" });
+  assert.ok(args.includes("--screenshot-size"));
+  assert.equal(args[args.indexOf("--screenshot-size") + 1], "390x844,1280x900");
+});
+
+test("preview data travels as its own flag, and only when there is some", () => {
+  assert.ok(!screenshotArgs(SHOT).includes("--screenshot-model"));
+  const args = screenshotArgs({ ...SHOT, model: "/ws/zcl_app.mock.json" });
+  assert.equal(args[args.indexOf("--screenshot-model") + 1], "/ws/zcl_app.mock.json");
+});
+
+test("a picture says what it is of, read back from its name", () => {
+  // the CLI names files rather than reporting a structure - one path per line
+  // is the whole machine contract
+  assert.equal(shotLabel("/tmp/x/view-zcl_app-390x844.png", 2), "390x844");
+  assert.equal(shotLabel("/tmp/x/view-zcl_app-2-1280x900.png", 2), "1280x900 · view 2");
+  // one viewport: the size is noise, the document index is not
+  assert.equal(shotLabel("/tmp/x/view-zcl_app-2.png", 1), "view 2");
+  assert.equal(shotLabel("/tmp/x/view.png", 1), "view.png");
+});
+
+// ---------------------------------------------------------------------------
+// The findings view: grouped by rule, worst first
+// ---------------------------------------------------------------------------
+
+const ENTRY = { message: "…" };
+
+test("the same rule in several files is one group, counted", () => {
+  const groups = groupByRule([
+    { ...ENTRY, rule: "unknown-binding-path", severity: "error", file: "/a.abap", line: 3 },
+    { ...ENTRY, rule: "unknown-binding-path", severity: "error", file: "/b.abap", line: 1 },
+    { ...ENTRY, rule: "unknown-binding-path", severity: "error", file: "/a.abap", line: 9 },
+    { ...ENTRY, rule: "event-without-handler", severity: "hint", file: "/a.abap", line: 2 },
+  ]);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].rule, "unknown-binding-path");
+  assert.equal(groups[0].count, 3);
+  assert.equal(groups[0].files, 2);
+  assert.equal(ruleSummary(groups[0]), "3 findings in 2 files");
+});
+
+test("the top of the list is where the next decision is", () => {
+  // worst severity first, then sheer quantity - a hint reported forty times
+  // must not outrank an error
+  const groups = groupByRule([
+    { ...ENTRY, rule: "hinty", severity: "hint", file: "/a.abap", line: 1 },
+    { ...ENTRY, rule: "hinty", severity: "hint", file: "/a.abap", line: 2 },
+    { ...ENTRY, rule: "hinty", severity: "hint", file: "/a.abap", line: 3 },
+    { ...ENTRY, rule: "warny", severity: "warning", file: "/a.abap", line: 4 },
+    { ...ENTRY, rule: "erry", severity: "error", file: "/a.abap", line: 5 },
+  ]);
+  assert.deepEqual(groups.map((g) => g.rule), ["erry", "warny", "hinty"]);
+});
+
+test("a rule reported at two severities takes the worse one", () => {
+  const [group] = groupByRule([
+    { ...ENTRY, rule: "member-too-new", severity: "warning", file: "/a.abap", line: 1 },
+    { ...ENTRY, rule: "member-too-new", severity: "error", file: "/a.abap", line: 2 },
+  ]);
+  assert.equal(group.severity, "error");
+});
+
+test("within a rule the findings are in reading order", () => {
+  const [group] = groupByRule([
+    { ...ENTRY, rule: "r", severity: "error", file: "/b.abap", line: 1 },
+    { ...ENTRY, rule: "r", severity: "error", file: "/a.abap", line: 9 },
+    { ...ENTRY, rule: "r", severity: "error", file: "/a.abap", line: 2 },
+  ]);
+  assert.deepEqual(
+    group.entries.map((e) => `${e.file}:${e.line}`),
+    ["/a.abap:2", "/a.abap:9", "/b.abap:1"]
+  );
+});
+
+test("nothing found is an empty list, not a group of nothing", () => {
+  assert.deepEqual(groupByRule([]), []);
 });

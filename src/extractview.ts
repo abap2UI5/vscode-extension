@@ -1,0 +1,247 @@
+/*
+ * extractview - moving the tail of a builder chain into a method of its own.
+ *
+ * A view built with `z2ui5_cl_ui5_view_builder` is one statement, and a real
+ * screen is a long one. The abap2UI5 answer is the handle idiom: a helper
+ * method taking the builder as an importing parameter and returning it, so a
+ * section of the view lives in a method with a name. The linter follows it
+ * (a handle-typed helper is reconstructed, not counted as unattributable) -
+ * but doing it by hand means splitting a chain without breaking its
+ * parenthesis balance, inventing the parameter, and remembering to declare
+ * the method in the right section.
+ *
+ * This is that edit, computed. `vscode`-free: what makes it correct is where
+ * a chain may be cut, and that is string work with rules.
+ *
+ * The cut is deliberately restricted to a TAIL - from a chain-segment
+ * boundary to the end of the statement. A middle section would have to hand
+ * the handle back for the rest of the chain to continue from, which is
+ * neither the corpus idiom nor readable; a tail produces exactly the shape
+ * the samples use.
+ */
+
+export interface ExtractEdit {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface ExtractPlan {
+  edits: ExtractEdit[];
+  /** The variable the extracted method is handed. */
+  handle: string;
+}
+
+/** Why an extraction was refused - shown to the user as it stands. */
+export interface ExtractRefusal {
+  error: string;
+}
+
+const CHAIN_CALL = /->\s*(ele|tag|a|end|shut|factory|stringify)\s*\(/i;
+
+/** Is this offset inside an ABAP string literal? Cutting a chain inside one
+ *  would produce two halves that both parse and neither mean anything. */
+function insideLiteral(source: string, offset: number): boolean {
+  let quote: string | undefined;
+  for (let i = 0; i < offset; i++) {
+    const ch = source[i];
+    if (!quote && (ch === "'" || ch === "`")) {
+      quote = ch;
+    } else if (quote && ch === quote) {
+      quote = source[i + 1] === quote ? (i++, quote) : undefined;
+    }
+  }
+  return quote !== undefined;
+}
+
+/** The ABAP statement around an offset: from after the previous `.` to the
+ *  next one, both outside literals. */
+function statementAround(
+  source: string,
+  offset: number
+): { start: number; end: number } | undefined {
+  let start = 0;
+  for (let i = offset; i > 0; i--) {
+    if (source[i - 1] === "." && !insideLiteral(source, i - 1)) {
+      start = i;
+      break;
+    }
+  }
+  let end = -1;
+  for (let i = offset; i < source.length; i++) {
+    if (source[i] === "." && !insideLiteral(source, i)) {
+      end = i;
+      break;
+    }
+  }
+  return end < 0 ? undefined : { start, end };
+}
+
+/** A `->` that begins a chain call, with the `)` closing the previous one
+ *  staying behind. `view->ele(` is not one: it starts the chain, and there is
+ *  nothing before it to leave behind. */
+function isBoundary(source: string, at: number): boolean {
+  if (source[at] !== "-" || source[at + 1] !== ">" || insideLiteral(source, at)) {
+    return false;
+  }
+  return source.slice(0, at).trimEnd().endsWith(")");
+}
+
+/**
+ * The chain-segment boundary the cursor means.
+ *
+ * Forward on the cursor's own line first, then backwards. A chain is written
+ * one call per line beginning `)->ele(`, so the cursor sits at the start of
+ * that line or on its `)` - both are BEFORE the `->` they refer to, and
+ * searching backwards alone would silently pick the previous call and extract
+ * one section too much.
+ */
+function boundaryAt(source: string, offset: number): number | undefined {
+  const lineEnd = source.indexOf("\n", offset);
+  for (let i = offset; i < (lineEnd < 0 ? source.length : lineEnd); i++) {
+    if (isBoundary(source, i)) {
+      return i;
+    }
+  }
+  for (let i = Math.min(offset, source.length - 2); i > 1; i--) {
+    if (isBoundary(source, i)) {
+      return i;
+    }
+  }
+  return undefined;
+}
+
+/** Shift a block of lines so its shallowest line sits at `indent` spaces,
+ *  keeping every relative step - the chain's own picture of its tree. */
+function reindent(block: string, indent: number): string {
+  const lines = block.split("\n");
+  const depths = lines
+    .slice(1)
+    .filter((line) => line.trim())
+    .map((line) => /^[ \t]*/.exec(line)?.[0].length ?? 0);
+  const shallowest = depths.length ? Math.min(...depths) : 0;
+  const shift = indent - shallowest;
+  return lines
+    .map((line, index) => {
+      if (index === 0 || !line.trim()) {
+        return line;
+      }
+      const current = /^[ \t]*/.exec(line)?.[0].length ?? 0;
+      return " ".repeat(Math.max(0, current + shift)) + line.trimStart();
+    })
+    .join("\n");
+}
+
+/** Where a `METHODS` declaration goes: the PROTECTED section if the class has
+ *  one (that is where the samples put view helpers), else PRIVATE, else just
+ *  before the definition's ENDCLASS. */
+function declarationPoint(source: string): number | undefined {
+  for (const keyword of ["PROTECTED SECTION.", "PRIVATE SECTION."]) {
+    const at = source.toUpperCase().indexOf(keyword);
+    if (at >= 0) {
+      return at + keyword.length;
+    }
+  }
+  const endclass = source.toUpperCase().indexOf("ENDCLASS.");
+  return endclass < 0 ? undefined : endclass;
+}
+
+/** Where the implementation goes: before the last `ENDCLASS.` of the file,
+ *  which is the implementation part's end. */
+function implementationPoint(source: string): number | undefined {
+  const at = source.toUpperCase().lastIndexOf("ENDCLASS.");
+  return at < 0 ? undefined : at;
+}
+
+const NAME_RE = /^[a-z][a-z0-9_]{0,28}$/i;
+
+/**
+ * The edits that move the selected tail of a chain into `methodName`.
+ *
+ * Refuses rather than guesses. Everything it will not do is something whose
+ * result would have to be checked by hand anyway: a selection that is not a
+ * chain, one that stops before the statement does, a name that is not a name.
+ */
+export function planExtract(
+  source: string,
+  selectionStart: number,
+  methodName: string,
+  builderClass = "z2ui5_cl_ui5_view_builder"
+): ExtractPlan | ExtractRefusal {
+  if (!NAME_RE.test(methodName)) {
+    return { error: "A method name starts with a letter and holds letters, digits and _." };
+  }
+  if (new RegExp(String.raw`\bMETHODS\s+${methodName}\b`, "i").test(source)) {
+    return { error: `The class already declares a method called ${methodName}.` };
+  }
+  const statement = statementAround(source, selectionStart);
+  if (!statement) {
+    return { error: "The cursor is not inside a statement that ends with a period." };
+  }
+  const text = source.slice(statement.start, statement.end);
+  if (!CHAIN_CALL.test(text)) {
+    return { error: "This is not a view builder chain - put the cursor in one." };
+  }
+  const boundary = boundaryAt(source, selectionStart);
+  if (boundary === undefined || boundary <= statement.start || boundary >= statement.end) {
+    return {
+      error:
+        "No chain call starts here. Put the cursor on the `)->ele( )` or " +
+        "`)->tag( )` that should become the first line of the new method.",
+    };
+  }
+  const head = source.slice(statement.start, boundary);
+  const tail = source.slice(boundary, statement.end);
+  if (!CHAIN_CALL.test(tail)) {
+    return { error: "There is no chain call left after the cursor to extract." };
+  }
+
+  /* The head has to end up in a variable, because that variable is what the
+   * new method is handed. A chain already captured into one keeps its name -
+   * re-capturing it would leave two handles for one chain. */
+  const captured = /^\s*(?:DATA\(\s*([\w]+)\s*\)|([\w]+))\s*=\s/i.exec(head);
+  const handle = captured ? (captured[1] ?? captured[2]) : "content";
+  const indent = /^[ \t]*/.exec(head.replace(/^\n+/, ""))?.[0] ?? "    ";
+
+  const edits: ExtractEdit[] = [];
+  if (!captured) {
+    // `view->ele( … )` becomes `DATA(content) = view->ele( … )`
+    const at = statement.start + (head.length - head.trimStart().length);
+    edits.push({ start: at, end: at, text: `DATA(${handle}) = ` });
+  }
+  // the tail leaves the statement; the head closes with a period, and the
+  // call to the new method follows it
+  edits.push({
+    start: boundary,
+    end: statement.end + 1, // include the statement's own period
+    text: `.\n\n${indent}${methodName}( ${handle} ).`,
+  });
+
+  const declareAt = declarationPoint(source);
+  const implementAt = implementationPoint(source);
+  if (declareAt === undefined || implementAt === undefined) {
+    return { error: "This file does not look like a class - no ENDCLASS found." };
+  }
+  edits.push({
+    start: declareAt,
+    end: declareAt,
+    text:
+      `\n\n    METHODS ${methodName}\n` +
+      `      IMPORTING\n` +
+      `        box           TYPE REF TO ${builderClass}\n` +
+      `      RETURNING\n` +
+      `        VALUE(result) TYPE REF TO ${builderClass}.`,
+  });
+  edits.push({
+    start: implementAt,
+    end: implementAt,
+    text:
+      `\n  METHOD ${methodName}.\n\n` +
+      `    result = box${reindent(tail, 8).replace(/\s+$/, "")}.\n\n` +
+      `  ENDMETHOD.\n\n`,
+  });
+
+  // applied back to front, so an earlier edit cannot move a later offset
+  edits.sort((a, b) => b.start - a.start);
+  return { edits, handle };
+}

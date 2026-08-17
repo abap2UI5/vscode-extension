@@ -58,11 +58,16 @@ tying the extension to a system is the launch URL you configure once.
   view XML) and get the `z2ui5_cl_ui5_view_builder` chain in the corpus style —
   the reverse of the reconstructed XML view. See
   [XML to builder chain](#xml-to-builder-chain).
+- **Examples for the control under the cursor** – *"Show Examples for this
+  Control"* searches the abap2UI5 sample repositories for working uses of it
+  and opens the pick at the line. See [Examples](#examples-from-the-sample-catalogues).
 - **App navigation map** – Every `z2ui5_if_app` class in the workspace and
   each `nav_app_call( )` between them as a clickable graph. See
   [Navigation map](#app-navigation-map).
 - **Status bar** – While an app is running the status bar shows the class and
-  the system; clicking it reloads the preview.
+  the system; clicking it reloads the preview. Next to it, the view check's
+  own verdict for the file you are in — counts per severity, how many of them
+  are mechanically fixable, and a click to the Problems panel.
 - **Several systems** – Name your systems in `abap2ui5.systems` and switch
   with *"abap2UI5: Select System"*. The choice is remembered per window and
   credentials are stored per host. See [Systems](#systems-abap2ui5systems).
@@ -82,9 +87,27 @@ tying the extension to a system is the launch URL you configure once.
   class's model actually has**, offered inside `{…}`, and the
   **`client->` API** with signature and documentation on hover. See
   [Completion and hover](#completion-and-hover).
+- **Inline annotations** – The finding at the end of its line, the UI5
+  `@since` of what you are writing, and what a PUBLIC attribute costs per
+  roundtrip. See [Inline annotations](#inline-annotations).
+- **Emmet for chains** – `Page>content>Button*3` expands to the builder chain
+  that builds it. See [Abbreviations](#abbreviations--emmet-for-chains).
+- **The apps of this workspace** – Every `z2ui5_if_app` class as a list with
+  run, preview and check on it. See [Apps](#the-apps-of-this-workspace).
+- **Findings by rule** – The **abap2UI5 Findings** view in the Explorer groups
+  what the check found by the rule behind it, worst first. See
+  [Findings view](#the-findings-view).
+- **Extract to View Method** – The tail of a long chain becomes a helper
+  method taking the builder handle, declaration and call included — the idiom
+  the samples use and the linter follows. See
+  [Extract](#extract-to-view-method).
 - **Format Document repairs a builder chain** – The indentation follows the
   view hierarchy the chain builds; only builder-verb lines are touched. See
   [Format Document](#format-document).
+- **Preview the view without a system** – *"Preview View (No System)"* renders
+  what the class builds and shows the picture beside it — the render gate kept
+  standing instead of thrown away. No system, no activation. See
+  [Preview without a system](#preview-the-view-without-a-system).
 - **Show Reconstructed XML View** – The XML the builder calls actually
   produce, as a live, syntax-highlighted document next to the class — with
   the findings mirrored in and **Go to Definition** back to the builder
@@ -155,7 +178,7 @@ the list as soon as you add a second one.
 | Mode | Behaviour |
 | --- | --- |
 | `tab` (default) | App embedded in an editor tab next to the code, through the local auth proxy |
-| `panel` | The same, but in the bottom panel area next to Terminal/Output |
+| `panel` | The same, but in the **abap2UI5 Control View** tab next to Terminal/Output |
 | `external` | In the normal browser (reuses your existing SAP session/SSO, no proxy needed) |
 
 The choice does not have to be made in the settings: **abap2UI5: Show the
@@ -389,8 +412,11 @@ Every finding whose correction is mechanical carries the correction with it,
 and the lightbulb offers it: the obsolete `client->_bind_edit( )`, a missing
 `$` in an event argument, an ABAP boolean written straight into the view. A
 rule whose correction would have to guess deliberately carries none. There is
-also *"fix all in this file"* — as a command and as
-`source.fixAll.abap2ui5`, so it can go into `editor.codeActionsOnSave`:
+also *"fix all in this file"* — as a command, as a CodeLens above the class
+definition (**Autofix n findings**, shown only while there is something to
+correct), as *"Fix All View Findings in the Workspace"* for the whole
+repository in one undo step, and as `source.fixAll.abap2ui5`, so it can go into
+`editor.codeActionsOnSave`:
 
 ```jsonc
 "editor.codeActionsOnSave": { "source.fixAll.abap2ui5": "explicit" }
@@ -429,6 +455,15 @@ the extension, so an unknown key or a misspelled rule id squiggles right in
 existing findings can name a `baseline` file in the config: the editor then
 drops exactly the findings CI drops (the output channel says how many), so
 the Problems panel shows only what is *new*.
+
+Writing that file is a command too. **add to baseline** waives one finding,
+which is right when three are left and hopeless when four hundred are;
+*"abap2UI5: Rebuild the View-Check Baseline"* sweeps the workspace and rewrites
+the whole file from what it finds — the editor's `--update-baseline`. It
+**replaces** rather than merges, on purpose: the CLI fails on a stale entry, so
+a baseline that only ever grows is one nobody can keep green. It asks before
+writing, and does nothing when the config names no baseline file — the CLI only
+honours one the config points at.
 
 ### Completion and hover
 
@@ -496,6 +531,179 @@ are **mirrored onto the XML lines** they concern, and **Go to Definition**
 (F12, or Ctrl+click) on any line jumps to the `ele( )` / `tag( )` /
 `a( )` in the class that produced it.
 
+### Preview the view without a system
+
+*"abap2UI5: Preview View (No System)"* renders the view the current class
+builds and shows the **picture** beside it — no system, no transport, no
+activation, and no launch URL configured.
+
+It is the render gate turned around. That gate already loads exactly this view
+in a real browser to decide whether it survives creation; here the view is kept
+standing and photographed instead of thrown away. What you see is the
+reconstruction the view check validates, seeded with the model derived from the
+class's own `TYPES`/`DATA` and rendered against the local OpenUI5 runtime — in
+the theme (`abap2ui5.viewPreview.theme`) and viewport
+(`abap2ui5.viewPreview.viewport`, e.g. `390x844` for a phone) you choose. The
+picture refreshes on every **save** of the previewed file, and a class that
+builds several views (a popup next to its main view) shows them all, in order.
+
+Render errors appear above the picture rather than instead of it: a view with
+one broken binding still comes up, and the half that rendered is usually the
+part worth looking at.
+
+**Preview data.** The model behind the picture is derived from what the class
+seeds *literally*, so a table filled by a `SELECT` renders as *No data* — which
+is most real apps. Put a JSON file next to the class and it fills:
+
+```
+src/zcl_travel_list.clas.abap
+src/zcl_travel_list.mock.json    ->  { "MT_ROWS": [ { "NAME": "Berlin - Rome" } ] }
+```
+
+It is merged over the derived model, so the file only has to name the table you
+want to see. The caption above the picture always says which of the two it
+used — an empty table is a perfectly correct rendering of a model with no rows,
+and that has to be distinguishable from a broken binding.
+
+**A device matrix.** `abap2ui5.viewPreview.viewport` takes a comma-separated
+list: `390x844,1280x900` renders both in one browser session and puts them side
+by side. The browser launch costs more than the renders, so the second viewport
+is nearly free.
+
+**Before and after.** *"abap2UI5: Preview View – Compare with HEAD"* renders the
+committed version of the file next to the working tree, both from the same
+data. It answers what no linter can: *did my change do what I meant to the
+view?*
+
+It needs the **render gate** installed (*"abap2UI5: Install Render Gate"*, one
+click) — it is the same runtime. And it is not the app: nothing round-trips, no
+event reaches ABAP, and the data is the derived mock model rather than what a
+system would serve. That is what **F9** is for.
+
+### Inline annotations
+
+Three things the editor says about a line without being asked — each borrowed
+from the extension that made the idea popular, each fed by data this extension
+already ships:
+
+- **The finding, at the end of its line** (the *Error Lens* idea). A builder
+  chain is forty lines long and the Problems panel is somewhere else; the
+  message belongs where the squiggle is. `abap2ui5.inlineFindings` takes
+  `problems` (errors and warnings, the default), `all` or `off` — hints are out
+  by default because "worth knowing, never wrong by itself" is a lot of grey
+  text in a long chain.
+- **The UI5 version something arrived in** (the *Version Lens* idea), warned
+  when it is above `abap2ui5.viewCheck.minUi5`. *Does my system have this yet?*
+  is the permanent abap2UI5 question, and the metadata answers it while you
+  write the line rather than after the check runs.
+  (`abap2ui5.inlineSince`)
+- **What a `PUBLIC` attribute costs per roundtrip** (the *Import Cost* idea).
+  abap2UI5 serializes every public attribute into the model on **every**
+  roundtrip; the size is measured from the class's own literal seeds, or from
+  the `<class>.mock.json` when there is one, and an attribute the model knows
+  nothing about still says that it is sent. (`abap2ui5.inlineRoundtripCost`)
+
+A line that already carries a finding gets no version or size next to it: the
+defect is what matters there.
+
+### Abbreviations — Emmet for chains
+
+`Page>content>Button*3`, then *"abap2UI5: Expand Abbreviation to a Chain"*, and
+the chain that builds it is written in the house layout:
+
+| | |
+| --- | --- |
+| `>` | child — `Page>content` |
+| `+` | sibling — `Button+Input` |
+| `*n` | repeat — `Button*3` |
+| `#id` | the `id` attribute — `Button#GO` |
+| `[a=b c="two words"]` | attributes |
+| `{text}` | the `text` attribute — `Button{Go}` |
+
+Inside an existing chain the expansion **continues** it (`)->ele( … )`, no
+factory, no `view_display( )`); outside one it scaffolds the whole statement.
+`>` binds tighter than `+`, exactly as in Emmet, so `Page>content>Button+Input`
+puts both controls in the content aggregation.
+
+### The apps of this workspace
+
+The **abap2UI5 Apps** view in the Explorer lists every class implementing
+`z2ui5_if_app`, with **run**, **preview** and **check** on the item — the list
+that says which thirty apps a repository has, which F9 (the class you happen to
+have open) and *Run a Recently Launched App* (what this window already ran)
+could not.
+
+### The findings view
+
+The Problems panel lists findings **per file**, mixed in with what every other
+contributor reports — which answers *what is wrong in this file*. The other
+question, *what is wrong in this repository*, is what the **abap2UI5 Findings**
+view in the Explorer is for: the same findings grouped by the **rule** that
+produced them, worst severity first and then by how many there are.
+
+Twelve `unknown-binding-path` across three classes are one decision — fix them,
+waive them, put them in the baseline — and per file they look like twelve
+unrelated problems. Expanding a rule lists every occurrence with its message;
+clicking one opens it. The view's title bar carries *Check All Views in the
+Workspace* (which is what fills it beyond the open files) and *Fix All View
+Findings in the Workspace*; a rule node links to its documentation page.
+
+It reads the published diagnostics rather than checking again, so it costs
+nothing and always agrees with the squiggles.
+
+### Extract to View Method
+
+A view built with the builder is **one statement**, and a real screen is a long
+one. abap2UI5's own answer is the handle idiom — a helper method taking the
+builder and returning it — which the linter follows, so an extracted section is
+still reconstructed and still checked.
+
+*"abap2UI5: Extract to View Method"* performs it: put the cursor on the
+`)->ele( )` or `)->tag( )` that should start the new method, give it a name, and
+the chain is split. The head is captured into a handle (keeping its own name if
+it already has one), the tail becomes
+
+```abap
+  METHOD render_section.
+
+    result = box->tag( `Button`
+        )->a( n = `text` v = `Go` ).
+
+  ENDMETHOD.
+```
+
+with the `METHODS render_section IMPORTING box … RETURNING VALUE(result) …`
+declaration written into the class, and the call `render_section( content ).`
+left where the tail used to be.
+
+It extracts a **tail** — from the chain call under the cursor to the end of the
+statement. A middle section would have to hand the handle back for the rest of
+the chain to continue from, which is neither the corpus idiom nor readable. It
+refuses rather than guesses: a cursor outside a chain, a name already taken and
+the chain's own first call each come back with a sentence saying so.
+
+### Examples from the sample catalogues
+
+The metadata snapshot answers *what properties does `sap.m.Table` have* — in
+completion, in hover, in the property editor. The question it cannot answer is
+*what does a working one look like in an abap2UI5 class*, and there are three
+repositories full of that answer:
+[samples](https://github.com/abap2UI5/samples),
+[samples-controls](https://github.com/abap2UI5/samples-controls) (416 ports of
+the official UI5 demo kit) and
+[samples-stack](https://github.com/abap2UI5/samples-stack).
+
+Put the cursor on an `ele( )` / `tag( )` call and run *"abap2UI5: Show Examples
+for this Control"*: the catalogues are searched for that control and the hits
+are offered richest-first — the number of attributes each one configures is in
+the pick — opening at the line. Off a builder call the command asks for a
+control name instead.
+
+It reads the catalogues from **`abap2ui5.mcp.reposRoot`**, the same setting the
+MCP server uses to find them; they are git checkouts, not something the
+extension ships, so with none of them present the command says so and offers
+the setting rather than reporting "nothing found".
+
 ### Outline and event navigation
 
 The Outline pane (and the breadcrumb bar) shows the `ele( )`/`tag( )`
@@ -506,8 +714,26 @@ chain sets shown alongside. Clicking a node jumps to its builder call.
 Go to Definition on the event name in `client->_event( 'GO' )` jumps to the
 `WHEN 'GO'` branch that handles it; on the `WHEN` literal it goes the other
 way, to every place the view raises the event. A CodeLens over each `WHEN`
-the view raises says *raised n× in the view* and peeks the calls — and
-**F2** renames an event everywhere at once, raises and handler together.
+the view raises says *raised n× in the view* and peeks the calls.
+
+**F2 renames the strings an app is wired together with.** An abap2UI5 app ties
+its two halves together with literals, and nothing in ABAP or UI5 connects the
+ends — so renaming one of them is a grep, and missing one is silent. F2 takes
+all of them at once:
+
+- an **event**: every `client->_event( 'GO' )` and the `WHEN 'GO'` that handles
+  it,
+- a **control id**: the `a( n = ``id`` v = ``TABLE`` )` that declares it and
+  every wire that addresses it — `CONTROL_BY_ID`, `SET_FOCUS`, `SCROLL_TO`,
+  `SCROLL_INTO_VIEW`, `KEYBOARD_SET_MODE` and `popover_display( by_id = … )`,
+- a **bound attribute**: the ABAP name and the binding paths that resolve to
+  it, `mv_title` and `{/MV_TITLE}` together.
+
+Position decides what a literal is, never its text: the `setBusy` sitting next
+to the id in the same wire is an argument, not an id, and stays put. The rename
+covers the class you are in — an app class owns its model and its ids, and a
+rename reaching further on the strength of a regex would be a worse offer than
+a confident local one.
 
 Go to Definition works on binding paths too: `{/MT_TRAVELS/STATUS}` lands on
 the `TYPES` field (or the `DATA` line for a root path) that declares it. And
@@ -574,14 +800,20 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2ui5.systems` | `[]` | Named launch profiles, for more than one system |
 | `abap2ui5.openMode` | `tab` | `tab`, `panel` or `external` |
 | `abap2ui5.reloadOn` | `activation` | When the preview reloads on its own: `activation`, `save` or `never` |
-| `abap2ui5.codeLens` | `true` | Show Run / Activate & reload / Check views above the class definition |
+| `abap2ui5.codeLens` | `true` | Show Run / Activate & reload / Check views / Autofix above the class definition |
 | `abap2ui5.viewCheck.onSave` | `true` | Run the static view check when a checkable file is saved |
 | `abap2ui5.viewCheck.live` | `true` | Also run the property gate while typing |
 | `abap2ui5.viewCheck.command` | – | Command running the abap2UI5-linter CLI for the render gate (empty = local checkout or npx) |
 | `abap2ui5.viewCheck.minUi5` | `1.71` | The UI5 version your system runs — checked against in both directions |
 | `abap2ui5.viewCheck.distribution` | `sapui5` | Which distribution the system serves: `sapui5` or `openui5` |
 | `abap2ui5.viewCheck.render` | `false` | Also run the headless render gate |
+| `abap2ui5.inlineFindings` | `problems` | Show the finding at the end of its line: `problems`, `all` or `off` |
+| `abap2ui5.inlineSince` | `true` | Show the UI5 version a control or attribute arrived in |
+| `abap2ui5.inlineRoundtripCost` | `true` | Show what a PUBLIC attribute adds to every roundtrip |
+| `abap2ui5.renamePreview` | `true` | F2 shows the refactor preview before the wires change |
 | `abap2ui5.viewCheck.allow` | `[]` | Accepted deviations, e.g. `sap.m.GenericTile.systemInfo` |
+| `abap2ui5.viewPreview.theme` | `sap_horizon` | UI5 theme the systemless preview renders in |
+| `abap2ui5.viewPreview.viewport` | `1280x900` | Viewport(s) it renders at; a comma-separated list is a device matrix |
 | `abap2ui5.mcp.enabled` | `true` | Offer the abap2UI5 MCP server to MCP clients |
 | `abap2ui5.mcp.system` | `true` | Also offer the abap2UI5 System MCP server (real-system tools) |
 | `abap2ui5.mcp.command` | – | Command starting the MCP server (empty = local checkout or npx) |
@@ -603,6 +835,13 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2UI5: Check Views (Static)` | Runs the static view check on the current file |
 | `abap2UI5: Check All Views in the Workspace` | Runs the same check over every ABAP class and view file |
 | `abap2UI5: Show Reconstructed XML View` | Opens the XML the builder calls produce, live beside the class |
+| `abap2UI5: Expand Abbreviation to a Chain` | Turns `Page>content>Button*3` into the chain that builds it |
+| `abap2UI5: Extract to View Method` | Moves the chain tail under the cursor into a handle-taking method |
+| `abap2UI5: Show Examples for this Control` | Finds the control under the cursor in the sample catalogues |
+| `abap2UI5: Fix All View Findings in the Workspace` | Applies every mechanical fix across the workspace, as one undo step |
+| `abap2UI5: Rebuild the View-Check Baseline` | Rewrites the repo's baseline from what the workspace reports now |
+| `abap2UI5: Preview View (No System)` | Renders the current class's view headless and shows the picture |
+| `abap2UI5: Preview View - Compare with HEAD` | The same, with the committed version rendered beside it |
 | `abap2UI5: Fix All View Findings in This File` | Applies every mechanical fix at once |
 | `abap2UI5: Install Render Gate` | Downloads the render-gate checker and Chromium into the extension's storage |
 | `abap2UI5: Take App Screenshot` | Renders the running app headless and opens the PNG |
@@ -634,8 +873,12 @@ preview with its auth proxy (and its traffic log, screenshot and stateful
 reload), Ctrl+F3 activation and the ADT integration, the render gate, the
 workspace-wide check, quick fixes, the navigation map, the Control
 Properties view, and the MCP servers.
-One knowing limit: the web check reads the VS Code settings only — a
-repository's `abap2ui5lint.jsonc` is not discovered there.
+The repository's `abap2ui5lint.jsonc` is honoured there too: it is read
+through the editor's own filesystem API instead of `fs`, the nearest config
+above a file governs it exactly as the CLI's upward walk decides, and a
+`baseline` it names is applied as well — so vscode.dev agrees with CI about the
+UI5 floor, the distribution, the allow list and every rule severity. What stays
+desktop-only is what a browser extension host genuinely cannot do.
 
 ## Installation
 

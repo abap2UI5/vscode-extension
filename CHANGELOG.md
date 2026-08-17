@@ -2,6 +2,223 @@
 
 ## Unreleased
 
+- **Three things the editor now says about a line unasked.** One decoration
+  pass, three ideas borrowed from the extensions that made them popular, all
+  three fed by data this extension already ships.
+
+  **The finding, at the end of its line** — the *Error Lens* idea. A builder
+  chain is forty lines long and the Problems panel is somewhere else; the
+  squiggle is where you are looking and the message was not.
+  `abap2ui5.inlineFindings` takes `problems` (the default), `all` or `off`;
+  hints are out by default because "worth knowing, never wrong by itself" is a
+  lot of grey text in a long chain.
+
+  **The UI5 version something arrived in** — the *Version Lens* idea — warned
+  when it is above your floor. *Does my system have this yet?* is the permanent
+  abap2UI5 question and the answer has been sitting in the bundled metadata all
+  along, arriving only as a finding once the floor was already crossed.
+
+  **What a PUBLIC attribute costs per roundtrip** — the *Import Cost* idea.
+  abap2UI5 serializes every public attribute into the model on every single
+  roundtrip; the size is measured from the class's own seeds or from the
+  `<class>.mock.json`, and an attribute nothing is known about still says that
+  it is sent. A line that already carries a finding gets neither, because there
+  the defect is what matters.
+
+- **Emmet for builder chains.** `Page>content>Button*3` expands to the chain
+  that builds it — `>` child, `+` sibling, `*n` repeat, `#id`, `[a=b]`,
+  `{text}`. Inside an existing chain the expansion continues it (`)->ele( … )`,
+  no factory, no `view_display( )`); outside one it scaffolds the whole
+  statement. `>` binds tighter than `+` exactly as in Emmet, so
+  `Page>content>Button+Input` puts both controls in the content aggregation —
+  the obvious implementation, splitting on `+` first, makes the Input a sibling
+  of the Page, which reads the same and builds a different view. The chain
+  itself is written by the same emitter *Convert XML View* uses, so there is
+  one opinion about the house layout rather than two.
+
+- **The apps of this workspace, as a list.** Every toolchain extension has one
+  — npm scripts, Docker, Maven, Jest all put the things of the project in a
+  tree with a play button — and abap2UI5 had none: F9 works on the class you
+  happen to have open, and *Run a Recently Launched App* only knows what this
+  window already ran. Opening a repository with thirty apps in it, nothing said
+  which thirty. The **abap2UI5 Apps** view lists every class implementing
+  `z2ui5_if_app` with run, preview and check on the item.
+
+- **F2 shows the refactor preview.** The rename crosses from ABAP into view
+  literals on the strength of where a string stands, which is the one
+  refactoring here worth looking at before it happens: every occurrence is
+  listed with its line, and nothing changes until you say so.
+  `abap2ui5.renamePreview` switches it off for anyone who would rather just
+  rename.
+
+- **A findings view, grouped by rule.** The Problems panel lists findings per
+  file, among every other contributor's — which answers "what is wrong in this
+  file". The new **abap2UI5 Findings** view in the Explorer answers the other
+  question: twelve `unknown-binding-path` across three classes are ONE decision
+  (fix, waive, baseline), and per file they look like twelve unrelated
+  problems. Rules come worst-severity-first and then by count, so the top of
+  the list is where the next decision is; expanding one lists every occurrence,
+  clicking it opens the line, and the title bar carries the workspace check and
+  the workspace fix. It reads the published diagnostics rather than checking
+  again, so it costs nothing and cannot disagree with the squiggles.
+
+- **Extract to View Method.** A view built with the builder is one statement,
+  and a real screen is a long one; abap2UI5's answer is the handle idiom, a
+  helper method taking the builder and returning it, which the linter follows
+  so an extracted section stays reconstructable and checked. Doing it by hand
+  means splitting one statement without breaking its parenthesis balance,
+  inventing the parameter and remembering the declaration in the right section.
+  The command computes all three: the head is captured into a handle (keeping
+  its own name if it has one), the tail becomes `result = box->…` inside a new
+  method, and the call takes its place. It extracts a **tail** — a middle
+  section would have to hand the handle back for the rest of the chain to
+  continue from, which is neither the corpus idiom nor readable — and it
+  refuses rather than guesses: a cursor outside a chain, a name already taken
+  and a chain's own first call each come back with a sentence saying why.
+
+- **The preview shows data, several devices, and what changed.** Three things
+  that turned the systemless preview from a nice picture into the panel you
+  leave open.
+
+  **Preview data.** The model behind a picture is derived from what the class
+  seeds *literally*, so a table filled by a `SELECT` photographed as *No data* —
+  which is most real apps, and made the preview least useful exactly where
+  layout matters most. A `zcl_app.mock.json` next to the class now fills it,
+  merged over the derived model so two lines are enough to fill one table. The
+  caption says which of the two the picture used: an empty table is a correct
+  rendering of a model with no rows, and that has to be distinguishable from a
+  broken binding.
+
+  **A device matrix.** `abap2ui5.viewPreview.viewport` takes a list —
+  `390x844,1280x900` — and renders every viewport in ONE browser session, side
+  by side in the panel. The launch and the UI5 boot cost more than the renders,
+  so the second device is nearly free, and responsive layout is precisely what
+  nobody has in their head.
+
+  **Before and after.** *"Preview View - Compare with HEAD"* renders the
+  committed version of the file next to the working tree, from the same data.
+  It answers the question no linter can: did my change do what I meant to the
+  view? A file git does not know says so rather than comparing against nothing.
+
+- **The panel tab says what is in it.** With the default `openMode` of `tab`
+  the app preview goes to an editor tab, so the bottom panel only ever shows
+  the *Control Properties* form — under a tab labelled just `abap2UI5`, which
+  named the extension rather than the thing on screen. It is
+  **abap2UI5 Control View** now. (VS Code capitalises the first letter of a
+  panel title itself, so it renders as *Abap2UI5 Control View* whatever the
+  manifest says.)
+
+- **Preview the view without a system.** An abap2UI5 view exists at runtime and
+  nowhere else, so looking at one has meant a system: activate the class,
+  launch the app, wait for the roundtrip — a long way to go to find out that a
+  column is in the wrong order. *"abap2UI5: Preview View (No System)"* renders
+  what the class builds and puts the picture beside it. No system, no
+  transport, no activation, no launch URL.
+
+  It is the render gate turned around. That gate has been loading exactly this
+  view in a real browser all along to decide whether it survives creation; the
+  linter can now keep it standing and photograph it instead of throwing it
+  away, and this command is that, wired to a panel: the reconstruction the view
+  check validates, seeded with the model derived from the class's own
+  `TYPES`/`DATA`, in the theme (`abap2ui5.viewPreview.theme`) and viewport
+  (`abap2ui5.viewPreview.viewport` — `390x844` for a phone) you pick. It
+  re-renders on save, shows every view a class builds, and keeps the last
+  picture up while the next one is taken. Render errors appear *above* the
+  picture rather than instead of it: a view with one broken binding still comes
+  up, and the half that rendered is the part worth seeing.
+
+  It needs the render gate installed — the same runtime, one click — and it is
+  not the app: nothing round-trips and no event reaches ABAP. That is what F9
+  is for.
+
+- **F2 renames the strings the app is wired together with.** An abap2UI5 app
+  joins its two halves with literals: a control is `a( n = `id` v = `TABLE` )`
+  in the view and `TABLE` again in a `CONTROL_BY_ID` wire; an attribute is
+  `mv_title` in the class and `{/MV_TITLE}` in the view. Nothing in ABAP or in
+  UI5 connects those ends — to the compiler a string is a string — so renaming
+  one of them has been a grep, and missing one is *silent*: a wire that
+  addresses nothing does nothing at runtime, not even a console line, and a
+  binding path that resolves to nothing renders empty. F2 already did this for
+  event names; it now does it for **control ids** (the `id` attribute plus
+  `CONTROL_BY_ID`, `SET_FOCUS`, `SCROLL_TO`, `SCROLL_INTO_VIEW`,
+  `KEYBOARD_SET_MODE` and `popover_display( by_id = … )`) and for **bound
+  attributes** (the ABAP name and every binding path that resolves to it,
+  including the root segment of a path into a table row).
+
+  What makes it safe is that position decides what a literal is, never its
+  text: the `setBusy` sitting next to the id in the same wire is an argument
+  and stays put, and a name the class does not declare offers no rename at all.
+
+- **The browser build reads the repository's `abap2ui5lint.jsonc`.** It could
+  not before, for a reason that was true of the reading and not of the file:
+  discovery goes through `fs`, which a browser extension host does not have. So
+  vscode.dev and github.dev checked against the VS Code settings alone and
+  quietly disagreed with CI about the UI5 floor, the distribution, the allow
+  list and every rule severity — the one divergence the web build knowingly
+  kept. The configs are now read through the editor's own filesystem API, the
+  nearest one above a file governs it (what the CLI's upward walk decides,
+  answered against the flat list a workspace search returns), and a `baseline`
+  the config names is applied too. What a config MEANS is now one piece of code
+  for both builds, because two builds disagreeing about precedence is the same
+  defect in a different place.
+
+- **Examples for the control under the cursor.** The bundled UI5 metadata says
+  what `sap.m.Table` *has*; it cannot say what a working one looks like in an
+  abap2UI5 class. Three repositories can — samples, samples-controls (416 ports
+  of the official demo kit) and samples-stack — and until now the only thing in
+  this window that could read them was the MCP server, on behalf of an agent.
+  *"Show Examples for this Control"* asks them the same question with the
+  cursor as the query, and offers the hits **richest first**: the number of
+  attributes each example configures decides the order, and no single file may
+  fill the list, so one app that happens to use `Text` forty times is not the
+  whole answer. It reads the catalogues from `abap2ui5.mcp.reposRoot`, and when
+  none is checked out it says exactly that instead of reporting "nothing
+  found" for a corpus that was never there.
+
+- **The view check has a line in the status bar.** Its findings go to the
+  Problems panel, next to whatever the ABAP extension, the XML language server
+  and every other contributor puts there — so "is the file I am looking at
+  clean?" meant opening a panel and reading past other people's entries. The
+  status bar now answers it in place: counts per severity for the active file,
+  the wrench count of what an autofix would correct, the warning or error
+  colour behind it, and a click that opens the list the numbers came from. A
+  clean file says so rather than going blank, because silence is
+  indistinguishable from a check that never ran. It reads the published
+  diagnostics rather than running the gate again, so it changes exactly when
+  the check has something new to say.
+
+- **The fixes and the baseline reach the whole workspace.** Two commands that
+  only existed one file at a time, in the cases where a repository is what you
+  are actually working on. *"Fix All View Findings in the Workspace"* sweeps
+  every checkable file and applies every mechanical correction as **one
+  WorkspaceEdit** — one undo step, the editor's own refactor preview, unsaved
+  buffers respected instead of overwritten — which is what adopting the linter
+  on an existing repository, or a rule whose autofix arrived after the code
+  did, actually needs. And *"Rebuild the View-Check Baseline"* writes the
+  baseline file from what the workspace reports right now: the editor's
+  `--update-baseline`, for the moment when the lightbulb's one-finding waiver
+  is hopeless because there are four hundred of them. It replaces rather than
+  merges (the CLI fails on a stale entry, so a baseline that only grows is one
+  nobody can keep green), asks before it writes, and says so when the config
+  names no baseline — the CLI only honours one the config points at. Both share
+  the check's own sweep, so "what the workspace says" means the same thing in
+  all three.
+
+- **An autofix lens next to the check that finds the work.** The class
+  definition already carried *Run*, *Activate & reload* and *Check views*;
+  what it did not carry was the one action that needs no reading at all.
+  **Autofix n findings** now appears beside them whenever the view check has
+  corrections it can apply mechanically — the obsolete binder method, the
+  missing `$` in an event argument, the ABAP boolean written straight into the
+  view — and runs exactly what the palette's *Fix All View Findings in This
+  File* and `source.fixAll.abap2ui5` run. It carries the count and disappears
+  at zero, so it never offers a press that would answer "nothing here can be
+  corrected mechanically", and it follows the findings rather than the
+  keystrokes: a changed setting, an adopted baseline or a finished check
+  updates the number. Findings whose correction would have to guess are not
+  counted — those stay a lightbulb decision on the line itself. Switch the
+  lens row off with `abap2ui5.codeLens`, as before.
+
 - **The linter pin moves to 0.2.1, and the MCP server gets the two catalogues
   it grew.** The pinned linter stops reading the `ELSE` of a `COND #( ... )` as
   the end of a lifecycle branch, which is the false positive that kept the

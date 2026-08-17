@@ -906,6 +906,110 @@ ${BASE_CSS}
 }
 
 // ---------------------------------------------------------------------------
+// Static view preview (no system)
+// ---------------------------------------------------------------------------
+
+export interface ViewPreviewOptions {
+  nonce: string;
+  /** What the webview may load images from - `webview.cspSource`. */
+  cspSource: string;
+  /** The class or file the pictures are of. */
+  title: string;
+  /** One entry per view the file builds, already converted to webview URIs. */
+  shots: ReadonlyArray<{ uri: string; label: string }>;
+  /** Theme and viewport the pictures were taken in, for the caption. */
+  theme: string;
+  viewport: string;
+  /** Where the model came from - a mock file, or the class itself. An empty
+   *  table is a correct rendering of a model with no rows, and without this
+   *  nobody can tell that from a broken binding. */
+  data: string;
+  /** Render errors that came WITH the pictures - shown, never hidden: a view
+   *  with one broken binding still renders, and the picture is of the half
+   *  that came up. */
+  errors: readonly string[];
+  /** Set while a re-render is in flight, so the last picture stays visible
+   *  instead of the panel going blank on every save. */
+  busy?: boolean;
+  /** No picture at all - the message says why in the panel's own words. */
+  problem?: string;
+}
+
+/**
+ * The systemless view preview: the PNGs the render gate took, with what they
+ * are of underneath them.
+ *
+ * Pictures rather than a live DOM on purpose. The renderer is a headless
+ * Chromium outside this window, and piping its document into a webview would
+ * mean shipping the whole UI5 runtime through the extension host to fake an
+ * app that cannot round-trip anyway. A picture is what there is to see, and
+ * it is honest about being one.
+ */
+export function viewPreviewHtml(options: ViewPreviewOptions): string {
+  const { nonce, cspSource, title, shots, theme, viewport, data, errors, busy, problem } = options;
+  const caption = `${escapeHtml(theme)} · ${escapeHtml(viewport)} · ${escapeHtml(data)}`;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource}; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+<title>abap2UI5 View Preview</title>
+<style nonce="${nonce}">
+${BASE_CSS}
+  body { padding: 12px 16px; overflow: auto; }
+  h2 { font-size: 1.05em; margin: 0 0 2px; font-weight: 600; }
+  .meta { opacity: 0.65; margin: 0 0 14px; font-size: 0.92em; }
+  /* Side by side as soon as there is more than one: a device matrix and a
+   * before/after comparison are both about seeing two pictures AT ONCE, and
+   * stacked they would be a scroll apart. */
+  .shots { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+  .shot { margin: 0 0 18px; flex: 1 1 320px; min-width: 0; }
+  .shot img {
+    max-width: 100%;
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.4));
+    border-radius: 4px;
+    display: block;
+  }
+  .shot figcaption { opacity: 0.65; font-size: 0.9em; margin-top: 4px; }
+  .problem, .errors {
+    border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+    padding: 6px 10px;
+    margin: 0 0 14px;
+    background: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.1));
+  }
+  .errors ul { margin: 4px 0 0; padding-left: 18px; }
+  .errors code { font-family: var(--vscode-editor-font-family, monospace); }
+  .busy { opacity: 0.5; }
+</style>
+</head>
+<body>
+  <h2>${escapeHtml(title)}</h2>
+  <p class="meta">${caption}${busy ? " · rendering…" : ""}</p>
+  ${problem ? `<p class="problem">${escapeHtml(problem)}</p>` : ""}
+  ${
+    errors.length
+      ? `<div class="errors"><strong>${errors.length} render error${
+          errors.length === 1 ? "" : "s"
+        }</strong> - the picture shows what came up regardless:<ul>${errors
+          .map((e) => `<li><code>${escapeHtml(e)}</code></li>`)
+          .join("")}</ul></div>`
+      : ""
+  }
+  <div class="shots ${busy ? "busy" : ""}">
+  ${shots
+    .map(
+      (shot) => `<figure class="shot">
+    <img src="${shot.uri}" alt="${escapeHtml(shot.label)}">
+    <figcaption>${escapeHtml(shot.label)}</figcaption>
+  </figure>`
+    )
+    .join("\n  ")}
+  </div>
+</body>
+</html>`;
+}
+
+// ---------------------------------------------------------------------------
 // App navigation map
 // ---------------------------------------------------------------------------
 

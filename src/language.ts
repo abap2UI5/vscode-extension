@@ -5,6 +5,7 @@ import {
   eventNameAt,
   eventNameSpans,
   eventUsagesOf,
+  NamedSpan,
   OutlineNode,
   viewOutline,
   whenBranchOf,
@@ -30,6 +31,9 @@ import {
 import { abapColorSpans, formatCssColor, xmlColorSpans } from "./colors";
 import { snapshot } from "./snapshot";
 import { VIEW_SELECTOR } from "./selector";
+import { attributeAt, attributeSpans, idAt, idSpans } from "./renamewires";
+import { planExtract } from "./extractview";
+import { expandAbbreviation } from "./abbreviation";
 
 /*
  * Completion and hover from the bundled UI5 metadata.
@@ -468,21 +472,49 @@ class MethodWorkspaceSymbols implements vscode.WorkspaceSymbolProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Rename: an event name, everywhere it appears
+// Rename: a name an abap2UI5 app ties itself together with, everywhere it
+// appears - an event, a control id, a bound attribute
 // ---------------------------------------------------------------------------
 
-class EventRename implements vscode.RenameProvider {
-  /** Only event names are renameable here - anything else defers to other
-   *  providers by throwing, which is the protocol for "not mine". */
+/**
+ * What the cursor is on, in the order the three can be told apart: an event
+ * name (a literal in `_event( )` or `WHEN`), a control id (a literal in an
+ * `id` attribute or an id-taking wire), or an attribute the class declares.
+ */
+function renameTargetAt(text: string, offset: number): NamedSpan | undefined {
+  return (
+    eventNameAt(text, offset) ??
+    whenNameAt(text, offset) ??
+    idAt(text, offset) ??
+    attributeAt(text, offset)
+  );
+}
+
+/** Everywhere that name is written - resolved by the same order, so the kind
+ *  of thing decided in prepareRename is the kind of thing replaced. */
+function renameSpans(text: string, offset: number, name: string): NamedSpan[] {
+  if (eventNameAt(text, offset) ?? whenNameAt(text, offset)) {
+    return eventNameSpans(text, name);
+  }
+  if (idAt(text, offset)) {
+    return idSpans(text, name);
+  }
+  return attributeSpans(text, name);
+}
+
+class WireRename implements vscode.RenameProvider {
+  /** Only the three names above are renameable here - anything else defers
+   *  to other providers by throwing, which is the protocol for "not mine". */
   prepareRename(
     doc: vscode.TextDocument,
     position: vscode.Position
   ): { range: vscode.Range; placeholder: string } {
     const text = doc.getText();
-    const offset = doc.offsetAt(position);
-    const span = eventNameAt(text, offset) ?? whenNameAt(text, offset);
+    const span = renameTargetAt(text, doc.offsetAt(position));
     if (!span) {
-      throw new Error("Only event names can be renamed here.");
+      throw new Error(
+        "Only event names, control ids and bound attributes can be renamed here."
+      );
     }
     return {
       range: new vscode.Range(
@@ -500,27 +532,48 @@ class EventRename implements vscode.RenameProvider {
   ): vscode.WorkspaceEdit {
     if (!/^[\w-]+$/.test(newName)) {
       throw new Error(
-        "An event name may only contain letters, digits, _ and -."
+        "An event name, id or attribute may only contain letters, digits, _ and -."
       );
     }
     const text = doc.getText();
     const offset = doc.offsetAt(position);
-    const span = eventNameAt(text, offset) ?? whenNameAt(text, offset);
+    const span = renameTargetAt(text, offset);
     if (!span) {
-      throw new Error("Only event names can be renamed here.");
+      throw new Error(
+        "Only event names, control ids and bound attributes can be renamed here."
+      );
     }
     const edit = new vscode.WorkspaceEdit();
-    // Every literal naming the event - the _event( ) calls and the WHEN
-    // branches together, so the view and the dispatch cannot drift apart.
-    for (const target of eventNameSpans(text, span.name)) {
-      edit.replace(
-        doc.uri,
-        new vscode.Range(
-          doc.positionAt(target.start),
-          doc.positionAt(target.end)
-        ),
-        newName
+    /* Every place the class writes this name, whichever half of the app
+     * writes it. The strings are what tie an abap2UI5 app together and
+     * nothing in ABAP or UI5 connects the two ends, so renaming one end and
+     * missing the other is silent: a wire that addresses nothing does
+     * nothing at runtime, and a binding path that resolves to nothing
+     * renders empty. Neither reports a thing. */
+    const targets = renameSpans(text, offset, span.name);
+    for (const [index, target] of targets.entries()) {
+      const range = new vscode.Range(
+        doc.positionAt(target.start),
+        doc.positionAt(target.end)
       );
+      /* Marking the edits as needing confirmation is what makes VS Code open
+       * the refactor PREVIEW instead of applying straight away - worth it for
+       * a rename that crosses from ABAP into view literals on the strength of
+       * where a string stands, and switchable for anyone who would rather
+       * just rename (the preview stays reachable with Ctrl+Shift+Enter, and
+       * the labels below are what it reads). */
+      edit.replace(doc.uri, range, newName, {
+        needsConfirmation: vscode.workspace
+          .getConfiguration("abap2ui5")
+          .get<boolean>("renamePreview", true),
+        label:
+          index === 0
+            ? `Rename ${span.name} to ${newName} - ${targets.length} occurrence${
+                targets.length === 1 ? "" : "s"
+              }`
+            : `${span.name} -> ${newName}`,
+        description: doc.lineAt(range.start.line).text.trim(),
+      });
     }
     return edit;
   }
@@ -585,7 +638,15 @@ export function registerLanguageFeatures(
       ABAP_SELECTOR,
       new EventDefinition()
     ),
-    vscode.languages.registerRenameProvider(ABAP_SELECTOR, new EventRename()),
+    vscode.languages.registerRenameProvider(ABAP_SELECTOR, new WireRename()),
+
+    vscode.commands.registerCommand("abap2ui5.extractViewMethod", () =>
+      extractViewMethod(log)
+    ),
+
+    vscode.commands.registerCommand("abap2ui5.expandAbbreviation", () =>
+      expandChainAbbreviation(log)
+    ),
     // The label keeps this outline apart from the ABAP extension's own.
     vscode.languages.registerDocumentSymbolProvider(
       ABAP_SELECTOR,
@@ -616,4 +677,118 @@ export function registerLanguageFeatures(
     "language: completion, hover, client API, chain formatting, " +
       "method navigation and view outline registered"
   );
+}
+
+// ---------------------------------------------------------------------------
+// Extract a chain section into a view method
+// ---------------------------------------------------------------------------
+
+/**
+ * "Extract to View Method": the tail of the chain under the cursor moves into
+ * a method of its own, taking the builder as a handle.
+ *
+ * The idiom is abap2UI5's own - a helper `IMPORTING box RETURNING result`,
+ * both `TYPE REF TO z2ui5_cl_ui5_view_builder` - and the linter follows it, so
+ * the extracted view is still reconstructed and still checked. Doing it by
+ * hand means splitting one statement without breaking its parenthesis balance
+ * and remembering the declaration; `extractview.ts` computes both.
+ */
+async function extractViewMethod(
+  log: (m: string) => void
+): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== "abap") {
+    vscode.window.showInformationMessage(
+      "abap2UI5: open an ABAP class and put the cursor on the chain call to extract."
+    );
+    return;
+  }
+  const name = await vscode.window.showInputBox({
+    title: "abap2UI5: extract to view method",
+    prompt: "Name for the new method - it takes the builder and returns it",
+    value: "render_section",
+    validateInput: (value) =>
+      /^[a-z][a-z0-9_]{0,28}$/i.test(value)
+        ? undefined
+        : "A method name starts with a letter and holds letters, digits and _.",
+  });
+  if (!name) {
+    return;
+  }
+  const doc = editor.document;
+  const plan = planExtract(
+    doc.getText(),
+    doc.offsetAt(editor.selection.start),
+    name
+  );
+  if ("error" in plan) {
+    vscode.window.showWarningMessage(`abap2UI5: ${plan.error}`);
+    return;
+  }
+  const edit = new vscode.WorkspaceEdit();
+  edit.set(
+    doc.uri,
+    plan.edits.map(
+      (e) =>
+        new vscode.TextEdit(
+          new vscode.Range(doc.positionAt(e.start), doc.positionAt(e.end)),
+          e.text
+        )
+    )
+  );
+  await vscode.workspace.applyEdit(edit);
+  log(`extract: ${name}( ${plan.handle} ) created`);
+  vscode.window.showInformationMessage(
+    `abap2UI5: extracted into ${name}( ${plan.handle} ).`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Emmet for chains
+// ---------------------------------------------------------------------------
+
+/**
+ * "Expand Abbreviation": the word under the cursor - `Page>content>Button*3` -
+ * becomes the chain that builds it.
+ *
+ * Whether it scaffolds a whole view or continues the chain it is standing in
+ * is decided here, from the statement around the cursor: inside one, the
+ * expansion has to hang off the previous call and must not carry a factory or
+ * a `view_display( )`. Both shapes come out of `abbreviation.ts`; this reads
+ * the line and puts the result back.
+ */
+async function expandChainAbbreviation(log: (m: string) => void): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== "abap") {
+    vscode.window.showInformationMessage(
+      "abap2UI5: write an abbreviation like Page>content>Button*3 in an ABAP file first."
+    );
+    return;
+  }
+  const doc = editor.document;
+  const selection = editor.selection;
+  const line = doc.lineAt(selection.start.line);
+  const source = selection.isEmpty ? line.text.trim() : doc.getText(selection);
+  const range = selection.isEmpty
+    ? new vscode.Range(
+        line.range.start.translate(0, /^\s*/.exec(line.text)?.[0].length ?? 0),
+        line.range.end
+      )
+    : selection;
+
+  /* A chain is one statement, so "am I inside one" is answered by the text
+   * from the previous period to here: a builder call in it means the
+   * statement is open and the expansion continues it. */
+  const before = doc.getText(new vscode.Range(new vscode.Position(0, 0), range.start));
+  const statement = before.slice(before.lastIndexOf(".") + 1);
+  const continuation = /->\s*(?:ele|tag|a)\s*\(/i.test(statement);
+  const indent = /^[ \t]*/.exec(line.text)?.[0] ?? "";
+
+  const { abap, error } = expandAbbreviation(source, indent, continuation);
+  if (error) {
+    vscode.window.showWarningMessage(`abap2UI5: ${error}`);
+    return;
+  }
+  await editor.edit((builder) => builder.replace(range, abap.trimStart()));
+  log(`abbreviation: expanded "${source}"${continuation ? " into the open chain" : ""}`);
 }

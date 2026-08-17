@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { previewHtml, welcomeHtml } from "../webview";
+import { previewHtml, viewPreviewHtml, welcomeHtml } from "../webview";
 
 const BASE = { nonce: "n0nce", hasLaunchUrl: true } as const;
 
@@ -86,4 +86,96 @@ test("the class name is escaped, not injected", () => {
   });
   assert.ok(!html.includes("<img"));
   assert.ok(html.includes("&lt;img"));
+});
+
+// ---------------------------------------------------------------------------
+// The systemless view preview
+// ---------------------------------------------------------------------------
+
+const SHOT = {
+  nonce: "n0nce",
+  cspSource: "vscode-resource:",
+  title: "ZCL_MY_APP",
+  theme: "sap_horizon",
+  viewport: "1280x900",
+  data: "model derived from the class",
+} as const;
+
+test("the preview shows the picture it was given, and what it is of", () => {
+  const html = viewPreviewHtml({
+    ...SHOT,
+    shots: [{ uri: "vscode-resource://tmp/view.png?v=1", label: "view.png" }],
+    errors: [],
+  });
+  assert.ok(html.includes("vscode-resource://tmp/view.png?v=1"));
+  assert.ok(html.includes("ZCL_MY_APP"));
+  assert.ok(html.includes("sap_horizon"));
+  assert.ok(html.includes("1280x900"));
+  // images only, and only from the webview's own source
+  assert.ok(html.includes("img-src vscode-resource:"));
+  assert.ok(!html.includes("<script"));
+});
+
+test("render errors are shown WITH the picture, never instead of it", () => {
+  const html = viewPreviewHtml({
+    ...SHOT,
+    shots: [{ uri: "u", label: "view.png" }],
+    errors: ["CREATE: Cannot add direct child without default aggregation"],
+  });
+  assert.ok(html.includes("1 render error"));
+  assert.ok(html.includes("Cannot add direct child"));
+  assert.ok(html.includes('src="u"'));
+});
+
+test("no picture: the panel says why in one sentence", () => {
+  const html = viewPreviewHtml({
+    ...SHOT,
+    shots: [],
+    errors: [],
+    problem: "The installed render gate does not know --screenshot yet.",
+  });
+  assert.ok(html.includes("does not know --screenshot yet"));
+  assert.ok(!html.includes("<img"));
+});
+
+test("a class name from the buffer is escaped, not injected", () => {
+  const html = viewPreviewHtml({
+    ...SHOT,
+    title: "<img src=x onerror=alert(1)>",
+    shots: [],
+    errors: ["<script>alert(1)</script>"],
+  });
+  assert.ok(!html.includes("<img src=x"));
+  assert.ok(!html.includes("<script>alert"));
+  assert.ok(html.includes("&lt;img"));
+});
+
+test("the caption says which data the picture shows", () => {
+  // an empty table is a correct rendering of a model with no rows - without
+  // this line it is indistinguishable from a broken binding
+  const derived = viewPreviewHtml({ ...SHOT, shots: [], errors: [] });
+  assert.ok(derived.includes("model derived from the class"));
+  const mocked = viewPreviewHtml({
+    ...SHOT,
+    data: "zcl_travel.mock.json",
+    shots: [{ uri: "u", label: "1280x900" }],
+    errors: [],
+  });
+  assert.ok(mocked.includes("zcl_travel.mock.json"));
+});
+
+test("several pictures are laid out to be seen at once", () => {
+  // a device matrix and a before/after comparison are both about comparing,
+  // and stacked they would be a scroll apart
+  const html = viewPreviewHtml({
+    ...SHOT,
+    viewport: "390x844,1280x900",
+    shots: [
+      { uri: "a", label: "390x844" },
+      { uri: "b", label: "1280x900" },
+    ],
+    errors: [],
+  });
+  assert.ok(html.includes('class="shots'));
+  assert.ok(html.includes("390x844") && html.includes("1280x900"));
 });

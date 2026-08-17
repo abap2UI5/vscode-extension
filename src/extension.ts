@@ -8,6 +8,12 @@ import { registerXmlPreview } from "./xmlpreview";
 import { registerQuickFix } from "./quickfix";
 import { registerLanguageFeatures } from "./language";
 import { registerCodeLens } from "./codelens";
+import { registerViewPreview } from "./viewpreview";
+import { registerFindingsBar } from "./findingsbar";
+import { registerExamples } from "./exampleview";
+import { registerFindingsView } from "./findingsview";
+import { registerInlineAnnotations } from "./inlineview";
+import { registerAppView } from "./appview";
 import { classNameOf, isAppClass } from "./abap";
 import { originOf } from "./urls";
 import { registerAppSearch } from "./appsearch";
@@ -339,9 +345,15 @@ export function activate(context: vscode.ExtensionContext): void {
   registerPropertyEditor(context, log);
   registerViewCheck(context, log);
   registerXmlPreview(context, log, findingsNow);
+  registerViewPreview(context, log);
   registerQuickFix(context, log);
   registerLanguageFeatures(context, log);
   registerCodeLens(context);
+  registerFindingsBar(context);
+  registerExamples(context, log);
+  registerFindingsView(context);
+  registerInlineAnnotations(context, log);
+  registerAppView(context);
   registerRenderGate(context, log);
   registerMcp(context, log, systemMcp);
 }
