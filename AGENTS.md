@@ -34,7 +34,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list |
 | `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
 | `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only |
-| `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, settings only (no repo config, no render gate) |
+| `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, repo config through `workspace.fs` (no render gate) |
 | `src/gate.ts` | The in-process property gate itself, shared by `viewcheck.ts` (desktop) and `webcheck.ts` (web) |
 | `src/diagnostics.ts` | Findings -> VS Code diagnostics (ranges, severities, rule links), shared by both checks |
 | `src/selector.ts` | The document selector all view providers share |
@@ -48,6 +48,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
 | `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability, the render-gate command ladder, scratch-file naming, the JSON report parsing |
+| `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
 | `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, and "add to baseline" |
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
@@ -93,6 +94,8 @@ not committed.
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
+`configcore.ts` (which must stay free of `path` too - the web bundle's shim
+does not implement it),
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain

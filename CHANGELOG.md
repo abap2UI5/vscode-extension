@@ -25,6 +25,19 @@
   not the app: nothing round-trips and no event reaches ABAP. That is what F9
   is for.
 
+- **The browser build reads the repository's `abap2ui5lint.jsonc`.** It could
+  not before, for a reason that was true of the reading and not of the file:
+  discovery goes through `fs`, which a browser extension host does not have. So
+  vscode.dev and github.dev checked against the VS Code settings alone and
+  quietly disagreed with CI about the UI5 floor, the distribution, the allow
+  list and every rule severity — the one divergence the web build knowingly
+  kept. The configs are now read through the editor's own filesystem API, the
+  nearest one above a file governs it (what the CLI's upward walk decides,
+  answered against the flat list a workspace search returns), and a `baseline`
+  the config names is applied too. What a config MEANS is now one piece of code
+  for both builds, because two builds disagreeing about precedence is the same
+  defect in a different place.
+
 - **Examples for the control under the cursor.** The bundled UI5 metadata says
   what `sap.m.Table` *has*; it cannot say what a working one looks like in an
   abap2UI5 class. Three repositories can — samples, samples-controls (416 ports

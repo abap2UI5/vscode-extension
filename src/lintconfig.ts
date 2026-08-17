@@ -21,6 +21,7 @@ import {
   loadBaseline,
 } from "@abap2ui5/linter/baseline";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
+import { optionsFromConfig } from "./configcore";
 
 /** The knobs both the config file and the VS Code settings can set. */
 export interface CheckOptions {
@@ -123,15 +124,17 @@ export function resolveOptions(
   if (error) {
     return { ...settings, configFile: file, error };
   }
+  /* The mapping itself lives in `configcore.ts`, shared with the web build:
+   * two builds disagreeing about precedence is the same defect as an editor
+   * disagreeing with CI. Only the READING differs - `fs` here, workspace.fs
+   * there - and the baseline is re-resolved against the platform's own path
+   * rules, since the shared code has to do without a `path` module. */
+  const options = optionsFromConfig(loaded, file, settings);
   return {
-    minUi5: (loaded.minUi5 as string) ?? settings.minUi5,
-    distribution: (loaded.distribution as string) ?? settings.distribution,
-    allow: [...new Set([...(loaded.allow as string[] | undefined ?? []), ...settings.allow])],
-    rules: loaded.rules as Record<string, unknown> | undefined,
+    ...options,
     baseline: loaded.baseline
       ? path.resolve(path.dirname(file), loaded.baseline as string)
       : undefined,
-    configFile: file,
   };
 }
 

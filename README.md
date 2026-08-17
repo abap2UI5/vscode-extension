@@ -708,8 +708,12 @@ preview with its auth proxy (and its traffic log, screenshot and stateful
 reload), Ctrl+F3 activation and the ADT integration, the render gate, the
 workspace-wide check, quick fixes, the navigation map, the Control
 Properties view, and the MCP servers.
-One knowing limit: the web check reads the VS Code settings only — a
-repository's `abap2ui5lint.jsonc` is not discovered there.
+The repository's `abap2ui5lint.jsonc` is honoured there too: it is read
+through the editor's own filesystem API instead of `fs`, the nearest config
+above a file governs it exactly as the CLI's upward walk decides, and a
+`baseline` it names is applied as well — so vscode.dev agrees with CI about the
+UI5 floor, the distribution, the allow list and every rule severity. What stays
+desktop-only is what a browser extension host genuinely cannot do.
 
 ## Installation
 
