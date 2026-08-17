@@ -65,6 +65,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/extractview.ts` | `vscode`-free: the edits that move a chain tail into a handle-taking method (where a chain may be cut) |
 | `src/examples.ts` | `vscode`-free: finds and ranks a control's uses in the sample catalogues |
 | `src/exampleview.ts` | "Show Examples for this Control": catalogue discovery, QuickPick, opens the hit |
+| `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix above the class definition |
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (ai-mcp) and the in-extension system server for MCP clients in the window |

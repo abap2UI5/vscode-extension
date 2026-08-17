@@ -147,6 +147,11 @@
         "title": "abap2UI5: Check All Views in the Workspace"
       },
       {
+        "command": "abap2ui5.openRuleDocs",
+        "title": "abap2UI5: Open the Rule Documentation",
+        "icon": "$(book)"
+      },
+      {
         "command": "abap2ui5.extractViewMethod",
         "title": "abap2UI5: Extract to View Method",
         "icon": "$(symbol-method)"
@@ -283,6 +288,10 @@
         {
           "command": "abap2ui5.showNavMap",
           "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.openRuleDocs",
+          "when": "false"
         }
       ],
       "editor/title": [
@@ -307,6 +316,23 @@
           "command": "abap2ui5.previewInTab",
           "when": "view == abap2ui5.preview",
           "group": "navigation@2"
+        },
+        {
+          "command": "abap2ui5.checkWorkspace",
+          "when": "view == abap2ui5.findings",
+          "group": "navigation@1"
+        },
+        {
+          "command": "abap2ui5.fixWorkspace",
+          "when": "view == abap2ui5.findings",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "abap2ui5.openRuleDocs",
+          "when": "view == abap2ui5.findings && viewItem == abap2ui5.rule",
+          "group": "inline"
         }
       ]
     },
@@ -333,6 +359,14 @@
       ]
     },
     "views": {
+      "explorer": [
+        {
+          "id": "abap2ui5.findings",
+          "name": "abap2UI5 Findings",
+          "icon": "$(checklist)",
+          "visibility": "collapsed"
+        }
+      ],
       "abap2ui5Panel": [
         {
           "id": "abap2ui5.preview",

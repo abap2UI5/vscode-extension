@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **A findings view, grouped by rule.** The Problems panel lists findings per
+  file, among every other contributor's — which answers "what is wrong in this
+  file". The new **abap2UI5 Findings** view in the Explorer answers the other
+  question: twelve `unknown-binding-path` across three classes are ONE decision
+  (fix, waive, baseline), and per file they look like twelve unrelated
+  problems. Rules come worst-severity-first and then by count, so the top of
+  the list is where the next decision is; expanding one lists every occurrence,
+  clicking it opens the line, and the title bar carries the workspace check and
+  the workspace fix. It reads the published diagnostics rather than checking
+  again, so it costs nothing and cannot disagree with the squiggles.
+
 - **Extract to View Method.** A view built with the builder is one statement,
   and a real screen is a long one; abap2UI5's answer is the handle idiom, a
   helper method taking the builder and returning it, which the linter follows

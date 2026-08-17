@@ -349,3 +349,81 @@ export function parseRenderReport(stdout: string): RenderReportParse {
     return { ok: false, reason: "broken-json", detail: String(err) };
   }
 }
+
+// ---------------------------------------------------------------------------
+// The findings view: what the workspace reports, by rule
+// ---------------------------------------------------------------------------
+
+export type FindingSeverity = "error" | "warning" | "hint";
+
+export interface RuleEntry {
+  rule: string;
+  severity: FindingSeverity;
+  /** Absolute path of the file the finding is in. */
+  file: string;
+  /** 0-based line, as VS Code counts them. */
+  line: number;
+  message: string;
+}
+
+export interface RuleGroup {
+  rule: string;
+  /** The worst severity this rule reports here - what colours the node. */
+  severity: FindingSeverity;
+  count: number;
+  files: number;
+  entries: RuleEntry[];
+}
+
+const SEVERITY_RANK: Record<FindingSeverity, number> = { error: 0, warning: 1, hint: 2 };
+
+/**
+ * The findings grouped by the rule that produced them.
+ *
+ * By RULE and not by file, which is the whole reason for a second view of
+ * data the Problems panel already has: a file list answers "what is wrong
+ * here", and the question this one is for is "what is wrong with this
+ * repository" - twelve `unknown-binding-path` across three classes is one
+ * decision (fix them, waive them, baseline them), and per-file it looks like
+ * twelve.
+ *
+ * Ordered worst-first, then by how many there are: the top of the list is
+ * where the next decision is.
+ */
+export function groupByRule(entries: readonly RuleEntry[]): RuleGroup[] {
+  const groups = new Map<string, RuleEntry[]>();
+  for (const entry of entries) {
+    const list = groups.get(entry.rule);
+    if (list) {
+      list.push(entry);
+    } else {
+      groups.set(entry.rule, [entry]);
+    }
+  }
+  return [...groups.entries()]
+    .map(([rule, list]) => ({
+      rule,
+      severity: list
+        .map((e) => e.severity)
+        .reduce((worst, s) => (SEVERITY_RANK[s] < SEVERITY_RANK[worst] ? s : worst), "hint" as FindingSeverity),
+      count: list.length,
+      files: new Set(list.map((e) => e.file)).size,
+      entries: [...list].sort(
+        (a, b) => a.file.localeCompare(b.file) || a.line - b.line
+      ),
+    }))
+    .sort(
+      (a, b) =>
+        SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
+        b.count - a.count ||
+        a.rule.localeCompare(b.rule)
+    );
+}
+
+/** The line under a rule in the tree: how much of it there is, and where. */
+export function ruleSummary(group: RuleGroup): string {
+  return (
+    `${group.count} finding${group.count === 1 ? "" : "s"} in ` +
+    `${group.files} file${group.files === 1 ? "" : "s"}`
+  );
+}

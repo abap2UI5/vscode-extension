@@ -87,6 +87,9 @@ tying the extension to a system is the launch URL you configure once.
   class's model actually has**, offered inside `{…}`, and the
   **`client->` API** with signature and documentation on hover. See
   [Completion and hover](#completion-and-hover).
+- **Findings by rule** – The **abap2UI5 Findings** view in the Explorer groups
+  what the check found by the rule behind it, worst first. See
+  [Findings view](#the-findings-view).
 - **Extract to View Method** – The tail of a long chain becomes a helper
   method taking the builder handle, declaration and call included — the idiom
   the samples use and the linter follows. See
@@ -569,6 +572,24 @@ It needs the **render gate** installed (*"abap2UI5: Install Render Gate"*, one
 click) — it is the same runtime. And it is not the app: nothing round-trips, no
 event reaches ABAP, and the data is the derived mock model rather than what a
 system would serve. That is what **F9** is for.
+
+### The findings view
+
+The Problems panel lists findings **per file**, mixed in with what every other
+contributor reports — which answers *what is wrong in this file*. The other
+question, *what is wrong in this repository*, is what the **abap2UI5 Findings**
+view in the Explorer is for: the same findings grouped by the **rule** that
+produced them, worst severity first and then by how many there are.
+
+Twelve `unknown-binding-path` across three classes are one decision — fix them,
+waive them, put them in the baseline — and per file they look like twelve
+unrelated problems. Expanding a rule lists every occurrence with its message;
+clicking one opens it. The view's title bar carries *Check All Views in the
+Workspace* (which is what fills it beyond the open files) and *Fix All View
+Findings in the Workspace*; a rule node links to its documentation page.
+
+It reads the published diagnostics rather than checking again, so it costs
+nothing and always agrees with the squiggles.
 
 ### Extract to View Method
 

@@ -11,6 +11,7 @@ import { registerCodeLens } from "./codelens";
 import { registerViewPreview } from "./viewpreview";
 import { registerFindingsBar } from "./findingsbar";
 import { registerExamples } from "./exampleview";
+import { registerFindingsView } from "./findingsview";
 import { classNameOf, isAppClass } from "./abap";
 import { originOf } from "./urls";
 import { registerAppSearch } from "./appsearch";
@@ -348,6 +349,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerCodeLens(context);
   registerFindingsBar(context);
   registerExamples(context, log);
+  registerFindingsView(context);
   registerRenderGate(context, log);
   registerMcp(context, log, systemMcp);
 }

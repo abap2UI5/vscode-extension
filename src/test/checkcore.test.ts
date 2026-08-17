@@ -6,6 +6,8 @@ import {
   isCheckableSource,
   findingsBarText,
   findingsBarTooltip,
+  groupByRule,
+  ruleSummary,
   parseRenderReport,
   parseScreenshotErrors,
   parseScreenshotOutput,
@@ -344,4 +346,61 @@ test("a picture says what it is of, read back from its name", () => {
   // one viewport: the size is noise, the document index is not
   assert.equal(shotLabel("/tmp/x/view-zcl_app-2.png", 1), "view 2");
   assert.equal(shotLabel("/tmp/x/view.png", 1), "view.png");
+});
+
+// ---------------------------------------------------------------------------
+// The findings view: grouped by rule, worst first
+// ---------------------------------------------------------------------------
+
+const ENTRY = { message: "…" };
+
+test("the same rule in several files is one group, counted", () => {
+  const groups = groupByRule([
+    { ...ENTRY, rule: "unknown-binding-path", severity: "error", file: "/a.abap", line: 3 },
+    { ...ENTRY, rule: "unknown-binding-path", severity: "error", file: "/b.abap", line: 1 },
+    { ...ENTRY, rule: "unknown-binding-path", severity: "error", file: "/a.abap", line: 9 },
+    { ...ENTRY, rule: "event-without-handler", severity: "hint", file: "/a.abap", line: 2 },
+  ]);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].rule, "unknown-binding-path");
+  assert.equal(groups[0].count, 3);
+  assert.equal(groups[0].files, 2);
+  assert.equal(ruleSummary(groups[0]), "3 findings in 2 files");
+});
+
+test("the top of the list is where the next decision is", () => {
+  // worst severity first, then sheer quantity - a hint reported forty times
+  // must not outrank an error
+  const groups = groupByRule([
+    { ...ENTRY, rule: "hinty", severity: "hint", file: "/a.abap", line: 1 },
+    { ...ENTRY, rule: "hinty", severity: "hint", file: "/a.abap", line: 2 },
+    { ...ENTRY, rule: "hinty", severity: "hint", file: "/a.abap", line: 3 },
+    { ...ENTRY, rule: "warny", severity: "warning", file: "/a.abap", line: 4 },
+    { ...ENTRY, rule: "erry", severity: "error", file: "/a.abap", line: 5 },
+  ]);
+  assert.deepEqual(groups.map((g) => g.rule), ["erry", "warny", "hinty"]);
+});
+
+test("a rule reported at two severities takes the worse one", () => {
+  const [group] = groupByRule([
+    { ...ENTRY, rule: "member-too-new", severity: "warning", file: "/a.abap", line: 1 },
+    { ...ENTRY, rule: "member-too-new", severity: "error", file: "/a.abap", line: 2 },
+  ]);
+  assert.equal(group.severity, "error");
+});
+
+test("within a rule the findings are in reading order", () => {
+  const [group] = groupByRule([
+    { ...ENTRY, rule: "r", severity: "error", file: "/b.abap", line: 1 },
+    { ...ENTRY, rule: "r", severity: "error", file: "/a.abap", line: 9 },
+    { ...ENTRY, rule: "r", severity: "error", file: "/a.abap", line: 2 },
+  ]);
+  assert.deepEqual(
+    group.entries.map((e) => `${e.file}:${e.line}`),
+    ["/a.abap:2", "/a.abap:9", "/b.abap:1"]
+  );
+});
+
+test("nothing found is an empty list, not a group of nothing", () => {
+  assert.deepEqual(groupByRule([]), []);
 });
