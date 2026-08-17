@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.23.0
 
 - **Fixes from a pass over the whole extension.** Nothing here is new
   behaviour; all of it is behaviour that was supposed to work already.
@@ -297,8 +297,6 @@
   can read — so a missing variable would have cost a third of the answer
   silently.
 
-## 0.23.0
-
 - **The scaffolded configs are now checked by the tools that read them.** Every
   template's SOURCE was already linted, but the files written AROUND it were
   not: a rule id the linter later renames, or a stray comma in the JSONC, would
@@ -338,8 +336,6 @@
   instead of being held open for as long as the socket lives. Credentials are
   also cleared when the proxy stops, rather than lingering until the next
   connect.
-
-## 0.22.1
 
 - **The abap2UI5 logo, everywhere the extension shows an icon.** The generic
   placeholder is gone: the red abap2UI5 disc is now the Marketplace tile, the
