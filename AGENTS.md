@@ -83,6 +83,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/wizard.ts` | "New App from Template" and "New Project from Template": template gallery pick, class name input, writing the project |
 | `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's own files copied from `src/data/app-template.json`, the name-carrying ones written here |
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
+| `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot |
+| `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/ai-mcp's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
 | `src/propedit.ts` | Property-editor edits: set/add/remove one `a( )` attribute as a span edit |
 | `src/propview.ts` | The "Control Properties" webview view: cursor -> `controlCallAt` -> form -> WorkspaceEdit |
 | `src/navmap.ts` | App navigation graph: nav_app_call extraction, column layout, SVG rendering |
@@ -324,12 +326,21 @@ Facts an agent cannot see from the code but will trip over:
   another one. **Do not re-type any of those files here.** That is precisely
   how the scaffold came to emit `@abap2ui5/linter@^0.1.1` against an ecosystem
   on 0.2.1, with no framework pin at all.
-- The MCP registration (`src/mcp.ts`) and the view checker (`src/viewcheck.ts`)
-  both probe checkout directories by name: `linter` (the checker's own
-  repository name) plus the **pre-rename aliases** `abap2UI5-linter` and
-  `ai-view-check`. The same list lives in ai-mcp's `lib/repos.mjs` as
-  `VIEW_CHECK_DIRS` — keep all three in sync, and drop an alias only in a
-  coordinated change.
+- **The sibling-checkout naming is ai-mcp's, snapshotted here.** The MCP
+  registration (`src/mcp.ts`), the view checker (`src/viewcheck.ts`) and the
+  example catalogues (`src/exampleview.ts`) all probe a repos root by
+  directory name — `linter` plus the **pre-rename aliases** `abap2UI5-linter`
+  and `ai-view-check`, `samples-controls` plus `abap2UI5-api` and
+  `ai-demokit`, and so on. That history belongs to `abap2UI5/ai-mcp`, which is
+  the component that RESOLVES the root; it owns it as data in
+  `lib/repo-dirs.json`. `src/repolayout.ts` exports the lists out of
+  `src/data/repo-dirs.json`, a generated snapshot of that file — same shape as
+  app-template and the client API: `scripts/generate-repo-dirs.mjs`,
+  `npm run repo-dirs:check` weekly through `bump-repo-dirs.yml`, and
+  `src/test/repolayout.test.ts` holding the module to the snapshot in
+  `npm test`. **Add a directory name in ai-mcp and regenerate here** — never
+  by editing `repolayout.ts`. This used to be two hand-written lists with no
+  gate between them, which is a rename that half-lands.
 
 ## Related repositories
 
