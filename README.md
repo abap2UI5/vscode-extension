@@ -792,9 +792,14 @@ auth proxy. An agent gets the real-system half of the loop:
 | --- | --- |
 | `list_systems` | The configured launch systems and which one is active |
 | `search_apps` | Class names on the system, via the ADT quick search |
-| `run_app` | The app rendered on the system, headless — as a screenshot |
+| `run_app_on_system` | The app rendered on the system, headless — as a screenshot |
 
-`run_app` loads the class through the auth proxy in the render gate's
+The name says which of the two it is: the abap2UI5 server's `run_app` builds
+and boots the transpiled sandbox, this one runs the class on a real system.
+Both servers are registered in the same window, so one name for two things
+would be a coin toss for the agent.
+
+`run_app_on_system` loads the class through the auth proxy in the render gate's
 Chromium, so it needs the render gate installed once. Every prompt (system
 pick, credentials) stays a normal VS Code dialog — the agent never sees a
 password. `abap2ui5.mcp.system: false` removes the server.

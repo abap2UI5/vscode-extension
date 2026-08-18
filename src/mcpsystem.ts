@@ -98,12 +98,17 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
       },
     },
     {
-      name: "run_app",
+      /* NOT `run_app`: the abap2UI5 MCP server (ai-mcp) registers a tool of
+       * that name in the same window, and it means something else - a build
+       * of the transpiled sandbox, no system involved. Two tools with one
+       * name and two semantics is a coin toss for the agent, so this one says
+       * which of the two it is. */
+      name: "run_app_on_system",
       description:
         "Runs an abap2UI5 app class on the active SAP system (through the " +
         "extension's auth proxy) in headless Chromium and returns a " +
         "screenshot of what it renders. The real-system counterpart of the " +
-        "sandbox run_app.",
+        "abap2UI5 server's sandbox `run_app`.",
       inputSchema: {
         type: "object",
         properties: {

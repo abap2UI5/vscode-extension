@@ -74,7 +74,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix above the class definition |
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (ai-mcp) and the in-extension system server for MCP clients in the window |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
-| `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (list/search/run-with-screenshot) |
+| `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`) |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
 | `src/screenshot.ts` | "Take App Screenshot": finds the render gate's Chromium and renders the proxied URL headless |
 | `src/colors.ts` | Colour spans for colour-typed property values (the swatch/picker provider's logic) |
