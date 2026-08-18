@@ -30,6 +30,20 @@
   activate, the three ways to look at a view, check and fix, and the three
   editing actions — one entry rather than ten loose ones.
 
+- **Fixes to what the reconstructed XML view points at.** Switching to
+  another class made the preview follow it before the re-render landed, and a
+  jump from an XML line during that window used the previous class's offsets
+  against the new source - landing somewhere arbitrary in it. It refuses
+  instead, until the render it belongs to exists. And findings that cannot be
+  recomputed on a half-typed buffer are now cleared rather than left pinned to
+  lines the re-render has already moved.
+
+- **Two things that failed silently now say so.** Picking an app from the
+  system search and having nothing happen was a possible outcome: starting it
+  talks to a system, and a refusal had nowhere to land. Same for the property
+  editor, where an edit that did not apply looked exactly like one that did -
+  the field showed the new value and the class still said the old one.
+
 - **Two lists that explain themselves.** An empty tree with no explanation is
   indistinguishable from a broken one. The app list says what it collects and
   offers the two commands that fill it; the findings tree points at the
