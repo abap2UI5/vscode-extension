@@ -8,7 +8,7 @@ import type { SapProxy } from "./proxy";
 /*
  * The abap2UI5 SYSTEM MCP server - real-system tools for AI agents.
  *
- * The ai-mcp server the extension already registers gives agents the dev
+ * The MCP server the extension already registers gives agents the dev
  * loop WITHOUT a system (sandbox deploy, transpiled run). This one is the
  * other half: it lives inside the extension, so it holds what only the
  * extension has - the configured systems, the stored credentials and the
@@ -16,7 +16,7 @@ import type { SapProxy } from "./proxy";
  * app against it, screenshot included.
  *
  * Hosted over plain streamable HTTP on 127.0.0.1 with a random path token,
- * and registered through the same MCP definition provider as ai-mcp.
+ * and registered through the same MCP definition provider as it.
  */
 
 export interface SystemMcpDeps {
@@ -98,7 +98,7 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
       },
     },
     {
-      /* NOT `run_app`: the abap2UI5 MCP server (ai-mcp) registers a tool of
+      /* NOT `run_app`: the abap2UI5 MCP server (mcp-server) registers a tool of
        * that name in the same window, and it means something else - a build
        * of the transpiled sandbox, no system involved. Two tools with one
        * name and two semantics is a coin toss for the agent, so this one says

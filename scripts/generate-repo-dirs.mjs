@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
  * Builds src/data/repo-dirs.json - the directory names a sibling checkout can
- * carry, taken from abap2UI5/ai-mcp's lib/repo-dirs.json.
+ * carry, taken from abap2UI5/mcp-server's lib/repo-dirs.json.
  *
  * Why the MCP server owns the list: it is the component that RESOLVES the
  * repos root, and it has to keep resolving a checkout somebody made under an
@@ -11,13 +11,13 @@
  * carry a hand-written second copy in src/repolayout.ts - two lists, no gate,
  * so the next rename would have landed in one of them and half-worked.
  *
- * Why a snapshot and not an import: ai-mcp is not a dependency of this
+ * Why a snapshot and not an import: mcp-server is not a dependency of this
  * extension - it is a program the extension may START, from a checkout or via
  * npx, and it is not there at all in the web build. So the content ships
  * inside the bundle, the same way app-template.json and client-api.json do,
  * and the same weekly gate keeps it honest.
  *
- *   node scripts/generate-repo-dirs.mjs /path/to/ai-mcp
+ *   node scripts/generate-repo-dirs.mjs /path/to/mcp-server
  *   node scripts/generate-repo-dirs.mjs           (fetches from GitHub main)
  *   node scripts/generate-repo-dirs.mjs --check   (fail when the committed
  *                                                  JSON is stale - what the
@@ -31,14 +31,14 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 // under src/ so tsc (rootDir: src, resolveJsonModule) can import it; esbuild
 // inlines it into both bundles, so the web build needs no fs for it either
 const OUT = path.join(ROOT, "src", "data", "repo-dirs.json");
-const REPO = "abap2UI5/ai-mcp";
+const REPO = "abap2UI5/mcp-server";
 const SOURCE_FILE = "lib/repo-dirs.json";
 const RAW = `https://raw.githubusercontent.com/${REPO}/main/${SOURCE_FILE}`;
 
 /** The keys src/repolayout.ts turns into exported constants. A key that
  *  disappears upstream must fail here, not resolve to `undefined` in an
  *  editor session. */
-export const REQUIRED_KEYS = ["corpus", "samples", "samplesStack", "viewCheck"];
+export const REQUIRED_KEYS = ["corpus", "samples", "samplesStack", "viewCheck", "server"];
 
 async function read(local) {
   if (local) {

@@ -1,4 +1,4 @@
-# src/data/repo-dirs.json is a snapshot of abap2UI5/ai-mcp's lib/repo-dirs.json
+# src/data/repo-dirs.json is a snapshot of abap2UI5/mcp-server's lib/repo-dirs.json
 # - the directory names a sibling checkout can carry, which is what the MCP
 # registration, the local view-check fallback and the example catalogues all
 # probe a repos root with. The MCP server owns that list because it is the
@@ -7,7 +7,7 @@
 # repository rename would have landed in one of the two and half-worked.
 #
 # This workflow is the other half of the fix: weekly regenerate against
-# ai-mcp's main, full gate, PR - the same shape as bump-client-api and
+# mcp-server's main, full gate, PR - the same shape as bump-client-api and
 # bump-app-template. A red run here means the extension is looking for a
 # checkout under a name the server has stopped using, or missing one it added.
 
@@ -36,7 +36,7 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Regenerate from ai-mcp's main
+      - name: Regenerate from mcp-server's main
         run: node scripts/generate-repo-dirs.mjs
 
       - name: Check whether the naming moved
@@ -59,11 +59,11 @@ jobs:
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           branch: bump-repo-dirs
-          title: "chore: sync repo-dirs.json with abap2UI5/ai-mcp"
-          commit-message: "chore: sync repo-dirs.json with abap2UI5/ai-mcp"
+          title: "chore: sync repo-dirs.json with abap2UI5/mcp-server"
+          commit-message: "chore: sync repo-dirs.json with abap2UI5/mcp-server"
           body: |
             Weekly regeneration of `src/data/repo-dirs.json` from
-            `abap2UI5/ai-mcp` main - the extension finds the same sibling
+            `abap2UI5/mcp-server` main - the extension finds the same sibling
             checkouts the MCP server does only when this file moves with it.
 
             Read the diff before merging: a new entry means a repository was
