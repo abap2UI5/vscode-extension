@@ -326,6 +326,16 @@ Facts an agent cannot see from the code but will trip over:
   another one. **Do not re-type any of those files here.** That is precisely
   how the scaffold came to emit `@abap2ui5/linter@^0.1.1` against an ecosystem
   on 0.2.1, with no framework pin at all.
+- **Which files those are is app-template's answer too.** That repository
+  describes itself in `template.json` — `files.shared` (what a project takes
+  unchanged), `files.named` (what carries a name), what stays with the template
+  and why, and the substitutions. The snapshot carries that spec alongside the
+  files (`appTemplate.template`), the generator takes its file list from it,
+  and `VERBATIM_FILES` in `scaffold.ts` is `files.shared` minus the three the
+  scaffold composes around values it reads (`package.json`,
+  `.github/workflows/check.yml`, `AGENTS.md`). So a file added to app-template
+  reaches a new project here without an edit. ai-mcp's `scaffold_app` executes
+  the same description; the three executors differ, the description does not.
 - **The sibling-checkout naming is ai-mcp's, snapshotted here.** The MCP
   registration (`src/mcp.ts`), the view checker (`src/viewcheck.ts`) and the
   example catalogues (`src/exampleview.ts`) all probe a repos root by
