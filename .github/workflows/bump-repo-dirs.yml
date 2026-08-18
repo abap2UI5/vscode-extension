@@ -1,0 +1,77 @@
+# src/data/repo-dirs.json is a snapshot of abap2UI5/ai-mcp's lib/repo-dirs.json
+# - the directory names a sibling checkout can carry, which is what the MCP
+# registration, the local view-check fallback and the example catalogues all
+# probe a repos root with. The MCP server owns that list because it is the
+# component that RESOLVES the root; this extension used to keep a hand-written
+# second copy in src/repolayout.ts, with no gate between them, so the next
+# repository rename would have landed in one of the two and half-worked.
+#
+# This workflow is the other half of the fix: weekly regenerate against
+# ai-mcp's main, full gate, PR - the same shape as bump-client-api and
+# bump-app-template. A red run here means the extension is looking for a
+# checkout under a name the server has stopped using, or missing one it added.
+
+name: Bump repo dirs
+
+on:
+  schedule:
+    # Mondays 07:05 UTC - after the app-template bump (06:53), off the
+    # full-hour spikes.
+    - cron: "5 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Regenerate from ai-mcp's main
+        run: node scripts/generate-repo-dirs.mjs
+
+      - name: Check whether the naming moved
+        id: diff
+        run: |
+          if git diff --quiet src/data/repo-dirs.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.diff.outputs.changed == 'true'
+        run: npm ci
+      - if: steps.diff.outputs.changed == 'true'
+        run: npm run lint
+      - if: steps.diff.outputs.changed == 'true'
+        run: npm test
+
+      - if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          branch: bump-repo-dirs
+          title: "chore: sync repo-dirs.json with abap2UI5/ai-mcp"
+          commit-message: "chore: sync repo-dirs.json with abap2UI5/ai-mcp"
+          body: |
+            Weekly regeneration of `src/data/repo-dirs.json` from
+            `abap2UI5/ai-mcp` main - the extension finds the same sibling
+            checkouts the MCP server does only when this file moves with it.
+
+            Read the diff before merging: a new entry means a repository was
+            renamed, and the old name has to stay in the list or every existing
+            checkout stops being found.
+
+            Lint and tests ran on the regenerated snapshot in the workflow that
+            opened this PR; CI repeats them here.
+          add-paths: |
+            src/data/repo-dirs.json
+          delete-branch: true

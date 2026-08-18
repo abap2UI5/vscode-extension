@@ -48,6 +48,26 @@ import appTemplate from "./data/app-template.json";
 /** app-template's files, exactly as that repository has them. */
 export const TEMPLATE_FILES: Record<string, string> = appTemplate.files;
 
+/** app-template's own description of what a project takes from it - the file
+ *  lists and the substitutions, snapshotted with the files themselves. One
+ *  list, in the repository that owns it; `npm run rename` over there and
+ *  ai-mcp's `scaffold_app` execute the same one. */
+export const TEMPLATE_SPEC = appTemplate.template;
+
+/* The shared files this scaffold does NOT copy byte for byte, because it
+ * writes its own around values read out of them: the manifest (project name,
+ * and the two scripts that need a `scripts/` directory a project does not
+ * get), the CI workflow (same, plus the linter action's pin), and AGENTS.md
+ * (its head describes THIS project; the guide below the marker is mirrored).
+ * Everything else app-template calls shared is copied - so a file added over
+ * there arrives here without an edit. */
+const COMPOSED = new Set(["package.json", ".github/workflows/check.yml", "AGENTS.md"]);
+
+/** The template's shared files this scaffold copies unchanged. */
+export const VERBATIM_FILES: string[] = TEMPLATE_SPEC.files.shared.filter(
+  (f: string) => !COMPOSED.has(f)
+);
+
 /** Everything from this line down in app-template's AGENTS.md is the mirrored
  *  app-building guide - repo-independent, and what a new project needs most. */
 export const GUIDE_MARKER = "> **Provenance:**";
@@ -303,6 +323,12 @@ const PACKAGE_JSON = (projectName: string): string => {
     scripts: Record<string, string>;
     devDependencies: Record<string, string>;
     engines?: Record<string, string>;
+    /** app-template carries an `overrides` block while the published linter's
+     *  peer range is narrower than the render-runtime it is released beside -
+     *  without it `npm ci` refuses the very pairing the template documents.
+     *  Copied rather than judged: it is a fact about the registry, and the
+     *  template is where it is decided and where it will be removed. */
+    overrides?: Record<string, unknown>;
   };
   const scripts: Record<string, string> = {};
   for (const [name, body] of Object.entries(template.scripts)) {
@@ -322,6 +348,7 @@ const PACKAGE_JSON = (projectName: string): string => {
       scripts,
       devDependencies: template.devDependencies,
       engines: template.engines ?? { node: ">=22" },
+      ...(template.overrides ? { overrides: template.overrides } : {}),
     },
     null,
     2
@@ -375,13 +402,10 @@ export function scaffoldFiles(
 `,
     },
     // Verbatim from app-template - see the header. These are the files that
-    // decide what a project is checked by, and there is one source for them.
-    { path: "abap2ui5lint.jsonc", content: TEMPLATE_FILES["abap2ui5lint.jsonc"] },
-    { path: "abaplint.jsonc", content: TEMPLATE_FILES["abaplint.jsonc"] },
-    { path: ".claude/settings.json", content: TEMPLATE_FILES[".claude/settings.json"] },
-    { path: ".gitattributes", content: TEMPLATE_FILES[".gitattributes"] },
-    { path: ".gitignore", content: TEMPLATE_FILES[".gitignore"] },
-    { path: ".github/dependabot.yml", content: TEMPLATE_FILES[".github/dependabot.yml"] },
+    // decide what a project is checked by, and there is one source for them:
+    // app-template's template.json says which they are, so a file added over
+    // there is handed out here without anybody editing this list.
+    ...VERBATIM_FILES.map((path) => ({ path, content: TEMPLATE_FILES[path] })),
 
     { path: "package.json", content: PACKAGE_JSON(projectName) },
     { path: ".github/workflows/check.yml", content: CHECK_WORKFLOW() },

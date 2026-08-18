@@ -4,6 +4,8 @@ import { APP_TEMPLATES } from "../template";
 import {
   GUIDE_MARKER,
   TEMPLATE_FILES,
+  TEMPLATE_SPEC,
+  VERBATIM_FILES,
   frameworkPin,
   guideSection,
   linterActionRef,
@@ -40,15 +42,22 @@ const contentOf = (path: string): string => {
   return file.content;
 };
 
-/** The files a project takes from app-template unchanged. */
-const VERBATIM = [
-  "abaplint.jsonc",
-  "abap2ui5lint.jsonc",
-  ".claude/settings.json",
-  ".gitattributes",
-  ".gitignore",
-  ".github/dependabot.yml",
-];
+/** The files a project takes from app-template unchanged - app-template's own
+ *  list, not a second one kept here. */
+const VERBATIM = VERBATIM_FILES;
+
+test("the verbatim list is app-template's, minus what the scaffold composes", () => {
+  // A hand-kept list here would go stale the moment app-template adds a file,
+  // and a project would quietly be missing it. This is the shape of that guard:
+  // everything the template calls shared is either copied or composed.
+  const composed = TEMPLATE_SPEC.files.shared.filter((f) => !VERBATIM.includes(f));
+  assert.deepEqual(composed.sort(), [
+    ".github/workflows/check.yml",
+    "AGENTS.md",
+    "package.json",
+  ]);
+  assert.ok(VERBATIM.length > 0, "the template still hands out files to copy");
+});
 
 test("the copied files are copied - byte for byte, from the snapshot", () => {
   for (const path of VERBATIM) {
@@ -186,12 +195,7 @@ test("a scaffolded project carries the app-building guide, verbatim", () => {
 test("the snapshot has nothing in it nobody reads", () => {
   // A file added to scripts/generate-app-template.mjs and then never used is a
   // silent claim that the scaffold copies more than it does.
-  const read = new Set([
-    ...VERBATIM,
-    "AGENTS.md",
-    "package.json",
-    ".github/workflows/check.yml",
-  ]);
+  const read = new Set(TEMPLATE_SPEC.files.shared);
   assert.deepEqual(
     Object.keys(TEMPLATE_FILES).sort(),
     [...read].sort(),

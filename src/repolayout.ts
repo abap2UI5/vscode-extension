@@ -1,29 +1,39 @@
 /*
  * repolayout - the sibling-checkout naming shared by every feature that
- * probes a repos root (the MCP registration and the local view-check
- * fallback). One list here instead of one per call site; ai-mcp's
- * lib/repos.mjs carries the same VIEW_CHECK_DIRS for its own resolution.
+ * probes a repos root (the MCP registration, the local view-check fallback
+ * and the example catalogues).
+ *
+ * The names themselves are NOT written here. abap2UI5/ai-mcp owns the
+ * ecosystem's rename history in `lib/repo-dirs.json`, because it is the
+ * component that resolves the repos root; `src/data/repo-dirs.json` is a
+ * generated snapshot of it (scripts/generate-repo-dirs.mjs, weekly drift gate
+ * in bump-repo-dirs.yml, exactly like app-template.json and client-api.json).
+ * A repository rename is one edit over there and one regenerated snapshot
+ * here - never a second list to remember.
+ *
+ * Each list is newest first: a repository's current name, then what
+ * `git clone` produced under its earlier names. GitHub redirects the old
+ * paths, so a checkout made from an outdated README still sits in a directory
+ * named after whichever name it was cloned under, and all of them resolve.
  */
 
-/** Directory names a linter checkout can carry, newest first: `linter` is
- *  the repository's own name (github.com/abap2UI5/linter), the other two are
- *  what `git clone` produced under its earlier names. */
-export const VIEW_CHECK_DIRS = ["linter", "abap2UI5-linter", "ai-view-check"] as const;
+import snapshot from "./data/repo-dirs.json";
 
-/** Directory names the samples corpus checkout can carry, newest first:
- *  `samples-controls` is the repository's own name
- *  (github.com/abap2UI5/samples-controls), the other two are what
- *  `git clone` produced under its earlier names (`abap2UI5-api`, and
- *  `ai-demokit` before that); ai-mcp's lib/repos.mjs carries the same
- *  CORPUS_DIRS for its own resolution. */
-export const CORPUS_DIRS = ["samples-controls", "abap2UI5-api", "ai-demokit"] as const;
+const DIRS = snapshot.dirs as Record<string, readonly string[]>;
 
-/** Directory names the pattern-sample checkout can carry, newest first
+/** Directory names a linter checkout can carry (github.com/abap2UI5/linter). */
+export const VIEW_CHECK_DIRS: readonly string[] = DIRS.viewCheck;
+
+/** Directory names the control corpus can carry
+ *  (github.com/abap2UI5/samples-controls) - 416 ports of the UI5 demo kit. */
+export const CORPUS_DIRS: readonly string[] = DIRS.corpus;
+
+/** Directory names the pattern-sample checkout can carry
  *  (github.com/abap2UI5/samples). One of the three catalogues the MCP
  *  server's `examples` tool searches. */
-export const SAMPLES_DIRS = ["samples", "abap2UI5-samples"] as const;
+export const SAMPLES_DIRS: readonly string[] = DIRS.samples;
 
-/** Directory names the stack-sample checkout can carry, newest first
+/** Directory names the stack-sample checkout can carry
  *  (github.com/abap2UI5/samples-stack) - the apps that need an OData
  *  service, RAP, APC or the Fiori launchpad. The third catalogue. */
-export const SAMPLES_STACK_DIRS = ["samples-stack", "abap2UI5-samples-stack"] as const;
+export const SAMPLES_STACK_DIRS: readonly string[] = DIRS.samplesStack;

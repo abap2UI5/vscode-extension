@@ -22,6 +22,13 @@
   can read it before pasting rather than taking that on trust. Ports survive,
   since "which port did it even try" is usually part of the answer.
 
+- **The system server's `run_app` is now `run_app_on_system`.** Both MCP
+  servers this extension registers live in one window, and the abap2UI5 server
+  (ai-mcp) already had a `run_app` — a build of the transpiled sandbox, no
+  system involved. This one runs a class on a real system through the auth
+  proxy. One name for the two of them left the agent guessing which it was
+  calling; the name now says.
+
 - **Apps you launch with F9 react to clicks again.** A system configured with
   `sap-ui-frameOptions=trusted` lets its app run in an iframe only after asking
   the embedding window for permission. Nothing answered, so UI5 waited ten

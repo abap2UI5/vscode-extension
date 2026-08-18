@@ -74,7 +74,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix above the class definition |
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (ai-mcp) and the in-extension system server for MCP clients in the window |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
-| `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (list/search/run-with-screenshot) |
+| `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`) |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
 | `src/screenshot.ts` | "Take App Screenshot": finds the render gate's Chromium and renders the proxied URL headless |
 | `src/colors.ts` | Colour spans for colour-typed property values (the swatch/picker provider's logic) |
@@ -83,6 +83,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/wizard.ts` | "New App from Template" and "New Project from Template": template gallery pick, class name input, writing the project |
 | `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's own files copied from `src/data/app-template.json`, the name-carrying ones written here |
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
+| `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot |
+| `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/ai-mcp's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
 | `src/propedit.ts` | Property-editor edits: set/add/remove one `a( )` attribute as a span edit |
 | `src/propview.ts` | The "Control Properties" webview view: cursor -> `controlCallAt` -> form -> WorkspaceEdit |
 | `src/navmap.ts` | App navigation graph: nav_app_call extraction, column layout, SVG rendering |
@@ -231,7 +233,13 @@ identity (see Conventions).
   Severity, wording, the `fixes` on a finding, the `rules` block and the
   `abap2ui5lint-disable…` directives all live in `@abap2ui5/linter` and are
   applied through it — never re-derived here. Two copies of that semantics is
-  exactly how the editor and CI drifted apart before.
+  exactly how the editor and CI drifted apart before. The **types** come from
+  the linter too: it ships `types.d.ts` and declares it per subpath in its
+  `exports` map, so `@abap2ui5/linter/reconstruct` and friends type-check
+  straight out of `node_modules`. There used to be a hand-written
+  `src/linter.d.ts` here; it was a second description of the same shapes and
+  could only ever go stale. Do not reintroduce one — if a shape is missing or
+  wrong, fix it in the linter.
 
 ## Toolchain & supply chain
 
@@ -318,12 +326,31 @@ Facts an agent cannot see from the code but will trip over:
   another one. **Do not re-type any of those files here.** That is precisely
   how the scaffold came to emit `@abap2ui5/linter@^0.1.1` against an ecosystem
   on 0.2.1, with no framework pin at all.
-- The MCP registration (`src/mcp.ts`) and the view checker (`src/viewcheck.ts`)
-  both probe checkout directories by name: `linter` (the checker's own
-  repository name) plus the **pre-rename aliases** `abap2UI5-linter` and
-  `ai-view-check`. The same list lives in ai-mcp's `lib/repos.mjs` as
-  `VIEW_CHECK_DIRS` — keep all three in sync, and drop an alias only in a
-  coordinated change.
+- **Which files those are is app-template's answer too.** That repository
+  describes itself in `template.json` — `files.shared` (what a project takes
+  unchanged), `files.named` (what carries a name), what stays with the template
+  and why, and the substitutions. The snapshot carries that spec alongside the
+  files (`appTemplate.template`), the generator takes its file list from it,
+  and `VERBATIM_FILES` in `scaffold.ts` is `files.shared` minus the three the
+  scaffold composes around values it reads (`package.json`,
+  `.github/workflows/check.yml`, `AGENTS.md`). So a file added to app-template
+  reaches a new project here without an edit. ai-mcp's `scaffold_app` executes
+  the same description; the three executors differ, the description does not.
+- **The sibling-checkout naming is ai-mcp's, snapshotted here.** The MCP
+  registration (`src/mcp.ts`), the view checker (`src/viewcheck.ts`) and the
+  example catalogues (`src/exampleview.ts`) all probe a repos root by
+  directory name — `linter` plus the **pre-rename aliases** `abap2UI5-linter`
+  and `ai-view-check`, `samples-controls` plus `abap2UI5-api` and
+  `ai-demokit`, and so on. That history belongs to `abap2UI5/ai-mcp`, which is
+  the component that RESOLVES the root; it owns it as data in
+  `lib/repo-dirs.json`. `src/repolayout.ts` exports the lists out of
+  `src/data/repo-dirs.json`, a generated snapshot of that file — same shape as
+  app-template and the client API: `scripts/generate-repo-dirs.mjs`,
+  `npm run repo-dirs:check` weekly through `bump-repo-dirs.yml`, and
+  `src/test/repolayout.test.ts` holding the module to the snapshot in
+  `npm test`. **Add a directory name in ai-mcp and regenerate here** — never
+  by editing `repolayout.ts`. This used to be two hand-written lists with no
+  gate between them, which is a rename that half-lands.
 
 ## Related repositories
 
