@@ -133,3 +133,45 @@ test("a baseline that does not parse waives nothing", () => {
   // the CLI fails on one; hiding findings behind a broken file is the opposite
   assert.equal(parseBaseline("{ not json"), null);
 });
+
+// ---------------------------------------------------------------------------
+// Rules: the settings', and the repository's over them
+// ---------------------------------------------------------------------------
+
+test("a rule the repository says nothing about is the settings' to decide", () => {
+  const options = optionsFromConfig({}, "/repo/abap2ui5lint.jsonc", {
+    minUi5: "1.71",
+    distribution: "sapui5",
+    allow: [],
+    rules: { "unknown-binding-path": false },
+  });
+  assert.deepEqual(options.rules, { "unknown-binding-path": false });
+});
+
+test("the repository wins for the rules it names", () => {
+  // the editor and CI disagreeing about the same file is what this module
+  // exists to prevent - a personal opinion cannot override a repo-wide one
+  const options = optionsFromConfig(
+    { rules: { "control-too-new": "error" } },
+    "/repo/abap2ui5lint.jsonc",
+    {
+      minUi5: "1.71",
+      distribution: "sapui5",
+      allow: [],
+      rules: { "control-too-new": false, "unknown-property": "hint" },
+    }
+  );
+  assert.deepEqual(options.rules, {
+    "control-too-new": "error", // the repository's
+    "unknown-property": "hint", // untouched by it, so the setting's
+  });
+});
+
+test("no opinion on either side leaves the gate its defaults", () => {
+  const options = optionsFromConfig({}, "/repo/abap2ui5lint.jsonc", {
+    minUi5: "1.71",
+    distribution: "sapui5",
+    allow: [],
+  });
+  assert.equal(options.rules, undefined);
+});

@@ -26,6 +26,25 @@
   already producing. What cannot be enumerated that way is said out loud
   rather than reported as an empty workspace.
 
+- **Which view-check rules are active is now a setting.** A repository's
+  `abap2ui5lint.jsonc` could always switch a rule off or move its severity,
+  but that file is the project's shared answer and needs one to exist.
+  `abap2ui5.viewCheck.rules` says the same thing per person and per workspace:
+  a rule id maps to `false`, to a severity, or to `{ severity, exclude }`.
+
+  ```json
+  "abap2ui5.viewCheck.rules": {
+    "unknown-binding-path": false,
+    "control-too-new": "warning"
+  }
+  ```
+
+  The repository still wins for every rule it names — editor and CI
+  disagreeing about the same file is the one thing this must not cause — and
+  the setting decides the rest. Since nobody knows rule ids by heart, the
+  lightbulb on a finding now offers *turn off <rule> in this workspace*, which
+  writes the id for you and offers to undo it.
+
 - **Right-click has an abap2UI5 menu** in ABAP classes and view XML: run and
   activate, the three ways to look at a view, check and fix, and the three
   editing actions — one entry rather than ten loose ones.

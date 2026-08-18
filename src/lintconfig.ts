@@ -44,6 +44,9 @@ export interface SettingsOptions {
   minUi5: string;
   distribution: string;
   allow: string[];
+  /** Per-rule severity overrides / switch-offs from the VS Code settings,
+   *  in the shape `abap2ui5lint.jsonc` uses for the same thing. */
+  rules?: Record<string, unknown>;
 }
 
 interface CacheEntry {

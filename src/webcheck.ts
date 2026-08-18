@@ -40,12 +40,26 @@ function config() {
   return vscode.workspace.getConfiguration(CONFIG_SECTION);
 }
 
+/**
+ * The `viewCheck.rules` setting, in the shape `abap2ui5lint.jsonc` uses for
+ * the same thing: rule id -> `false`, a severity, or `{ severity, exclude }`.
+ *
+ * Read fresh each time rather than cached - the check already runs per
+ * keystroke, an object of a handful of entries costs nothing to fetch, and a
+ * cache would be one more thing to invalidate when the setting changes.
+ */
+function ruleSettings(): Record<string, unknown> | undefined {
+  const rules = config().get<Record<string, unknown>>("viewCheck.rules");
+  return rules && Object.keys(rules).length > 0 ? rules : undefined;
+}
+
 function settings(): SettingsOptions {
   const cfg = config();
   return {
     minUi5: cfg.get<string>("viewCheck.minUi5", "1.71"),
     distribution: cfg.get<string>("viewCheck.distribution", "sapui5"),
     allow: cfg.get<string[]>("viewCheck.allow", []),
+    rules: ruleSettings(),
   };
 }
 
