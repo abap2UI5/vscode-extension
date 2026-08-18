@@ -177,6 +177,32 @@ export function augmentedPath(
   return parts.join(path.delimiter);
 }
 
+/** The directory a checker child is started in.
+ *
+ *  `spawn` reports ENOENT for a cwd that does not exist exactly as it does for
+ *  a missing executable, and names the COMMAND in both messages. So a working
+ *  directory that is not on disk reads as "node could not be started", which
+ *  sends the reader after the runtime and offers them an install that cannot
+ *  fix it - the render gate then reinstalls, fails the same way, and offers
+ *  again.
+ *
+ *  A document opened through ADT is that case: its workspace folder is a
+ *  `repotree-v1` path, not a directory. `committedText` in viewpreview.ts
+ *  already guards the same way; this is the call site that did not.
+ *
+ *  `exists` is injected so this is decidable without touching a disk.
+ */
+export function checkerCwd(
+  folder: { fsPath: string; scheme: string } | undefined,
+  home: string,
+  exists: (dir: string) => boolean
+): string {
+  if (!folder || folder.scheme !== "file" || !exists(folder.fsPath)) {
+    return home;
+  }
+  return folder.fsPath;
+}
+
 // ---------------------------------------------------------------------------
 // The status bar's one line
 // ---------------------------------------------------------------------------
