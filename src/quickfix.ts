@@ -6,6 +6,7 @@ import { PropertyFinding } from "@abap2ui5/linter/properties";
 import { addToBaseline } from "./baselinefile";
 import { plannedFixes } from "./checkcore";
 import { clearBaselineCache } from "./lintconfig";
+import { CONFIG_SECTION } from "./settings";
 import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
 
 /*
@@ -157,6 +158,25 @@ class ViewCheckActions implements vscode.CodeActionProvider {
       action.diagnostics = [diagnostic];
       actions.push(action);
 
+      /* --- switch the rule off everywhere ---------------------------------
+       *
+       * The setting exists, but a rule id is not something anybody knows by
+       * heart - and the moment you want a rule gone is the moment you are
+       * looking at one of its findings. This writes the id into
+       * `viewCheck.rules` for you, at workspace scope: the project this rule
+       * is noisy in, not every project you open. */
+      const offAction = new vscode.CodeAction(
+        `abap2UI5: turn off ${rule} in this workspace`,
+        vscode.CodeActionKind.QuickFix
+      );
+      offAction.command = {
+        command: "abap2ui5.disableRule",
+        title: "Turn the rule off",
+        arguments: [rule],
+      };
+      offAction.diagnostics = [diagnostic];
+      actions.push(offAction);
+
       // --- adopt into the baseline, when the repo config names one --------
       if (baselineFile) {
         const finding =
@@ -261,6 +281,42 @@ export function registerQuickFix(
         }
       }
     ),
+    vscode.commands.registerCommand("abap2ui5.disableRule", async (rule: string) => {
+      if (!rule) {
+        return;
+      }
+      const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+      const rules = { ...(cfg.get<Record<string, unknown>>("viewCheck.rules") ?? {}) };
+      rules[rule] = false;
+      const target = vscode.workspace.workspaceFolders?.length
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global;
+      try {
+        await cfg.update("viewCheck.rules", rules, target);
+      } catch (err) {
+        // no workspace to write to, a read-only settings file, a policy
+        vscode.window.showWarningMessage(
+          `abap2UI5: could not turn ${rule} off - ${String(err)}`
+        );
+        return;
+      }
+      log(`quick-fix: ${rule} switched off in the settings`);
+      const undo = "Undo";
+      const picked = await vscode.window.showInformationMessage(
+        `abap2UI5: ${rule} is off. A repository's abap2ui5lint.jsonc still ` +
+          "wins for the rules it names.",
+        undo
+      );
+      if (picked === undo) {
+        delete rules[rule];
+        await cfg.update(
+          "viewCheck.rules",
+          Object.keys(rules).length ? rules : undefined,
+          target
+        );
+      }
+    }),
+
     vscode.commands.registerCommand("abap2ui5.fixAll", async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {

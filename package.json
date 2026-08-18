@@ -221,6 +221,10 @@
         "command": "abap2ui5.copyAppName",
         "title": "abap2UI5: Copy the App's Class Name",
         "icon": "$(copy)"
+      },
+      {
+        "command": "abap2ui5.disableRule",
+        "title": "abap2UI5: Turn a View-Check Rule Off"
       }
     ],
     "mcpServerDefinitionProviders": [
@@ -341,6 +345,10 @@
         },
         {
           "command": "abap2ui5.copyAppName",
+          "when": "false"
+        },
+        {
+          "command": "abap2ui5.disableRule",
           "when": "false"
         }
       ],
@@ -648,6 +656,47 @@
           },
           "default": [],
           "markdownDescription": "Accepted deviations for the property gate, e.g. `sap.m.GenericTile.systemInfo` - each entry is passed to the checker as `--allow`. Merges with the `allow` list of a workspace's `abap2ui5lint.jsonc`.\n\nTo waive a single line rather than a whole rule, put the linter's own directive above it: `\" abap2ui5lint-disable-next-line unknown-binding-path -- filled in a LOOP`. The quick fix on any finding writes it for you, and CI honours it too."
+        },
+        "abap2ui5.viewCheck.rules": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean",
+                "description": "false switches the rule off"
+              },
+              {
+                "enum": [
+                  "hint",
+                  "warning",
+                  "error"
+                ],
+                "description": "report it at this severity instead of its default"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "severity": {
+                    "enum": [
+                      "hint",
+                      "warning",
+                      "error"
+                    ]
+                  },
+                  "exclude": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "file path patterns this rule does not judge"
+                  }
+                }
+              }
+            ]
+          },
+          "markdownDescription": "Which view-check rules are active, and how loudly. A rule id maps to `false` to switch it off, to `\"hint\"` / `\"warning\"` / `\"error\"` to change its severity, or to `{ \"severity\": \u2026, \"exclude\": [\u2026] }`.\n\n```json\n\"abap2ui5.viewCheck.rules\": {\n  \"unknown-binding-path\": false,\n  \"control-too-new\": \"warning\"\n}\n```\n\nA repository's `abap2ui5lint.jsonc` wins for every rule it names, so the editor keeps agreeing with CI about those; this setting decides the rest. Rule ids are listed on the [rules page](https://abap2ui5.github.io/linter/)."
         },
         "abap2ui5.inlineFindings": {
           "type": "string",
