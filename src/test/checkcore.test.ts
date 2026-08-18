@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as path from "path";
 import {
   augmentedPath,
+  checkerCwd,
   isCheckableSource,
   findingsBarText,
   findingsBarTooltip,
@@ -491,4 +492,43 @@ test("a class name handed in always wins", () => {
 test("a path with nothing but generic segments still answers", () => {
   assert.equal(sourceLabel("/source/main"), "main");
   assert.equal(sourceLabel(""), "");
+});
+
+// ---------------------------------------------------------------------------
+// checkerCwd - a working directory spawn can actually enter
+// ---------------------------------------------------------------------------
+
+const onDisk = (dir: string) => dir === "/work/project";
+
+test("a real workspace folder is where the checker runs", () => {
+  assert.equal(
+    checkerCwd({ fsPath: "/work/project", scheme: "file" }, "/home/me", onDisk),
+    "/work/project"
+  );
+});
+
+test("no workspace folder falls back to the home directory", () => {
+  assert.equal(checkerCwd(undefined, "/home/me", onDisk), "/home/me");
+});
+
+test("an ADT document's folder is not a directory, and is not used as one", () => {
+  // The regression: a class opened through ADT has a workspace folder whose
+  // path is a repotree route. spawn answers ENOENT for a cwd that is not
+  // there and names the COMMAND, so this arrived as "node not found" - and
+  // the offered remedy, reinstalling the 275 MB render gate, could not fix it.
+  assert.equal(
+    checkerCwd(
+      { fsPath: "/repotree-v1/TEST2/Local Objects ($TMP)/LARS", scheme: "repotree-v1" },
+      "/home/me",
+      onDisk
+    ),
+    "/home/me"
+  );
+});
+
+test("a file-scheme folder that is not on disk is refused too", () => {
+  assert.equal(
+    checkerCwd({ fsPath: "/gone", scheme: "file" }, "/home/me", onDisk),
+    "/home/me"
+  );
 });

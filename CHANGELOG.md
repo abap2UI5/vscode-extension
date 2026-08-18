@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **The render gate works against a system again.** 0.24.0 taught the view
+  check to see documents opened through ADT, and then started its checker in
+  the workspace folder of whatever it was checking. For an ADT document that
+  folder is a `repotree-v1` route, not a directory - and `spawn` answers
+  `ENOENT` for a working directory that is not there exactly as it does for a
+  missing executable, naming the COMMAND in both messages. So it read as
+  *"node could not be started"*, and the remedy offered was to install the
+  render gate: 275 MB, after which the next check failed the same way and
+  offered again. Four rounds is a gigabyte and no working gate.
+
+  The preview never had this - it runs in a scratch directory - which is why
+  the same class photographed fine while the check refused. `committedText`
+  already guards the same way; this was the one call site that did not.
 - **F9 apps react to clicks - this time against the real protocol.** 0.24.0
   claimed this and did not deliver it: the answer it posted was an invented
   JSON envelope with a `sentinel` field, and `sap/ui/security/FrameOptions`

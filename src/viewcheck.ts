@@ -17,6 +17,7 @@ import {
   isCheckableSource,
   parseRenderReport,
   quoteForShell,
+  checkerCwd,
   RenderResult,
   plannedFixes,
   resolveCheckerCommand,
@@ -201,8 +202,11 @@ function runRenderGate(
   const args = useShell
     ? rawArgs.map((arg) => quoteForShell(arg, process.platform))
     : rawArgs;
-  const cwd =
-    vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath ?? os.homedir();
+  const cwd = checkerCwd(
+    vscode.workspace.getWorkspaceFolder(doc.uri)?.uri,
+    os.homedir(),
+    (dir) => fs.existsSync(dir)
+  );
   log(`view-check: render gate - ${checker.cmd} ${args.join(" ")}`);
 
   return new Promise((resolve) => {
