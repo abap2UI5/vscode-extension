@@ -231,7 +231,13 @@ identity (see Conventions).
   Severity, wording, the `fixes` on a finding, the `rules` block and the
   `abap2ui5lint-disable…` directives all live in `@abap2ui5/linter` and are
   applied through it — never re-derived here. Two copies of that semantics is
-  exactly how the editor and CI drifted apart before.
+  exactly how the editor and CI drifted apart before. The **types** come from
+  the linter too: it ships `types.d.ts` and declares it per subpath in its
+  `exports` map, so `@abap2ui5/linter/reconstruct` and friends type-check
+  straight out of `node_modules`. There used to be a hand-written
+  `src/linter.d.ts` here; it was a second description of the same shapes and
+  could only ever go stale. Do not reintroduce one — if a shape is missing or
+  wrong, fix it in the linter.
 
 ## Toolchain & supply chain
 
