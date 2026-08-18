@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.24.1 - 2026-08-18
+
 - **The render gate works against a system again.** 0.24.0 taught the view
   check to see documents opened through ADT, and then started its checker in
   the workspace folder of whatever it was checking. For an ADT document that
