@@ -179,3 +179,35 @@ test("several pictures are laid out to be seen at once", () => {
   assert.ok(html.includes('class="shots'));
   assert.ok(html.includes("390x844") && html.includes("1280x900"));
 });
+
+// ---------------------------------------------------------------------------
+// UI5 frame protection - the wire format is two strings, not JSON
+// ---------------------------------------------------------------------------
+
+test("the preview answers UI5 frame protection in the format UI5 reads", () => {
+  const html = previewHtml({
+    frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
+    externalUrl: "https://host:44300/sap/bc/z2ui5?app_start=ZCL_X",
+    className: "ZCL_X",
+    theme: "",
+    language: "",
+    modelRoots: [],
+    nonce: "n0nce",
+  });
+
+  // sap/ui/security/FrameOptions drops anything that is not a string
+  // containing "SAPFrameProtection*" before it looks at it:
+  //   typeof sData !== "string" || sData.indexOf("SAPFrameProtection*") === -1
+  // so these two literals ARE the protocol.
+  assert.ok(html.includes("SAPFrameProtection*require-origin"));
+  assert.ok(html.includes("SAPFrameProtection*parent-unlocked"));
+
+  // parent-origin only proves the parent is alive; it leaves the frame
+  // blocked. A preview that embeds a url it built itself means unlocked.
+  assert.ok(!html.includes("SAPFrameProtection*parent-origin"));
+
+  // The regression this replaces: an invented JSON envelope. UI5 never sends
+  // it and never reads it, so the app waited out its ten seconds and blocked
+  // every click.
+  assert.ok(!html.includes("sentinel"));
+});
