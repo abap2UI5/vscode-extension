@@ -323,6 +323,12 @@ const PACKAGE_JSON = (projectName: string): string => {
     scripts: Record<string, string>;
     devDependencies: Record<string, string>;
     engines?: Record<string, string>;
+    /** app-template carries an `overrides` block while the published linter's
+     *  peer range is narrower than the render-runtime it is released beside -
+     *  without it `npm ci` refuses the very pairing the template documents.
+     *  Copied rather than judged: it is a fact about the registry, and the
+     *  template is where it is decided and where it will be removed. */
+    overrides?: Record<string, unknown>;
   };
   const scripts: Record<string, string> = {};
   for (const [name, body] of Object.entries(template.scripts)) {
@@ -342,6 +348,7 @@ const PACKAGE_JSON = (projectName: string): string => {
       scripts,
       devDependencies: template.devDependencies,
       engines: template.engines ?? { node: ">=22" },
+      ...(template.overrides ? { overrides: template.overrides } : {}),
     },
     null,
     2
