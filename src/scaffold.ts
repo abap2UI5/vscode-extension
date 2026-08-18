@@ -51,7 +51,7 @@ export const TEMPLATE_FILES: Record<string, string> = appTemplate.files;
 /** app-template's own description of what a project takes from it - the file
  *  lists and the substitutions, snapshotted with the files themselves. One
  *  list, in the repository that owns it; `npm run rename` over there and
- *  ai-mcp's `scaffold_app` execute the same one. */
+ *  mcp-server's `scaffold_app` execute the same one. */
 export const TEMPLATE_SPEC = appTemplate.template;
 
 /* The shared files this scaffold does NOT copy byte for byte, because it

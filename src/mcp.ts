@@ -2,12 +2,12 @@ import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as path from "path";
-import { CORPUS_DIRS, VIEW_CHECK_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
+import { CORPUS_DIRS, VIEW_CHECK_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS, SERVER_DIRS } from "./repolayout";
 import { splitCommandLine } from "./checkcore";
 
 /*
  * MCP server registration: exposes the abap2UI5 MCP server
- * (https://github.com/abap2UI5/ai-mcp) to every MCP client in this VS Code
+ * (https://github.com/abap2UI5/mcp-server) to every MCP client in this VS Code
  * window - Copilot agent mode, Claude Code, or any other extension speaking
  * MCP. The server gives agents the full abap2UI5 dev loop without an SAP
  * system: capability queries, static view validation, deploy, transpiled
@@ -21,8 +21,8 @@ import { splitCommandLine } from "./checkcore";
 
 const PROVIDER_ID = "abap2ui5.mcp";
 
-/** Repo-name -> env var the server resolves it with (see ai-mcp lib/repos.mjs,
- *  whose CORPUS_DIRS / VIEW_CHECK_DIRS this mirrors via src/repolayout.ts). */
+/** Repo-name -> env var the server resolves it with (see mcp-server
+ *  lib/repos.mjs, whose directory lists this mirrors via src/repolayout.ts). */
 const HOME_VARS: ReadonlyArray<readonly [string, string]> = [
   ["abap2UI5", "A2UI5_HOME"],
   ...CORPUS_DIRS.map((d) => [d, "SAMPLES_CONTROLS_HOME"] as const),
@@ -53,12 +53,19 @@ function serverCommand(): string[] {
   }
   const root = config().get<string>("mcp.reposRoot", "").trim();
   if (root) {
-    const server = path.join(root, "ai-mcp", "server.mjs");
-    if (fs.existsSync(server)) {
-      return ["node", server];
+    /* Every name the repository has carried, newest first - it was ai-mcp
+     * before 2026-08. A hard-coded directory name here would stop finding a
+     * checkout the day upstream renames, and fall back to npx without saying
+     * so: the server would still start, from the network, ignoring the local
+     * clone the user pointed at on purpose. */
+    for (const dir of SERVER_DIRS) {
+      const server = path.join(root, dir, "server.mjs");
+      if (fs.existsSync(server)) {
+        return ["node", server];
+      }
     }
   }
-  return ["npx", "--yes", "github:abap2UI5/ai-mcp"];
+  return ["npx", "--yes", "github:abap2UI5/mcp-server"];
 }
 
 function serverEnv(): Record<string, string> {

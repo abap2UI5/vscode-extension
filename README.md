@@ -759,7 +759,7 @@ path resolves against.
 
 ## MCP server (`abap2ui5.mcp.*`)
 
-The extension offers the [abap2UI5 MCP server](https://github.com/abap2UI5/ai-mcp)
+The extension offers the [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server)
 to every MCP client in the VS Code window — GitHub Copilot agent mode, Claude
 Code, or any other extension speaking MCP (VS Code 1.101+). The server gives
 an AI agent the full abap2UI5 development loop **without an SAP system**:
@@ -774,16 +774,16 @@ an AI agent the full abap2UI5 development loop **without an SAP system**:
 
 The server orchestrates local checkouts of `abap2UI5` and
 [`samples-controls`](https://github.com/abap2UI5/samples-controls) (plus
-optionally `linter` and `ai-mcp` itself). Clone them into one folder and
+optionally `linter` and `mcp-server` itself). Clone them into one folder and
 point `abap2ui5.mcp.reposRoot` at it — the extension passes the matching
 `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `AI_VIEW_CHECK_HOME` variables to
-the server and prefers the local `ai-mcp` checkout over downloading via npx.
+the server and prefers the local `mcp-server` checkout over downloading via npx.
 The server appears in the MCP view (`MCP: List Servers`) as **abap2UI5**;
 `abap2ui5.mcp.enabled: false` removes it.
 
 ### The system MCP server
 
-ai-mcp is deliberately system-less. The extension additionally offers
+The MCP server is deliberately system-less. The extension additionally offers
 **abap2UI5 System** — a second, in-extension MCP server holding what only
 the extension has: the configured systems, the stored credentials and the
 auth proxy. An agent gets the real-system half of the loop:
@@ -829,7 +829,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2ui5.mcp.enabled` | `true` | Offer the abap2UI5 MCP server to MCP clients |
 | `abap2ui5.mcp.system` | `true` | Also offer the abap2UI5 System MCP server (real-system tools) |
 | `abap2ui5.mcp.command` | – | Command starting the MCP server (empty = local checkout or npx) |
-| `abap2ui5.mcp.reposRoot` | – | Folder with the `abap2UI5` / `samples-controls` / `linter` / `ai-mcp` checkouts |
+| `abap2ui5.mcp.reposRoot` | – | Folder with the `abap2UI5` / `samples-controls` / `linter` / `mcp-server` checkouts |
 
 ## Commands
 

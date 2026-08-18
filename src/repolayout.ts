@@ -3,7 +3,7 @@
  * probes a repos root (the MCP registration, the local view-check fallback
  * and the example catalogues).
  *
- * The names themselves are NOT written here. abap2UI5/ai-mcp owns the
+ * The names themselves are NOT written here. abap2UI5/mcp-server owns the
  * ecosystem's rename history in `lib/repo-dirs.json`, because it is the
  * component that resolves the repos root; `src/data/repo-dirs.json` is a
  * generated snapshot of it (scripts/generate-repo-dirs.mjs, weekly drift gate
@@ -25,7 +25,7 @@ const DIRS = snapshot.dirs as Record<string, readonly string[]>;
 export const VIEW_CHECK_DIRS: readonly string[] = DIRS.viewCheck;
 
 /** Directory names the control corpus can carry
- *  (github.com/abap2UI5/samples-controls) - 416 ports of the UI5 demo kit. */
+ *  (github.com/abap2UI5/samples-controls) - the UI5 demo kit, ported. */
 export const CORPUS_DIRS: readonly string[] = DIRS.corpus;
 
 /** Directory names the pattern-sample checkout can carry
@@ -37,3 +37,10 @@ export const SAMPLES_DIRS: readonly string[] = DIRS.samples;
  *  (github.com/abap2UI5/samples-stack) - the apps that need an OData
  *  service, RAP, APC or the Fiori launchpad. The third catalogue. */
 export const SAMPLES_STACK_DIRS: readonly string[] = DIRS.samplesStack;
+
+/** Directory names an MCP server checkout can carry
+ *  (github.com/abap2UI5/mcp-server, renamed from ai-mcp). Unlike the four
+ *  above, this one is not passed to the server - it is how this extension
+ *  FINDS the server before falling back to npx, so a checkout carrying the
+ *  previous name has to keep working. */
+export const SERVER_DIRS: readonly string[] = DIRS.server;
