@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+
+## 0.24.0
+
 - **The scaffold hands out the MCP server's new name.** `abap2UI5/ai-mcp` is
   `abap2UI5/mcp-server`, and `src/data/app-template.json` - the snapshot a new
   project is written from - still carried the old one, so every project created
