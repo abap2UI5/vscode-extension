@@ -41,8 +41,8 @@ function config() {
 }
 
 /** The command that starts the server: an explicit setting wins; a local
- *  checkout under the repos root is preferred; npx from GitHub is the
- *  fallback. */
+ *  checkout under the repos root is preferred; npx from the npm registry is
+ *  the fallback. */
 function serverCommand(): string[] {
   const explicit = config().get<string>("mcp.command", "").trim();
   if (explicit) {
@@ -65,7 +65,16 @@ function serverCommand(): string[] {
       }
     }
   }
-  return ["npx", "--yes", "github:abap2UI5/mcp-server"];
+  /* The published package, not `github:abap2UI5/mcp-server` - that resolved
+   * to whatever main held on the day, cloned the whole repository and ran its
+   * install. This is an immutable tarball of a tested release.
+   *
+   * Deliberately unpinned. The server's compatibility is with the CORPORA it
+   * reads, not with this extension, so a version pinned here would express a
+   * coupling that does not exist - and would then need a bump workflow and an
+   * extension release to follow every server release. `latest` is also no
+   * looser than what this line did before. */
+  return ["npx", "--yes", "@abap2ui5/mcp-server"];
 }
 
 function serverEnv(): Record<string, string> {

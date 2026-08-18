@@ -15,6 +15,15 @@
   ones: the directory aliases every existing checkout is still found under, and
   this file's own history.
 
+- **The MCP server comes from npm now.** The fallback when there is no local
+  checkout was `npx --yes github:abap2UI5/mcp-server`: a clone of whatever
+  `main` held that minute, plus its install, every cold start. It is
+  `npx --yes @abap2ui5/mcp-server` since that package exists - an immutable
+  tarball of a tested release, and a much shorter first start. Left unpinned on
+  purpose: the server's compatibility is with the corpora it reads, not with
+  this extension, so a version fixed here would invent a coupling and then need
+  an extension release behind every server release.
+
 - **`npm run check`.** The four commands `AGENTS.md` has always asked for before
   pushing, under the name every repository in the ecosystem uses for them.
 
