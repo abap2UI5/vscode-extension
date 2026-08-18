@@ -16,7 +16,11 @@ const ROOT = path.join(__dirname, "..");
 interface Manifest {
   contributes: {
     commands: Array<{ command: string; title: string }>;
-    menus?: Record<string, Array<{ command: string }>>;
+    /** An entry is a command OR a nested submenu, never both. */
+    menus?: Record<string, Array<{ command?: string; submenu?: string }>>;
+    submenus?: Array<{ id: string; label: string }>;
+    viewsWelcome?: Array<{ view: string; contents: string }>;
+    views?: Record<string, Array<{ id: string }>>;
     keybindings?: Array<{ command: string }>;
   };
 }
@@ -119,21 +123,67 @@ test("no command is contributed twice", () => {
 
 test("menus and keybindings only reference contributed commands", () => {
   const known = new Set(contributed);
+  const declaredSubmenus = new Set(
+    (manifest.contributes.submenus ?? []).map((entry) => entry.id)
+  );
   for (const [menu, entries] of Object.entries(
     manifest.contributes.menus ?? {}
   )) {
     for (const entry of entries) {
+      // A menu entry is either a command or a nested submenu - the submenu
+      // that puts every abap2UI5 action behind one right-click entry is the
+      // second kind, and carries no command of its own.
+      if (entry.submenu) {
+        assert.ok(
+          declaredSubmenus.has(entry.submenu),
+          `menus.${menu} opens submenu ${entry.submenu}, which is not declared in contributes.submenus`
+        );
+        continue;
+      }
       assert.ok(
-        known.has(entry.command),
+        entry.command !== undefined && known.has(entry.command),
         `menus.${menu} references unknown command ${entry.command}`
       );
     }
+  }
+  // and every declared submenu is actually opened from somewhere, or it is
+  // invisible to the user no matter what it holds
+  for (const id of declaredSubmenus) {
+    const opened = Object.values(manifest.contributes.menus ?? {}).some(
+      (entries) => entries.some((entry) => entry.submenu === id)
+    );
+    assert.ok(opened, `submenu ${id} is declared but no menu opens it`);
   }
   for (const binding of manifest.contributes.keybindings ?? []) {
     assert.ok(
       known.has(binding.command),
       `keybinding references unknown command ${binding.command}`
     );
+  }
+});
+
+test("the welcome text of an empty view links only to real commands", () => {
+  // These are the one thing a user sees when a tree has nothing to show, and
+  // a link to a command that no longer exists fails silently on click.
+  const known = new Set(contributed);
+  const viewIds = new Set(
+    Object.values(manifest.contributes.views ?? {}).flatMap((entries) =>
+      entries.map((entry) => entry.id)
+    )
+  );
+  for (const welcome of manifest.contributes.viewsWelcome ?? []) {
+    assert.ok(
+      viewIds.has(welcome.view),
+      `viewsWelcome targets ${welcome.view}, which is not a contributed view`
+    );
+    for (const [, command] of welcome.contents.matchAll(
+      /command:([\w.]+)/g
+    )) {
+      assert.ok(
+        known.has(command),
+        `the welcome text of ${welcome.view} links to unknown command ${command}`
+      );
+    }
   }
 });
 

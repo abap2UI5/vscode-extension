@@ -50,3 +50,54 @@ test("reconstruction, formatting and binding offers line up end to end", () => {
   const rel = relativeOffers(row);
   assert.ok(rel.some((o) => o.path === "STATUS"));
 });
+
+// ---------------------------------------------------------------------------
+// Switching a rule off actually reaches the gate
+// ---------------------------------------------------------------------------
+
+/*
+ * The precedence is tested in configcore; this is the other half - that what
+ * comes out of it is a thing the gate obeys. A setting that merges correctly
+ * and then changes no finding would look right in every unit test and do
+ * nothing in the editor.
+ */
+const TOO_NEW = `CLASS zcl_new DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+ENDCLASS.
+CLASS zcl_new IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
+        )->a( n = \`xmlns\` v = \`sap.m\`
+        )->tag( \`GenericTag\`
+    )->stringify( ).
+  ENDMETHOD.
+ENDCLASS.`;
+
+test("a rule switched off in the options produces no finding", () => {
+  const { runGate } = require("../gate") as typeof import("../gate");
+  const base = {
+    minUi5: "1.71",
+    distribution: "sapui5",
+    allow: [] as string[],
+  };
+  const on = runGate(TOO_NEW, "zcl_new.clas.abap", false, base);
+  const rule = on.findings[0]?.type;
+  assert.ok(rule, "the fixture has to produce a finding to switch off");
+
+  const off = runGate(TOO_NEW, "zcl_new.clas.abap", false, {
+    ...base,
+    rules: { [rule]: false },
+  });
+  assert.equal(
+    off.findings.filter((f) => f.type === rule).length,
+    0,
+    `${rule} was switched off and still reported`
+  );
+  // and the switch is per rule - everything else it found still stands
+  assert.equal(
+    off.findings.length,
+    on.findings.filter((f) => f.type !== rule).length
+  );
+});

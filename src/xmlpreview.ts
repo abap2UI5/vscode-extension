@@ -49,6 +49,11 @@ let previewOpen = false;
  *  closed source. */
 let lastContent: string | undefined;
 let lastOffsets: Array<number | undefined> | undefined;
+/** The source `lastOffsets` was computed from. Following another class
+ *  changes what the preview is ABOUT before the debounced re-render lands,
+ *  and until it did, a jump used the previous class's offsets against the new
+ *  source - landing somewhere arbitrary in it rather than on the call. */
+let lastOffsetsFor: string | undefined;
 
 /** A source the preview can follow: an ABAP buffer that builds views. */
 function isFollowable(doc: vscode.TextDocument): boolean {
@@ -123,7 +128,12 @@ export function registerXmlPreview(
     try {
       findings = findingsFor(source);
     } catch {
-      return; // an unparsable buffer mid-edit is not worth reporting
+      // An unparsable buffer mid-edit is not worth reporting - but leaving
+      // the previous run's findings up is worse than showing none: the XML
+      // around them has just been re-rendered, so they now point at lines
+      // that no longer say what they were about.
+      diagnostics.delete(PREVIEW_URI);
+      return;
     }
     const out: vscode.Diagnostic[] = [];
     for (const f of findings) {
@@ -160,12 +170,14 @@ export function registerXmlPreview(
         `builder chain. -->\n`;
       lastContent = empty;
       lastOffsets = undefined;
+      lastOffsetsFor = undefined;
       diagnostics.delete(PREVIEW_URI);
       return empty;
     }
     const formatted = formatDocument(prep.nodes, className);
     lastContent = formatted.text;
     lastOffsets = formatted.lineOffsets;
+    lastOffsetsFor = source.uri.toString();
     mirrorFindings(source, formatted.lineOffsets, formatted.text.split("\n"));
     return formatted.text;
   }
@@ -229,6 +241,11 @@ export function registerXmlPreview(
           const source = activeSourceDoc();
           const offset = lastOffsets?.[position.line];
           if (!source || offset === undefined) {
+            return undefined;
+          }
+          // the render this line came from has to be the render of THIS
+          // source, or the offset means nothing in it
+          if (lastOffsetsFor !== source.uri.toString()) {
             return undefined;
           }
           const at = source.positionAt(

@@ -17,6 +17,7 @@ import {
   shotLabel,
   viewportCount,
   quoteForShell,
+  sourceLabel,
   resolveCheckerCommand,
   splitCommandLine,
   scratchFileName,
@@ -460,4 +461,34 @@ test("a finding with several fix spans is still one finding", () => {
     (f.fixes ?? []).some((fix) => applied.has(fix))
   ).length;
   assert.equal(covered, 2, "from two findings");
+});
+
+// ---------------------------------------------------------------------------
+// Naming a source that may not be a file
+// ---------------------------------------------------------------------------
+
+test("a file is named by its file name", () => {
+  assert.equal(sourceLabel("/repo/src/zcl_app.clas.abap"), "zcl_app.clas.abap");
+});
+
+test("an ADT path is named by the segment that means something", () => {
+  // `…/oo/classes/zcl_app/source/main` - the last segment names nothing, and
+  // a findings tree full of "main" entries tells you nothing about which
+  // class each one is in
+  assert.equal(
+    sourceLabel("/sap/bc/adt/oo/classes/zcl_travel_app/source/main"),
+    "zcl_travel_app"
+  );
+});
+
+test("a class name handed in always wins", () => {
+  assert.equal(
+    sourceLabel("/sap/bc/adt/oo/classes/zcl_app/source/main", "ZCL_APP"),
+    "ZCL_APP"
+  );
+});
+
+test("a path with nothing but generic segments still answers", () => {
+  assert.equal(sourceLabel("/source/main"), "main");
+  assert.equal(sourceLabel(""), "");
 });

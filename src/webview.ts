@@ -640,6 +640,35 @@ ${BASE_CSS}
   // one - they are counted here and relayed to the host for the output log.
   window.addEventListener('message', (event) => {
     const msg = event.data || {};
+
+    /*
+     * UI5's own frame protection. A system configured with
+     * sap-ui-frameOptions=trusted lets the app run in an iframe only after
+     * asking the embedding window for permission: sap/ui/security/FrameOptions
+     * posts a request up and waits. Nobody answered, so after ten seconds UI5
+     * gave up and blocked the frame - the app rendered and then ignored every
+     * click, with only a console line to say why:
+     *
+     *   Reached timeout of 10000ms waiting for a response from parent window
+     *
+     * This preview IS the trusted parent: the url it embeds is the one the
+     * extension built from the configured system. So it answers.
+     */
+    if (msg && msg.sentinel === 'sap.ui.core.FrameOptions') {
+      if (msg.type === 'request' && event.source) {
+        event.source.postMessage(
+          {
+            sentinel: 'sap.ui.core.FrameOptions',
+            type: 'response',
+            id: msg.id,
+            status: 'SUCCESS',
+          },
+          '*'
+        );
+      }
+      return;
+    }
+
     const kind = msg.__abap2ui5Runtime;
     if (kind === 'inspect') {
       markInspect(false); // one-shot: the click ends the mode

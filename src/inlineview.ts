@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { mockFileFor } from "./viewpreview";
 import { CONFIG_SECTION } from "./settings";
 import { DIAG_SOURCE } from "./diagnostics";
 
@@ -266,14 +267,11 @@ export function registerInlineAnnotations(
 /** The preview data next to a class, when there is some - the same file the
  *  systemless preview renders with, so both say the same thing about size. */
 function mockModel(doc: vscode.TextDocument): Record<string, unknown> | undefined {
-  if (doc.uri.scheme !== "file") {
-    return undefined;
-  }
-  const candidate = doc.uri.fsPath.replace(
-    /\.(clas\.abap|abap|view\.xml|fragment\.xml|xml)$/i,
-    ".mock.json"
-  );
-  if (candidate === doc.uri.fsPath || !fs.existsSync(candidate)) {
+  // one convention, resolved in one place - the preview and this annotation
+  // disagreeing about which data they describe is exactly the confusion the
+  // caption on the picture exists to prevent
+  const candidate = mockFileFor(doc);
+  if (!candidate) {
     return undefined;
   }
   try {

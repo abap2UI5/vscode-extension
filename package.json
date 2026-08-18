@@ -216,6 +216,15 @@
         "command": "abap2ui5.checkApp",
         "title": "abap2UI5: Check this App's Views",
         "icon": "$(checklist)"
+      },
+      {
+        "command": "abap2ui5.copyAppName",
+        "title": "abap2UI5: Copy the App's Class Name",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "abap2ui5.disableRule",
+        "title": "abap2UI5: Turn a View-Check Rule Off"
       }
     ],
     "mcpServerDefinitionProviders": [
@@ -333,6 +342,14 @@
         {
           "command": "abap2ui5.refreshApps",
           "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.copyAppName",
+          "when": "false"
+        },
+        {
+          "command": "abap2ui5.disableRule",
+          "when": "false"
         }
       ],
       "editor/title": [
@@ -372,6 +389,11 @@
           "command": "abap2ui5.refreshApps",
           "when": "view == abap2ui5.apps",
           "group": "navigation@1"
+        },
+        {
+          "command": "abap2ui5.runFromSystem",
+          "when": "view == abap2ui5.apps && !isWeb",
+          "group": "navigation@0"
         }
       ],
       "view/item/context": [
@@ -394,6 +416,65 @@
           "command": "abap2ui5.checkApp",
           "when": "view == abap2ui5.apps && viewItem == abap2ui5.app.view",
           "group": "inline@3"
+        },
+        {
+          "command": "abap2ui5.copyAppName",
+          "when": "view == abap2ui5.apps",
+          "group": "9_copy"
+        }
+      ],
+      "editor/context": [
+        {
+          "submenu": "abap2ui5.editorContext",
+          "group": "1_modification@100",
+          "when": "resourceLangId == abap || resourceExtname == .xml"
+        }
+      ],
+      "abap2ui5.editorContext": [
+        {
+          "command": "abap2ui5.run",
+          "group": "1_run@1",
+          "when": "!isWeb && resourceLangId == abap"
+        },
+        {
+          "command": "abap2ui5.activate",
+          "group": "1_run@2",
+          "when": "!isWeb && resourceLangId == abap"
+        },
+        {
+          "command": "abap2ui5.previewView",
+          "group": "2_look@1",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.showReconstructedXml",
+          "group": "2_look@2"
+        },
+        {
+          "command": "abap2ui5.showExamples",
+          "group": "2_look@3"
+        },
+        {
+          "command": "abap2ui5.checkViews",
+          "group": "3_check@1"
+        },
+        {
+          "command": "abap2ui5.fixAll",
+          "group": "3_check@2"
+        },
+        {
+          "command": "abap2ui5.extractViewMethod",
+          "group": "4_edit@1",
+          "when": "resourceLangId == abap"
+        },
+        {
+          "command": "abap2ui5.expandAbbreviation",
+          "group": "4_edit@2",
+          "when": "resourceLangId == abap"
+        },
+        {
+          "command": "abap2ui5.convertXml",
+          "group": "4_edit@3"
         }
       ]
     },
@@ -576,6 +657,47 @@
           "default": [],
           "markdownDescription": "Accepted deviations for the property gate, e.g. `sap.m.GenericTile.systemInfo` - each entry is passed to the checker as `--allow`. Merges with the `allow` list of a workspace's `abap2ui5lint.jsonc`.\n\nTo waive a single line rather than a whole rule, put the linter's own directive above it: `\" abap2ui5lint-disable-next-line unknown-binding-path -- filled in a LOOP`. The quick fix on any finding writes it for you, and CI honours it too."
         },
+        "abap2ui5.viewCheck.rules": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean",
+                "description": "false switches the rule off"
+              },
+              {
+                "enum": [
+                  "hint",
+                  "warning",
+                  "error"
+                ],
+                "description": "report it at this severity instead of its default"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "severity": {
+                    "enum": [
+                      "hint",
+                      "warning",
+                      "error"
+                    ]
+                  },
+                  "exclude": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "file path patterns this rule does not judge"
+                  }
+                }
+              }
+            ]
+          },
+          "markdownDescription": "Which view-check rules are active, and how loudly. A rule id maps to `false` to switch it off, to `\"hint\"` / `\"warning\"` / `\"error\"` to change its severity, or to `{ \"severity\": \u2026, \"exclude\": [\u2026] }`.\n\n```json\n\"abap2ui5.viewCheck.rules\": {\n  \"unknown-binding-path\": false,\n  \"control-too-new\": \"warning\"\n}\n```\n\nA repository's `abap2ui5lint.jsonc` wins for every rule it names, so the editor keeps agreeing with CI about those; this setting decides the rest. Rule ids are listed on the [rules page](https://abap2ui5.github.io/linter/)."
+        },
         "abap2ui5.inlineFindings": {
           "type": "string",
           "enum": [
@@ -728,6 +850,24 @@
           }
         ]
       }
+    ],
+    "submenus": [
+      {
+        "id": "abap2ui5.editorContext",
+        "label": "abap2UI5"
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "abap2ui5.apps",
+        "contents": "No abap2UI5 app found yet.\n\nThis list holds every class that implements `z2ui5_if_app` - the ones in your open folders, plus the ones you have open in the editor. Working straight against a system through ADT, a class appears here once you open it.\n\n[New App from Template](command:abap2ui5.newApp)\n[Refresh the list](command:abap2ui5.refreshApps)",
+        "when": "!isWeb"
+      },
+      {
+        "view": "abap2ui5.findings",
+        "contents": "Nothing found in what has been checked.\n\nThe view check runs while you type and on save, so this fills itself as you work. To cover everything at once rather than only what is open:\n\n[Check All Views](command:abap2ui5.checkWorkspace)",
+        "when": "!isWeb"
+      }
     ]
   },
   "scripts": {
@@ -745,7 +885,7 @@
     "app-template:check": "node scripts/generate-app-template.mjs --check"
   },
   "devDependencies": {
-    "@abap2ui5/linter": "github:abap2UI5/linter#599cecc476fc963b12429174f0da495b4f61087f",
+    "@abap2ui5/linter": "github:abap2UI5/linter#3b98c30956741152917397ab6e9ac998c274ef1f",
     "@types/node": "^26.2.0",
     "@types/vscode": "^1.101.0",
     "@vscode/test-web": "^0.0.81",

@@ -101,10 +101,30 @@ export function optionsFromConfig(
     minUi5: (raw.minUi5 as string) ?? (raw.ui5 as string) ?? settings.minUi5,
     distribution: (raw.distribution as string) ?? settings.distribution,
     allow: [...new Set([...((raw.allow as string[] | undefined) ?? []), ...settings.allow])],
-    rules: raw.rules as Record<string, unknown> | undefined,
+    /*
+     * Per RULE, not per block: the repo decides about the rules it names and
+     * the settings fill in the rest. A personal opinion about a rule the
+     * repository has one about would put the editor and CI on different
+     * answers for the same file, which is the disagreement this whole module
+     * exists to prevent - while a rule the repository says nothing about is
+     * nobody else's business.
+     */
+    rules: mergeRules(settings.rules, raw.rules as Record<string, unknown>),
     baseline: baseline ? joinPath(dirOf(configFile), baseline) : undefined,
     configFile,
   };
+}
+
+/** The repo config's rules over the settings', entry by entry. Undefined
+ *  when neither side has an opinion, so the gate keeps its own defaults. */
+function mergeRules(
+  fromSettings: Record<string, unknown> | undefined,
+  fromConfig: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!fromSettings && !fromConfig) {
+    return undefined;
+  }
+  return { ...fromSettings, ...fromConfig };
 }
 
 /** A baseline file's text as key -> count. An unreadable one suppresses

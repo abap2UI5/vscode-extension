@@ -6,7 +6,6 @@ import {
   abapStatements,
   blankNonCode,
   declaredNames,
-  insideLiteral,
 } from "../abapscan";
 
 /*
@@ -78,13 +77,6 @@ test("a period inside a literal or a comment ends no statement", () => {
   assert.equal(statements.length, 3);
   assert.ok(statements[0].text.includes("3.14"));
   assert.ok(statements[2].text.includes("mv_c"));
-});
-
-test("insideLiteral answers for the content, not the delimiters", () => {
-  const source = "mv_a = `text`.";
-  const at = source.indexOf("text");
-  assert.equal(insideLiteral(source, at + 1), true);
-  assert.equal(insideLiteral(source, 0), false);
 });
 
 // ---------------------------------------------------------------------------

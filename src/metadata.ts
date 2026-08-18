@@ -191,11 +191,6 @@ export function memberInfo(
   return membersOf(data, control).find((m) => m.name === member);
 }
 
-/** Drops the derived-member memo - for a test that swaps the snapshot for a
- *  fixture with the same identity, which nothing in the extension does. */
-export function clearMemberCache(data: Snapshot): void {
-  memberCache.delete(data);
-}
 
 /** The values of an enum type, e.g. `sap.m.ButtonType` -> Default, Accept, … */
 export function enumValues(data: Snapshot, type?: string): string[] | undefined {

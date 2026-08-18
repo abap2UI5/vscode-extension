@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { DIAG_SOURCE, RULES_PAGE, ruleOf } from "./diagnostics";
 
-import * as path from "path";
+import { labelOf } from "./abapsources";
 import {
   FindingSeverity,
   groupByRule,
@@ -85,8 +85,9 @@ class FindingsTree implements vscode.TreeDataProvider<Node> {
       item.resourceUri = vscode.Uri.parse(`abap2ui5-rule:${node.rule}`);
       return item;
     }
+    const uri = vscode.Uri.parse(node.file);
     const item = new vscode.TreeItem(
-      `${path.basename(node.file)}:${node.line + 1}`,
+      `${labelOf(uri)}:${node.line + 1}`,
       vscode.TreeItemCollapsibleState.None
     );
     item.description = node.message;
@@ -95,7 +96,7 @@ class FindingsTree implements vscode.TreeDataProvider<Node> {
       title: "Open the finding",
       command: "vscode.open",
       arguments: [
-        vscode.Uri.file(node.file),
+        uri,
         { selection: new vscode.Range(node.line, 0, node.line, 0) },
       ],
     };
@@ -107,9 +108,6 @@ class FindingsTree implements vscode.TreeDataProvider<Node> {
 function collect(): RuleEntry[] {
   const out: RuleEntry[] = [];
   for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
-    if (uri.scheme !== "file") {
-      continue;
-    }
     for (const diagnostic of diagnostics) {
       const rule = diagnostic.source === DIAG_SOURCE ? ruleOf(diagnostic) : undefined;
       if (!rule) {
@@ -118,7 +116,10 @@ function collect(): RuleEntry[] {
       out.push({
         rule,
         severity: severityOf(diagnostic),
-        file: uri.fsPath,
+        // the uri, not the path: a class opened through ADT has no path, and
+        // dropping those was why this tree stayed empty for anyone working
+        // straight against a system
+        file: uri.toString(),
         line: diagnostic.range.start.line,
         message: diagnostic.message,
       });
