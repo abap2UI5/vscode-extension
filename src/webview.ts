@@ -653,20 +653,24 @@ ${BASE_CSS}
      *
      * This preview IS the trusted parent: the url it embeds is the one the
      * extension built from the configured system. So it answers.
+     *
+     * The wire format is two plain strings, not JSON - and UI5 drops anything
+     * else before looking at it:
+     *
+     *   if (oSource === FrameOptions.__self || oSource == null ||
+     *       typeof sData !== "string" ||
+     *       sData.indexOf("SAPFrameProtection*") === -1) { return; }
+     *
+     * so an object shaped like a protocol message is not a late answer, it is
+     * no answer at all. "parent-unlocked" is the reply that unlocks the frame
+     * (_applyState(false, true)); "parent-origin" only proves the parent is
+     * alive and leaves the app blocked, which is not what this preview means.
      */
-    if (msg && msg.sentinel === 'sap.ui.core.FrameOptions') {
-      if (msg.type === 'request' && event.source) {
-        event.source.postMessage(
-          {
-            sentinel: 'sap.ui.core.FrameOptions',
-            type: 'response',
-            id: msg.id,
-            status: 'SUCCESS',
-          },
-          '*'
-        );
+    if (typeof event.data === 'string') {
+      if (event.data === 'SAPFrameProtection*require-origin' && event.source) {
+        event.source.postMessage('SAPFrameProtection*parent-unlocked', '*');
       }
-      return;
+      return; // no string message carries anything else this listener wants
     }
 
     const kind = msg.__abap2ui5Runtime;

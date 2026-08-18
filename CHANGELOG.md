@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **F9 apps react to clicks - this time against the real protocol.** 0.24.0
+  claimed this and did not deliver it: the answer it posted was an invented
+  JSON envelope with a `sentinel` field, and `sap/ui/security/FrameOptions`
+  never sends or reads such a thing. Its wire format is two plain strings, and
+  it drops everything else before looking:
+
+  ```js
+  if (oSource === FrameOptions.__self || oSource == null ||
+      typeof sData !== "string" ||
+      sData.indexOf("SAPFrameProtection*") === -1) { return; }
+  ```
+
+  So the app asked with `SAPFrameProtection*require-origin`, the preview
+  replied with an object nobody parsed, and after ten seconds UI5 logged
+  *"waiting for a response from parent window"* and blocked the frame - the
+  app rendered and then ignored every click, exactly as before. It answers
+  `SAPFrameProtection*parent-unlocked` now, which is the reply that unlocks
+  (`_applyState(false, true)`) rather than `parent-origin`, which only proves
+  the parent is alive.
+
+## Unreleased
+
 
 ## 0.24.0
 
