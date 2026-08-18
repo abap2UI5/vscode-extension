@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **One command that writes the bug report for you.** *abap2UI5: Copy
+  Diagnostics for a Bug Report* collects what a diagnosis actually needs and
+  puts it in your clipboard and in an editor tab: every open ABAP document
+  with its **uri scheme**, whether the check considers it checkable, whether
+  it builds a view, which config governs it and how many findings it carries -
+  plus the versions, the ABAP extensions installed alongside, the settings you
+  changed, the render gate's state, and the last 400 log lines.
+
+  The scheme is the point. A window can hold a checked-out repository and
+  classes opened straight from a system through ADT at the same time, and
+  almost every difference in behaviour between the two comes down to which of
+  them a document is - invisible in a screenshot, and until now invisible in
+  the log too. The check's own log lines carry it now, along with the config
+  that governed each one.
+
+  Hostnames, credentials in urls, `sap-user` style parameters and the proxy's
+  own token are removed before you see it; the report opens in a tab so you
+  can read it before pasting rather than taking that on trust. Ports survive,
+  since "which port did it even try" is usually part of the answer.
+
 - **The system server's `run_app` is now `run_app_on_system`.** Both MCP
   servers this extension registers live in one window, and the abap2UI5 server
   (ai-mcp) already had a `run_app` — a build of the transpiled sandbox, no

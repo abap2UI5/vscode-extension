@@ -463,7 +463,7 @@ async function checkDocument(
   try {
     gate = runGate(text, doc.uri.fsPath || name, isXml, options);
   } catch (err) {
-    log(`view-check: ${name} - could not be checked (${String(err)})`);
+    log(`view-check: ${name} [${doc.uri.scheme}] - could not be checked (${String(err)})`);
     if (request.announce) {
       vscode.window.showWarningMessage(
         `abap2UI5: ${name} could not be checked - ${String(err)}`
@@ -478,7 +478,10 @@ async function checkDocument(
 
   if (gate.nothingChecked) {
     diagnostics.delete(doc.uri);
-    log(`view-check: ${name} - nothing checkable (${gate.nothingChecked})`);
+    log(
+      `view-check: ${name} [${doc.uri.scheme}] - nothing checkable ` +
+        `(${gate.nothingChecked})`
+    );
     if (request.announce) {
       vscode.window.showInformationMessage(
         `abap2UI5: nothing to check in ${name} - ${gate.nothingChecked}.`
@@ -507,10 +510,17 @@ async function checkDocument(
 
   const diags = toDiagnostics(doc, gate.findings, renderErrors);
   diagnostics.set(doc.uri, diags);
+  /* The scheme rides along on purpose. A window can hold a checked-out
+   * repository and classes opened straight from a system at the same time,
+   * and almost every difference in what the check can do comes down to which
+   * of the two a document is - the config it finds, the baseline it can
+   * apply, whether a mock file can exist next to it. Reading the log without
+   * it meant guessing which kind of document each line was about. */
   log(
-    `view-check: ${name} - ${gate.findings.length} finding(s), ` +
+    `view-check: ${name} [${doc.uri.scheme}] - ${gate.findings.length} finding(s), ` +
       `${renderErrors.length} render error(s)${helperNote}` +
-      (baselined ? ` (${baselined} baselined)` : "")
+      (baselined ? ` (${baselined} baselined)` : "") +
+      (options.configFile ? ` (config ${path.basename(options.configFile)})` : " (settings)")
   );
   if (request.announce) {
     if (diags.length === 0) {
