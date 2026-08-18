@@ -1,4 +1,4 @@
-# Weekly dependency updates, opened as pull requests so `npm test`, the
+# Monthly dependency updates, opened as pull requests so `npm test`, the
 # typecheck and the web smoke decide whether they are safe.
 #
 # @abap2ui5/linter is deliberately NOT here. It is a git dependency pinned to
@@ -13,10 +13,10 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-      day: tuesday
-      # Tuesday, so a bump lands on a lockfile bump-linter.yml has already
-      # settled on Monday rather than racing it.
+      interval: monthly
+      # Monthly runs land on the 1st, so a bump no longer reliably follows the
+      # Monday lockfile settle from bump-linter.yml the way the old Tuesday
+      # slot did. A collision costs a rebase, not a build.
       time: "06:30"
     open-pull-requests-limit: 5
     ignore:
@@ -24,14 +24,21 @@ updates:
     groups:
       toolchain:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+      toolchain-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: tuesday
+      interval: monthly
       time: "06:30"
     open-pull-requests-limit: 5
     groups:
       actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+      actions-major:
+        patterns: ["*"]
+        update-types: ["major"]
