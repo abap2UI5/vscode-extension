@@ -20,6 +20,19 @@ updates:
       time: "06:30"
     open-pull-requests-limit: 5
     ignore:
+      # TypeScript majors, until typescript-eslint can take one. Its peer range
+      # is `>=4.8.4 <6.1.0` as of 8.67.0 - which is the newest there is - so a
+      # major bump here does not produce a red test, it produces an `npm ci`
+      # that cannot resolve at all, and every job in the workflow is skipped
+      # rather than run. That happened on 2026-08-18 with 5.3 -> 7.0.2, and it
+      # reached main because a red pull request can be merged in this
+      # repository.
+      #
+      # Lift this the day `npm view typescript-eslint peerDependencies.typescript`
+      # admits the major - not before, and not by deleting the line because it
+      # looks stale.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
       - dependency-name: "@abap2ui5/linter"
     groups:
       toolchain:
