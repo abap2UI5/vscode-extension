@@ -696,8 +696,8 @@ completion, in hover, in the property editor. The question it cannot answer is
 *what does a working one look like in an abap2UI5 class*, and there are three
 repositories full of that answer:
 [samples](https://github.com/abap2UI5/samples),
-[samples-controls](https://github.com/abap2UI5/samples-controls) (416 ports of
-the official UI5 demo kit) and
+[samples-controls](https://github.com/abap2UI5/samples-controls) (the official
+UI5 demo kit, rebuilt control by control) and
 [samples-stack](https://github.com/abap2UI5/samples-stack).
 
 Put the cursor on an `ele( )` / `tag( )` call and run *"abap2UI5: Show Examples
