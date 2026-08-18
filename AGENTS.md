@@ -72,7 +72,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix above the class definition |
-| `src/mcp.ts` | Registers the abap2UI5 MCP server (ai-mcp) and the in-extension system server for MCP clients in the window |
+| `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`) |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
@@ -84,7 +84,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's own files copied from `src/data/app-template.json`, the name-carrying ones written here |
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
 | `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot |
-| `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/ai-mcp's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
+| `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/mcp-server's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
 | `src/propedit.ts` | Property-editor edits: set/add/remove one `a( )` attribute as a span edit |
 | `src/propview.ts` | The "Control Properties" webview view: cursor -> `controlCallAt` -> form -> WorkspaceEdit |
 | `src/navmap.ts` | App navigation graph: nav_app_call extraction, column layout, SVG rendering |
@@ -139,11 +139,20 @@ request, so a failure there means you skipped this:
 
 ```bash
 npm install
+npm run check     # the four below, in order
+```
+
+```bash
 npm run lint      # tsc --noEmit + eslint (eslint.config.mjs)
 npm test          # esbuild -> dist-test, then node --test
 npm run package   # production esbuild
 npm run vsix      # vsce package, catches manifest errors
 ```
+
+`npm run check` is the ecosystem-wide name for "what CI will say about this
+tree" — every repository has one, and it means the same thing in each. Here it
+is the four commands above and not the fifth (`test:web`), which is the one CI
+step that cannot run in a restricted environment; the paragraph below says why.
 
 The eslint config is tuned to the codebase (empty catch as best-effort
 probe, the tests' mid-test `require()`), so a clean tree lints clean -
@@ -321,9 +330,12 @@ Facts an agent cannot see from the code but will trip over:
   The cost is drift, which is why there are two halves and only one of them
   runs in CI: `src/test/scaffold.test.ts` holds the scaffold to the snapshot
   (`npm test`), and `npm run app-template:check` holds the snapshot to
-  app-template's main — weekly, through `bump-app-template.yml`, because this
-  repository's build must not go red when somebody merges a pull request in
-  another one. **Do not re-type any of those files here.** That is precisely
+  app-template's main. That second half deliberately does **not** run in CI —
+  this repository's build must not go red when somebody merges a pull request
+  in another one — so `bump-app-template.yml` regenerates weekly instead and
+  opens a pull request when the template moved. The cost of that choice is a
+  window: between an upstream merge and the Monday bump the snapshot is stale,
+  and only `npm run app-template:check` locally says so. **Do not re-type any of those files here.** That is precisely
   how the scaffold came to emit `@abap2ui5/linter@^0.1.1` against an ecosystem
   on 0.2.1, with no framework pin at all.
 - **Which files those are is app-template's answer too.** That repository
@@ -334,21 +346,22 @@ Facts an agent cannot see from the code but will trip over:
   and `VERBATIM_FILES` in `scaffold.ts` is `files.shared` minus the three the
   scaffold composes around values it reads (`package.json`,
   `.github/workflows/check.yml`, `AGENTS.md`). So a file added to app-template
-  reaches a new project here without an edit. ai-mcp's `scaffold_app` executes
+  reaches a new project here without an edit. mcp-server's `scaffold_app` executes
   the same description; the three executors differ, the description does not.
-- **The sibling-checkout naming is ai-mcp's, snapshotted here.** The MCP
+- **The sibling-checkout naming is mcp-server's, snapshotted here.** The MCP
   registration (`src/mcp.ts`), the view checker (`src/viewcheck.ts`) and the
   example catalogues (`src/exampleview.ts`) all probe a repos root by
   directory name — `linter` plus the **pre-rename aliases** `abap2UI5-linter`
   and `ai-view-check`, `samples-controls` plus `abap2UI5-api` and
-  `ai-demokit`, and so on. That history belongs to `abap2UI5/ai-mcp`, which is
+  `ai-demokit`, and so on. That history belongs to `abap2UI5/mcp-server`, which is
   the component that RESOLVES the root; it owns it as data in
   `lib/repo-dirs.json`. `src/repolayout.ts` exports the lists out of
   `src/data/repo-dirs.json`, a generated snapshot of that file — same shape as
   app-template and the client API: `scripts/generate-repo-dirs.mjs`,
-  `npm run repo-dirs:check` weekly through `bump-repo-dirs.yml`, and
+  `npm run repo-dirs:check` locally and a weekly regeneration through
+  `bump-repo-dirs.yml`, and
   `src/test/repolayout.test.ts` holding the module to the snapshot in
-  `npm test`. **Add a directory name in ai-mcp and regenerate here** — never
+  `npm test`. **Add a directory name in mcp-server and regenerate here** — never
   by editing `repolayout.ts`. This used to be two hand-written lists with no
   gate between them, which is a rename that half-lands.
 
@@ -360,4 +373,4 @@ Facts an agent cannot see from the code but will trip over:
 | [samples](https://github.com/abap2UI5/samples) | Sample applications |
 | [samples-controls](https://github.com/abap2UI5/samples-controls) | Ported demo-kit samples (formerly `abap2UI5-api`, before that `ai-demokit` — where this extension used to live, until 0.6.0) |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | The view checker behind `src/viewcheck.ts` (SHA-pinned package) and `src/rendergate.ts` (runtime bundle download) |
-| [ai-mcp](https://github.com/abap2UI5/ai-mcp) | The MCP server `src/mcp.ts` registers for MCP clients in the window |
+| [mcp-server](https://github.com/abap2UI5/mcp-server) | The MCP server `src/mcp.ts` registers for MCP clients in the window |

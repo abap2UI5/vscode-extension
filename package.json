@@ -881,6 +881,7 @@
     ]
   },
   "scripts": {
+    "check": "npm run lint && npm test && npm run package && npm run vsix",
     "vscode:prepublish": "npm run package",
     "compile": "node esbuild.js",
     "watch": "node esbuild.js --watch",

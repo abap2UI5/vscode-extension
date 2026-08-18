@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **The scaffold hands out the MCP server's new name.** `abap2UI5/ai-mcp` is
+  `abap2UI5/mcp-server`, and `src/data/app-template.json` - the snapshot a new
+  project is written from - still carried the old one, so every project created
+  since the rename got an `AGENTS.md` pointing at a repository that only exists
+  through GitHub's redirect. Regenerated; the same run picked up two script
+  entries the template had added in the meantime. Nothing in CI compares this
+  snapshot to app-template's `main` on purpose (this repository's build must not
+  go red when another repository merges), which is exactly the window that let
+  it drift - so `AGENTS.md` now says that out loud instead of claiming the
+  weekly bump is a check. The remaining `ai-mcp` strings are the deliberate
+  ones: the directory aliases every existing checkout is still found under, and
+  this file's own history.
+
+- **`npm run check`.** The four commands `AGENTS.md` has always asked for before
+  pushing, under the name every repository in the ecosystem uses for them.
+
 - **One command that writes the bug report for you.** *abap2UI5: Copy
   Diagnostics for a Bug Report* collects what a diagnosis actually needs and
   puts it in your clipboard and in an editor tab: every open ABAP document

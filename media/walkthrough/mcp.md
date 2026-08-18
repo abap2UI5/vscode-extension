@@ -1,6 +1,6 @@
 # Give your AI agent the abap2UI5 dev loop
 
-The extension offers the [abap2UI5 MCP server](https://github.com/abap2UI5/ai-mcp)
+The extension offers the [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server)
 to every MCP client in the window — GitHub Copilot agent mode, Claude Code,
 or any other extension speaking MCP. The server gives an agent the full
 abap2UI5 development loop **without an SAP system**: capability queries,

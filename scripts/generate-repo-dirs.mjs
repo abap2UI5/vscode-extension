@@ -91,7 +91,7 @@ if (invokedDirectly) {
     const current = fs.existsSync(OUT) ? fs.readFileSync(OUT, "utf8") : "";
     if (current !== json) {
       console.error(
-        "repo-dirs.json is STALE against abap2UI5/ai-mcp - a checkout the MCP server finds is one this extension would not. Run `npm run repo-dirs` and commit."
+        "repo-dirs.json is STALE against abap2UI5/mcp-server - a checkout the MCP server finds is one this extension would not. Run `npm run repo-dirs` and commit."
       );
       process.exit(1);
     }
