@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.24.1 - 2026-08-18
+## 0.24.1
 
 - **The render gate works against a system again.** 0.24.0 taught the view
   check to see documents opened through ADT, and then started its checker in
@@ -36,9 +36,6 @@
   `SAPFrameProtection*parent-unlocked` now, which is the reply that unlocks
   (`_applyState(false, true)`) rather than `parent-origin`, which only proves
   the parent is alive.
-
-## Unreleased
-
 
 ## 0.24.0
 
