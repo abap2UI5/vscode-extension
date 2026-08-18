@@ -179,9 +179,20 @@ export async function installRenderGate(
     );
   } catch (err) {
     log(`render-gate: install failed - ${String(err)}`);
-    // only the half-built one goes - whatever was installed before is still
-    // where it was, and still works
+    /*
+     * Only the half-built one goes - whatever was installed before is still
+     * where it was, and still works.
+     *
+     * `previous` goes with it. A failure AFTER the swap leaves the old
+     * installation parked under that name, and nothing but the next install
+     * attempt would ever remove it - which is a third of a gigabyte
+     * (Chromium included) sitting in global storage for someone who just
+     * decided not to try again.
+     */
     fs.rmSync(staging, { recursive: true, force: true });
+    if (fs.existsSync(dir)) {
+      fs.rmSync(previous, { recursive: true, force: true });
+    }
     vscode.window.showErrorMessage(
       `abap2UI5: render gate install failed (${String(err).slice(0, 120)}). ` +
         "Details in the abap2UI5 output channel."
