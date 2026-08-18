@@ -225,6 +225,11 @@
       {
         "command": "abap2ui5.disableRule",
         "title": "abap2UI5: Turn a View-Check Rule Off"
+      },
+      {
+        "command": "abap2ui5.copyDiagnostics",
+        "title": "abap2UI5: Copy Diagnostics for a Bug Report",
+        "icon": "$(clippy)"
       }
     ],
     "mcpServerDefinitionProviders": [
@@ -350,6 +355,10 @@
         {
           "command": "abap2ui5.disableRule",
           "when": "false"
+        },
+        {
+          "command": "abap2ui5.copyDiagnostics",
+          "when": "!isWeb"
         }
       ],
       "editor/title": [
