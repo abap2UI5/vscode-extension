@@ -86,6 +86,9 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/navmap.ts` | App navigation graph: nav_app_call extraction, column layout, SVG rendering |
 | `src/navview.ts` | "Show App Navigation Map": workspace scan + the webview panel around the SVG |
 | `src/snapshot.ts` | Loads the bundled UI5 metadata once, for the gate and the language features |
+| `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over |
+| `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
+| `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
 | `src/abap.ts`, `src/urls.ts`, `src/context.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
 | `src/test/` | `node --test` suite over exactly those modules |
 | `snippets/` | ABAP snippets contributed to the editor |
@@ -101,6 +104,7 @@ not committed.
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
+`abapscan.ts`, `settings.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`,

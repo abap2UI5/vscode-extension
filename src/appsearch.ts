@@ -103,7 +103,15 @@ export function registerAppSearch(
         const pick = picker.selectedItems[0]?.label ?? picker.value.trim();
         picker.hide();
         if (pick) {
-          void deps.run(pick.toUpperCase());
+          // Starting an app talks to a system: wrong credentials, a system
+          // that is down, a class that is not an app. Rejecting into nothing
+          // left the picker closed with no app and no explanation - the one
+          // outcome a search is never allowed to have.
+          deps.run(pick.toUpperCase()).catch((err: unknown) => {
+            vscode.window.showErrorMessage(
+              `abap2UI5: could not start ${pick.toUpperCase()} - ${String(err)}`
+            );
+          });
         }
       });
       picker.onDidHide(() => {

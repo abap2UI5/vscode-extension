@@ -1,5 +1,56 @@
 # Changelog
 
+## Unreleased
+
+- **Apps you launch with F9 react to clicks again.** A system configured with
+  `sap-ui-frameOptions=trusted` lets its app run in an iframe only after asking
+  the embedding window for permission. Nothing answered, so UI5 waited ten
+  seconds and then blocked the frame: the app rendered and then ignored every
+  click, with one line in the console to say why. The preview is the window
+  that embedded it — it answers now.
+
+- **The systemless preview can take a picture.** *Preview View (No System)*
+  shipped against a checker option that no published bundle contained, so the
+  render gate installed perfectly and then refused the only thing it was
+  installed for. Reinstalling fetched the same bundle again, which is why the
+  advice to do so was a loop; the message says what actually helps, and the
+  pinned checker is now one that knows the option.
+
+- **Working straight against a system, without a checked-out repository.**
+  Six surfaces asked what files exist, which answers nothing when a class is a
+  document opened through ADT rather than a file on disk: the app list and the
+  findings tree stayed empty, the navigation map drew nothing, *Check All
+  Views* reported "no checkable files", Ctrl+T found no methods, and the
+  preview never found its mock data. All of them now see the open documents
+  too — and the findings tree had been throwing away findings the check was
+  already producing. What cannot be enumerated that way is said out loud
+  rather than reported as an empty workspace.
+
+- **Right-click has an abap2UI5 menu** in ABAP classes and view XML: run and
+  activate, the three ways to look at a view, check and fix, and the three
+  editing actions — one entry rather than ten loose ones.
+
+- **Fixes to what the reconstructed XML view points at.** Switching to
+  another class made the preview follow it before the re-render landed, and a
+  jump from an XML line during that window used the previous class's offsets
+  against the new source - landing somewhere arbitrary in it. It refuses
+  instead, until the render it belongs to exists. And findings that cannot be
+  recomputed on a half-typed buffer are now cleared rather than left pinned to
+  lines the re-render has already moved.
+
+- **Two things that failed silently now say so.** Picking an app from the
+  system search and having nothing happen was a possible outcome: starting it
+  talks to a system, and a refusal had nowhere to land. Same for the property
+  editor, where an edit that did not apply looked exactly like one that did -
+  the field showed the new value and the class still said the old one.
+
+- **Two lists that explain themselves.** An empty tree with no explanation is
+  indistinguishable from a broken one. The app list says what it collects and
+  offers the two commands that fill it; the findings tree points at the
+  workspace check. The app list also carries the system search in its title
+  bar — the rest of the app landscape lives there, and looking for it started
+  in the palette — and a tree item can hand you its class name to paste.
+
 ## 0.23.0
 
 - **Fixes from a pass over the whole extension.** Nothing here is new

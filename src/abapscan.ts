@@ -147,13 +147,6 @@ export function blankNonCode(source: string): string {
   return out.join("");
 }
 
-/** Whether an offset sits inside a literal's content. */
-export function insideLiteral(source: string, at: number): boolean {
-  return abapSpans(source).some(
-    (s) => s.kind === "literal" && at > s.from && at <= s.end
-  );
-}
-
 export interface AbapStatement {
   /** The statement as written, delimiting period excluded. */
   text: string;

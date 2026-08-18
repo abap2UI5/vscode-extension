@@ -40,7 +40,17 @@ export class PropertyEditorProvider implements vscode.WebviewViewProvider {
     this.view = view;
     view.webview.options = { enableScripts: true };
     view.webview.html = propertyEditorHtml(createNonce());
-    view.webview.onDidReceiveMessage((msg) => void this.onMessage(msg));
+    view.webview.onDidReceiveMessage((msg) => {
+      // The form writes a WorkspaceEdit back into the class. A rejection here
+      // had nowhere to land, so an edit that did not apply looked exactly
+      // like one that did - the field showed the new value and the source
+      // still said the old one.
+      this.onMessage(msg).catch((err: unknown) => {
+        vscode.window.showWarningMessage(
+          `abap2UI5: the property could not be changed - ${String(err)}`
+        );
+      });
+    });
     view.onDidChangeVisibility(() => this.refresh());
     this.refresh();
   }
