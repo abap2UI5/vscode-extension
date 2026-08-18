@@ -10,6 +10,10 @@ import { ModelView } from "./modelview";
 import { CONFIG_SECTION } from "./settings";
 
 export { CONFIG_SECTION };
+
+/** How much of the log the bug report carries. Enough to hold a launch, a
+ *  check and whatever went wrong after them; small enough to paste. */
+const RECENT_LOG_LINES = 400;
 export const TEMPLATE_KEY = "launchUrlTemplate";
 export const OPEN_MODE_KEY = "openMode";
 const RELOAD_KEY = "reloadOn";
@@ -104,10 +108,30 @@ export class Session implements vscode.Disposable {
     });
   }
 
+  /**
+   * The last log lines, so the bug report can carry them.
+   *
+   * VS Code lets an extension WRITE to an output channel and never read it
+   * back, so "paste the log" meant the user finding the channel, selecting
+   * all of it and hoping the interesting part had not scrolled away. Keeping
+   * a bounded copy costs a few kilobytes and turns that into one command.
+   */
+  private readonly recent: string[] = [];
+
   /** Writes to the "abap2UI5" output channel (View → Output). */
   log(message: string): void {
     const stamp = new Date().toISOString().replace("T", " ").slice(0, 19);
-    this.output.appendLine(`${stamp}  ${message}`);
+    const line = `${stamp}  ${message}`;
+    this.output.appendLine(line);
+    this.recent.push(line);
+    if (this.recent.length > RECENT_LOG_LINES) {
+      this.recent.shift();
+    }
+  }
+
+  /** The recent log, oldest first - what `abap2ui5.copyDiagnostics` pastes. */
+  recentLog(): string[] {
+    return [...this.recent];
   }
 
   theme(): string {

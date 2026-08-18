@@ -14,6 +14,7 @@ import { registerExamples } from "./exampleview";
 import { registerFindingsView } from "./findingsview";
 import { registerInlineAnnotations } from "./inlineview";
 import { registerAppView } from "./appview";
+import { registerDiagnosticsReport } from "./diagnosticsreport";
 import { classNameOf, isAppClass } from "./abap";
 import { originOf } from "./urls";
 import { registerAppSearch } from "./appsearch";
@@ -359,6 +360,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerFindingsView(context);
   registerInlineAnnotations(context, log);
   registerAppView(context);
+  registerDiagnosticsReport(context, session);
   registerRenderGate(context, log);
   registerMcp(context, log, systemMcp);
 }
