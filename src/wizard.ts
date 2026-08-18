@@ -142,7 +142,10 @@ export async function newProjectWizard(): Promise<void> {
 
   const open = "Open project";
   const choice = await vscode.window.showInformationMessage(
-    `Created ${files.length} files. Run "npm ci" there, then "npm run check" - the same gates CI runs.`,
+    // `npm install`, not `npm ci`: a brand-new project has no lockfile yet,
+    // and `npm ci` refuses without one. The install writes it - AGENTS.md and
+    // the README tell the reader to commit it.
+    `Created ${files.length} files. Run "npm install" there, then "npm run check" - the same gates CI runs.`,
     open,
     "Not now"
   );

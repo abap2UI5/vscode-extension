@@ -135,6 +135,13 @@ tying the extension to a system is the launch URL you configure once.
   empty view, list, form, master & detail, popup — pick one, name the
   class, done. Every template ships linter-clean (the test suite enforces
   it).
+- **New Project from Template** – The same gallery into an empty folder, with
+  everything that makes it a project:
+  [abap2UI5/app-template](https://github.com/abap2UI5/app-template)'s own
+  `abaplint.jsonc` (framework pinned to a release) and `abap2ui5lint.jsonc`
+  (the config this extension itself reads, so the editor and CI agree from the
+  first commit), its `AGENTS.md` app-building guide, the Claude permission
+  allowlist, CI running both gates, and the abapGit files.
 
 All commands are available from the Command Palette (`Ctrl/Cmd + Shift + P`).
 
@@ -850,6 +857,7 @@ password. `abap2ui5.mcp.system: false` removes the server.
 | `abap2UI5: Show App Navigation Map` | Draws the workspace's apps and their `nav_app_call( )`s as a clickable graph |
 | `abap2UI5: Set Launch URL` | Sets (or changes) the launch URL template |
 | `abap2UI5: New App from Template` | Template gallery: pick a skeleton, name the class |
+| `abap2UI5: New Project from Template` | The same gallery, into an empty folder: the class plus abap2UI5/app-template's gates, CI, `AGENTS.md` and abapGit files |
 | `abap2UI5: Clear Stored SAP Credentials` | Removes user and password from the SecretStorage |
 | `abap2UI5: Open Project on GitHub` | Opens the abap2UI5 repository in the browser |
 
@@ -866,7 +874,10 @@ socket works there:
 - the view outline and event navigation,
 - colour swatches on colour-typed property values,
 - "Convert XML View to Builder Chain",
-- snippets and the template gallery ("New App from Template").
+- snippets and the template gallery ("New App from Template"), and
+  "New Project from Template" — the whole starter project is written from a
+  bundled snapshot of abap2UI5/app-template, so it needs neither git nor
+  network.
 
 Desktop-only (their commands hide from the palette on the web): the embedded
 preview with its auth proxy (and its traffic log, screenshot and stateful

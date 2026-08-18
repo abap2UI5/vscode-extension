@@ -72,6 +72,35 @@
 
 ## 0.23.0
 
+- **"New Project from Template" now hands out the real template.** The command
+  wrote its own hand-typed copy of
+  [abap2UI5/app-template](https://github.com/abap2UI5/app-template)'s files,
+  and that copy had drifted: it installed `@abap2ui5/linter` 0.1.1 while the
+  ecosystem was on 0.2.1, it pinned no framework release at all — so abaplint
+  resolved abap2UI5's moving default branch and a rename over there could turn
+  into a red build in your brand-new project — it left out the
+  `chain-house-layout` rule the guide tells you a gate applies, and it wrote no
+  `AGENTS.md`, so an assistant opening the new project found nothing to read.
+
+  A project created from the IDE now gets app-template's own
+  `abaplint.jsonc`, `abap2ui5lint.jsonc`, `AGENTS.md` (the complete
+  app-building guide), `.claude/settings.json` permission allowlist,
+  `.gitattributes`, `.gitignore` and Dependabot config, the pinned versions
+  from its `package.json`, and a CI workflow running the abap2UI5-linter's own
+  GitHub Action at the same pin the template uses. It is still generated
+  rather than cloned — the command works in vscode.dev, where there is no git
+  — but from a snapshot that is regenerated weekly and gated by the test
+  suite, so it cannot quietly drift again.
+
+- **An opt-in rule your `abap2ui5lint.jsonc` switches on is now reported in
+  the editor too.** `chain-house-layout` — the builder-chain layout rule
+  abap2UI5/app-template enables — was never produced by the in-editor gate,
+  whatever your config said, so CI flagged a drifted chain and the editor
+  stayed silent about it. That was the last piece of the editor/CI split. The
+  first thing it turns up is in this extension's own gallery: the empty
+  template's chain was laid out flat, and it is now indented per level like
+  the rest.
+
 - **Fixes from a pass over the whole extension.** Nothing here is new
   behaviour; all of it is behaviour that was supposed to work already.
 

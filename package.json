@@ -880,7 +880,9 @@
     "test": "node esbuild.js --tests && node --test dist-test/*.test.cjs",
     "test:web": "node esbuild.js && node esbuild.js --webtest && vscode-test-web --browserType=chromium --headless --extensionDevelopmentPath=. --extensionTestsPath=dist/web/test.js",
     "client-api": "node scripts/generate-client-api.mjs",
-    "client-api:check": "node scripts/generate-client-api.mjs --check"
+    "client-api:check": "node scripts/generate-client-api.mjs --check",
+    "app-template": "node scripts/generate-app-template.mjs",
+    "app-template:check": "node scripts/generate-app-template.mjs --check"
   },
   "devDependencies": {
     "@abap2ui5/linter": "github:abap2UI5/linter#3b98c30956741152917397ab6e9ac998c274ef1f",
