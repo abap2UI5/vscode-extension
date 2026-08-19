@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.24.2
+
 - **A rejected logon stops at the first request, and says what the system
   said.** One wrong password used to become one failed logon per resource:
   the proxy puts the same credentials on every request a UI5 page makes, so a
