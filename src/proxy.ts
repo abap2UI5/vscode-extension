@@ -2,6 +2,7 @@ import * as http from "http";
 import * as https from "https";
 import { randomBytes } from "crypto";
 import { URL } from "url";
+import { redact } from "./report";
 
 /** Non-2xx answer from the ADT class lookup, with the status to decide on. */
 export class AdtStatusError extends Error {
@@ -32,6 +33,59 @@ export interface ProxyResponse {
   status: number;
   /** Request path, for the log line. */
   path: string;
+  /**
+   * The `WWW-Authenticate` header of a rejected request, verbatim. It is the
+   * one field that says whether the system offered basic auth at all - a
+   * system that answers 401 WITHOUT it is not asking for a password, and no
+   * amount of retyping one will help.
+   */
+  authenticate?: string;
+  /**
+   * What the rejection page said, flattened to one line and redacted - "User
+   * is locked", "Password must be changed", "Logon not possible in client
+   * 100". The status alone cannot tell those apart.
+   */
+  reason?: string;
+}
+
+/**
+ * How much of a rejection body to read. The sentence worth having is at the
+ * top of the page; reading further only risks pulling a session id into a log
+ * that gets pasted into issues.
+ */
+const REJECTION_SNIFF_BYTES = 4096;
+
+/** Tags out, entities and runs of whitespace collapsed. */
+function flatten(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * The one line of a rejection page worth logging.
+ *
+ * SAP answers a refused logon with a full HTML page whose first line is a
+ * doctype, so the naive "first line of the body" says nothing. The title
+ * carries the message on the ICF logon error page; anything else falls back
+ * to the flattened body. Redacted, because this ends up in the output channel
+ * and from there in bug reports.
+ */
+export function describeRejection(body: string): string | undefined {
+  const title = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const text = flatten(title?.[1] ?? "") || flatten(body);
+  return text ? redact(text).slice(0, 200) : undefined;
+}
+
+/** A response header as one string, whatever shape node hands over. */
+function headerValue(value: string | string[] | undefined): string | undefined {
+  const text = Array.isArray(value) ? value.join(", ") : value;
+  return text ? text : undefined;
 }
 
 /** One finished request/response pair, as the traffic log records it. The
@@ -355,6 +409,19 @@ export class SapProxy {
    */
   onResponse?: (response: ProxyResponse) => void;
 
+  /**
+   * Set when the system rejected the injected credentials with 401.
+   *
+   * A UI5 page asks for dozens of resources, and the proxy puts the same
+   * user and password on every one of them - so ONE wrong password produces a
+   * burst of failed logons, and a system with a lockout policy counts every
+   * one of them. Eleven in a few seconds is what a single F9 was observed to
+   * send. While this is set the proxy answers locally instead of asking the
+   * system again; `start( )` clears it, which is what re-entering the
+   * credentials (and every F9) goes through.
+   */
+  private authRejected = false;
+
   /** Called once per finished response, with the full roundtrip timing -
    *  what feeds the traffic log and the toolbar's roundtrip badge. */
   onTraffic?: (entry: TrafficEntry) => void;
@@ -390,6 +457,8 @@ export class SapProxy {
     const target = new URL(targetOrigin);
     const authHeader =
       "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
+    // new credentials are a new attempt, whether or not the server restarts
+    this.authRejected = false;
 
     if (this.server && this.target && this.target.origin === target.origin) {
       this.authHeader = authHeader;
@@ -481,6 +550,13 @@ export class SapProxy {
     if (!target || !auth) {
       return Promise.reject(new Error("proxy not started"));
     }
+    if (this.authRejected) {
+      // the activation poller runs on a timer, so without this it would keep
+      // offering the rejected password long after the user stopped looking
+      return Promise.reject(
+        new Error("the system rejected the stored credentials")
+      );
+    }
     const isHttps = target.protocol === "https:";
     const mod = isHttps ? https : http;
 
@@ -507,7 +583,23 @@ export class SapProxy {
               body += chunk;
             }
           });
-          res.on("end", () => resolve({ status, body }));
+          res.on("end", () => {
+            // A rejection here used to be silent: these requests happen on a
+            // timer rather than on a keystroke, so nothing in the UI said the
+            // logon had stopped working.
+            if (status === 401 || status === 403) {
+              if (status === 401) {
+                this.authRejected = true;
+              }
+              this.onResponse?.({
+                status,
+                path,
+                authenticate: headerValue(res.headers["www-authenticate"]),
+                reason: describeRejection(body),
+              });
+            }
+            resolve({ status, body });
+          });
           // a connection that dies mid-body emits on the RESPONSE stream, and
           // an unhandled "error" there takes the extension host down with it
           res.on("error", reject);
@@ -560,6 +652,28 @@ export class SapProxy {
       res.writeHead(404).end();
       return;
     }
+    if (this.authRejected) {
+      // Answered here, without touching the system - see `authRejected`. The
+      // status is the one the system gave, so the page behaves exactly as it
+      // did on the answer that set the flag; the body says why nothing is
+      // arriving, since this text is what an iframe ends up showing.
+      res
+        .writeHead(401, { "content-type": "text/plain; charset=utf-8" })
+        .end(
+          "abap2UI5: the system rejected the stored user or password. The " +
+            "extension stopped repeating the request so the account does not " +
+            "get locked. Enter the credentials again to retry."
+        );
+      this.onTraffic?.({
+        method: String(req.method ?? "GET"),
+        path,
+        status: 401,
+        durationMs: 0,
+        bytes: 0,
+      });
+      return;
+    }
+
     // an authorized request that came in prefixed leaves with the cookie, so
     // that an absolute-path resource is authorized too
     const seedCookie = String(req.url ?? "").startsWith(`/${TOKEN_SEGMENT}/`);
@@ -641,10 +755,41 @@ export class SapProxy {
         res.destroy();
       });
 
-      this.onResponse?.({
-        status: proxyRes.statusCode ?? 0,
-        path: reportedPath,
-      });
+      const status = proxyRes.statusCode ?? 0;
+      if (status === 401 || status === 403) {
+        // Reported after the body rather than at header time: what makes a
+        // rejection diagnosable is the sentence inside it, and these two
+        // statuses are the only ones where waiting a few milliseconds buys
+        // anything. A 401 also stops the burst of retries (`authRejected`).
+        if (status === 401) {
+          this.authRejected = true;
+        }
+        let sniff = "";
+        proxyRes.on("data", (chunk: Buffer) => {
+          if (sniff.length < REJECTION_SNIFF_BYTES) {
+            sniff += chunk.toString("utf8");
+          }
+        });
+        let reported = false;
+        const reportRejection = () => {
+          if (reported) {
+            return;
+          }
+          reported = true;
+          this.onResponse?.({
+            status,
+            path: reportedPath,
+            authenticate: headerValue(proxyRes.headers["www-authenticate"]),
+            reason: describeRejection(sniff),
+          });
+        };
+        proxyRes.once("end", reportRejection);
+        // an aborted rejection never reaches "end", and a rejection nobody
+        // hears about is the state this whole path exists to end
+        proxyRes.once("close", reportRejection);
+      } else {
+        this.onResponse?.({ status, path: reportedPath });
+      }
       // The traffic log: measured to the last body byte, so the duration is
       // what the user actually waited for. The extra data listener rides
       // alongside pipe( ) without disturbing it.

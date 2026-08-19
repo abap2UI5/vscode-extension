@@ -202,7 +202,7 @@ export async function activateAndReload(session: Session): Promise<void> {
  * them, with the retry that follows.
  */
 export function watchProxyStatus(session: Session): void {
-  session.proxy.onResponse = ({ status, path }) => {
+  session.proxy.onResponse = ({ status, path, authenticate, reason }) => {
     if (status !== 401 && status !== 403) {
       if (status >= 500) {
         session.log(`proxy: the system answered ${status} for ${path}`);
@@ -210,19 +210,35 @@ export function watchProxyStatus(session: Session): void {
       return;
     }
     session.log(`proxy: the system answered ${status} for ${path}`);
+    // Which is where the log used to stop - and "401" on its own fits a wrong
+    // password, a locked user, an expired one, a client that refuses logons
+    // and a system that does not do basic auth at all. These two lines are
+    // what tells them apart, and they are what a pasted report needs to carry.
+    if (authenticate) {
+      session.log(`proxy: the system asks for ${authenticate}`);
+    }
+    if (reason) {
+      session.log(`proxy: it says "${reason}"`);
+    }
     const now = Date.now();
     if (now - session.lastAuthPrompt < 30_000) {
       return;
     }
     session.lastAuthPrompt = now;
+    // Until they are entered the proxy answers locally, so the burst of
+    // requests behind this one stops here rather than at the system.
     const origin = session.currentTarget
       ? originOf(session.currentTarget.externalUrl)
       : undefined;
     void vscode.window
       .showWarningMessage(
-        `abap2UI5: the system rejected the logon (HTTP ${status}). The stored ` +
-          "user or password may be wrong, or this system does not accept basic " +
-          "auth - in which case set `abap2ui5.openMode` to `external`.",
+        `abap2UI5: the system rejected the logon (HTTP ${status})` +
+          // the system's own words when it gave any - "user is locked" is a
+          // different afternoon than "wrong password", and only it knows
+          (reason ? `: ${reason}` : "") +
+          ". The stored user or password may be wrong, or this system does " +
+          "not accept basic auth - in which case set `abap2ui5.openMode` to " +
+          "`external`.",
         "Re-enter credentials"
       )
       .then(async (pick) => {

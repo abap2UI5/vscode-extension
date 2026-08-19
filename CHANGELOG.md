@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **A rejected logon stops at the first request, and says what the system
+  said.** One wrong password used to become one failed logon per resource:
+  the proxy puts the same credentials on every request a UI5 page makes, so a
+  single F9 was observed sending eleven 401s within seconds - two of them in
+  the same second. A system with a lockout policy counts every one of them, so
+  a typo could cost the user their account. The proxy now stops asking after
+  the first 401 and answers the remaining requests itself, until credentials
+  are entered again (which every F9 does). The ADT lookups, which run on a
+  timer rather than on a keystroke, stop with it.
+- **"HTTP 401" alone was never a diagnosis.** It fits a wrong password, a
+  locked user, an expired one, a client that refuses logons, and a system that
+  does not offer basic auth at all - and the extension had nothing else to
+  offer. The rejection now carries the `WWW-Authenticate` header (a 401
+  *without* one is not asking for a password, and no amount of retyping helps)
+  and the system's own sentence, taken from the rejection page and redacted,
+  both in the log and in the message that offers to re-enter the credentials.
+
 ## 0.24.1
 
 - **The render gate works against a system again.** 0.24.0 taught the view
