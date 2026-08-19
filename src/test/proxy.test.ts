@@ -4,6 +4,7 @@ import * as http from "http";
 import * as https from "https";
 import { AddressInfo } from "net";
 import {
+  allowFraming,
   decodeBody,
   describeRejection,
   injectRuntimeHook,
@@ -732,5 +733,108 @@ test("a rejection from the ADT lookups is reported too", async () => {
   } finally {
     await proxy.stop();
     system.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Frame protection: the preview has to be allowed to frame the app
+// ---------------------------------------------------------------------------
+
+test("the bootstrap leaves the proxy with frame options set to allow", () => {
+  // verbatim from z2ui5_cl_ui5_http_handler
+  const bootstrap =
+    `<script id="sap-ui-bootstrap" src="/sap/public/bc/ui5_ui5/resources/sap-ui-core.js" ` +
+    `data-sap-ui-compatVersion="edge" data-sap-ui-async="true" ` +
+    `data-sap-ui-frameOptions="trusted" data-sap-ui-bindingSyntax="complex"></script>`;
+  const out = allowFraming(bootstrap);
+  assert.ok(!out.includes("trusted"), out);
+  assert.ok(out.includes(`data-sap-ui-frameOptions="allow"`));
+  // everything else about the tag survives
+  assert.ok(out.includes(`data-sap-ui-bindingSyntax="complex"`));
+  assert.ok(out.includes(`data-sap-ui-async="true"`));
+});
+
+test("the other spellings and quotings are rewritten too", () => {
+  assert.ok(
+    allowFraming(`<script data-sap-ui-frame-options='deny'></script>`).includes(
+      `data-sap-ui-frame-options="allow"`
+    )
+  );
+  assert.ok(
+    allowFraming(`<script data-sap-ui-frameoptions=trusted></script>`).includes(
+      `data-sap-ui-frameoptions="allow"`
+    )
+  );
+  // an attribute that merely starts the same way is not this one
+  const other = `<script data-sap-ui-frameOptionsConfig="{}"></script>`;
+  assert.equal(allowFraming(other), other);
+});
+
+test("a page without the attribute is left exactly as it is", () => {
+  const html = `<html><head><script src="sap-ui-core.js"></script></head></html>`;
+  assert.equal(allowFraming(html), html);
+});
+
+/** A system that serves one HTML document, whatever is asked of it. */
+function htmlSystem(html: string): Promise<{
+  origin: string;
+  close: () => void;
+}> {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(html);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      resolve({
+        origin: `http://127.0.0.1:${port}`,
+        close: () => server.close(),
+      });
+    });
+  });
+}
+
+/** Asks the proxy the way the preview iframe does - only a document request
+ *  is buffered and rewritten, a plain GET is piped through untouched. */
+function throughProxyAsDocument(
+  proxy: SapProxy,
+  path: string
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    http
+      .get(
+        `${proxy.origin}${path}`,
+        { headers: { "sec-fetch-dest": "document" } },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (c: string) => (body += c));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        }
+      )
+      .on("error", reject);
+  });
+}
+
+test("an app page served through the proxy comes out framable", async () => {
+  // end to end, because the rewrite only counts if it is on the path the
+  // preview actually loads - and only HTML documents go through it
+  const server = await htmlSystem(
+    `<!DOCTYPE html><html><head>` +
+      `<script id="sap-ui-bootstrap" data-sap-ui-frameOptions="trusted"></script>` +
+      `</head><body></body></html>`
+  );
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(server.origin, "user", "pass");
+    const answer = await throughProxyAsDocument(proxy, "/sap/bc/z2ui5");
+    assert.ok(answer.body.includes(`data-sap-ui-frameOptions="allow"`), answer.body);
+    assert.ok(!answer.body.includes("trusted"));
+    // and the runtime hook still lands, on the same body
+    assert.ok(answer.body.includes("__abap2ui5Runtime"));
+  } finally {
+    await proxy.stop();
+    server.close();
   }
 });
