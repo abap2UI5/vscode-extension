@@ -642,29 +642,26 @@ ${BASE_CSS}
     const msg = event.data || {};
 
     /*
-     * UI5's own frame protection. A system configured with
-     * sap-ui-frameOptions=trusted lets the app run in an iframe only after
-     * asking the embedding window for permission: sap/ui/security/FrameOptions
-     * posts a request up and waits. Nobody answered, so after ten seconds UI5
-     * gave up and blocked the frame - the app rendered and then ignored every
-     * click, with only a console line to say why:
+     * UI5's own frame protection, answered for the sake of the protocol.
      *
-     *   Reached timeout of 10000ms waiting for a response from parent window
+     * It is NOT what makes the preview clickable - the proxy is, by serving
+     * the bootstrap with "sap-ui-frameOptions=allow" (see "allowFraming").
+     * This reply cannot do it: "_applyState(false, true)" only lifts the block
+     * once "bRunnable" is already true, and in "trusted" mode behind a
+     * "vscode-webview://" parent it never becomes true. 0.24.1 sent exactly
+     * this message, on the wire exactly as UI5 reads it, and the app stayed
+     * unclickable - the mode had to go instead.
      *
-     * This preview IS the trusted parent: the url it embeds is the one the
-     * extension built from the configured system. So it answers.
-     *
-     * The wire format is two plain strings, not JSON - and UI5 drops anything
-     * else before looking at it:
+     * What stays true is the wire format, which is two plain strings, never
+     * JSON - UI5 drops anything else before looking at it:
      *
      *   if (oSource === FrameOptions.__self || oSource == null ||
      *       typeof sData !== "string" ||
      *       sData.indexOf("SAPFrameProtection*") === -1) { return; }
      *
-     * so an object shaped like a protocol message is not a late answer, it is
-     * no answer at all. "parent-unlocked" is the reply that unlocks the frame
-     * (_applyState(false, true)); "parent-origin" only proves the parent is
-     * alive and leaves the app blocked, which is not what this preview means.
+     * So the answer costs nothing and is the right one for a parent that
+     * embeds a url it built itself: a page that IS runnable (same-origin, or
+     * allowlisted by its own system) is unlocked by it.
      */
     if (typeof event.data === 'string') {
       if (event.data === 'SAPFrameProtection*require-origin' && event.source) {

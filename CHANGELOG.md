@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.24.3
+
+- **The preview is clickable.** Twice now this was answered as a handshake
+  problem, and twice the app kept eating every click. It is not a handshake
+  problem. `sap/ui/security/FrameOptions` blocks the document the moment it
+  finds itself framed - a capture-phase listener that calls `preventDefault( )`
+  on every input event - and lifts that block only from
+  `_applyState(bRunnable, bParentUnlocked)`, which needs BOTH flags. The
+  preview can supply `bParentUnlocked` and never `bRunnable`:
+
+  - `bRunnable` needs a same-origin parent, or an allowlist that matches the
+    parent's origin. Ours is `vscode-webview://<id>` - not the system's, and in
+    nobody's allowlist.
+  - the first message from the parent runs `_check( )` *before* the
+    "parent-unlocked" branch, and `_check( )` without an allowlist ends in
+    `_callback(false)`.
+
+  So 0.24.1's answer was correct on the wire and still could not win. The
+  proxy now serves the bootstrap with `sap-ui-frameOptions="allow"` instead,
+  which is defensible exactly here: frame protection stops a FOREIGN page from
+  framing an SAP app to harvest clicks, and the framing page is this extension,
+  loading a url it built itself over loopback behind a capability token.
+
 ## 0.24.2
 
 - **A rejected logon stops at the first request, and says what the system
