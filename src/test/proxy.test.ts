@@ -5,6 +5,7 @@ import * as https from "https";
 import { AddressInfo } from "net";
 import {
   decodeBody,
+  describeRejection,
   injectRuntimeHook,
   SapProxy,
   withUtf8Charset,
@@ -594,4 +595,142 @@ test("a body without a declared charset is read as UTF-8", () => {
   const text = decodeBody(Buffer.from("<html>Prüfen</html>", "utf8"), "text/html");
   assert.ok(text.includes("Prüfen"));
   assert.equal(withUtf8Charset("text/html"), "text/html; charset=utf-8");
+});
+
+// ---------------------------------------------------------------------------
+// A rejected logon: what it says, and how often it says it
+// ---------------------------------------------------------------------------
+
+test("the rejection reason comes out of the page title", () => {
+  const page =
+    `<!DOCTYPE html><html><head><title>Logon Error Message</title></head>` +
+    `<body><h1>User is locked</h1></body></html>`;
+  assert.equal(describeRejection(page), "Logon Error Message");
+});
+
+test("without a title the flattened body has to do", () => {
+  const page = `<!DOCTYPE html><html><body><h1>User  is locked.</h1></body></html>`;
+  assert.equal(describeRejection(page), "User is locked.");
+});
+
+test("an empty rejection body says nothing rather than an empty string", () => {
+  assert.equal(describeRejection(""), undefined);
+  assert.equal(describeRejection("<html><title> </title></html>"), undefined);
+});
+
+test("the rejection reason is redacted before it is logged", () => {
+  const reason = describeRejection("Logon to https://sap.internal:44300 failed");
+  assert.ok(reason);
+  assert.ok(!reason.includes("sap.internal"), reason);
+  assert.ok(reason.includes("44300"), "the port is the diagnostic part");
+});
+
+/** A system that refuses every logon, the way the ICF does: 401, a realm, and
+ *  an HTML page carrying the actual sentence. */
+function rejectingSystem(): Promise<{
+  origin: string;
+  seen: string[];
+  close: () => void;
+}> {
+  const seen: string[] = [];
+  const server = http.createServer((req, res) => {
+    seen.push(String(req.url));
+    res.writeHead(401, {
+      "content-type": "text/html",
+      "www-authenticate": 'Basic realm="SAP NetWeaver Application Server"',
+    });
+    res.end("<html><head><title>User is locked</title></head></html>");
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      resolve({
+        origin: `http://127.0.0.1:${port}`,
+        seen,
+        close: () => server.close(),
+      });
+    });
+  });
+}
+
+test("a rejection is reported with the realm and the system's own words", async () => {
+  const system = await rejectingSystem();
+  const proxy = new SapProxy();
+  const seen: { authenticate?: string; reason?: string }[] = [];
+  proxy.onResponse = (r) => seen.push(r);
+  try {
+    await proxy.start(system.origin, "user", "wrong");
+    const answer = await throughProxy(proxy, "/sap/bc/z2ui5");
+    assert.equal(answer.status, 401);
+    assert.equal(seen.length, 1, "reported once, not once per body chunk");
+    assert.match(seen[0].authenticate ?? "", /^Basic realm=/);
+    assert.equal(seen[0].reason, "User is locked");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("after a 401 the proxy stops asking the system again", async () => {
+  // one wrong password used to become one failed logon per resource a UI5
+  // page loads, which is what locks an account
+  const system = await rejectingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "wrong");
+    const first = await throughProxy(proxy, "/sap/bc/z2ui5");
+    assert.equal(first.status, 401);
+    const second = await throughProxy(proxy, "/sap/public/bc/ui5_ui5/x.js");
+    assert.equal(second.status, 401, "the page still sees a 401");
+    assert.match(second.body, /stopped repeating the request/);
+    assert.deepEqual(system.seen, ["/sap/bc/z2ui5"], "only the first went out");
+    await assert.rejects(
+      proxy.fetchFromSystem("/sap/bc/adt/probe"),
+      /rejected the stored credentials/,
+      "and the polling lookups stop too"
+    );
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("re-entered credentials let the proxy try again", async () => {
+  const system = await rejectingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "wrong");
+    await throughProxy(proxy, "/sap/bc/z2ui5");
+    await proxy.start(system.origin, "user", "right");
+    const retry = await throughProxy(proxy, "/sap/bc/z2ui5");
+    assert.equal(retry.status, 401, "this system rejects everyone");
+    assert.equal(system.seen.length, 2, "but the attempt was forwarded");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a rejection from the ADT lookups is reported too", async () => {
+  // these run on a timer, so a logon that stopped working was silent here
+  const system = await rejectingSystem();
+  const proxy = new SapProxy();
+  const seen: { status: number; reason?: string }[] = [];
+  proxy.onResponse = (r) => seen.push(r);
+  try {
+    await proxy.start(system.origin, "user", "wrong");
+    const answer = await proxy.fetchFromSystem("/sap/bc/adt/probe");
+    assert.equal(answer.status, 401);
+    assert.deepEqual(seen, [
+      {
+        status: 401,
+        path: "/sap/bc/adt/probe",
+        authenticate: 'Basic realm="SAP NetWeaver Application Server"',
+        reason: "User is locked",
+      },
+    ]);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
 });
