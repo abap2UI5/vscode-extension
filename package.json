@@ -2,7 +2,7 @@
   "name": "abap2ui5",
   "displayName": "abap2UI5",
   "description": "Develop abap2UI5 apps in VS Code: F9 launches a z2ui5_if_app class in an embedded preview, reload on activation, static view checks, the abap2UI5 MCP server for AI agents, snippets.",
-  "version": "0.24.1",
+  "version": "0.24.2",
   "publisher": "abap2ui5",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -706,7 +706,7 @@
               }
             ]
           },
-          "markdownDescription": "Which view-check rules are active, and how loudly. A rule id maps to `false` to switch it off, to `\"hint\"` / `\"warning\"` / `\"error\"` to change its severity, or to `{ \"severity\": \u2026, \"exclude\": [\u2026] }`.\n\n```json\n\"abap2ui5.viewCheck.rules\": {\n  \"unknown-binding-path\": false,\n  \"control-too-new\": \"warning\"\n}\n```\n\nA repository's `abap2ui5lint.jsonc` wins for every rule it names, so the editor keeps agreeing with CI about those; this setting decides the rest. Rule ids are listed on the [rules page](https://abap2ui5.github.io/linter/)."
+          "markdownDescription": "Which view-check rules are active, and how loudly. A rule id maps to `false` to switch it off, to `\"hint\"` / `\"warning\"` / `\"error\"` to change its severity, or to `{ \"severity\": …, \"exclude\": […] }`.\n\n```json\n\"abap2ui5.viewCheck.rules\": {\n  \"unknown-binding-path\": false,\n  \"control-too-new\": \"warning\"\n}\n```\n\nA repository's `abap2ui5lint.jsonc` wins for every rule it names, so the editor keeps agreeing with CI about those; this setting decides the rest. Rule ids are listed on the [rules page](https://abap2ui5.github.io/linter/)."
         },
         "abap2ui5.inlineFindings": {
           "type": "string",
