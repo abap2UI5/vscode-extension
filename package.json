@@ -659,6 +659,11 @@
           "default": false,
           "markdownDescription": "Also run the render gate: the reconstructed view is loaded with a real `XMLView.create` in headless Chromium. Unlike the bundled property gate this needs the external checker - install it once with *\"abap2UI5: Install Render Gate\"* (downloads the checker bundle and Chromium, runs with VS Code's own runtime), or provide your own via `#abap2ui5.viewCheck.command#` / `#abap2ui5.mcp.reposRoot#`."
         },
+        "abap2ui5.viewCheck.rollingBundle": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Download the render gate from the linter's **rolling** bundle instead of the immutable one published for the linter commit this extension build pins.\n\nOff by default, and worth leaving off: the rolling bundle is rebuilt on every merge to the linter's main branch, so the checker running on your machine can then change without this extension being updated. Turn it on only to try an unreleased linter."
+        },
         "abap2ui5.viewCheck.allow": {
           "type": "array",
           "items": {

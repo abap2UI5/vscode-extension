@@ -15,11 +15,22 @@ import * as tar from "tar";
  * machine.
  *
  * Bundle selection: the linter CI publishes every bundle twice - under a
- * rolling tag and under an immutable per-commit tag. This build prefers the
+ * rolling tag and under an immutable per-commit tag. This build uses the
  * bundle of exactly the linter commit it pins (LINTER_PIN, injected by
- * esbuild from the lockfile), so what the render gate executes matches what
- * this release was tested with; the rolling tag is the fallback when no
- * per-commit bundle exists for the pin.
+ * esbuild from the lockfile), so what the render gate executes is what this
+ * release was tested with.
+ *
+ * The rolling tag is NOT a fallback, and used to be. That made a merge to the
+ * linter's main branch change what every already-installed extension
+ * downloaded next - no version negotiation, no pull request, no changelog
+ * between a commit there and a checker running on somebody's machine here. It
+ * is the one path in this ecosystem where merging reaches end users directly,
+ * and it reached them silently. A missing per-commit bundle is now an error
+ * that says what to do, because "the pinned build is unavailable" and "here is
+ * a different build" are not the same answer.
+ *
+ * `abap2ui5.viewCheck.rollingBundle` opts back in, for somebody deliberately
+ * testing an unreleased linter.
  */
 
 const ROLLING_BUNDLE_URL =
@@ -116,18 +127,30 @@ export async function installRenderGate(
         fs.rmSync(staging, { recursive: true, force: true });
         fs.mkdirSync(staging, { recursive: true });
         const tgz = path.join(staging, "bundle.tgz");
-        if (PINNED_BUNDLE_URL) {
+        const allowRolling = vscode.workspace
+          .getConfiguration("abap2ui5")
+          .get<boolean>("viewCheck.rollingBundle", false);
+
+        if (PINNED_BUNDLE_URL && !allowRolling) {
           try {
             await download(PINNED_BUNDLE_URL, tgz);
             log(`render-gate: bundle ${LINTER_PIN.slice(0, 12)} (matches the pinned linter)`);
-          } catch {
-            log(
-              `render-gate: no per-commit bundle for ${LINTER_PIN.slice(0, 12)} - falling back to the rolling release`
+          } catch (e) {
+            throw new Error(
+              `no render-gate bundle published for linter commit ${LINTER_PIN.slice(0, 12)}, ` +
+                `which is the one this extension build was tested against. ` +
+                `Update the extension - a newer build pins a linter commit that has one - or set ` +
+                `abap2ui5.viewCheck.rollingBundle to accept the linter's current main instead. ` +
+                `(${e instanceof Error ? e.message : String(e)})`
             );
-            await download(ROLLING_BUNDLE_URL, tgz);
           }
         } else {
           await download(ROLLING_BUNDLE_URL, tgz);
+          log(
+            PINNED_BUNDLE_URL
+              ? "render-gate: rolling bundle (abap2ui5.viewCheck.rollingBundle) - this is the linter's current main, not the commit this build pins"
+              : "render-gate: rolling bundle - this build pins no linter commit"
+          );
         }
 
         progress.report({ message: "extracting..." });
