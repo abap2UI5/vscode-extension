@@ -16,7 +16,7 @@ import { registerInlineAnnotations } from "./inlineview";
 import { registerAppView } from "./appview";
 import { registerDiagnosticsReport } from "./diagnosticsreport";
 import { classNameOf, isAppClass } from "./abap";
-import { originOf } from "./urls";
+import { proxiedUrl } from "./urls";
 import { registerAppSearch } from "./appsearch";
 import { registerNewApp, registerNewProject } from "./wizard";
 import { registerConvert } from "./convert";
@@ -331,10 +331,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return undefined;
         }
         const externalUrl = session.urlFor(system, className);
-        const origin = originOf(externalUrl);
-        return origin
-          ? externalUrl.replace(origin, session.proxy.origin)
-          : undefined;
+        return proxiedUrl(externalUrl, session.proxy.origin);
       },
       screenshot: (className, url) =>
         takeScreenshot(context, { url, className }, log),

@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **A launch URL without a path loads past its first request.** (#60) The
+  preview swaps the system's origin for the local proxy's
+  `http://127.0.0.1:<port>/__abap2ui5/<token>` prefix. For
+  `https://host/sap/bc/z2ui5?app_start=X` that leaves the token as a
+  directory; for `https://host?app_start=X` it left the token as the LAST
+  PATH SEGMENT - which a browser drops when resolving every relative url on
+  the page. The UI5 bootstrap and every module were then asked for as
+  `/__abap2ui5/<resource>`, token gone, nothing loaded - a white preview
+  whose only trace on the system was the initial GET, with the roundtrip
+  POST never arriving. The frame URL is now rebuilt from the parsed launch
+  URL (`pathname` is never empty), so the token is always followed by `/`
+  and survives resolution.
+
+  Rebuilding instead of substring-replacing also fixes a quieter miss: a
+  launch URL that never spells its normalised origin verbatim (an uppercase
+  host, an explicit `:443`) left `replace(origin, proxyOrigin)` a no-op, and
+  the iframe loaded the system directly - without the credentials only the
+  proxy can inject.
+- **The proxy's own cookie now travels from the framed page.** The token
+  cookie that authorizes absolute-path requests (`/sap/public/...`) was
+  planted `SameSite=Lax` - but the app page sits in an iframe whose
+  top-level document is the `vscode-webview://` origin, so every request it
+  makes counts as cross-site and a Lax cookie stays home. It is
+  `SameSite=None; Secure` now, the same pair the SAP session cookies are
+  already preserved with, and loopback is a trustworthy origin so Chromium
+  accepts it over plain http.
+
 ## 0.24.3
 
 - **The preview is clickable.** Twice now this was answered as a handshake

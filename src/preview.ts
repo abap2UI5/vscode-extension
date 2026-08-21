@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { createNonce, previewHtml, welcomeHtml } from "./webview";
 import { AppTarget, loadMessage, modelRootsOfSource } from "./previewcore";
 import { classNameOf, errorTokens } from "./abap";
-import { originOf } from "./urls";
+import { proxiedUrl } from "./urls";
 import { allSystems } from "./systems";
 import { abapNsMap, viewOutline } from "./context";
 import { matchOutline, RuntimeControl } from "./inspect";
@@ -203,11 +203,10 @@ export async function applyPreviewParam(
     return;
   }
   const externalUrl = session.urlFor(system, target.className);
-  const origin = originOf(externalUrl);
   const frameUrl =
-    origin && session.proxy.isRunning
-      ? externalUrl.replace(origin, session.proxy.origin)
-      : externalUrl;
+    (session.proxy.isRunning
+      ? proxiedUrl(externalUrl, session.proxy.origin)
+      : undefined) ?? externalUrl;
   session.currentTarget = { ...target, externalUrl, frameUrl };
   session.updateStatusItem();
   reloadShownApp(
