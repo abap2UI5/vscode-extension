@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.24.4
+
 - **A launch URL without a path loads past its first request.** (#60) The
   preview swaps the system's origin for the local proxy's
   `http://127.0.0.1:<port>/__abap2ui5/<token>` prefix. For
