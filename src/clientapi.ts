@@ -60,3 +60,40 @@ export function isClientCompletion(lineUpToCursor: string): boolean {
 export function signatureHead(method: ClientMethod): string {
   return method.signature.split("\n")[0].replace(/\s+/g, " ").trim();
 }
+
+/** The published Client API reference - the docs site's page generated from
+ *  the same interface this bundled JSON is parsed from
+ *  (docs/scripts/generate-api-reference.mjs). */
+export const API_REFERENCE_PAGE =
+  "https://abap2ui5.github.io/docs/resources/api.html";
+
+/** The reference page's anchor for one method, or undefined when none can be
+ *  derived.
+ *
+ *  The docs generator writes each method as a `` ### `name` `` heading and
+ *  VitePress slugs it with its default slugify: the heading's text content
+ *  (the bare name - backticks and the obsolete badge are not part of it),
+ *  runs of separator characters (underscore included) collapsed to one
+ *  hyphen, leading and trailing separators trimmed, a leading digit guarded
+ *  with `_`, all lowercased. Method names are ABAP identifiers
+ *  ([A-Za-z0-9_]), for which this is exactly the rule below - so
+ *  `view_display` -> `view-display`, `_bind_edit` -> `bind-edit`,
+ *  `nest2_view_display` -> `nest2-view-display`, as the deployed page
+ *  writes them. */
+export function apiReferenceAnchor(name: string): string | undefined {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/^(\d)/, "_$1");
+  return slug === "" ? undefined : slug;
+}
+
+/** The reference URL for one method: deep-linked to its heading when an
+ *  anchor is derivable, the top of the page otherwise. */
+export function apiReferenceUrl(name: string): string {
+  const anchor = apiReferenceAnchor(name);
+  return anchor === undefined
+    ? API_REFERENCE_PAGE
+    : `${API_REFERENCE_PAGE}#${anchor}`;
+}

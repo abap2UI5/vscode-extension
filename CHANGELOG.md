@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **The `client->` hover links to the published Client API Reference.** The
+  hover shows a method's signature and ABAP Doc, but it was a dead end: no
+  way to read on - the parameter tables, the constants, the neighbouring
+  methods of the same group. Every hover now ends with a "Client API
+  Reference" link to the generated page on the documentation site, deep-linked
+  straight to the method's own heading (`client->view_display` opens at
+  `#view-display`), so the full reference is one click from the code.
 - **"Show Examples for this Control" works without a single clone.** The
   command used to read only the local checkouts under
   `abap2ui5.mcp.reposRoot` - and the beginner most in need of an example is

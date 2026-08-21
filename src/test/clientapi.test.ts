@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  API_REFERENCE_PAGE,
+  apiReferenceAnchor,
+  apiReferenceUrl,
   clientCallAt,
   clientMethod,
   clientMethods,
@@ -54,6 +57,29 @@ test("completion opens right after the arrow and inside a partial name", () => {
   assert.ok(isClientCompletion("x = me->client->nav"));
   assert.equal(isClientCompletion("    client"), false);
   assert.equal(isClientCompletion("    view->ele( "), false);
+});
+
+test("reference anchors match how the docs site slugs the method headings", () => {
+  // Pinned against the deployed page's ids: the docs generator writes
+  // `### \`name\`` and VitePress's default slugify turns underscore runs
+  // into one hyphen and trims leading/trailing separators.
+  assert.equal(apiReferenceAnchor("view_display"), "view-display");
+  assert.equal(apiReferenceAnchor("_bind_edit"), "bind-edit");
+  assert.equal(apiReferenceAnchor("nest2_view_display"), "nest2-view-display");
+});
+
+test("every bundled method deep-links; a nameless name falls back to the page", () => {
+  for (const method of clientMethods()) {
+    const url = apiReferenceUrl(method.name);
+    assert.match(
+      url,
+      new RegExp(`^${API_REFERENCE_PAGE.replace(/[.]/g, "\\.")}#[a-z0-9][a-z0-9-]*$`),
+      `no deep link for ${method.name}: ${url}`
+    );
+  }
+  // nothing derivable -> the top of the page, never a dangling `#`
+  assert.equal(apiReferenceAnchor("_"), undefined);
+  assert.equal(apiReferenceUrl("_"), API_REFERENCE_PAGE);
 });
 
 test("the signature head is one line, for the completion detail", () => {
