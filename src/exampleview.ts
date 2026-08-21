@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { controlCallAt } from "./context";
 import { ExampleHit, findControlUses, rankExamples } from "./examples";
+import { CatalogueEntry, CatalogueHit, catalogueUrl, matchCatalogue, parseCatalogue } from "./catalogue";
 import { CORPUS_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
 
 /*
@@ -15,19 +16,96 @@ import { CORPUS_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
  * put it on an `ele( n = `Table` )`, run the command, and get the places a
  * working `Table` is built in the samples - richest example first, opened at
  * the line.
+ *
+ * A local checkout is the primary source and always wins: it is searched
+ * line by line and opens in the editor. But the catalogues are git checkouts,
+ * not something the extension ships, and the beginner most in need of an
+ * example is exactly the person who has cloned nothing yet. So each
+ * repository WITHOUT a local checkout is answered from the `catalogue.json`
+ * it commits at its root, fetched from GitHub and cached for a day - those
+ * hits name whole samples rather than lines, and open on github.com.
  */
 
-
-/** Where the catalogues live, newest directory name first - the same names
- *  the MCP registration probes for. */
-const CATALOGUES = [...SAMPLES_DIRS, ...CORPUS_DIRS, ...SAMPLES_STACK_DIRS];
+/** The three sample repositories: the GitHub name that publishes the
+ *  catalogue, and the local directory names a checkout can carry (newest
+ *  first - the same names the MCP registration probes for). */
+const GROUPS: ReadonlyArray<{ repo: string; dirs: readonly string[] }> = [
+  { repo: "samples", dirs: SAMPLES_DIRS },
+  { repo: "samples-controls", dirs: CORPUS_DIRS },
+  { repo: "samples-stack", dirs: SAMPLES_STACK_DIRS },
+];
 
 /** A corpus is thousands of classes; the walk stays bounded so a mistyped
  *  repos root pointing at a home directory cannot turn this into a
  *  filesystem crawl. */
 const FILE_LIMIT = 4000;
 
-function catalogueRoots(): Array<{ dir: string; name: string }> {
+/** How long a fetched catalogue stays good. A day, like the ecosystem's
+ *  other snapshots-of-elsewhere: the catalogues move with sample merges,
+ *  which is far slower than anyone re-runs this command. */
+const CATALOGUE_TTL_MS = 24 * 60 * 60 * 1000;
+
+interface CachedCatalogue {
+  at: number;
+  entries: CatalogueEntry[];
+}
+
+/** Fetched catalogues, per repo - the session-lifetime layer over the
+ *  `globalState` layer that survives a window reload. */
+const memoryCache = new Map<string, CachedCatalogue>();
+
+function cacheKey(repo: string): string {
+  return `examples.catalogue.${repo}`;
+}
+
+/**
+ * The remote catalogue of one repository: memory, then `globalState`, then
+ * a fetch of the committed `catalogue.json` (cached back into both).
+ *
+ * `undefined` means "this repository could not answer at all" - fetch failed
+ * and nothing cached - which the caller distinguishes from an answer with no
+ * matches. On a failed fetch an EXPIRED cache is still served: a day-old
+ * catalogue beats no examples, and the next successful fetch replaces it.
+ */
+async function remoteEntries(
+  context: vscode.ExtensionContext,
+  repo: string,
+  log: (m: string) => void,
+  force = false
+): Promise<CatalogueEntry[] | undefined> {
+  const now = Date.now();
+  const stored = (): CachedCatalogue | undefined =>
+    memoryCache.get(repo) ?? context.globalState.get<CachedCatalogue>(cacheKey(repo));
+  if (!force) {
+    const cached = stored();
+    if (cached && Array.isArray(cached.entries) && now - cached.at < CATALOGUE_TTL_MS) {
+      memoryCache.set(repo, cached);
+      return cached.entries;
+    }
+  }
+  try {
+    const res = await fetch(catalogueUrl(repo), { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const entries = parseCatalogue(await res.text());
+    log(`examples: fetched ${repo} catalogue - ${entries.length} entries`);
+    const value = { at: now, entries };
+    memoryCache.set(repo, value);
+    await context.globalState.update(cacheKey(repo), value);
+    return entries;
+  } catch (err) {
+    log(
+      `examples: ${repo} catalogue fetch failed - ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+    const cached = stored();
+    return cached && Array.isArray(cached.entries) ? cached.entries : undefined;
+  }
+}
+
+function catalogueRoots(): Array<{ dir: string; name: string; repo: string }> {
   const root = vscode.workspace
     .getConfiguration(CONFIG_SECTION)
     .get<string>("mcp.reposRoot", "")
@@ -35,11 +113,13 @@ function catalogueRoots(): Array<{ dir: string; name: string }> {
   if (!root) {
     return [];
   }
-  const found: Array<{ dir: string; name: string }> = [];
-  for (const name of CATALOGUES) {
-    const dir = path.join(root, name, "src");
-    if (fs.existsSync(dir)) {
-      found.push({ dir, name });
+  const found: Array<{ dir: string; name: string; repo: string }> = [];
+  for (const group of GROUPS) {
+    for (const name of group.dirs) {
+      const dir = path.join(root, name, "src");
+      if (fs.existsSync(dir)) {
+        found.push({ dir, name, repo: group.repo });
+      }
     }
   }
   return found;
@@ -96,10 +176,14 @@ async function askControl(editor: vscode.TextEditor | undefined): Promise<string
   });
 }
 
-function search(control: string, log: (m: string) => void): ExampleHit[] {
+function searchLocal(
+  roots: ReadonlyArray<{ dir: string; name: string }>,
+  control: string,
+  log: (m: string) => void
+): ExampleHit[] {
   const budget = { left: FILE_LIMIT };
   const hits: ExampleHit[] = [];
-  for (const catalogue of catalogueRoots()) {
+  for (const catalogue of roots) {
     for (const file of classFiles(catalogue.dir, budget)) {
       let source: string;
       try {
@@ -110,8 +194,43 @@ function search(control: string, log: (m: string) => void): ExampleHit[] {
       hits.push(...findControlUses(source, control, { file, catalogue: catalogue.name }));
     }
   }
-  log(`examples: ${control} - ${hits.length} use(s) in the catalogues`);
+  log(`examples: ${control} - ${hits.length} use(s) in the local catalogues`);
   return rankExamples(hits);
+}
+
+type ExampleItem = vscode.QuickPickItem & ({ hit: ExampleHit } | { remote: CatalogueHit });
+
+function quickPickItems(
+  hits: readonly ExampleHit[],
+  remote: readonly CatalogueHit[]
+): Array<vscode.QuickPickItem | ExampleItem> {
+  const items: Array<vscode.QuickPickItem | ExampleItem> = [];
+  const separators = hits.length > 0 && remote.length > 0;
+  if (separators) {
+    items.push({ label: "in your checkouts", kind: vscode.QuickPickItemKind.Separator });
+  }
+  for (const hit of hits) {
+    items.push({
+      label: `$(symbol-class) ${path.basename(hit.file).replace(/\.clas\.abap$/i, "")}`,
+      description: `${hit.catalogue} · ${hit.attributes} attribute${
+        hit.attributes === 1 ? "" : "s"
+      }`,
+      detail: hit.text,
+      hit,
+    });
+  }
+  if (separators) {
+    items.push({ label: "on github.com", kind: vscode.QuickPickItemKind.Separator });
+  }
+  for (const entry of remote) {
+    items.push({
+      label: `$(github) ${entry.className}`,
+      description: `${entry.repo} · opens on GitHub`,
+      detail: entry.summary ? `${entry.title} — ${entry.summary}` : entry.title,
+      remote: entry,
+    });
+  }
+  return items;
 }
 
 export function registerExamples(
@@ -120,65 +239,94 @@ export function registerExamples(
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("abap2ui5.showExamples", async () => {
-      const roots = catalogueRoots();
-      if (!roots.length) {
-        /* The catalogues are git checkouts, not something the extension
-         * ships - so the honest answer names the setting and offers to open
-         * it, rather than reporting "nothing found" for a corpus that was
-         * never there. */
-        const pick = await vscode.window.showInformationMessage(
-          "abap2UI5: no sample catalogue found. Clone samples, samples-controls " +
-            "or samples-stack next to each other and point " +
-            "abap2ui5.mcp.reposRoot at the folder holding them.",
-          "Open setting"
-        );
-        if (pick === "Open setting") {
-          await vscode.commands.executeCommand(
-            "workbench.action.openSettings",
-            "abap2ui5.mcp.reposRoot"
-          );
-        }
-        return;
-      }
       const control = await askControl(vscode.window.activeTextEditor);
       if (!control) {
         return;
       }
-      const hits = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Window, title: `abap2UI5: searching ${control}` },
-        async () => search(control, log)
-      );
-      if (!hits.length) {
-        vscode.window.showInformationMessage(
-          `abap2UI5: no example of ${control} in ${roots
-            .map((r) => r.name)
-            .join(", ")}.`
+      let force = false;
+      for (;;) {
+        const roots = catalogueRoots();
+        const searched = await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Window, title: `abap2UI5: searching ${control}` },
+          async () => {
+            const hits = roots.length ? searchLocal(roots, control, log) : [];
+            /* Each repository without a checkout is asked remotely - the
+             * checkout stays primary, so a cloned samples-controls is never
+             * shadowed by its own catalogue. */
+            const remote: CatalogueHit[] = [];
+            let remoteAnswered = false;
+            for (const group of GROUPS) {
+              if (roots.some((r) => r.repo === group.repo)) {
+                continue;
+              }
+              const entries = await remoteEntries(context, group.repo, log, force);
+              if (entries !== undefined) {
+                remoteAnswered = true;
+                remote.push(...matchCatalogue(entries, control, group.repo));
+              }
+            }
+            return { hits, remote, remoteAnswered };
+          }
         );
-        return;
-      }
-      const picked = await vscode.window.showQuickPick(
-        hits.map((hit) => ({
-          label: `$(symbol-class) ${path.basename(hit.file).replace(/\.clas\.abap$/i, "")}`,
-          description: `${hit.catalogue} · ${hit.attributes} attribute${
-            hit.attributes === 1 ? "" : "s"
-          }`,
-          detail: hit.text,
-          hit,
-        })),
-        {
-          title: `${hits.length} example(s) of ${control}`,
+        const { hits, remote, remoteAnswered } = searched;
+        if (!hits.length && !remote.length) {
+          if (!roots.length && !remoteAnswered) {
+            /* No checkout AND no fetch: name both ways out instead of
+             * reporting "nothing found" for a corpus that was never there. */
+            const pick = await vscode.window.showInformationMessage(
+              "abap2UI5: no sample catalogue available - no local checkout under " +
+                "abap2ui5.mcp.reposRoot, and the online catalogues could not be " +
+                "fetched. Clone samples, samples-controls or samples-stack next " +
+                "to each other and point the setting at the folder holding them, " +
+                "or retry the download.",
+              "Open setting",
+              "Retry fetch"
+            );
+            if (pick === "Open setting") {
+              await vscode.commands.executeCommand(
+                "workbench.action.openSettings",
+                "abap2ui5.mcp.reposRoot"
+              );
+              return;
+            }
+            if (pick === "Retry fetch") {
+              force = true;
+              continue;
+            }
+            return;
+          }
+          const sources = [
+            ...new Set([
+              ...roots.map((r) => r.name),
+              ...GROUPS.filter((g) => !roots.some((r) => r.repo === g.repo)).map(
+                (g) => `${g.repo} (online)`
+              ),
+            ]),
+          ];
+          vscode.window.showInformationMessage(
+            `abap2UI5: no example of ${control} in ${sources.join(", ")}.`
+          );
+          return;
+        }
+        const picked = (await vscode.window.showQuickPick(quickPickItems(hits, remote), {
+          title: `${hits.length + remote.length} example(s) of ${control}`,
           matchOnDetail: true,
           placeHolder: "Richest example first - pick one to open it at the line",
+        })) as ExampleItem | undefined;
+        if (!picked) {
+          return;
         }
-      );
-      if (!picked) {
+        if ("remote" in picked) {
+          await vscode.env.openExternal(vscode.Uri.parse(picked.remote.url));
+          return;
+        }
+        const doc = await vscode.workspace.openTextDocument(picked.hit.file);
+        const editor = await vscode.window.showTextDocument(doc, { preview: true });
+        const at = new vscode.Position(picked.hit.line - 1, 0);
+        editor.selection = new vscode.Selection(at, at);
+        editor.revealRange(new vscode.Range(at, at), vscode.TextEditorRevealType.InCenter);
         return;
       }
-      const doc = await vscode.workspace.openTextDocument(picked.hit.file);
-      const editor = await vscode.window.showTextDocument(doc, { preview: true });
-      const at = new vscode.Position(picked.hit.line - 1, 0);
-      editor.selection = new vscode.Selection(at, at);
-      editor.revealRange(new vscode.Range(at, at), vscode.TextEditorRevealType.InCenter);
     })
   );
   log("examples: command registered");

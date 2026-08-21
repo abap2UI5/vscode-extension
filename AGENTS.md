@@ -65,7 +65,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/renamewires.ts` | `vscode`-free: where a control id and a bound attribute are written - both ends of the strings an app is wired with, for F2 |
 | `src/extractview.ts` | `vscode`-free: the edits that move a chain tail into a handle-taking method (where a chain may be cut) |
 | `src/examples.ts` | `vscode`-free: finds and ranks a control's uses in the sample catalogues |
-| `src/exampleview.ts` | "Show Examples for this Control": catalogue discovery, QuickPick, opens the hit |
+| `src/catalogue.ts` | `vscode`-free: parses the sample repositories' committed `catalogue.json` (three sibling shapes, pinned in `src/test/fixtures/catalogue-*.json`) and matches a control against the entries |
+| `src/exampleview.ts` | "Show Examples for this Control": catalogue discovery, the remote-catalogue fallback (fetch + day cache in memory and `globalState`), QuickPick, opens the hit (editor or GitHub) |
 | `src/annotations.ts` | `vscode`-free: what a line deserves to be told about it - `@since` per control/member, roundtrip cost per PUBLIC attribute |
 | `src/inlineview.ts` | The one decoration pass that renders all three inline annotations (findings, `@since`, cost) |
 | `src/abbreviation.ts` | `vscode`-free: Emmet-style abbreviations -> element tree -> chain (emitted by `xmltoabap.ts`) |
@@ -109,6 +110,7 @@ not committed.
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
+`catalogue.ts`,
 `abapscan.ts`, `settings.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,

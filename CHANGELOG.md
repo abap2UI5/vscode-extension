@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **"Show Examples for this Control" works without a single clone.** The
+  command used to read only the local checkouts under
+  `abap2ui5.mcp.reposRoot` - and the beginner most in need of an example is
+  exactly the person who has cloned nothing yet, so they got an empty
+  result. Each sample repository without a local checkout is now answered
+  from the `catalogue.json` it commits at its root, fetched from GitHub and
+  cached for a day: those hits name whole samples - the ports that
+  demonstrate the control first - and open on github.com at the class. A
+  local checkout stays the primary source and always wins for its
+  repository (it is searched line by line and opens in the editor); a
+  failed fetch quietly falls back to the previous behavior. Only when
+  there is no checkout AND no fetched catalogue does the command say so,
+  offering to open the setting or retry the download.
 - **"Check System Connection" diagnoses a white preview.** The most common
   first-run failure is a launch URL that is slightly wrong, and its symptom
   is the least helpful one possible: an empty white frame. The new command
