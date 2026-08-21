@@ -54,6 +54,38 @@ export function withParams(
   }
 }
 
+/**
+ * The launch URL rebased onto the running proxy: same path, query and hash,
+ * loaded through `http://127.0.0.1:<port>/__abap2ui5/<token>` instead of the
+ * system's origin.
+ *
+ * Rebuilt from the parsed parts rather than by replacing the origin substring,
+ * for two reasons a plain `replace(origin, proxyOrigin)` got wrong:
+ *
+ * - `URL.origin` is normalised (lowercased host, default port dropped), so a
+ *   launch URL written as `https://MyHost:443/...` never contained its own
+ *   origin verbatim - the replace was a no-op and the iframe loaded the system
+ *   DIRECTLY, where without the injected credentials it has nothing to show.
+ * - a launch URL without a path (`https://host?app_start=X`) put the query
+ *   right behind the token, making the token the LAST PATH SEGMENT - which the
+ *   browser drops when resolving every relative url on the page
+ *   (`resources/sap-ui-core.js` against `.../__abap2ui5/<token>?...` is
+ *   `.../__abap2ui5/resources/sap-ui-core.js`, token gone). `pathname` is
+ *   never empty, so the token always ends up followed by `/` and survives as
+ *   a directory.
+ */
+export function proxiedUrl(
+  externalUrl: string,
+  proxyOrigin: string
+): string | undefined {
+  try {
+    const parsed = new URL(externalUrl);
+    return proxyOrigin + parsed.pathname + parsed.search + parsed.hash;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The `sap-client` of a launch URL, needed for the ADT lookups. */
 export function sapClientOf(url: string): string | undefined {
   try {

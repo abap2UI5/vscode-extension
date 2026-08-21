@@ -341,6 +341,12 @@ test("the first answer plants the cookie an absolute path needs", async () => {
     );
     assert.ok(planted, "the answer carries the cookie");
     assert.match(planted!, /HttpOnly/, "the page cannot read it back out");
+    // in the preview the page sits in an iframe whose top-level document is
+    // the vscode-webview:// origin - every request it makes is cross-site
+    // there, and a Lax cookie stays home. None+Secure is what travels, and
+    // loopback is trustworthy enough for Chromium to take Secure over http.
+    assert.match(planted!, /SameSite=None/, "travels from the framed page");
+    assert.match(planted!, /Secure/, "which None requires");
 
     const cookie = planted!.split(";")[0];
     const absolute = await rawGet(proxy, "/sap/public/bc/ui5_ui5/x.js", {
@@ -542,6 +548,35 @@ test("a launch url without a path forwards a valid request line", async () => {
     const answer = await rawGet(proxy, `${tokenPath(proxy)}?app_start=zcl_x`);
     assert.equal(answer.status, 200);
     assert.equal(system.seen[0].path, "/?app_start=zcl_x");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the pathless frame URL keeps the token through relative resolution", async () => {
+  // proxiedUrl( ) turns `https://host?app_start=X` into `<prefix>/?app_start=X`
+  // - token as a DIRECTORY. Both the document and a relative resource the page
+  // resolves against it have to route, and the system has to see its own
+  // paths, token-free. (Resolved against the old `<prefix>?app_start=X` shape,
+  // the browser dropped the token segment and nothing ever loaded - the white
+  // preview of issue #60.)
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const frameUrl = `http://127.0.0.1:${new URL(proxy.origin).port}${tokenPath(
+      proxy
+    )}/?app_start=zcl_x`;
+    const doc = await rawGet(proxy, new URL(frameUrl).pathname + new URL(frameUrl).search);
+    assert.equal(doc.status, 200);
+    assert.equal(system.seen[0].path, "/?app_start=zcl_x");
+
+    // what the browser asks for next: `resources/...` relative to the document
+    const resource = new URL("resources/sap-ui-core.js", frameUrl);
+    const answer = await rawGet(proxy, resource.pathname + resource.search);
+    assert.equal(answer.status, 200);
+    assert.equal(system.seen[1].path, "/resources/sap-ui-core.js");
   } finally {
     await proxy.stop();
     system.close();

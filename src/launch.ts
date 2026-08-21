@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { classNameOf, isAppClass } from "./abap";
-import { originOf, sapClientOf } from "./urls";
+import { originOf, proxiedUrl, sapClientOf } from "./urls";
 import { suggestSystemUi5 } from "./ui5detect";
 import { clearCredentials, ensureCredentials, ensureSystem } from "./systems";
 import { PreviewSurface, Session } from "./session";
@@ -74,7 +74,7 @@ export async function runApp(
       },
       () => session.proxy.start(origin, creds.user, creds.pass)
     );
-    frameUrl = externalUrl.replace(origin, session.proxy.origin);
+    frameUrl = proxiedUrl(externalUrl, session.proxy.origin) ?? externalUrl;
   } catch (err) {
     vscode.window.showErrorMessage(
       "abap2UI5: could not start the proxy - " +

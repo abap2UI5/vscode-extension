@@ -899,8 +899,15 @@ export class SapProxy {
           })
         : [];
       if (seedCookie) {
+        // SameSite=None, not Lax: the page lives in an iframe whose top-level
+        // document is the vscode-webview:// origin, so every request the page
+        // makes counts as cross-site and a Lax cookie stays home - exactly the
+        // absolute-path requests this cookie exists to authorize. None needs
+        // Secure to be accepted, and loopback is a trustworthy origin, so
+        // Chromium takes the pair over plain http (same reasoning as the SAP
+        // session cookies above).
         cookies.push(
-          `${TOKEN_COOKIE}=${this.token}; Path=/; HttpOnly; SameSite=Lax`
+          `${TOKEN_COOKIE}=${this.token}; Path=/; HttpOnly; SameSite=None; Secure`
         );
       }
       if (cookies.length > 0) {
