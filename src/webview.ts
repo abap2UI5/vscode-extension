@@ -431,6 +431,7 @@ ${BASE_CSS}
       <div class="hint">
         <span>Taking longer than usual.</span>
         <button id="hint-reload">Reload</button>
+        <button id="hint-check">Check connection</button>
         <button id="hint-ext">Open externally</button>
       </div>
     </div>
@@ -613,6 +614,11 @@ ${BASE_CSS}
   document.getElementById('hint-ext').addEventListener('click', openExternal);
   document.getElementById('hint-reload').addEventListener('click', () => {
     load(frameUrl, 'Reloading ' + nameEl.textContent + '\\u2026');
+  });
+  // An app frame that never loads is exactly what the connection check
+  // diagnoses - offer it right where the wall is hit.
+  document.getElementById('hint-check').addEventListener('click', () => {
+    vscodeApi.postMessage({ type: 'command', command: 'abap2ui5.checkConnection' });
   });
   function openExternal() { vscodeApi.postMessage({ type: 'openExternal' }); }
 

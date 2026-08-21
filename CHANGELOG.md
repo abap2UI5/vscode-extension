@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **"Check System Connection" diagnoses a white preview.** The most common
+  first-run failure is a launch URL that is slightly wrong, and its symptom
+  is the least helpful one possible: an empty white frame. The new command
+  probes the configured system the way F9 would - the same URL expansion,
+  the same stored credentials, the same proxy plumbing - and reports step by
+  step where a launch ends: the URL's shape (`{class}` placeholder, scheme),
+  the host (DNS, port, TLS certificate, VPN), the HTTP status (401/403 with
+  the system's own words and whether basic auth is offered at all, 404 with
+  the SICF hint and the path that failed), and whether a 200 actually is an
+  abap2UI5 bootstrap page rather than a logon form or something else
+  entirely. Each failing step names its fix; the full stepwise report lands
+  in the abap2UI5 output log. The preview's "taking longer than usual"
+  overlay and the getting-started walkthrough offer the check right where
+  the wall is usually hit.
 - **A launch URL without a path loads past its first request.** (#60) The
   preview swaps the system's origin for the local proxy's
   `http://127.0.0.1:<port>/__abap2ui5/<token>` prefix. For

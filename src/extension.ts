@@ -42,6 +42,7 @@ import {
 } from "./preview";
 import {
   activateAndReload,
+  checkConnection,
   makeConnectSystem,
   runApp,
   watchProxyStatus,
@@ -243,6 +244,11 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       reloadShownApp(session, "Reloaded after save");
     }),
+    // The white-preview diagnosis: probes the configured launch URL the way
+    // F9 would and says which step fails (URL, host, logon, ICF path, page).
+    vscode.commands.registerCommand("abap2ui5.checkConnection", () =>
+      checkConnection(session)
+    ),
     vscode.commands.registerCommand("abap2ui5.resetCredentials", async () => {
       await clearCredentials(context);
       vscode.window.showInformationMessage(

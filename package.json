@@ -103,6 +103,11 @@
         "icon": "$(server-environment)"
       },
       {
+        "command": "abap2ui5.checkConnection",
+        "title": "abap2UI5: Check System Connection",
+        "icon": "$(plug)"
+      },
+      {
         "command": "abap2ui5.resetCredentials",
         "title": "abap2UI5: Clear Stored SAP Credentials"
       },
@@ -279,6 +284,10 @@
         },
         {
           "command": "abap2ui5.setLaunchUrl",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.checkConnection",
           "when": "!isWeb"
         },
         {

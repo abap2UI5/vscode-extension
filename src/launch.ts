@@ -1,14 +1,27 @@
 import * as vscode from "vscode";
 import { classNameOf, isAppClass } from "./abap";
-import { originOf, proxiedUrl, sapClientOf } from "./urls";
+import { originOf, proxiedUrl, sapClientOf, shortUrl } from "./urls";
 import { suggestSystemUi5 } from "./ui5detect";
 import { clearCredentials, ensureCredentials, ensureSystem } from "./systems";
 import { PreviewSurface, Session } from "./session";
 import { reloadShownApp, showInTab } from "./preview";
+import { describeRejection } from "./proxy";
+import {
+  CheckStep,
+  checkTemplate,
+  classifyBody,
+  classifyStatus,
+  describeConnectFailure,
+  firstFailure,
+  pathAndQueryOf,
+  reachedStep,
+  renderReport,
+} from "./connectcheck";
 
 /*
- * Launching an app: F9, the activation command behind Ctrl+F3, and the
- * proxy-status watch that turns a rejected logon into an actionable offer.
+ * Launching an app: F9, the activation command behind Ctrl+F3, the
+ * proxy-status watch that turns a rejected logon into an actionable offer,
+ * and the connection check that turns a white preview into a diagnosis.
  */
 
 /**
@@ -189,6 +202,133 @@ export async function activateAndReload(session: Session): Promise<void> {
     session.bounceFocusUntil = Date.now() + 2500;
   }
   reloadShownApp(session, "Reloaded after activation");
+}
+
+// ---------------------------------------------------------------------------
+// The connection check - a white preview, diagnosed
+// ---------------------------------------------------------------------------
+
+/**
+ * "abap2UI5: Check System Connection" - probes the active system's launch URL
+ * and reports step by step where a launch would end, with the fix next to the
+ * failing step.
+ *
+ * The biggest first-run failure is a launch URL that is slightly wrong, and
+ * its symptom in the preview is a white rectangle that says nothing. The
+ * check walks the exact route F9 takes - the same URL expansion, the same
+ * stored credentials, the same proxy plumbing (`fetchFromSystem`) - so what
+ * it reports is what the preview would experience. The meaning of each
+ * observation lives in `connectcheck.ts`, `vscode`-free and unit-tested.
+ */
+export async function checkConnection(session: Session): Promise<void> {
+  const system = await ensureSystem(session.ctx);
+  if (!system) {
+    return;
+  }
+
+  const steps: CheckStep[] = [checkTemplate(system.template)];
+
+  if (steps[0].ok) {
+    // The class name only fills the placeholder - the endpoint serves its
+    // bootstrap page for any name - so prefer whatever the user last ran.
+    const editor = vscode.window.activeTextEditor;
+    const editorClass =
+      editor &&
+      editor.document.languageId === "abap" &&
+      isAppClass(editor.document.getText())
+        ? classNameOf(editor.document.getText(), editor.document.fileName)
+        : undefined;
+    const className =
+      session.currentTarget?.className ??
+      editorClass ??
+      session.recentApps()[0] ??
+      "ZCL_APP";
+    const externalUrl = session.urlFor(system, className);
+    const origin = originOf(externalUrl);
+    const probePath = pathAndQueryOf(externalUrl);
+    if (!origin || !probePath) {
+      // checkTemplate passed, so this shape should not exist - still, never
+      // report "reachable" about a URL that was not probed.
+      steps.push({
+        label: "Host reachable",
+        ok: false,
+        detail: "the expanded launch URL does not parse as a URL",
+        fix: 'Check the template with "abap2UI5: Set Launch URL".',
+      });
+    } else {
+      const creds = await ensureCredentials(session.ctx, origin);
+      if (!creds) {
+        return;
+      }
+      try {
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Window,
+            title: `abap2UI5: checking ${system.name}`,
+          },
+          async () => {
+            // The same start( ) a launch goes through: it clears a previous
+            // rejection and holds the credentials the fetch injects.
+            await session.proxy.start(origin, creds.user, creds.pass);
+            const answer = await session.proxy.fetchFromSystem(
+              probePath,
+              "text/html, */*"
+            );
+            steps.push(reachedStep(origin));
+            const statusStep = classifyStatus({
+              status: answer.status,
+              path: probePath.split("?")[0] || "/",
+              authenticate: answer.authenticate,
+              reason:
+                answer.status >= 400
+                  ? describeRejection(answer.body)
+                  : undefined,
+            });
+            steps.push(statusStep);
+            if (statusStep.ok) {
+              steps.push(classifyBody(answer.body));
+            }
+          }
+        );
+      } catch (err) {
+        const failure = err as { code?: unknown; message?: unknown };
+        steps.push(
+          describeConnectFailure({
+            code: typeof failure?.code === "string" ? failure.code : undefined,
+            message:
+              typeof failure?.message === "string"
+                ? failure.message
+                : String(err),
+          })
+        );
+      }
+    }
+  }
+
+  // The full stepwise report lives in the output channel - the one place a
+  // multi-line result fits, and the same place the proxy already reports to.
+  session.log(`connection check: ${system.name} (${shortUrl(system.template)})`);
+  for (const line of renderReport(steps)) {
+    session.log(`  ${line}`);
+  }
+
+  const failed = firstFailure(steps);
+  if (!failed) {
+    vscode.window.showInformationMessage(
+      `abap2UI5: connection check passed - ${system.name} serves an ` +
+        "abap2UI5 page. If the preview still stays empty, check the " +
+        "abap2UI5 output log for runtime errors."
+    );
+    return;
+  }
+  const pick = await vscode.window.showErrorMessage(
+    `abap2UI5: ${failed.label} - ${failed.detail}` +
+      (failed.fix ? ` ${failed.fix}` : ""),
+    "Show All Steps"
+  );
+  if (pick === "Show All Steps") {
+    session.output.show(true);
+  }
 }
 
 // ---------------------------------------------------------------------------
