@@ -39,6 +39,22 @@ test("the preview carries the runtime-error badge, reset on every load", () => {
   assert.ok(html.includes("appModel"));
 });
 
+test("the slow-load hint offers the connection check", () => {
+  // The wall a wrong launch URL puts up is a frame that never loads - the
+  // overlay that notices it is exactly where the diagnosis belongs.
+  const html = previewHtml({
+    frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
+    externalUrl: "https://host:44300/sap/bc/z2ui5?app_start=ZCL_X",
+    className: "ZCL_X",
+    theme: "",
+    language: "",
+    modelRoots: [],
+    nonce: "n0nce",
+  });
+  assert.ok(html.includes('id="hint-check"'));
+  assert.ok(html.includes("abap2ui5.checkConnection"));
+});
+
 test("in panel mode the empty state promises the app right here", () => {
   const html = welcomeHtml({ ...BASE, openMode: "panel" });
   assert.ok(html.includes("Your app runs here"));

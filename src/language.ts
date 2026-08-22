@@ -14,6 +14,7 @@ import {
 } from "./context";
 import { declarationSpan, methodImplementations, usesBuilder } from "./abap";
 import {
+  apiReferenceUrl,
   clientCallAt,
   clientMethod,
   clientMethods,
@@ -318,6 +319,9 @@ class ClientApiHover implements vscode.HoverProvider {
     if (method.doc) {
       md.appendMarkdown(`\n${method.doc}`);
     }
+    md.appendMarkdown(
+      `\n\n[Client API Reference](${apiReferenceUrl(method.name)})`
+    );
     return new vscode.Hover(md);
   }
 }

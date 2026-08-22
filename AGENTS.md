@@ -30,7 +30,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/extension.ts` | Desktop activation: builds the `Session`, wires the preview surfaces, registers every command |
 | `src/session.ts` | The desktop session object: all mutable state (shown app, tab, status bar, channels, proxy, focus bookkeeping) with one `dispose()` registered in `context.subscriptions` |
 | `src/preview.ts` | The preview surfaces: panel view provider, editor tab, webview message handling, moving the app between tab and panel |
-| `src/launch.ts` | F9 (`runApp`), the Ctrl+F3 activate-and-reload command, the proxy-status watch, the connect-system flow |
+| `src/launch.ts` | F9 (`runApp`), the Ctrl+F3 activate-and-reload command, the proxy-status watch, the connect-system flow, the connection check command |
+| `src/connectcheck.ts` | `vscode`-free: what the connection check's probes MEAN - launch-URL shape, DNS/TCP/TLS failure and HTTP-status classification, bootstrap-page detection - behind "Check System Connection" |
 | `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list |
 | `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
 | `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only |
@@ -64,7 +65,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/renamewires.ts` | `vscode`-free: where a control id and a bound attribute are written - both ends of the strings an app is wired with, for F2 |
 | `src/extractview.ts` | `vscode`-free: the edits that move a chain tail into a handle-taking method (where a chain may be cut) |
 | `src/examples.ts` | `vscode`-free: finds and ranks a control's uses in the sample catalogues |
-| `src/exampleview.ts` | "Show Examples for this Control": catalogue discovery, QuickPick, opens the hit |
+| `src/catalogue.ts` | `vscode`-free: parses the sample repositories' committed `catalogue.json` (three sibling shapes, pinned in `src/test/fixtures/catalogue-*.json`) and matches a control against the entries |
+| `src/exampleview.ts` | "Show Examples for this Control": catalogue discovery, the remote-catalogue fallback (fetch + day cache in memory and `globalState`), QuickPick, opens the hit (editor or GitHub) |
 | `src/annotations.ts` | `vscode`-free: what a line deserves to be told about it - `@since` per control/member, roundtrip cost per PUBLIC attribute |
 | `src/inlineview.ts` | The one decoration pass that renders all three inline annotations (findings, `@since`, cost) |
 | `src/abbreviation.ts` | `vscode`-free: Emmet-style abbreviations -> element tree -> chain (emitted by `xmltoabap.ts`) |
@@ -108,10 +110,11 @@ not committed.
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
+`catalogue.ts`,
 `abapscan.ts`, `settings.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
-`abbreviation.ts`,
+`abbreviation.ts`, `connectcheck.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain

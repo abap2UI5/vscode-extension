@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- **The `client->` hover links to the published Client API Reference.** The
+  hover shows a method's signature and ABAP Doc, but it was a dead end: no
+  way to read on - the parameter tables, the constants, the neighbouring
+  methods of the same group. Every hover now ends with a "Client API
+  Reference" link to the generated page on the documentation site, deep-linked
+  straight to the method's own heading (`client->view_display` opens at
+  `#view-display`), so the full reference is one click from the code.
+- **"Show Examples for this Control" works without a single clone.** The
+  command used to read only the local checkouts under
+  `abap2ui5.mcp.reposRoot` - and the beginner most in need of an example is
+  exactly the person who has cloned nothing yet, so they got an empty
+  result. Each sample repository without a local checkout is now answered
+  from the `catalogue.json` it commits at its root, fetched from GitHub and
+  cached for a day: those hits name whole samples - the ports that
+  demonstrate the control first - and open on github.com at the class. A
+  local checkout stays the primary source and always wins for its
+  repository (it is searched line by line and opens in the editor); a
+  failed fetch quietly falls back to the previous behavior. Only when
+  there is no checkout AND no fetched catalogue does the command say so,
+  offering to open the setting or retry the download.
+- **"Check System Connection" diagnoses a white preview.** The most common
+  first-run failure is a launch URL that is slightly wrong, and its symptom
+  is the least helpful one possible: an empty white frame. The new command
+  probes the configured system the way F9 would - the same URL expansion,
+  the same stored credentials, the same proxy plumbing - and reports step by
+  step where a launch ends: the URL's shape (`{class}` placeholder, scheme),
+  the host (DNS, port, TLS certificate, VPN), the HTTP status (401/403 with
+  the system's own words and whether basic auth is offered at all, 404 with
+  the SICF hint and the path that failed), and whether a 200 actually is an
+  abap2UI5 bootstrap page rather than a logon form or something else
+  entirely. Each failing step names its fix; the full stepwise report lands
+  in the abap2UI5 output log. The preview's "taking longer than usual"
+  overlay and the getting-started walkthrough offer the check right where
+  the wall is usually hit.
+
 ## 0.24.4
 
 - **A launch URL without a path loads past its first request.** (#60) The

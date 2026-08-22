@@ -589,7 +589,7 @@ export class SapProxy {
   fetchFromSystem(
     path: string,
     accept = "application/xml, application/json, */*"
-  ): Promise<{ status: number; body: string }> {
+  ): Promise<{ status: number; body: string; authenticate?: string }> {
     const target = this.target;
     const auth = this.authHeader;
     if (!target || !auth) {
@@ -632,6 +632,7 @@ export class SapProxy {
             // A rejection here used to be silent: these requests happen on a
             // timer rather than on a keystroke, so nothing in the UI said the
             // logon had stopped working.
+            const authenticate = headerValue(res.headers["www-authenticate"]);
             if (status === 401 || status === 403) {
               if (status === 401) {
                 this.authRejected = true;
@@ -639,11 +640,13 @@ export class SapProxy {
               this.onResponse?.({
                 status,
                 path,
-                authenticate: headerValue(res.headers["www-authenticate"]),
+                authenticate,
                 reason: describeRejection(body),
               });
             }
-            resolve({ status, body });
+            // The header travels with the answer too: the connection check
+            // needs it to tell "wrong password" from "no basic auth at all".
+            resolve({ status, body, authenticate });
           });
           // a connection that dies mid-body emits on the RESPONSE stream, and
           // an unhandled "error" there takes the extension host down with it

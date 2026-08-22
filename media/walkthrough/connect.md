@@ -14,3 +14,8 @@ System"*; the choice is remembered per window.
 
 Credentials (the ones you use in ADT) are asked for once and kept in VS
 Code's SecretStorage.
+
+Not sure the URL is right? Run *"abap2UI5: Check System Connection"* — it
+probes the endpoint step by step (URL shape, host, logon, ICF path, page
+content) and says which step fails and what fixes it, instead of leaving
+you with a white preview.
