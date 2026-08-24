@@ -99,7 +99,7 @@
     },
     {
       "name": "get",
-      "signature": "METHODS get\n    RETURNING\n      VALUE(result) TYPE z2ui5_if_types=>ty_s_get.",
+      "signature": "METHODS get\n    RETURNING\n      VALUE(result) TYPE ty_s_get.",
       "doc": ""
     },
     {
@@ -144,7 +144,7 @@
     },
     {
       "name": "_event",
-      "signature": "METHODS _event\n    IMPORTING\n      val           TYPE clike                              OPTIONAL\n      t_arg         TYPE string_table                       OPTIONAL\n      s_ctrl        TYPE z2ui5_if_types=>ty_s_event_control OPTIONAL\n        PREFERRED PARAMETER val\n    RETURNING\n      VALUE(result) TYPE string.",
+      "signature": "METHODS _event\n    IMPORTING\n      val           TYPE clike                              OPTIONAL\n      t_arg         TYPE string_table                       OPTIONAL\n      s_ctrl        TYPE ty_s_event_control                  OPTIONAL\n        PREFERRED PARAMETER val\n    RETURNING\n      VALUE(result) TYPE string.",
       "doc": "Register a backend event and return the handler expression for a view\nattribute (press = client->_event( `SAVE` )). s_ctrl carries the optional\nevent flags: check_allow_multi_req sends the event while another\nroundtrip is still running, check_prevent_default cancels the control's\nbuilt-in default for this event (oEvent.preventDefault(), e.g. a\nsap.tnt NavigationListItem press that must not select the item) before\nthe roundtrip - the event is still sent, so the backend stays in charge\nof what happens instead. That flag is baked per WIRE at render time;\nprevent_default_expr is the same veto decided per FIRING - a client\nexpression evaluated when the event fires, so one wire can protect one\nrow/column and let the rest through\n(`${$parameters>/column}.getId().indexOf('COL_DATE') >= 0`). It wins\nover the flag when both are set."
     },
     {
