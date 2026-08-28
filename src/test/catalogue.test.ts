@@ -129,3 +129,31 @@ test("the list stays bounded however big the catalogue grows", () => {
   };
   assert.equal(matchCatalogue(parseCatalogue(JSON.stringify(big)), "Table", "samples").length, 8);
 });
+
+test("a samples-stack hit links to the branch its file is actually on", () => {
+  /*
+   * samples-stack keeps its samples on per-topic branches and says so in
+   * every entry. The branch was read nowhere, so each hit opened a
+   * `blob/main/...` url for a file that exists only on `02-smart-controls` -
+   * a 404 for anyone without a local checkout, which is exactly the case the
+   * remote catalogue is FOR.
+   */
+  const entries = parseCatalogue(JSON.stringify(samplesStack));
+  const branched = entries.find((e) => e.branch);
+  assert.ok(branched, "the pinned fixture no longer carries a branch");
+  assert.equal(
+    blobUrl("samples-stack", branched.file, branched.branch),
+    `https://github.com/abap2UI5/samples-stack/blob/${branched.branch}/${branched.file}`
+  );
+});
+
+test("an entry without a branch still links to main", () => {
+  assert.equal(
+    blobUrl("samples", "src/z.clas.abap"),
+    "https://github.com/abap2UI5/samples/blob/main/src/z.clas.abap"
+  );
+  assert.equal(
+    blobUrl("samples", "src/z.clas.abap", undefined),
+    "https://github.com/abap2UI5/samples/blob/main/src/z.clas.abap"
+  );
+});

@@ -4,6 +4,7 @@ import * as path from "path";
 import {
   augmentedPath,
   checkerCwd,
+  directiveLine,
   isCheckableSource,
   findingsBarText,
   findingsBarTooltip,
@@ -531,4 +532,82 @@ test("a file-scheme folder that is not on disk is refused too", () => {
     checkerCwd({ fsPath: "/gone", scheme: "file" }, "/home/me", onDisk),
     "/home/me"
   );
+});
+
+/*
+ * Where a disable directive may be written.
+ *
+ * The linter records an XML finding at the offset of the attribute it is
+ * about, and controls in the corpus spread their attributes over lines. A
+ * comment inserted above such a line lands INSIDE the start tag, and the view
+ * then fails to load - a worse outcome than the finding being waived.
+ */
+
+test("directiveLine leaves ABAP alone - a full-line comment is legal anywhere", () => {
+  const abap = [
+    "view->ele( n = `Page`",
+    "    )->tag( n = `Button`",
+    "        )->a( n = `text` v = `Go` ).",
+  ].join("\n");
+  assert.equal(directiveLine(abap, 2, false), 2);
+  assert.equal(directiveLine(abap, 0, false), 0);
+});
+
+test("directiveLine climbs out of a multi-line XML start tag", () => {
+  const xml = [
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">',
+    "  <Button",
+    '    text="Go"',
+    '    nosuchprop="x"/>',
+    "</mvc:View>",
+  ].join("\n");
+  // the finding sits on `nosuchprop`, the comment has to go above `<Button`
+  assert.equal(directiveLine(xml, 3, true), 1);
+  assert.equal(directiveLine(xml, 2, true), 1);
+});
+
+test("directiveLine keeps the line when the tag is closed on it", () => {
+  const xml = [
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">',
+    '  <Button text="Go" nosuchprop="x"/>',
+    "</mvc:View>",
+  ].join("\n");
+  assert.equal(directiveLine(xml, 1, true), 1);
+});
+
+test("directiveLine is not fooled by < inside attribute values or comments", () => {
+  const xml = [
+    '<mvc:View xmlns="sap.m">',
+    '  <Text text="a &lt; b and a < b"/>',
+    "  <!-- <Button -->",
+    "  <Button",
+    '    nosuchprop="x"/>',
+    "</mvc:View>",
+  ].join("\n");
+  // line 4 is inside the start tag opened on line 3
+  assert.equal(directiveLine(xml, 4, true), 3);
+  // line 2 is between tags - its own line is fine
+  assert.equal(directiveLine(xml, 2, true), 2);
+});
+
+test("directiveLine handles an apostrophe-quoted attribute holding a >", () => {
+  const xml = [
+    '<mvc:View xmlns="sap.m">',
+    "  <Text",
+    "    text='a > b'",
+    '    nosuchprop="x"/>',
+    "</mvc:View>",
+  ].join("\n");
+  assert.equal(directiveLine(xml, 3, true), 1);
+});
+
+test("directiveLine survives the prolog", () => {
+  const xml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<mvc:View xmlns="sap.m">',
+    "  <Button",
+    '    nosuchprop="x"/>',
+    "</mvc:View>",
+  ].join("\n");
+  assert.equal(directiveLine(xml, 3, true), 2);
 });

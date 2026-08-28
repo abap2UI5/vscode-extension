@@ -3,6 +3,7 @@ import * as https from "https";
 import { randomBytes } from "crypto";
 import { URL } from "url";
 import { redact } from "./report";
+import { rebasedLocation } from "./urls";
 
 /** Non-2xx answer from the ADT class lookup, with the status to decide on. */
 export class AdtStatusError extends Error {
@@ -413,6 +414,20 @@ const TOKEN_COOKIE = "__abap2ui5_proxy";
  *  the one the proxy hands out - the shape of a DNS rebinding attempt. */
 const LOOPBACK_HOST = /^(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?$/i;
 
+/**
+ * Whether a request's `Host` is one this machine's own loopback can be
+ * reached under.
+ *
+ * Exported because EVERY local listener that acts with the system
+ * credentials owes its callers this check, not just this one - a port on
+ * 127.0.0.1 is reachable by any process on the machine and by any page that
+ * resolves a name to loopback. The system MCP server is the second such
+ * listener and shares it; a third must too.
+ */
+export function isLoopbackHost(host: string | undefined): boolean {
+  return LOOPBACK_HOST.test(String(host ?? ""));
+}
+
 /** How long a forwarded request may take before the proxy gives up. Without
  *  it a system that accepts the connection and then goes quiet holds the
  *  request - and the preview - open with nothing to show for it. */
@@ -543,6 +558,14 @@ export class SapProxy {
     return !!this.server && !!this.target && !!this.authHeader;
   }
 
+  /** Which SYSTEM this proxy currently forwards to, normalised - undefined
+   *  while it is not running. Callers that remember something about a system
+   *  (rather than about the proxy) key it on this, so switching systems does
+   *  not carry the old one's verdict over. */
+  get systemOrigin(): string | undefined {
+    return this.target?.origin;
+  }
+
   /**
    * The system path an incoming request is asking for, or undefined when the
    * request has no business here. Two ways to be authorized, and a request
@@ -552,7 +575,7 @@ export class SapProxy {
     // A browser sends the host it connected to. Ours is always loopback, so
     // anything else is a name that resolves here without being ours - which
     // is what DNS rebinding looks like from this side.
-    if (!LOOPBACK_HOST.test(String(req.headers.host ?? ""))) {
+    if (!isLoopbackHost(req.headers.host)) {
       return undefined;
     }
 
@@ -878,10 +901,12 @@ export class SapProxy {
         }
       }
 
-      // Rewrite redirects from the SAP host to the proxy
+      // Rewrite redirects from the SAP host to the proxy - structurally,
+      // never by replacing the origin substring (see `rebasedLocation`).
       if (outHeaders.location) {
-        outHeaders.location = String(outHeaders.location).replace(
-          target.origin,
+        outHeaders.location = rebasedLocation(
+          String(outHeaders.location),
+          target,
           this.origin
         );
       }

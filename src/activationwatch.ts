@@ -25,6 +25,10 @@ import { isNewer } from "./previewcore";
  *  and a test can hand in a scripted stand-in. */
 export interface ClassStateSource {
   readonly isRunning: boolean;
+  /** The system being forwarded to. What "ADT does not answer here" is a
+   *  statement ABOUT, so the watch remembers that verdict per system rather
+   *  than per session. */
+  readonly systemOrigin?: string;
   fetchClassState(className: string, sapClient?: string): Promise<AdtClassState>;
 }
 
@@ -62,8 +66,17 @@ export class ActivationWatch {
   private timer: NodeJS.Timeout | undefined;
   /** Bumped on every stop, so an in-flight poll of an old watch goes stale. */
   private generation = 0;
-  /** ADT answered 4xx: this system will not tell us, stop asking for good. */
-  private adtUnavailable = false;
+  /**
+   * Systems whose ADT answered 4xx: they will not start answering later, so
+   * they are not asked again.
+   *
+   * Keyed by system origin, not a plain flag. As a flag it latched for the
+   * whole window: one launch against a system where `/sap/bc/adt` is closed
+   * (or the user lacks the authorization) switched reload-on-activation off
+   * for every OTHER system too, until the window was reloaded - the feature
+   * silently gone with only a log line to say so.
+   */
+  private adtUnavailable = new Set<string>();
   /** Server changedAt of the version the preview currently shows. */
   private baselineClass: string | undefined;
   private baselineChangedAt: string | undefined;
@@ -78,15 +91,35 @@ export class ActivationWatch {
    * right now. Fire-and-forget: without a baseline the watch still reloads on
    * an observed inactive→active flip, just not on a too-fast-to-see one.
    */
+  /** Whether this system has already refused the ADT lookup. */
+  private refused(): boolean {
+    const origin = this.deps.source.systemOrigin;
+    return origin !== undefined && this.adtUnavailable.has(origin);
+  }
+
   captureBaseline(): void {
     const { source, current, log } = this.deps;
     const target = current();
-    if (!target || !source.isRunning || this.adtUnavailable) {
+    if (!target || !source.isRunning || this.refused()) {
       return;
     }
     const className = target.className;
+    /*
+     * The answer belongs to the state the preview is in NOW. `stop()` bumps
+     * the generation on every save and every reload, and this fetch is
+     * fire-and-forget - so a slow answer could land after the next save had
+     * already started a watch, overwrite the baseline with the OLDER
+     * timestamp, and make the first poll read "changed since shown" for an
+     * activation that never happened. That reload cleared the
+     * "not activated" badge, which is precisely the thing the badge is there
+     * to keep on the screen.
+     */
+    const gen = this.generation;
     void source.fetchClassState(className, target.sapClient).then(
       (state) => {
+        if (gen !== this.generation) {
+          return; // superseded: a newer capture or watch owns the baseline
+        }
         this.baselineClass = className;
         this.baselineChangedAt = state.changedAt;
         log(
@@ -115,8 +148,10 @@ export class ActivationWatch {
     if (!target) {
       return;
     }
-    if (this.adtUnavailable) {
-      log("activation watch: not started - ADT already refused earlier this session");
+    if (this.refused()) {
+      log(
+        `activation watch: not started - ADT already refused on ${source.systemOrigin}`
+      );
       return;
     }
     if (!source.isRunning) {
@@ -149,10 +184,14 @@ export class ActivationWatch {
       } catch (err) {
         if (err instanceof AdtStatusError && err.status >= 400 && err.status < 500) {
           // Not authorized / not exposed: it will not start answering later.
-          this.adtUnavailable = true;
+          const origin = source.systemOrigin;
+          if (origin) {
+            this.adtUnavailable.add(origin);
+          }
           log(
-            `activation watch: ADT answered ${err.status} - giving up for this ` +
-              "session (is /sap/bc/adt active on the launch-URL host?)"
+            `activation watch: ADT answered ${err.status} - giving up on ` +
+              `${origin ?? "this system"} (is /sap/bc/adt active on the ` +
+              "launch-URL host?)"
           );
           return;
         }

@@ -79,6 +79,20 @@ export class PreviewViewProvider
       if (this.view === view) {
         this.view = undefined;
         this.previewRendered = false;
+        /*
+         * The app went with the view. The tab's own dispose handler has always
+         * said so; this one only forgot the webview, so the session went on
+         * believing an app was showing: the status bar kept offering
+         * "$(play-circle) ZCL_APP", and clicking it ran the reload command,
+         * which passed its guard and posted into nothing at all. No app, no
+         * message, no feedback - instead of the "no app is running" the same
+         * click gives after closing the tab.
+         */
+        if (this.showsApp) {
+          this.showsApp = false;
+          this.session.currentTarget = undefined;
+          this.session.updateStatusItem();
+        }
       }
     });
     this.render();
@@ -440,9 +454,25 @@ export async function movePreview(
   provider: PreviewSurface,
   to: "tab" | "panel"
 ): Promise<void> {
-  await vscode.workspace
-    .getConfiguration(CONFIG_SECTION)
-    .update(OPEN_MODE_KEY, to, vscode.ConfigurationTarget.Global);
+  /*
+   * Write where the value is actually READ from, not always globally.
+   *
+   * `openMode` is not machine-scoped, so a repository's `.vscode/settings.json`
+   * may set it - and a workspace value wins over the global one. Updating only
+   * the global value then moved the running app once and changed nothing: the
+   * next F9 opened in the old surface again, and the empty state went back to
+   * explaining the other mode. Whichever scope defines it today is the one
+   * that has to change.
+   */
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const set = cfg.inspect<string>(OPEN_MODE_KEY);
+  const scope =
+    set?.workspaceFolderValue !== undefined
+      ? vscode.ConfigurationTarget.WorkspaceFolder
+      : set?.workspaceValue !== undefined
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global;
+  await cfg.update(OPEN_MODE_KEY, to, scope);
 
   // Disposing the tab clears `currentTarget` through its dispose handler. The
   // app is not gone, it changes place, so it is put back afterwards.

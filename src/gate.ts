@@ -8,7 +8,7 @@
  * snapshot is handed in by `snapshot.ts`).
  */
 
-import { checkAbapRules } from "@abap2ui5/linter/abap-rules";
+import { checkAbapRules, namedModels } from "@abap2ui5/linter/abap-rules";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import {
   checkNodes,
@@ -26,6 +26,35 @@ import { snapshot } from "./snapshot";
 import type { CheckOptions } from "./lintconfig";
 
 export const VIEW_XML_RE = /\.(view|fragment)\.xml$/i;
+
+/*
+ * Four inputs the linter's runtime reads and the PINNED `types.d.ts` does not
+ * declare: `jsonPaths` on the prepareAbap result, `jsonPaths` and `fromAbap`
+ * on checkNodes, `minUi5` on checkAbapRules. Leaving them out is not a typing
+ * detail - it silences whole rules (see `runGate`), which is how this gate
+ * drifted from the CLI in the first place.
+ *
+ * They travel through these narrow casts rather than through a local
+ * re-description of the linter's shapes: AGENTS.md is explicit that a
+ * hand-written `linter.d.ts` here may not come back, because a second copy of
+ * those types can only go stale. The linter declares all four on its main
+ * branch now (abap2UI5/linter, `./icons` change), so at the next pin bump
+ * these three aliases go and the values are passed directly -
+ * `gate.parity.test.ts` is what proves they were carrying the right values
+ * meanwhile.
+ *
+ * The shapes are the RUNTIME's, not a guess: `jsonPaths` is a `Set` of the
+ * paths bound as JSON. Typing it as a record type-checked fine against a
+ * declaration that did not exist and was simply wrong - which is the standing
+ * risk of a cast, and why the linter's own typings gate now reads its option
+ * names out of the signatures.
+ */
+type UndeclaredNodeOptions = {
+  jsonPaths?: Set<string> | null;
+  fromAbap?: boolean;
+};
+type UndeclaredAbapRuleOptions = { minUi5?: string };
+type UndeclaredPrepared = { jsonPaths?: Set<string> | null };
 
 export interface GateResult {
   findings: PropertyFinding[];
@@ -81,6 +110,13 @@ export function runGate(
       };
     }
     const controlIds: Record<string, string> = {};
+    // Which `name>` prefixes a binding may use: the class itself is the only
+    // place that can widen the framework's three (SET_ODATA_MODEL). `null`
+    // means "widened non-literally", which silences unknown-model rather than
+    // guessing - passing nothing at all silenced it just the same, and that
+    // is not the same statement.
+    const models = namedModels(text);
+    const jsonPaths = (prep as UndeclaredPrepared).jsonPaths ?? null;
     for (const node of prep.nodes) {
       // the model derived from the class is what makes the binding-path
       // rules possible - a path nothing in the model has stays silently
@@ -94,10 +130,19 @@ export function runGate(
           model: prep.model,
           shape: prep.modelShape,
           rootFields: prep.rootFields,
+          models,
+          // json-bind-on-scalar-property needs the paths a JSON seed wrote,
+          // and both raw-javascript-to-frontend rules only judge a value as
+          // ABAP-authored when the caller says the source was ABAP.
+          ...({ jsonPaths, fromAbap: true } as UndeclaredNodeOptions),
         })
       );
       Object.assign(controlIds, collectControlIds(node));
     }
+    // Structural defects of the builder chain itself - an excess shut( )
+    // asserts at RUNTIME, so this is the loudest thing the gate can find and
+    // it was the one part of the pipeline this module never copied.
+    findings.push(...(prep.structure ?? []));
     // rules that need the class itself, not just the view tree - the id map
     // and the snapshot let the CONTROL_BY_ID rules judge wire types.
     // `rules` has to go in HERE, not only into applyRules below: an OPT-IN
@@ -105,7 +150,17 @@ export function runGate(
     // for it, so leaving it out kept the editor silent about a rule the
     // repository's own `abap2ui5lint.jsonc` switches on - and CI reported it.
     // That is exactly the editor/CI divergence this gate exists to close.
-    findings.push(...checkAbapRules(text, { data, controlIds, rules: options.rules }));
+    findings.push(
+      ...checkAbapRules(text, {
+        data,
+        controlIds,
+        rules: options.rules,
+        // the ABAP-side icon check judges against the target release; without
+        // it every repo was judged against the 1.71 default, so a higher floor
+        // reported icons in the editor that CI called fine
+        ...({ minUi5 } as UndeclaredAbapRuleOptions),
+      })
+    );
     attachNamespaceFixes(findings, text);
     renderable = prep.docs.length > 0 && prep.helperTokens === 0;
     if (prep.helperTokens > 0) {

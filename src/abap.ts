@@ -1,3 +1,5 @@
+import { blankComments } from "./abapscan";
+
 /*
  * ABAP source helpers.
  *
@@ -16,9 +18,69 @@
  */
 export const APP_INTERFACE_RE = /\binterfaces\s*:?\s*z2ui5_if_app\b/i;
 
-/** True when the source implements `z2ui5_if_app` — the F9 launch condition. */
+/** True when the source ITSELF writes `INTERFACES z2ui5_if_app`. */
 export function isAppClass(source: string): boolean {
-  return APP_INTERFACE_RE.test(source);
+  return APP_INTERFACE_RE.test(blankComments(source));
+}
+
+/**
+ * The superclass a class definition names, upper-cased, or undefined for a
+ * root class.
+ *
+ * Read out of the `CLASS … DEFINITION …` statement only - `INHERITING FROM`
+ * may not be looked for in the whole file, where a comment or a second class
+ * in the same include would answer for the first one. Comments are blanked
+ * first for the same reason.
+ */
+export function superclassOf(source: string): string | undefined {
+  const code = blankComments(source);
+  const def = CLASS_DEF_RE.exec(code);
+  if (!def) {
+    return undefined;
+  }
+  // the definition statement runs to its first period
+  const from = def.index;
+  const dot = code.indexOf(".", from);
+  const statement = code.slice(from, dot < 0 ? code.length : dot);
+  return /\binheriting\s+from\s+([\w/]+)/i.exec(statement)?.[1].toUpperCase();
+}
+
+/**
+ * Whether a class is an abap2UI5 app, INCLUDING one that inherits the
+ * interface from a superclass.
+ *
+ * A shared base class carrying `INTERFACES z2ui5_if_app` and the lifecycle
+ * methods, with each app redefining them, is a common way to keep a team's
+ * apps uniform - and to the editor those apps looked like ordinary classes:
+ * F9, the CodeLens, the apps tree and the navigation map all went quiet
+ * (abap2UI5/vscode-extension#81).
+ *
+ * `sourceOf` answers with the source of a class by upper-cased name, or
+ * undefined when this window cannot see it - which is the normal case for a
+ * base class that lives in another package. Then the answer is "not an app",
+ * the same as before, rather than a guess.
+ */
+export function isAppClassDeep(
+  source: string,
+  sourceOf: (className: string) => string | undefined,
+  maxDepth = 16
+): boolean {
+  let text: string | undefined = source;
+  const seen = new Set<string>();
+  for (let depth = 0; depth <= maxDepth && text !== undefined; depth++) {
+    if (isAppClass(text)) {
+      return true;
+    }
+    const parent = superclassOf(text);
+    // a cycle is not legal ABAP, but a half-written buffer is not legal ABAP
+    // either and must not hang the editor
+    if (!parent || seen.has(parent)) {
+      return false;
+    }
+    seen.add(parent);
+    text = sourceOf(parent);
+  }
+  return false;
 }
 
 /**

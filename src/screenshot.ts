@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { spawn } from "child_process";
+import { run } from "./childproc";
 import { offerInstall, renderGateBrowsers } from "./rendergate";
 
 /*
@@ -50,33 +50,28 @@ export function findChromium(browsersDir: string): string | undefined {
 
 const SHOT_TIMEOUT_MS = 45_000;
 
-function runChromium(
+async function runChromium(
   chromium: string,
   args: string[],
   log: (m: string) => void
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(chromium, args, { stdio: ["ignore", "ignore", "pipe"] });
-    let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error("Chromium did not finish within 45 s"));
-    }, SHOT_TIMEOUT_MS);
-    child.stderr.on("data", (c) => (stderr += String(c)));
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve();
-      } else {
-        log(`screenshot: chromium stderr: ${stderr.slice(0, 400)}`);
-        reject(new Error(`Chromium exited with code ${code}`));
-      }
-    });
-  });
+  // Through the shared runner for the kill: a headless Chromium is a process
+  // TREE (zygote, GPU, renderers), and the plain SIGTERM this used to send to
+  // the parent left the rest of it running after a timeout.
+  const outcome = await run(chromium, args, { timeoutMs: SHOT_TIMEOUT_MS });
+  if (outcome.kind === "spawn-failed") {
+    throw outcome.error;
+  }
+  if (outcome.kind === "timeout") {
+    log(`screenshot: chromium stderr: ${outcome.stderr.slice(0, 400)}`);
+    throw new Error(
+      `Chromium did not finish within ${Math.round(SHOT_TIMEOUT_MS / 1000)} s`
+    );
+  }
+  if (outcome.kind === "closed" && outcome.code !== 0) {
+    log(`screenshot: chromium stderr: ${outcome.stderr.slice(0, 400)}`);
+    throw new Error(`Chromium exited with code ${outcome.code}`);
+  }
 }
 
 /**
@@ -116,6 +111,22 @@ export async function takeScreenshot(
     // Fast-forwards the page's timers so the UI5 boot and the first backend
     // roundtrip are through before the shot - deterministic, no sleep.
     "--virtual-time-budget=15000",
+    /*
+     * KNOWN EXPOSURE, deliberately not worked around here: this is the
+     * proxied url, so it carries the proxy's path token, and a process
+     * argument vector is readable by other processes of this user (`ps`,
+     * /proc/<pid>/cmdline). `report.ts` redacts the same token out of the
+     * logs precisely because it authorizes an authenticated session against
+     * the system.
+     *
+     * Headless Chromium takes the page to shoot only as an argument - there
+     * is no stdin or file form of it - so removing this needs a different
+     * shape (a one-shot token the proxy retires after the shot, or a local
+     * redirect page). Both change security-critical code that cannot be
+     * verified against a real system from here, and a half-verified change
+     * to the credential path is worse than a documented one. The window is
+     * the lifetime of one screenshot process.
+     */
     options.url,
   ];
   // Chromium refuses its sandbox as root (containers, some CI images).

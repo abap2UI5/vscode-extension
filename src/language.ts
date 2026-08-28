@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import { abapSources } from "./abapsources";
+import { blankNonCode } from "./abapscan";
 import {
   abapBindingContextAt,
   eventNameAt,
@@ -21,7 +22,7 @@ import {
   isClientCompletion,
   signatureHead,
 } from "./clientapi";
-import { chainIndentEdits } from "./chainformat";
+import { chainFormatEdits } from "./chainformat";
 import { membersOf } from "./metadata";
 import {
   CompletionKind,
@@ -379,14 +380,15 @@ class ChainFormatting implements vscode.DocumentFormattingEditProvider {
     if (!usesBuilder(text)) {
       return []; // nothing to format - the chains are what this understands
     }
-    return chainIndentEdits(text).map((edit) => {
-      const line = doc.lineAt(edit.line);
-      const leading = line.text.length - line.text.trimStart().length;
-      return vscode.TextEdit.replace(
-        new vscode.Range(edit.line, 0, edit.line, leading),
-        edit.indent
-      );
-    });
+    // Character spans, because that is what the linter's layout fixes are:
+    // they normalise the whitespace BETWEEN chain segments, newline included,
+    // not just a line's indent.
+    return chainFormatEdits(text).map((edit) =>
+      vscode.TextEdit.replace(
+        new vscode.Range(doc.positionAt(edit.start), doc.positionAt(edit.end)),
+        edit.text
+      )
+    );
   }
 }
 
@@ -785,9 +787,16 @@ async function expandChainAbbreviation(log: (m: string) => void): Promise<void> 
 
   /* A chain is one statement, so "am I inside one" is answered by the text
    * from the previous period to here: a builder call in it means the
-   * statement is open and the expansion continues it. */
+   * statement is open and the expansion continues it.
+   *
+   * Which period, though, is a lexical question - `lastIndexOf(".")` found one
+   * inside a comment or a literal just as happily (`view->ele( \`Page\`  " main
+   * page.`), cut the statement short, decided it was not a continuation, and
+   * inserted a whole new `DATA(view) = …factory( ).` statement into the middle
+   * of an open chain. `blankNonCode` keeps the offsets, so the index still
+   * points into the real text. */
   const before = doc.getText(new vscode.Range(new vscode.Position(0, 0), range.start));
-  const statement = before.slice(before.lastIndexOf(".") + 1);
+  const statement = before.slice(blankNonCode(before).lastIndexOf(".") + 1);
   const continuation = /->\s*(?:ele|tag|a)\s*\(/i.test(statement);
   const indent = /^[ \t]*/.exec(line.text)?.[0] ?? "";
 

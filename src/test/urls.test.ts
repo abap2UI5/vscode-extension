@@ -9,6 +9,7 @@ import {
   sapClientOf,
   shortUrl,
   withParams,
+  rebasedLocation,
 } from "../urls";
 
 const TEMPLATE = "https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100";
@@ -105,4 +106,83 @@ test("an origin the URL never spells verbatim still lands on the proxy", () => {
 
 test("something that is not a URL yields no frame URL", () => {
   assert.equal(proxiedUrl("nonsense", PROXY), undefined);
+});
+
+/*
+ * The redirect header.
+ *
+ * `proxiedUrl` was rebuilt from parsed parts because replacing the origin
+ * substring silently missed any non-normalised spelling. The redirect path
+ * kept the naive replace, with the same consequence one step later: the
+ * browser follows the redirect to the system directly, without the injected
+ * credentials, and the preview goes white.
+ */
+
+const TARGET = new URL("https://myhost:44300/sap/bc/z2ui5");
+const REDIRECT_PROXY = "http://127.0.0.1:5123/__abap2ui5/tok3n";
+
+test("rebasedLocation rewrites a redirect back to the system", () => {
+  assert.equal(
+    rebasedLocation("https://myhost:44300/sap/bc/gui/start", TARGET, REDIRECT_PROXY),
+    `${REDIRECT_PROXY}/sap/bc/gui/start`
+  );
+});
+
+test("rebasedLocation survives a host spelled in another case", () => {
+  // URL.origin lowercases the host, so this never contained the origin
+  // verbatim and the old replace did nothing at all
+  assert.equal(
+    rebasedLocation("https://MyHost:44300/sap/bc/x", TARGET, REDIRECT_PROXY),
+    `${REDIRECT_PROXY}/sap/bc/x`
+  );
+});
+
+test("rebasedLocation matches a default port written either way", () => {
+  const target = new URL("https://myhost/sap/bc/z2ui5");
+  assert.equal(
+    rebasedLocation("https://myhost:443/sap/bc/x", target, REDIRECT_PROXY),
+    `${REDIRECT_PROXY}/sap/bc/x`
+  );
+  assert.equal(
+    rebasedLocation("https://myhost/sap/bc/x", target, REDIRECT_PROXY),
+    `${REDIRECT_PROXY}/sap/bc/x`
+  );
+});
+
+test("rebasedLocation keeps query and hash", () => {
+  assert.equal(
+    rebasedLocation(
+      "https://myhost:44300/sap/bc/x?sap-client=100&a=b#frag",
+      TARGET,
+      REDIRECT_PROXY
+    ),
+    `${REDIRECT_PROXY}/sap/bc/x?sap-client=100&a=b#frag`
+  );
+});
+
+test("rebasedLocation follows a scheme switch on the same authority", () => {
+  // http -> https on the same host:port still has to go through the proxy,
+  // which is the only route carrying the credentials
+  assert.equal(
+    rebasedLocation("http://myhost:44300/sap/bc/x", TARGET, REDIRECT_PROXY),
+    `${REDIRECT_PROXY}/sap/bc/x`
+  );
+});
+
+test("rebasedLocation leaves a foreign host alone", () => {
+  const idp = "https://idp.example.com/saml?RelayState=x";
+  assert.equal(rebasedLocation(idp, TARGET, REDIRECT_PROXY), idp);
+});
+
+test("rebasedLocation leaves a relative Location untouched", () => {
+  // the browser resolves these against the proxy origin by itself, token and
+  // all - rewriting them would double the prefix
+  assert.equal(rebasedLocation("/sap/bc/x", TARGET, REDIRECT_PROXY), "/sap/bc/x");
+  assert.equal(rebasedLocation("../x", TARGET, REDIRECT_PROXY), "../x");
+  assert.equal(rebasedLocation("x?y=1", TARGET, REDIRECT_PROXY), "x?y=1");
+});
+
+test("rebasedLocation returns nonsense unchanged rather than throwing", () => {
+  assert.equal(rebasedLocation("", TARGET, REDIRECT_PROXY), "");
+  assert.equal(rebasedLocation("::::", TARGET, REDIRECT_PROXY), "::::");
 });

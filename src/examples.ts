@@ -29,13 +29,28 @@ export interface ExampleHit {
   attributes: number;
 }
 
-/** `ele( n = \`Table\` )` and `tag( n = \`Table\` )`, in any of the quote forms
- *  the builder accepts, with an optional namespace prefix. */
+/**
+ * Every way the corpus writes `ele( )` / `tag( )` for one control, in any of
+ * the quote forms the builder accepts and with an optional namespace prefix:
+ *
+ *     tag( n = `Button` )     named
+ *     tag( `Button` )         positional
+ *
+ * Reading only the named form is the mistake `context.ts` documents at length
+ * and had already fixed for completion, hover and the outline - and this
+ * module never got. The positional form is not an exotic spelling: it is what
+ * this extension's own XML converter emits (a lone `n =` trips abaplint's
+ * omit_parameter_name) and it outnumbers the named one in the sample
+ * catalogues, so "Show Examples for this Control" quietly reported a fraction
+ * of the hits - none at all for the common sap.m controls - and then ranked
+ * that fraction by attribute count as if it were the corpus.
+ */
 function callRe(control: string): RegExp {
   const local = control.includes(".") ? control.slice(control.lastIndexOf(".") + 1) : control;
   const name = local.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const quoted = String.raw`[\`'|]\s*(?:\w+:)?${name}\s*[\`'|]`;
   return new RegExp(
-    String.raw`\b(?:ele|tag)\s*\(\s*n\s*=\s*[\`'|]\s*(?:\w+:)?${name}\s*[\`'|]`,
+    String.raw`\b(?:ele|tag)\s*\(\s*(?:n\s*=\s*)?${quoted}`,
     "gi"
   );
 }

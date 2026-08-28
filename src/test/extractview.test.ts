@@ -155,3 +155,72 @@ ENDCLASS.`;
   const plan = planExtract(source, at, "render_box");
   assert.ok(!("error" in plan), `refused: ${JSON.stringify(plan)}`);
 });
+
+test("a chain written inside client->view_display( ) is refused, not mangled", () => {
+  /*
+   * The classic one-statement style. Cut at a `)->`, the head keeps an
+   * unclosed `view_display(` and the tail carries a `)` and a `stringify( )`
+   * that belong to it - the result was a head that does not compile and a
+   * method body with a foreign call and a spare paren.
+   */
+  const source = [
+    "CLASS zcl_x DEFINITION PUBLIC.",
+    "  PUBLIC SECTION.",
+    "    INTERFACES z2ui5_if_app.",
+    "ENDCLASS.",
+    "",
+    "CLASS zcl_x IMPLEMENTATION.",
+    "  METHOD z2ui5_if_app~main.",
+    "    client->view_display( z2ui5_cl_ui5_view_builder=>factory(",
+    "      )->ele( `Page`",
+    "      )->tag( `Button`",
+    "      )->stringify( ) ).",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\n");
+  const plan = planExtract(source, source.indexOf(")->tag("), "build_button");
+  assert.ok("error" in plan, "the shape was not refused");
+  assert.match(plan.error, /inside another call/);
+});
+
+test("the same view captured in a variable extracts normally", () => {
+  const source = [
+    "CLASS zcl_x DEFINITION PUBLIC.",
+    "  PUBLIC SECTION.",
+    "    INTERFACES z2ui5_if_app.",
+    "ENDCLASS.",
+    "",
+    "CLASS zcl_x IMPLEMENTATION.",
+    "  METHOD z2ui5_if_app~main.",
+    "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).",
+    "    view->ele( `Page`",
+    "      )->tag( `Button`",
+    "      )->a( n = `text` v = `Go` ).",
+    "    client->view_display( view->stringify( ) ).",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\n");
+  const plan = planExtract(source, source.indexOf(")->tag("), "build_button");
+  assert.ok(!("error" in plan), `refused: ${"error" in plan ? plan.error : ""}`);
+});
+
+test("a selection reaching past stringify is refused", () => {
+  const source = [
+    "CLASS zcl_x DEFINITION PUBLIC.",
+    "  PUBLIC SECTION.",
+    "    INTERFACES z2ui5_if_app.",
+    "ENDCLASS.",
+    "",
+    "CLASS zcl_x IMPLEMENTATION.",
+    "  METHOD z2ui5_if_app~main.",
+    "    DATA(xml) = z2ui5_cl_ui5_view_builder=>factory(",
+    "      )->ele( `Page`",
+    "      )->tag( `Button`",
+    "      )->stringify( ).",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\n");
+  const plan = planExtract(source, source.indexOf(")->tag("), "build_button");
+  assert.ok("error" in plan);
+  assert.match(plan.error, /stringify/);
+});

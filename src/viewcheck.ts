@@ -3,8 +3,8 @@ import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { spawn } from "child_process";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
+import { run } from "./childproc";
 import { installRenderGate, renderGateBrowsers, renderGateCli } from "./rendergate";
 import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
@@ -16,7 +16,6 @@ import {
   CheckerCommand,
   isCheckableSource,
   parseRenderReport,
-  quoteForShell,
   checkerCwd,
   RenderResult,
   plannedFixes,
@@ -183,7 +182,7 @@ export function spawnEnv(): NodeJS.ProcessEnv {
  */
 const RENDER_TIMEOUT_MS = 180_000;
 
-function runRenderGate(
+async function runRenderGate(
   doc: vscode.TextDocument,
   log: (m: string) => void,
   superseded: () => boolean
@@ -196,12 +195,7 @@ function runRenderGate(
 
   const checker = checkerCommand();
   const useShell = checker.cmd !== "node" && process.platform === "win32";
-  const rawArgs = [...checker.args, scratch, "--json", "--advisory", "--no-properties"];
-  // with shell: true Node passes the args through unquoted, so a path with a
-  // space in it would arrive as two arguments
-  const args = useShell
-    ? rawArgs.map((arg) => quoteForShell(arg, process.platform))
-    : rawArgs;
+  const args = [...checker.args, scratch, "--json", "--advisory", "--no-properties"];
   const cwd = checkerCwd(
     vscode.workspace.getWorkspaceFolder(doc.uri)?.uri,
     os.homedir(),
@@ -209,75 +203,48 @@ function runRenderGate(
   );
   log(`view-check: render gate - ${checker.cmd} ${args.join(" ")}`);
 
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (result: RenderResult | undefined) => {
-      if (settled) {
-        return; // a failed spawn emits "error" and may still emit "close"
-      }
-      settled = true;
-      clearInterval(watch);
-      clearTimeout(limit);
-      fs.rmSync(scratchDir, { recursive: true, force: true });
-      resolve(result);
-    };
-    const child =
+  try {
+    // `run` quotes the PROGRAM as well as its arguments under a shell, which
+    // this call site did not: an explicit `viewCheck.command` naming
+    // `C:\Program Files\nodejs\node.exe` was split at the space by cmd.exe
+    // and reported as "not recognized", with an offer to install a gate that
+    // could not have fixed it.
+    const outcome = await run(
+      checker.cmd === "node" ? process.execPath : checker.cmd,
+      args,
       checker.cmd === "node"
-        ? // run with the Node.js inside VS Code itself - works without any
-          // node installation on the PATH
-          spawn(process.execPath, args, {
+        ? {
+            // run with the Node.js inside VS Code itself - works without any
+            // node installation on the PATH
             cwd,
             env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", ...checker.env },
-          })
-        : spawn(checker.cmd, args, {
+            timeoutMs: RENDER_TIMEOUT_MS,
+            abandoned: superseded,
+          }
+        : {
             cwd,
             env: { ...spawnEnv(), ...checker.env },
             shell: useShell,
-          });
+            timeoutMs: RENDER_TIMEOUT_MS,
+            abandoned: superseded,
+          }
+    );
 
-    /** Kills the child and everything it started - npx spawns the real
-     *  checker, which spawns Chromium, and killing only the shell would
-     *  leave both behind. */
-    const kill = () => {
-      if (child.pid === undefined || child.killed) {
-        return;
-      }
-      try {
-        if (process.platform === "win32") {
-          spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"]);
-        } else {
-          child.kill("SIGKILL");
-        }
-      } catch {
-        /* the child is already gone */
-      }
-    };
-
-    const limit = setTimeout(() => {
+    if (outcome.kind === "abandoned") {
+      // the buffer moved on, or the document was closed - nothing will be
+      // done with this answer, so it was not paid for to the end
+      log("view-check: render gate no longer needed - killed");
+      return undefined;
+    }
+    if (outcome.kind === "timeout") {
       log(
         `view-check: render gate exceeded ${RENDER_TIMEOUT_MS} ms - killed, ` +
           "the property gate's findings still stand"
       );
-      kill();
-      done(undefined);
-    }, RENDER_TIMEOUT_MS);
-
-    // the buffer moved on, or the document was closed - nothing will be done
-    // with this answer, so stop paying for it
-    const watch = setInterval(() => {
-      if (superseded()) {
-        log("view-check: render gate no longer needed - killed");
-        kill();
-        done(undefined);
-      }
-    }, 500);
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (c) => (stdout += String(c)));
-    child.stderr.on("data", (c) => (stderr += String(c)));
-    child.on("error", (err) => {
-      log(`view-check: render gate failed to start - ${String(err)}`);
+      return undefined;
+    }
+    if (outcome.kind === "spawn-failed") {
+      log(`view-check: render gate failed to start - ${String(outcome.error)}`);
       if (!spawnFailed) {
         spawnFailed = true;
         void vscode.window
@@ -296,26 +263,31 @@ function runRenderGate(
             }
           });
       }
-      done(undefined);
-    });
-    child.on("close", () => {
-      if (settled) {
-        return;
-      }
-      const parsed = parseRenderReport(stdout);
-      if (!parsed.ok) {
-        log(
-          parsed.reason === "no-json"
-            ? `view-check: render gate produced no JSON` +
-                (stderr ? ` - stderr: ${stderr.slice(0, 400)}` : "")
-            : `view-check: render gate returned broken JSON - ${parsed.detail}`
-        );
-        done(undefined);
-        return;
-      }
-      done(parsed.result);
-    });
-  });
+      return undefined;
+    }
+
+    const parsed = parseRenderReport(outcome.stdout);
+    if (!parsed.ok) {
+      log(
+        parsed.reason === "no-json"
+          ? `view-check: render gate produced no JSON` +
+              (outcome.stderr ? ` - stderr: ${outcome.stderr.slice(0, 400)}` : "")
+          : `view-check: render gate returned broken JSON - ${parsed.detail}`
+      );
+      return undefined;
+    }
+    return parsed.result;
+  } finally {
+    /* On every path, including a throw: the scratch directory is this run's
+     * alone. It used to be removed inside a timer callback, where a Windows
+     * EBUSY (the killed child had not let go yet) threw with nothing to catch
+     * it - the promise then never settled and its caller waited forever. */
+    try {
+      fs.rmSync(scratchDir, { recursive: true, force: true });
+    } catch (err) {
+      log(`view-check: scratch directory left behind - ${String(err)}`);
+    }
+  }
 }
 
 /**
@@ -561,6 +533,11 @@ export interface SweepResult {
 export interface SweptFile {
   uri: vscode.Uri;
   findings: PropertyFinding[];
+  /** The version of the open document the findings were gated against, if it
+   *  was open. `fixWorkspace` refuses to apply offsets to a buffer that has
+   *  been typed in since - the sweep is `await`ed per file, so the window is
+   *  real. Absent when the text came from disk. */
+  version?: number;
 }
 
 /**
@@ -591,8 +568,24 @@ async function sweepWorkspace(
     WORKSPACE_GLOB,
     "**/{node_modules,.git,dist,out}/**"
   );
+  /*
+   * An open document WINS over the file of the same name, always - it is what
+   * the user is looking at, and `fixWorkspace` turns these findings into
+   * offsets that are then applied to exactly that document.
+   *
+   * Reading the file instead was a silent corruption: a class that is open
+   * with unsaved changes AND on disk was gated against the disk text, and the
+   * resulting character offsets were mapped through the dirty buffer. Every
+   * fix after the first divergence landed a few characters off - mid-token,
+   * in one WorkspaceEdit. The same mismatch put the workspace check's
+   * squiggles on the wrong lines.
+   */
+  const open = new Map<string, vscode.TextDocument>();
+  for (const doc of vscode.workspace.textDocuments) {
+    open.set(doc.uri.toString(), doc);
+  }
   const targets: Array<{ uri: vscode.Uri; open?: vscode.TextDocument }> = found.map(
-    (uri) => ({ uri })
+    (uri) => ({ uri, open: open.get(uri.toString()) })
   );
   const known = new Set(found.map((uri) => uri.toString()));
   for (const doc of vscode.workspace.textDocuments) {
@@ -647,7 +640,7 @@ async function sweepWorkspace(
     if (options.baseline && opts.baseline && uri.scheme === "file") {
       applyBaselineTo(gate.findings, opts.baseline, uri.fsPath);
     }
-    swept.push({ uri, findings: gate.findings });
+    swept.push({ uri, findings: gate.findings, version: target.open?.version });
   }
   return { files: swept, cancelled: token.isCancellationRequested };
 }
@@ -751,12 +744,22 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
       const edit = new vscode.WorkspaceEdit();
       let fixes = 0;
       let files = 0;
+      let moved = 0;
       for (const file of swept.files) {
         const planned = plannedFixes(file.findings);
         if (!planned.length) {
           continue;
         }
         const doc = await vscode.workspace.openTextDocument(file.uri);
+        /* A fix is a pair of character offsets into the text that was gated.
+         * If that text has changed since - the sweep awaits each file, and a
+         * fast typist is faster than a workspace scan - the offsets address
+         * different characters now, and applying them rewrites the wrong
+         * span. Skipping is the only safe answer; the next run picks it up. */
+        if (file.version !== undefined && doc.version !== file.version) {
+          moved++;
+          continue;
+        }
         edit.set(
           file.uri,
           planned.map(
@@ -770,9 +773,18 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
         fixes += planned.length;
         files++;
       }
+      if (moved) {
+        log(
+          `view-check: workspace fix - ${moved} file(s) skipped, edited while the sweep ran`
+        );
+      }
+      const skipped = moved
+        ? ` ${moved} file(s) were edited while the sweep ran and were left alone.`
+        : "";
       if (!fixes) {
         vscode.window.showInformationMessage(
-          `abap2UI5: nothing in ${swept.files.length} file(s) can be corrected mechanically.`
+          `abap2UI5: nothing in ${swept.files.length} file(s) can be corrected mechanically.` +
+            skipped
         );
         return;
       }
@@ -783,7 +795,8 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
        * what tells someone to run it again. */
       vscode.window.showInformationMessage(
         `abap2UI5: applied ${fixes} fix(es) in ${files} file(s). ` +
-          "Run it again if fixes overlapped; the files are edited, not saved."
+          "Run it again if fixes overlapped; the files are edited, not saved." +
+          skipped
       );
     }
   );
@@ -853,10 +866,37 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
         );
         return;
       }
+      /*
+       * Only real files under the baseline's own repository go in.
+       *
+       * The sweep deliberately also gates documents that have no file behind
+       * them (a class opened through ADT) and, in a multi-root window, files
+       * of the other folders. Neither can ever produce a matching entry when
+       * the CLI runs over this repository - and a baseline entry that matches
+       * nothing is not inert: it is STALE, which the linter reports and CI
+       * fails on. So writing them would hand somebody a baseline that breaks
+       * the build it was written to unblock.
+       */
+      const root = path.dirname(baselineFile);
+      const inRepo = (uri: vscode.Uri): boolean => {
+        if (uri.scheme !== "file") {
+          return false;
+        }
+        const rel = path.relative(root, uri.fsPath);
+        return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+      };
+      const mine = swept.files.filter((file) => inRepo(file.uri));
+      const foreign = swept.files.length - mine.length;
+      if (foreign) {
+        log(
+          `view-check: baseline - ${foreign} file(s) outside ${root} ` +
+            "(or with no file on disk) were not written into it"
+        );
+      }
       try {
         const written = rebuildBaseline(
           baselineFile,
-          swept.files.map((file) => ({
+          mine.map((file) => ({
             file: file.uri.fsPath,
             findings: file.findings,
           }))
@@ -871,7 +911,10 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
         );
         vscode.window.showInformationMessage(
           `abap2UI5: ${path.basename(baselineFile)} now waives ` +
-            `${written.findings} finding(s) from ${swept.files.length} file(s).`
+            `${written.findings} finding(s) from ${mine.length} file(s).` +
+            (foreign
+              ? ` ${foreign} file(s) outside the repository were not included.`
+              : "")
         );
       } catch (err) {
         vscode.window.showWarningMessage(

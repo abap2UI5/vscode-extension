@@ -227,3 +227,38 @@ test("the preview answers UI5 frame protection in the format UI5 reads", () => {
   // every click.
   assert.ok(!html.includes("sentinel"));
 });
+
+test("the preview refuses the host's own protocol from the app frame", () => {
+  /*
+   * The embedded app is not confined to the SAP system - it can link
+   * anywhere, and any page in the iframe may postMessage to its parent. If
+   * the listener took a 'load' from it, the toolbar would show a trusted
+   * class name and system URL around an untrusted page, and the reload
+   * button would reload THAT.
+   *
+   * event.source is the discriminator that cannot be forged, so it has to
+   * stay in the emitted script.
+   */
+  const html = previewHtml({
+    frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
+    externalUrl: "https://host:44300/sap/bc/z2ui5?app_start=ZCL_X",
+    className: "ZCL_X",
+    theme: "",
+    language: "",
+    modelRoots: [],
+    nonce: "n0nce",
+  });
+  assert.ok(
+    html.includes("event.source === frame.contentWindow"),
+    "the provenance check is gone - the app frame can spoof the toolbar"
+  );
+  assert.ok(
+    html.includes("if (fromApp) { return; }"),
+    "the host-only branch is no longer gated on provenance"
+  );
+  // and the runtime marker is only honoured from the frame
+  assert.ok(
+    html.includes("fromApp ? msg.__abap2ui5Runtime : undefined"),
+    "runtime messages are accepted from senders other than the app frame"
+  );
+});

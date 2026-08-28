@@ -42,6 +42,94 @@ export interface AbapSpan {
 }
 
 /**
+ * One past the closing quote of a literal opened at `open`, or the end of the
+ * line for an unclosed one - a literal does not survive a line break.
+ */
+function scanLiteral(source: string, open: number): number {
+  const quote = source[open];
+  let j = open + 1;
+  while (j < source.length && source[j] !== "\n") {
+    if (source[j] === quote) {
+      if (source[j + 1] === quote) {
+        j += 2; // doubled quote: an escaped one, the literal goes on
+        continue;
+      }
+      return j + 1;
+    }
+    j++;
+  }
+  return j;
+}
+
+/**
+ * One past the `}` closing the embedded expression opened at `open`.
+ *
+ * What is inside `{ }` is ABAP CODE, not template text: it nests, it may hold
+ * literals, and it may hold further templates. Reading it as text is what made
+ * `|val { get( 'a|b' ) }|` end at the `|` inside the literal - after which the
+ * stray `'` opened a literal that swallowed the rest of the line, taking the
+ * next statement with it.
+ */
+function scanEmbedded(source: string, open: number): number {
+  let j = open + 1;
+  let depth = 1;
+  while (j < source.length && depth > 0) {
+    const c = source[j];
+    if (c === "\\") {
+      j += 2;
+      continue;
+    }
+    if (c === "'" || c === "`") {
+      j = scanLiteral(source, j);
+      continue;
+    }
+    if (c === "|") {
+      const nested = scanTemplate(source, j);
+      j = nested.closed ? nested.end + 1 : nested.end;
+      continue;
+    }
+    if (c === "{") {
+      depth++;
+    } else if (c === "}") {
+      depth--;
+    }
+    j++;
+  }
+  return j;
+}
+
+/**
+ * Where the string template opened at `open` ends: the index of its closing
+ * `|`, or the end of the source when it is not closed.
+ *
+ * A template may span lines, `\` escapes the next character (that is how a
+ * literal `|`, `{` or `}` is written), and `{ … }` is an embedded expression
+ * whose contents are skipped as code rather than read as text.
+ */
+function scanTemplate(
+  source: string,
+  open: number
+): { end: number; closed: boolean } {
+  let j = open + 1;
+  while (j < source.length) {
+    const c = source[j];
+    if (c === "\\") {
+      j += 2;
+      continue;
+    }
+    if (c === "|") {
+      return { end: j, closed: true };
+    }
+    if (c === "{") {
+      j = scanEmbedded(source, j);
+      continue;
+    }
+    j++;
+  }
+  return { end: source.length, closed: false };
+}
+
+/**
  * Every literal, comment and string template in the source, in order and
  * without overlaps - the first opener wins, which is what makes a quote
  * inside a comment part of the comment rather than the start of a literal.
@@ -69,51 +157,30 @@ export function abapSpans(source: string): AbapSpan[] {
       continue;
     }
     if (c === "'" || c === "`") {
-      const start = i + 1;
-      let j = start;
       // a literal does not survive a line break - an unclosed one ends there,
       // rather than running on and eating the rest of the file
-      while (j < source.length && source[j] !== "\n") {
-        if (source[j] === c) {
-          if (source[j + 1] === c) {
-            j += 2; // doubled quote: an escaped one, the literal goes on
-            continue;
-          }
-          break;
-        }
-        j++;
-      }
-      const closed = source[j] === c;
+      const after = scanLiteral(source, i);
+      const closed = source[after - 1] === c && after > i + 1;
+      const end = closed ? after - 1 : after;
       spans.push({
         kind: "literal",
         from: i,
-        to: closed ? j + 1 : j,
-        start,
-        end: j,
+        to: after,
+        start: i + 1,
+        end,
         quote: c,
       });
-      i = closed ? j + 1 : j;
+      i = after;
       continue;
     }
     if (c === "|") {
-      let j = i + 1;
-      while (j < source.length) {
-        if (source[j] === "\\") {
-          j += 2;
-          continue;
-        }
-        if (source[j] === "|") {
-          break;
-        }
-        j++;
-      }
-      const closed = source[j] === "|";
+      const { end: j, closed } = scanTemplate(source, i);
       spans.push({
         kind: "template",
         from: i,
-        to: closed ? j + 1 : j,
+        to: Math.min(closed ? j + 1 : j, source.length),
         start: i + 1,
-        end: j,
+        end: Math.min(j, source.length),
       });
       i = closed ? j + 1 : j;
       continue;
@@ -136,8 +203,28 @@ export function abapLiterals(source: string): AbapSpan[] {
  * code, and every index it reports still points into the original.
  */
 export function blankNonCode(source: string): string {
+  return blank(source, () => true);
+}
+
+/**
+ * The source with only its COMMENTS blanked - literals and templates stay as
+ * they are, same length, same offsets.
+ *
+ * For the readers that have to see literal CONTENT (a marker like
+ * `n = \`id\``, an argument's value) and must still not be fooled by a
+ * commented-out copy of what they are looking for. `blankNonCode` is too much
+ * for them: it takes away the very text they match on.
+ */
+export function blankComments(source: string): string {
+  return blank(source, (span) => span.kind === "comment");
+}
+
+function blank(source: string, wanted: (span: AbapSpan) => boolean): string {
   const out = source.split("");
   for (const span of abapSpans(source)) {
+    if (!wanted(span)) {
+      continue;
+    }
     for (let i = span.from; i < span.to; i++) {
       if (out[i] !== "\n") {
         out[i] = " "; // a template may span lines, and those have to stay

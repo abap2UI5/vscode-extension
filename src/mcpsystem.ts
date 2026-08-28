@@ -3,7 +3,7 @@ import * as http from "http";
 import { randomBytes } from "crypto";
 import { handleMcpMessage, McpTool, textResult } from "./mcprpc";
 import { searchClasses } from "./appsearch";
-import type { SapProxy } from "./proxy";
+import { isLoopbackHost, type SapProxy } from "./proxy";
 
 /*
  * The abap2UI5 SYSTEM MCP server - real-system tools for AI agents.
@@ -182,6 +182,20 @@ export function createSystemMcpServer(
     req: http.IncomingMessage,
     res: http.ServerResponse
   ): Promise<void> => {
+    /*
+     * Both halves of the rule every local listener here follows: the secret
+     * in the path, AND a `Host` that is loopback. This server acts with the
+     * system credentials exactly as the auth proxy does - `run_app_on_system`
+     * and `search_apps` go out authenticated - so it owes callers the same
+     * refusal of a request that arrived under a name merely RESOLVING to
+     * 127.0.0.1, which is what DNS rebinding looks like from this side. The
+     * proxy has enforced this since it was written; this one only had the
+     * token, which is one half of the invariant and reads as the whole of it.
+     */
+    if (!isLoopbackHost(req.headers.host)) {
+      res.writeHead(404).end();
+      return;
+    }
     if (req.url !== `/${token}`) {
       res.writeHead(404).end();
       return;

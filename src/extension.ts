@@ -15,7 +15,8 @@ import { registerFindingsView } from "./findingsview";
 import { registerInlineAnnotations } from "./inlineview";
 import { registerAppView } from "./appview";
 import { registerDiagnosticsReport } from "./diagnosticsreport";
-import { classNameOf, isAppClass } from "./abap";
+import { classNameOf } from "./abap";
+import { isAppSource, registerAppClasses } from "./appclasses";
 import { proxiedUrl } from "./urls";
 import { registerAppSearch } from "./appsearch";
 import { registerNewApp, registerNewProject } from "./wizard";
@@ -218,7 +219,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (trigger === "never") {
         return;
       }
-      if (!isAppClass(doc.getText())) {
+      if (!isAppSource(doc.getText())) {
         return;
       }
       if (
@@ -347,6 +348,10 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   context.subscriptions.push({ dispose: () => systemMcp.dispose() });
 
+  // before the features that ask it whether a class is an app - an app that
+  // inherits z2ui5_if_app is only recognised once the window's classes are
+  // indexed (issue #81)
+  registerAppClasses(context);
   registerNewApp(context);
   registerNewProject(context);
   registerConvert(context, log);

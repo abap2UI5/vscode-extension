@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import type { ViewNode } from "@abap2ui5/linter/reconstruct";
 import { decodeEntities, parseXml, xmlToAbap } from "../xmltoabap";
-import { chainIndentEdits } from "../chainformat";
+import { chainFormatEdits } from "../chainformat";
 
 const SAMPLE = `<mvc:View
   xmlns="sap.m"
@@ -83,7 +83,7 @@ test("xmlToAbap emits the corpus chain style", () => {
 
 test("the emitted chain is a no-op for Format Document", () => {
   const { abap } = xmlToAbap(SAMPLE, "    ");
-  assert.deepEqual(chainIndentEdits(abap), []);
+  assert.deepEqual(chainFormatEdits(abap), []);
 });
 
 test("the emitted chain reconstructs back to the same view", () => {

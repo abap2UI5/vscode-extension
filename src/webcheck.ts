@@ -284,7 +284,16 @@ export function registerWebCheck(
     }),
     vscode.workspace.onDidOpenTextDocument((doc) => schedule(doc, 0)),
     vscode.workspace.onDidCloseTextDocument((doc) => {
-      timers.delete(doc.uri.toString());
+      // clear, not just forget: a timer dropped from the map still fires, and
+      // its check publishes diagnostics for the document that was just closed
+      // - right after this handler deleted them. They then sit in the Problems
+      // panel for a file nothing is showing any more.
+      const key = doc.uri.toString();
+      const pending = timers.get(key);
+      if (pending) {
+        clearTimeout(pending);
+      }
+      timers.delete(key);
       diagnostics.delete(doc.uri);
     })
   );

@@ -48,14 +48,15 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401; authorized by the token in its own url |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
-| `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability, the render-gate command ladder, scratch-file naming, the JSON report parsing |
+| `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability, the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written |
+| `src/childproc.ts` | `vscode`-free: the ONE way a checker is started - shell quoting of program AND arguments, timeout, kill of the whole process tree, "nobody is waiting any more" |
 | `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
 | `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, and "add to baseline" |
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
 | `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
 | `src/clientapi.ts` | The bundled `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion |
-| `src/chainformat.ts` | Format Document for builder chains: per-line indents from the chain's own nesting |
+| `src/chainformat.ts` | Format Document for builder chains: hands on the linter's own `chain-house-layout` fixes (never a second layout algorithm) |
 | `src/renderloc.ts` | Places a render-gate error message on the source line quoting its token |
 | `scripts/generate-client-api.mjs` | Regenerates `src/data/client-api.json` from `z2ui5_if_client.intf.abap` (local checkout or GitHub raw) |
 | `src/bindingpaths.ts` | Binding-path offers from the model shape the linter derives (`prepareAbap( ).modelShape`) |
@@ -94,6 +95,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/snapshot.ts` | Loads the bundled UI5 metadata once, for the gate and the language features |
 | `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over |
 | `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
+| `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
 | `src/abap.ts`, `src/urls.ts`, `src/context.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
 | `src/test/` | `node --test` suite over exactly those modules |
@@ -108,7 +110,7 @@ not committed.
 **The `vscode`-free boundary is load-bearing.** `abap.ts`, `urls.ts`,
 `context.ts`, `metadata.ts`, `lintconfig.ts`, `snapshot.ts`,
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
-`clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`,
+`clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `catalogue.ts`,
 `abapscan.ts`, `settings.ts`,
@@ -205,6 +207,16 @@ identity (see Conventions).
   versa — a mismatch only shows up at runtime, not in `tsc`.
 - **Settings live under the `abap2ui5.` prefix** and are read through
   `CONFIG_SECTION`. Command IDs use the same prefix.
+- **"An app" includes a class that INHERITS `z2ui5_if_app`.** `isAppClass`
+  answers only for the source in front of it; every feature that decides
+  whether something is an app — F9, the CodeLens, the apps tree, the
+  navigation map — asks `isAppSource` (`appclasses.ts`) instead, which
+  follows `INHERITING FROM` through the classes the window can see. A shared
+  base class holding the interface is a common house pattern and used to make
+  the whole extension go quiet on every app built that way. The lookup is
+  synchronous by necessity (a CodeLens provider cannot await a scan), so the
+  index is rebuilt in the background; an unknown base class means "not an
+  app", never a guess.
 - **The preview reloads on activation, not on save.** A saved ABAP class is
   still inactive on the server, so reloading would show the old version. Keys
   that other ABAP extensions own (F9, Ctrl+F3) are taken over only with a
@@ -245,7 +257,13 @@ identity (see Conventions).
   Severity, wording, the `fixes` on a finding, the `rules` block and the
   `abap2ui5lint-disable…` directives all live in `@abap2ui5/linter` and are
   applied through it — never re-derived here. Two copies of that semantics is
-  exactly how the editor and CI drifted apart before. The **types** come from
+  exactly how the editor and CI drifted apart before. **Format Document is the
+  same rule, not a sibling of it**: `chainformat.ts` asks the linter for
+  `chain-house-layout` (switching the opt-in rule on for that one call) and
+  hands its whitespace-only fixes to the editor. It used to derive the layout
+  itself, and was measurably stricter — eight of samples-controls' 637 builder
+  classes would have been re-indented by the editor although the rule calls
+  them correct. The **types** come from
   the linter too: it ships `types.d.ts` and declares it per subpath in its
   `exports` map, so `@abap2ui5/linter/reconstruct` and friends type-check
   straight out of `node_modules`. There used to be a hand-written
@@ -283,6 +301,29 @@ Facts an agent cannot see from the code but will trip over:
   `snapshot.ts` logs why, which is the only signal you get. The test build
   copies the same file into `dist-test/`, because `snapshot.ts` resolves it
   next to its own bundle.
+  `copySnapshot()` also copies the linter's **`data/icons.json` into the
+  extension root's `data/`** — not next to the bundle. The icon rules are the
+  one place the linter resolves its own data file, from `import.meta.url` +
+  `"../data"`, which in this CJS bundle is `dist/../data` (and `dist-test/..`,
+  so one copy serves both). Nothing fails when it is absent: `loadIcons`
+  treats an unreadable file as an empty registry by design, so `unknown-icon`,
+  `icon-too-new` and `icon-removed` simply never fired in the editor while CI
+  reported them. `data/` is build output — gitignored, and packaged into the
+  `.vsix` because `.vscodeignore` does not exclude it.
+- **`gate.ts` is a second CALLER of the linter's pipeline, never a second
+  pipeline.** It exists because the two hosts feed the metadata snapshot in
+  differently (desktop reads a file, the browser gets text through
+  `workspace.fs`) while `checkAbapSource` only takes a *path*. Everything else
+  it must do exactly as `lib/index.mjs` does — and it silently stopped:
+  `models`, `jsonPaths`, `fromAbap`, `prep.structure` and `minUi5` had gone
+  missing from the copy, each switching off whole rules (`unknown-model`,
+  `json-bind-on-scalar-property`, `raw-javascript-to-frontend`, `excess-shut`
+  / `duplicate-property` / `attribute-without-element`, and the icon floor)
+  with no symptom beyond CI and the editor disagreeing. `gate.parity.test.ts`
+  now diffs the two over fixtures and is the reason a sixth missing input
+  fails a test instead of going quiet. The one known difference is written
+  down there: the XML branch cannot run `checkIcons`, which the linter does
+  not export through its `exports` map.
 - **The rule reference is coupled by URL, not by import.** Every diagnostic's
   code links to `https://abap2ui5.github.io/linter/#<rule-id>`, which the
   linter's `generate-rules-page` emits one anchor per rule for. The rule ids

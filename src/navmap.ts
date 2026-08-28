@@ -8,7 +8,7 @@
  * shows - all `vscode`-free and covered by the test suite.
  */
 
-import { classNameOf, isAppClass } from "./abap";
+import { classNameOf, isAppClassDeep } from "./abap";
 
 export interface NavSource {
   fileName: string;
@@ -74,15 +74,25 @@ export function navGraph(sources: NavSource[]): NavGraph {
   const nodes = new Map<string, NavNode>();
   const edges: NavEdge[] = [];
 
+  /* An app may inherit `z2ui5_if_app` from a shared base class rather than
+   * write it (issue #81), and the set handed in is exactly the place to look
+   * the base class up - the map is drawn over these sources and no others. */
+  const byName = new Map<string, string>();
   for (const { fileName, source } of sources) {
-    if (!isAppClass(source)) {
+    byName.set(classNameOf(source, fileName), source);
+  }
+  const isApp = (source: string): boolean =>
+    isAppClassDeep(source, (name) => byName.get(name.toUpperCase()));
+
+  for (const { fileName, source } of sources) {
+    if (!isApp(source)) {
       continue;
     }
     const className = classNameOf(source, fileName);
     nodes.set(className, { className, fileName, isApp: true });
   }
   for (const { fileName, source } of sources) {
-    if (!isAppClass(source)) {
+    if (!isApp(source)) {
       continue;
     }
     const from = classNameOf(source, fileName);

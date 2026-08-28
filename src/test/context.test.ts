@@ -4,6 +4,11 @@ import {
   abapBindingContextAt,
   abapContextAt,
   abapNsMap,
+  controlCallAt,
+  eventNameSpans,
+  eventUsagesOf,
+  whenBranches,
+  whenBranchOf,
   xmlContextAt,
   xmlNsMap,
 } from "../context";
@@ -431,4 +436,102 @@ test("between attributes is still a name position", () => {
   const context = xmlAt(`<mvc:View xmlns="sap.m"><Button text='Go' ty‸/></mvc:View>`);
   assert.equal(context?.kind, "member");
   assert.equal(context?.prefix, "ty");
+});
+
+/*
+ * Two things a call's argument text is not: raw, and quote-free.
+ *
+ * Every reader takes the FIRST match inside the parentheses, and in the
+ * line-per-argument style a commented-out argument sits inside them too - so
+ * a dead `n = ` line decided what control the cursor was on. And ABAP escapes
+ * a quote by doubling it, which the literal patterns stopped at.
+ */
+
+test("a commented-out argument does not win over the real one", () => {
+  const context = abapAt(
+    [
+      "    view->tag(",
+      "       \" n = `Button` was wrong",
+      "       n = `Text`",
+      "    )->a( n = `text` v = `‸X` ).",
+    ].join("\n")
+  );
+  assert.equal(context?.control, "sap.m.Text");
+});
+
+test("a commented-out attribute name does not win either", () => {
+  const context = abapAt(
+    [
+      "    view->tag( n = `Button`",
+      "        )->a(",
+      "            \" n = `press`",
+      "            n = `text` v = `‸X` ).",
+    ].join("\n")
+  );
+  assert.equal(context?.member, "text");
+});
+
+test("a doubled quote is part of the literal, not the end of it", () => {
+  // the whole written literal is the attribute's span, doubling included -
+  // the property editor rewrites exactly this, and a span that stopped at the
+  // first half left the tail of the old value behind
+  const source =
+    "    view->tag( n = `Text` )->a( n = `text` v = `it``s fine` ).";
+  const call = controlCallAt(source, source.indexOf("Text` )"));
+  const attr = call?.attrs.find((a) => a.name === "text");
+  assert.ok(attr, "the attribute was not read at all");
+  assert.equal(attr.literal, true);
+  assert.equal(attr.value, "it`s fine", "the doubling should be unescaped");
+  assert.equal(
+    source.slice(attr.valueStart, attr.valueEnd),
+    "it``s fine",
+    "the span has to cover the literal AS WRITTEN"
+  );
+});
+
+test("the positional name survives a doubled quote in an earlier argument", () => {
+  const context = abapAt(
+    [
+      "    view->tag( `Text`",
+      "        )->a( n = `text` v = `a``b`",
+      "        )->a( n = `‸tooltip` v = `x` ).",
+    ].join("\n")
+  );
+  assert.equal(context?.control, "sap.m.Text");
+});
+
+test("a commented-out WHEN branch is not where the event is handled", () => {
+  /*
+   * The FIRST match wins, so a dead branch left above a live one is where
+   * Go-to-Definition landed - and F2 rewrote it as if it were code.
+   */
+  const source = [
+    "CASE lv_event.",
+    "* WHEN 'SAVE'.",
+    "*   old_save( ).",
+    "  WHEN 'SAVE'.",
+    "    save( ).",
+    "ENDCASE.",
+  ].join("\n");
+  const at = whenBranchOf(source, "SAVE");
+  assert.ok(at !== undefined);
+  assert.equal(
+    source.slice(0, at).split("\n").length,
+    4,
+    "the dead branch was taken for the live one"
+  );
+  assert.deepEqual(
+    whenBranches(source).map((b) => b.name),
+    ["SAVE"]
+  );
+  assert.equal(eventNameSpans(source, "SAVE").length, 1);
+});
+
+test("a commented-out _event wire is not a usage", () => {
+  const source = [
+    "  view->tag( `Button`",
+    '      " )->a( n = `press` v = client->_event( `SAVE` )',
+    "      )->a( n = `press` v = client->_event( `SAVE` ) ).",
+  ].join("\n");
+  assert.equal(eventUsagesOf(source, "SAVE").length, 1);
 });

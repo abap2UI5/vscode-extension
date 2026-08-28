@@ -128,3 +128,44 @@ test("the last attribute of a chain can be removed too", () => {
   const chain = next.slice(next.indexOf("DATA(view)"), next.indexOf("client->view_display"));
   assert.equal(parens(chain, "("), parens(chain, ")"));
 });
+
+test("rewriting a value with a doubled quote replaces all of it", () => {
+  /*
+   * The literal's span used to stop at the first half of a doubled quote, so
+   * the editor showed "it" for `it``s fine` and writing "hello" produced
+   * `hello``s fine` - silent corruption of the source it was asked to edit.
+   */
+  const source =
+    "    view->tag( n = `Text` )->a( n = `text` v = `it``s fine` ).";
+  const call = controlCallAt(source, source.indexOf("Text` )"));
+  assert.ok(call);
+  const attr = call.attrs.find((a) => a.name === "text");
+  assert.equal(attr?.value, "it`s fine");
+
+  const edit = setAttributeEdit(source, call, "text", "hello");
+  assert.ok(edit);
+  const after = source.slice(0, edit.start) + edit.text + source.slice(edit.end);
+  assert.equal(
+    after,
+    "    view->tag( n = `Text` )->a( n = `text` v = `hello` )."
+  );
+});
+
+test("a new value containing a quote is written escaped", () => {
+  const source = "    view->tag( n = `Text` )->a( n = `text` v = `plain` ).";
+  const call = controlCallAt(source, source.indexOf("Text` )"));
+  assert.ok(call);
+  const edit = setAttributeEdit(source, call, "text", "it`s fine");
+  assert.ok(edit);
+  const after = source.slice(0, edit.start) + edit.text + source.slice(edit.end);
+  assert.equal(
+    after,
+    "    view->tag( n = `Text` )->a( n = `text` v = `it``s fine` )."
+  );
+  // and it reads back as what was asked for - the round trip closes
+  const reread = controlCallAt(after, after.indexOf("Text` )"));
+  assert.equal(
+    reread?.attrs.find((a) => a.name === "text")?.value,
+    "it`s fine"
+  );
+});

@@ -75,3 +75,49 @@ test("one file cannot fill the whole list", () => {
   assert.equal(ranked.filter((h) => h.file === WHERE.file).length, 2);
   assert.ok(ranked.some((h) => h.text === "other"));
 });
+
+test("the positional call form counts as a use - it is most of the corpus", () => {
+  /*
+   * `tag( `Button` )` without the `n =` is what the XML converter emits and
+   * what the sample catalogues are mostly written in (a lone `n =` trips
+   * abaplint's omit_parameter_name). Matching only the named form reported a
+   * fraction of the hits, and none at all for the common sap.m controls.
+   */
+  const source = [
+    "    view->ele( `Page`",
+    "        )->tag( `Button`",
+    "            )->a( n = `text` v = `Go`",
+    "            )->a( n = `press` v = `X` ).",
+  ].join("\n");
+  const hits = findControlUses(source, "sap.m.Button", {
+    file: "z.clas.abap",
+    catalogue: "samples",
+  });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].attributes, 2);
+  assert.equal(findControlUses(source, "Page", { file: "z", catalogue: "s" }).length, 1);
+});
+
+test("both call forms are found in one source, and neither twice", () => {
+  const source = [
+    "view->tag( `Button` )->a( n = `text` v = `a` ).",
+    "view->tag( n = `Button` )->a( n = `text` v = `b` ).",
+  ].join("\n");
+  const hits = findControlUses(source, "Button", {
+    file: "z.clas.abap",
+    catalogue: "samples",
+  });
+  assert.equal(hits.length, 2);
+  assert.deepEqual(
+    hits.map((h) => h.line),
+    [1, 2]
+  );
+});
+
+test("a positional literal of another control is not a hit", () => {
+  const source = "view->tag( `Text` )->a( n = `text` v = `Button` ).";
+  assert.deepEqual(
+    findControlUses(source, "Button", { file: "z", catalogue: "s" }),
+    []
+  );
+});

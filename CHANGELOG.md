@@ -2,6 +2,81 @@
 
 ## Unreleased
 
+- **F9 recognises an app that INHERITS `z2ui5_if_app`.** A shared base class
+  carrying the interface and the lifecycle methods, with each app redefining
+  them, is a common way to keep a team's apps uniform - and the extension
+  recognised none of those apps: it read the interface out of the class in
+  front of it, so F9, the "Run"/"Activate & reload" CodeLens, the abap2UI5
+  Apps tree and the navigation map all stayed silent on the very classes a
+  developer works in every day. The inheritance chain is now followed, over
+  as many levels as it has, using the classes the window can see (the
+  workspace's files plus everything open, so it works against ADT too). A
+  base class this window cannot see still means "not an app" - the same
+  answer as before, rather than a guess.
+  ([#81](https://github.com/abap2UI5/vscode-extension/issues/81))
+- **The view check works again in the browser.** On vscode.dev and browser-
+  based BAS every check threw before it produced anything, and the error was
+  swallowed by design, so the whole feature was silently dead: no squiggles,
+  no Problems entries, no completion metadata - with nothing anywhere saying
+  why.
+- **The editor reports the findings CI reports.** Five rules never fired in
+  the editor although the linter reports them on the same file:
+  `unknown-model`, `json-bind-on-scalar-property`,
+  `raw-javascript-to-frontend`, and the three structural ones that assert at
+  RUNTIME - `excess-shut`, `duplicate-property` and
+  `attribute-without-element`. The icon rules (`unknown-icon`,
+  `icon-too-new`, `icon-removed`) had never fired in the editor at all, and
+  the configured minimum UI5 version now reaches them, so a repository with a
+  higher floor is judged against its own floor.
+- **"Fix All Views in the Workspace" no longer corrupts unsaved files.** A
+  class that was open with unsaved changes AND on disk was checked against the
+  version on DISK, and the resulting fixes were then applied to the buffer -
+  so every fix after the first difference landed a few characters off, in the
+  middle of a token. Open files are now checked as they stand, and a file
+  edited while the sweep runs is skipped and reported instead of edited blind.
+  The same mismatch had put the workspace check's squiggles on the wrong
+  lines.
+- **Format Document agrees with the linter.** It worked the chain layout out
+  for itself and was measurably stricter than `chain-house-layout`: eight of
+  the 637 builder classes in samples-controls would have been re-indented
+  although the rule calls them correct. It now applies the linter's own
+  layout fixes, so formatting and CI cannot disagree.
+- **Redirects from the system reach the preview.** A `Location` header that
+  spelled the host in another case, or its port differently, was not rewritten
+  onto the local proxy - the browser then followed it to the system directly,
+  without the injected credentials, and the preview stayed white.
+- **Reload-on-activation survives a system switch.** One launch against a
+  system whose `/sap/bc/adt` is closed used to switch the feature off for
+  every other system too, until the window was reloaded.
+- **Fewer wrong answers from the language features.** A commented-out
+  argument inside a builder call decided which control completion, hover and
+  the property editor were talking about; a doubled quote (`` `it``s fine` ``)
+  truncated a value, and rewriting it from the property editor corrupted the
+  literal; a commented-out `WHEN` branch was where Go-to-Definition landed and
+  what F2 renamed; `control_by_id` mentioned in a comment made the next
+  literal look like a control id. String templates with embedded expressions
+  (`|val { get( 'a|b' ) }|`) no longer swallow the rest of the line.
+- **"Show Examples for this Control" finds most of the corpus.** It matched
+  only `tag( n = \`Button\` )` and not the positional `tag( \`Button\` )`, which
+  is what the XML converter emits and most of what the sample catalogues
+  contain - so common sap.m controls returned no local hits at all. Hits in
+  samples-stack now link to the branch their file is actually on instead of
+  404ing.
+- **The view preview and the screenshot cannot hang the panel any more.** Both
+  run the checker with a timeout and kill the whole process tree, as the view
+  check already did; a Windows path with a space in it (`C:\Users\John
+  Smith\...`) no longer breaks either of them, nor a `viewCheck.command`
+  pointing at `C:\Program Files\nodejs\node.exe`.
+- **The render gate verifies what it downloads** before extracting or running
+  it, and the extension's second local listener (the System MCP server) now
+  refuses a non-loopback `Host` exactly as the auth proxy does.
+- **The preview's toolbar cannot be spoofed by the app it shows.** The
+  embedded app could post the host's own messages and rewrite the class name,
+  the system URL shown under it and the reload target.
+- **Desktop-only commands are hidden in the browser.** The editor-title play
+  button and F9 appeared on vscode.dev, where those commands do not exist, and
+  answered "command not found".
+
 - **The `client->` hover links to the published Client API Reference.** The
   hover shows a method's signature and ABAP Doc, but it was a dead end: no
   way to read on - the parameter tables, the constants, the neighbouring
