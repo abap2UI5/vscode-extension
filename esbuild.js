@@ -11,7 +11,19 @@ const webTests = process.argv.includes("--webtest");
  *  bundle - the property gate reads it at runtime. The config-file schema
  *  travels the same way: `contributes.jsonValidation` points at the copy, so
  *  editing `abap2ui5lint.jsonc` validates against exactly the pinned linter's
- *  schema, offline. */
+ *  schema, offline.
+ *
+ *  `data/icons.json` is the third, and it does NOT go next to the bundle: the
+ *  icon rules are the one place the linter resolves its own data file itself,
+ *  from `import.meta.url` + "../data" - which in this CJS bundle is the shim's
+ *  `__filename`, i.e. `dist/../data`. So the copy has to land in the extension
+ *  ROOT's `data/`, and it serves `dist-test/` (`dist-test/../data`) with it.
+ *
+ *  Without the copy nothing breaks loudly: `loadIcons` treats an unreadable
+ *  file as an empty registry by design, so `unknown-icon`, `icon-too-new` and
+ *  `icon-removed` simply never fired in the editor while CI reported them -
+ *  the same silent-metadata trap as a missing `dist/properties.json`, for the
+ *  data file that arrived later. `gate.icons.test.ts` is the gate on it. */
 function copySnapshot() {
   const data = path.join(
     path.dirname(require.resolve("@abap2ui5/linter/properties")),
@@ -26,6 +38,11 @@ function copySnapshot() {
   fs.copyFileSync(
     path.join(data, "abap2ui5lint.schema.json"),
     path.join("dist", "abap2ui5lint.schema.json")
+  );
+  fs.mkdirSync("data", { recursive: true });
+  fs.copyFileSync(
+    path.join(data, "icons.json"),
+    path.join("data", "icons.json")
   );
 }
 
@@ -119,8 +136,17 @@ function webConfig() {
       // that.
       __dirname: '"/web"',
       __filename: '"/web/extension.js"',
+      // A browser worker has no `process` either, so these are ReferenceErrors
+      // rather than missing functions. The linter calls `process.cwd()` on
+      // every `applyRules` - without the define every web check threw and the
+      // view check went silent on vscode.dev with nothing but a log line.
+      "process.cwd": "web_process_cwd",
+      "process.env": "web_process_env",
     },
-    inject: ["scripts/import-meta-url-web-shim.mjs"],
+    inject: [
+      "scripts/import-meta-url-web-shim.mjs",
+      "scripts/web-shims/process.mjs",
+    ],
     logLevel: "info",
   };
 }

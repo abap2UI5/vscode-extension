@@ -283,6 +283,29 @@ Facts an agent cannot see from the code but will trip over:
   `snapshot.ts` logs why, which is the only signal you get. The test build
   copies the same file into `dist-test/`, because `snapshot.ts` resolves it
   next to its own bundle.
+  `copySnapshot()` also copies the linter's **`data/icons.json` into the
+  extension root's `data/`** — not next to the bundle. The icon rules are the
+  one place the linter resolves its own data file, from `import.meta.url` +
+  `"../data"`, which in this CJS bundle is `dist/../data` (and `dist-test/..`,
+  so one copy serves both). Nothing fails when it is absent: `loadIcons`
+  treats an unreadable file as an empty registry by design, so `unknown-icon`,
+  `icon-too-new` and `icon-removed` simply never fired in the editor while CI
+  reported them. `data/` is build output — gitignored, and packaged into the
+  `.vsix` because `.vscodeignore` does not exclude it.
+- **`gate.ts` is a second CALLER of the linter's pipeline, never a second
+  pipeline.** It exists because the two hosts feed the metadata snapshot in
+  differently (desktop reads a file, the browser gets text through
+  `workspace.fs`) while `checkAbapSource` only takes a *path*. Everything else
+  it must do exactly as `lib/index.mjs` does — and it silently stopped:
+  `models`, `jsonPaths`, `fromAbap`, `prep.structure` and `minUi5` had gone
+  missing from the copy, each switching off whole rules (`unknown-model`,
+  `json-bind-on-scalar-property`, `raw-javascript-to-frontend`, `excess-shut`
+  / `duplicate-property` / `attribute-without-element`, and the icon floor)
+  with no symptom beyond CI and the editor disagreeing. `gate.parity.test.ts`
+  now diffs the two over fixtures and is the reason a sixth missing input
+  fails a test instead of going quiet. The one known difference is written
+  down there: the XML branch cannot run `checkIcons`, which the linter does
+  not export through its `exports` map.
 - **The rule reference is coupled by URL, not by import.** Every diagnostic's
   code links to `https://abap2ui5.github.io/linter/#<rule-id>`, which the
   linter's `generate-rules-page` emits one anchor per rule for. The rule ids
