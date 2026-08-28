@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
+import { createHash } from "crypto";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import * as tar from "tar";
@@ -86,14 +87,94 @@ function runWithVsCodeNode(
   });
 }
 
-async function download(url: string, dest: string): Promise<void> {
+/** Downloads to `dest` and returns the SHA-256 of what was written. */
+async function download(url: string, dest: string): Promise<string> {
   const res = await fetch(url);
   if (!res.ok || !res.body) {
     throw new Error(`download failed - HTTP ${res.status} for ${url}`);
   }
+  const digest = createHash("sha256");
   await pipeline(
     Readable.fromWeb(res.body as import("stream/web").ReadableStream),
+    async function* (source: AsyncIterable<Buffer>) {
+      for await (const chunk of source) {
+        digest.update(chunk);
+        yield chunk;
+      }
+    },
     fs.createWriteStream(dest)
+  );
+  return digest.digest("hex");
+}
+
+/** Where the remembered digest of a bundle url lives. Keyed by url, so the
+ *  rolling bundle (which is MEANT to change) and each per-commit bundle are
+ *  tracked apart. */
+const digestKey = (url: string): string => `abap2ui5.bundleDigest:${url}`;
+
+/**
+ * What this build is willing to execute from a downloaded archive.
+ *
+ * The bundle is fetched over HTTPS and then extracted and run with VS Code's
+ * Node - so whoever can change that release asset chooses code that runs on
+ * every machine that installs the gate. Pinning the URL to a per-commit tag
+ * pins WHICH asset, not WHAT IS IN IT.
+ *
+ * Two checks, strongest first:
+ *
+ * 1. A `<bundle>.sha256` sibling asset, when the linter publishes one: authoritative,
+ *    and a mismatch is refused outright. (It does not publish one today; this
+ *    closes the gap the moment it does, with no release here.)
+ * 2. Otherwise trust-on-first-use, per url. A per-commit tag is supposed to be
+ *    IMMUTABLE, so the same url answering with different bytes than last time
+ *    is precisely the signal worth stopping on - it cannot happen by accident.
+ *
+ * Neither protects a first install against a bundle that was already
+ * tampered with; say so rather than implying otherwise.
+ */
+async function verifyBundle(
+  context: vscode.ExtensionContext,
+  url: string,
+  actual: string,
+  log: (m: string) => void
+): Promise<void> {
+  let published: string | undefined;
+  try {
+    const res = await fetch(`${url}.sha256`);
+    if (res.ok) {
+      // `<hex>  view-check-bundle.tgz`, the shasum(1) format
+      const hex = /\b([0-9a-f]{64})\b/i.exec(await res.text())?.[1];
+      published = hex?.toLowerCase();
+    }
+  } catch {
+    // no checksum asset published, or offline mid-install - fall through to
+    // the remembered digest, which is the check that does not need the network
+  }
+  if (published) {
+    if (published !== actual) {
+      throw new Error(
+        `bundle checksum mismatch - the published sha256 is ${published.slice(0, 12)}… ` +
+          `but the download hashes to ${actual.slice(0, 12)}…. Nothing was installed.`
+      );
+    }
+    log(`render-gate: bundle sha256 ${actual.slice(0, 12)}… matches the published checksum`);
+    await context.globalState.update(digestKey(url), actual);
+    return;
+  }
+
+  const remembered = context.globalState.get<string>(digestKey(url));
+  if (remembered && remembered !== actual) {
+    throw new Error(
+      "bundle changed since it was last installed from the same URL. That URL " +
+        "names one immutable linter commit, so its content should never move. " +
+        `Expected ${remembered.slice(0, 12)}…, got ${actual.slice(0, 12)}…. ` +
+        "Nothing was installed."
+    );
+  }
+  await context.globalState.update(digestKey(url), actual);
+  log(
+    `render-gate: bundle sha256 ${actual.slice(0, 12)}…` +
+      (remembered ? " (unchanged since the last install)" : " (first install from this URL)")
   );
 }
 
@@ -131,9 +212,12 @@ export async function installRenderGate(
           .getConfiguration("abap2ui5")
           .get<boolean>("viewCheck.rollingBundle", false);
 
+        let bundleUrl: string;
+        let digest: string;
         if (PINNED_BUNDLE_URL && !allowRolling) {
           try {
-            await download(PINNED_BUNDLE_URL, tgz);
+            bundleUrl = PINNED_BUNDLE_URL;
+            digest = await download(PINNED_BUNDLE_URL, tgz);
             log(`render-gate: bundle ${LINTER_PIN.slice(0, 12)} (matches the pinned linter)`);
           } catch (e) {
             throw new Error(
@@ -145,13 +229,18 @@ export async function installRenderGate(
             );
           }
         } else {
-          await download(ROLLING_BUNDLE_URL, tgz);
+          bundleUrl = ROLLING_BUNDLE_URL;
+          digest = await download(ROLLING_BUNDLE_URL, tgz);
           log(
             PINNED_BUNDLE_URL
               ? "render-gate: rolling bundle (abap2ui5.viewCheck.rollingBundle) - this is the linter's current main, not the commit this build pins"
               : "render-gate: rolling bundle - this build pins no linter commit"
           );
         }
+
+        // before anything out of the archive is unpacked, let alone run
+        progress.report({ message: "verifying the download..." });
+        await verifyBundle(context, bundleUrl, digest, log);
 
         progress.report({ message: "extracting..." });
         await tar.x({ file: tgz, cwd: staging });

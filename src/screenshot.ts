@@ -116,6 +116,22 @@ export async function takeScreenshot(
     // Fast-forwards the page's timers so the UI5 boot and the first backend
     // roundtrip are through before the shot - deterministic, no sleep.
     "--virtual-time-budget=15000",
+    /*
+     * KNOWN EXPOSURE, deliberately not worked around here: this is the
+     * proxied url, so it carries the proxy's path token, and a process
+     * argument vector is readable by other processes of this user (`ps`,
+     * /proc/<pid>/cmdline). `report.ts` redacts the same token out of the
+     * logs precisely because it authorizes an authenticated session against
+     * the system.
+     *
+     * Headless Chromium takes the page to shoot only as an argument - there
+     * is no stdin or file form of it - so removing this needs a different
+     * shape (a one-shot token the proxy retires after the shot, or a local
+     * redirect page). Both change security-critical code that cannot be
+     * verified against a real system from here, and a half-verified change
+     * to the credential path is worse than a documented one. The window is
+     * the lifetime of one screenshot process.
+     */
     options.url,
   ];
   // Chromium refuses its sandbox as root (containers, some CI images).

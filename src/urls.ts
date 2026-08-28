@@ -117,3 +117,56 @@ export function isUsableTemplate(template: string): boolean {
     return false;
   }
 }
+
+/** The port a URL actually talks to, default ports spelled out - `URL.port`
+ *  is empty for 80/443, which makes two spellings of one authority compare
+ *  unequal. */
+function effectivePort(url: URL): string {
+  return url.port || (url.protocol === "https:" ? "443" : "80");
+}
+
+/**
+ * A `Location` header from the system, rebased onto the proxy when it points
+ * back at the system - and left exactly as it is when it does not.
+ *
+ * This is `proxiedUrl`'s problem a second time, and it had the same wrong
+ * answer: `location.replace(target.origin, proxyOrigin)`. `URL.origin` is
+ * NORMALISED - lowercased host, default port dropped - so a system answering
+ * `Location: https://MyHost:44300/sap/bc/...` (or dropping `:443` where the
+ * configured origin kept it) does not contain the origin verbatim, the
+ * replace silently does nothing, and the browser follows the redirect to the
+ * system DIRECTLY. There it has no injected credentials, so it gets a 401 and
+ * the preview stays white - the exact symptom the connection check exists to
+ * explain.
+ *
+ * Compared by host and port rather than by whole origin on purpose: a system
+ * that redirects http -> https on the same authority still has to be followed
+ * through the proxy, which is the only route that carries the credentials.
+ *
+ * A relative `Location` (`/sap/bc/...`, `../x`) is already resolved against
+ * the proxy's own origin by the browser, so it is returned untouched.
+ */
+export function rebasedLocation(
+  location: string,
+  target: URL,
+  proxyOrigin: string
+): string {
+  let parsed: URL;
+  try {
+    // a relative Location has no origin of its own; resolving it against the
+    // target is how we find out whether it would leave the system
+    parsed = new URL(location, target);
+  } catch {
+    return location;
+  }
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(location) && !location.startsWith("//")) {
+    return location; // relative: the browser resolves it against the proxy
+  }
+  if (
+    parsed.hostname !== target.hostname ||
+    effectivePort(parsed) !== effectivePort(target)
+  ) {
+    return location; // somewhere else entirely - not ours to rewrite
+  }
+  return proxyOrigin + parsed.pathname + parsed.search + parsed.hash;
+}
