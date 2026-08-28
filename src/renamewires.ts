@@ -21,7 +21,9 @@ import {
   abapLiterals,
   abapSpans,
   abapStatements,
+  blankComments,
   declaredNames,
+  type AbapStatement,
 } from "./abapscan";
 
 import type { NamedSpan } from "./context";
@@ -71,10 +73,29 @@ function literals(source: string): Literal[] {
   }));
 }
 
-/** The first literal starting after `from`, within reach. */
-function literalAfter(all: readonly Literal[], from: number): Literal | undefined {
+/** The first literal starting after `from`, within reach AND before `limit`. */
+function literalAfter(
+  all: readonly Literal[],
+  from: number,
+  limit: number
+): Literal | undefined {
   const hit = all.find((literal) => literal.start > from);
-  return hit && hit.start - from <= MARKER_REACH ? hit : undefined;
+  return hit && hit.start - from <= MARKER_REACH && hit.start < limit
+    ? hit
+    : undefined;
+}
+
+/** One past the `.` that ends the statement `at` belongs to. A marker whose
+ *  own statement carries no literal (`set_focus( lv_id )`) must not reach
+ *  forward into the NEXT statement and bless whatever it says first. */
+function statementEnd(statements: readonly AbapStatement[], at: number): number {
+  for (const statement of statements) {
+    const end = statement.start + statement.text.length;
+    if (at < end) {
+      return end;
+    }
+  }
+  return Number.MAX_SAFE_INTEGER;
 }
 
 /**
@@ -88,11 +109,22 @@ function literalAfter(all: readonly Literal[], from: number): Literal | undefine
  */
 export function idLiterals(source: string): NamedSpan[] {
   const all = literals(source);
+  /*
+   * The markers are looked for in CODE, not in the raw text. Read raw, a
+   * comment mentioning one ("TODO use control_by_id here") armed the scan,
+   * and the next literal - the toast text on the line below - was recorded as
+   * a control id. F2 then offered to rename it, and renaming a real id whose
+   * text happened to match rewrote it too, because the other end is found by
+   * text. `blankComments` keeps every offset - and keeps the literals, which
+   * one of the markers reads (`n = \`id\``).
+   */
+  const code = blankComments(source);
+  const statements = abapStatements(source);
   const out: NamedSpan[] = [];
   const seen = new Set<number>();
-  for (const marker of source.matchAll(ID_MARKERS)) {
+  for (const marker of code.matchAll(ID_MARKERS)) {
     const at = (marker.index ?? 0) + marker[0].length;
-    const literal = literalAfter(all, at);
+    const literal = literalAfter(all, at, statementEnd(statements, at));
     if (!literal || !literal.text || seen.has(literal.start)) {
       continue;
     }

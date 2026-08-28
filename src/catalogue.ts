@@ -38,6 +38,10 @@ export interface CatalogueEntry {
   /** The full UI5 entity a port demonstrates (`sap.m.Table`), when the
    *  catalogue names one - only samples-controls does. */
   entity?: string;
+  /** The branch the file lives on, when the catalogue names one. Only
+   *  samples-stack does, and it means it: its entries sit on per-topic
+   *  branches (`02-smart-controls`), so a link to `main` is a 404. */
+  branch?: string;
 }
 
 /** A catalogue entry matched against a control, ready to show. */
@@ -59,9 +63,16 @@ export function catalogueUrl(repo: string): string {
   return `https://raw.githubusercontent.com/abap2UI5/${repo}/main/catalogue.json`;
 }
 
-/** Where a catalogue entry's class opens when there is no local checkout. */
-export function blobUrl(repo: string, file: string): string {
-  return `https://github.com/abap2UI5/${repo}/blob/main/${file}`;
+/**
+ * Where a catalogue entry's class opens when there is no local checkout.
+ *
+ * The branch is the entry's own when it names one. samples-stack keeps its
+ * samples on per-topic branches and says so in every entry - and the branch
+ * was read nowhere, so each of its hits opened a `blob/main/...` url for a
+ * file that only exists on `02-smart-controls` and answered 404.
+ */
+export function blobUrl(repo: string, file: string, branch = "main"): string {
+  return `https://github.com/abap2UI5/${repo}/blob/${branch}/${file}`;
 }
 
 function asString(value: unknown): string {
@@ -98,6 +109,7 @@ function asEntry(value: unknown): CatalogueEntry | undefined {
     summary: asString(raw.summary) || asString(raw.description),
     keywords: asKeywords(raw.keywords),
     entity: asString(raw.entity) || undefined,
+    branch: asString(raw.branch) || undefined,
   };
 }
 
@@ -168,7 +180,12 @@ export function matchCatalogue(
       score = 1;
     }
     if (score > 0) {
-      scored.push({ ...entry, repo, score, url: blobUrl(repo, entry.file) });
+      scored.push({
+        ...entry,
+        repo,
+        score,
+        url: blobUrl(repo, entry.file, entry.branch),
+      });
     }
   }
   return scored

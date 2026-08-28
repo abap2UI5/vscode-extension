@@ -18,7 +18,7 @@
  * and the test suite drives it directly.
  */
 
-import { abapSpans } from "./abapscan";
+import { abapSpans, blankComments } from "./abapscan";
 
 /** Which of the three writable positions the cursor sits in. */
 export type ContextKind = "control" | "member" | "value" | "namespace";
@@ -238,10 +238,51 @@ function scanAbapUncached(source: string, offset: number): AbapScan {
   return { stack: stackAtCursor ?? [...stack], calls, literal };
 }
 
-/** The argument text of a call — up to its `)`, or to the end when it is the
- *  call still being written. */
+/**
+ * The argument text of a call - up to its `)`, or to the end when it is the
+ * call still being written, with COMMENTS blanked out.
+ *
+ * Blanked, not stripped: every reader below reports offsets into this slice
+ * and they are translated straight back into source offsets, so the length
+ * has to be preserved exactly.
+ *
+ * The blanking is the point. In the line-per-argument style the corpus uses,
+ * a commented-out argument sits INSIDE the call's parentheses:
+ *
+ *     view->tag(
+ *        " n = `Button` was wrong
+ *        n = `Text`
+ *     )->a( … ).
+ *
+ * and every reader here takes the FIRST match, so the dead line won: the
+ * control was read as sap.m.Button, and completion, hover, the property
+ * editor and the aggregation resolution all inherited it. `abapscan.ts`
+ * already knows where the comments are - this is the same "identifier in a
+ * comment" class the lexer was written for, one layer further in.
+ */
 function argsOf(source: string, call: Call): string {
-  return source.slice(call.open + 1, call.close ?? source.length);
+  const from = call.open + 1;
+  const to = call.close ?? source.length;
+  return blankComments(source.slice(from, to));
+}
+
+/*
+ * A quoted literal, doubled quotes included.
+ *
+ * ABAP escapes a quote by doubling it, so `` `it``s fine` `` is ONE literal
+ * whose value is `it`s fine`. Reading it as `` [^`]* `` stopped at the first
+ * half of the pair: the property editor showed "it", and writing a new value
+ * replaced only that much - leaving `` `hello``s fine` `` behind in the
+ * source. `abapscan.ts` has always handled the doubling; these regexes did
+ * not.
+ */
+const LITERAL_ALTERNATIVES =
+  "(?:`((?:[^`]|``)*)`|'((?:[^']|'')*)'|\"((?:[^\"]|\"\")*)\")";
+
+/** The written form of a literal turned into its value: a doubled quote is
+ *  one quote. */
+function unescapeLiteral(raw: string, quote: string): string {
+  return raw.split(quote + quote).join(quote);
 }
 
 /** The literal value of a named argument, e.g. `n` in `a( n = \`text\` … )`. */
@@ -262,7 +303,7 @@ function argNameBefore(source: string, from: number, to: number): string | undef
 
 /** A lone literal written as the FIRST argument, with no `name =` in front of
  *  it. */
-const POSITIONAL_LITERAL = /^\s*(?:`([^`]*)`|'([^']*)'|"([^"]*)")/;
+const POSITIONAL_LITERAL = new RegExp("^\\s*" + LITERAL_ALTERNATIVES);
 
 /**
  * The name an `ele( )` / `tag( )` call writes, in either of the two shapes the
@@ -344,11 +385,15 @@ export interface BindingContext {
  *  literal, which a complex binding (`{path: 'X'}` in a backtick literal)
  *  always has. */
 function argLiteral(args: string, name: string): string | undefined {
-  const m = new RegExp(
-    "\\b" + name + "\\s*=\\s*(?:`([^`]*)`|'([^']*)'|\"([^\"]*)\")",
-    "i"
-  ).exec(args);
-  return m ? (m[1] ?? m[2] ?? m[3]) : undefined;
+  const m = new RegExp("\\b" + name + "\\s*=\\s*" + LITERAL_ALTERNATIVES, "i").exec(
+    args
+  );
+  if (!m) {
+    return undefined;
+  }
+  const raw = m[1] ?? m[2] ?? m[3];
+  const quote = m[1] !== undefined ? "`" : m[2] !== undefined ? "'" : '"';
+  return unescapeLiteral(raw, quote);
 }
 
 /** The path a bound aggregation addresses, including the complex form
@@ -650,17 +695,18 @@ function argLiteralSpan(
   name: string
 ): { start: number; end: number; quote: string } | undefined {
   const args = argsOf(source, call);
-  const m = new RegExp(
-    "\\b" + name + "\\s*=\\s*(?:`([^`]*)`|'([^']*)'|\"([^\"]*)\")",
-    "i"
-  ).exec(args);
+  const m = new RegExp("\\b" + name + "\\s*=\\s*" + LITERAL_ALTERNATIVES, "i").exec(
+    args
+  );
   if (!m) {
     return undefined;
   }
-  const value = m[1] ?? m[2] ?? m[3];
+  // the RAW written form, doubled quotes included - the span has to cover the
+  // whole literal, or a rewrite leaves the tail of it in the source
+  const raw = m[1] ?? m[2] ?? m[3];
   const matchEnd = call.open + 1 + m.index + m[0].length;
   return {
-    start: matchEnd - 1 - value.length,
+    start: matchEnd - 1 - raw.length,
     end: matchEnd - 1,
     quote: source[matchEnd - 1],
   };
@@ -739,11 +785,21 @@ export function controlCallAt(
       }
       const literal = argLiteralSpan(source, a, "v");
       const expression = literal ? undefined : argExpressionSpan(source, a);
-      const nameText = source.slice(attrName.start, attrName.end);
+      // Read unescaped, written escaped: the span covers the literal AS
+      // WRITTEN (doubling included, so a rewrite replaces all of it), while
+      // the value is what the literal MEANS - which is what the property
+      // editor shows in a form field and re-escapes on the way back.
+      const nameText = unescapeLiteral(
+        source.slice(attrName.start, attrName.end),
+        attrName.quote
+      );
       if (literal) {
         attrs.push({
           name: nameText,
-          value: source.slice(literal.start, literal.end),
+          value: unescapeLiteral(
+            source.slice(literal.start, literal.end),
+            literal.quote
+          ),
           literal: true,
           valueStart: literal.start,
           valueEnd: literal.end,
@@ -854,9 +910,22 @@ function escapeRe(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/*
+ * The four readers below match on literal CONTENT ('SAVE'), so they cannot
+ * run over `blankNonCode` - it would take away the very text they look for.
+ * They run over `blankComments` instead: same offsets, literals intact, and a
+ * commented-out copy of a branch or a wire out of the way.
+ *
+ * Without it a `* WHEN 'SAVE'.` left above a live one was a match like any
+ * other: Go-to-Definition landed on the dead line (the FIRST match wins), and
+ * F2 rewrote it as if it were code.
+ */
+
 /** Where `WHEN '<name>'` handles the event - the offset of the literal. */
 export function whenBranchOf(source: string, name: string): number | undefined {
-  const m = new RegExp(`\\bWHEN\\s+(['\`])${escapeRe(name)}\\1`, "i").exec(source);
+  const m = new RegExp(`\\bWHEN\\s+(['\`])${escapeRe(name)}\\1`, "i").exec(
+    blankComments(source)
+  );
   return m ? m.index : undefined;
 }
 
@@ -867,8 +936,9 @@ export function eventUsagesOf(source: string, name: string): number[] {
     `_event\\w*\\([^)]*?(['\`])${escapeRe(name)}\\1`,
     "gi"
   );
+  const code = blankComments(source);
   let m: RegExpExecArray | null;
-  while ((m = re.exec(source))) {
+  while ((m = re.exec(code))) {
     out.push(m.index);
   }
   return out;
@@ -878,8 +948,9 @@ export function eventUsagesOf(source: string, name: string): number[] {
 export function whenBranches(source: string): NamedSpan[] {
   const out: NamedSpan[] = [];
   const re = /\bWHEN\s+(['`])([\w-]+)\1/gi;
+  const code = blankComments(source);
   let m: RegExpExecArray | null;
-  while ((m = re.exec(source))) {
+  while ((m = re.exec(code))) {
     const start = m.index + m[0].indexOf(m[1]) + 1;
     out.push({ name: m[2], start, end: start + m[2].length });
   }
@@ -897,8 +968,9 @@ export function eventNameSpans(source: string, name: string): NamedSpan[] {
     `_event\\w*\\([^)]*?(['\`])(${escapeRe(name)})\\1`,
     "gi"
   );
+  const code = blankComments(source);
   let m: RegExpExecArray | null;
-  while ((m = call.exec(source))) {
+  while ((m = call.exec(code))) {
     const start = m.index + m[0].lastIndexOf(m[1] + m[2] + m[1]) + 1;
     out.push({ name, start, end: start + name.length });
   }

@@ -122,3 +122,69 @@ test("the reported offset points at the name in the original text", () => {
 test("a statement that is not a declaration declares nothing", () => {
   assert.deepEqual(declaredNames("mv_title = `Hello`"), []);
 });
+
+/*
+ * String templates with embedded expressions.
+ *
+ * What is inside `{ }` is ABAP code, not template text - it nests, it holds
+ * literals, and it holds further templates. Reading it as text let the
+ * template close on the first `|` it met in there, and everything after that
+ * was misread: the two cases below used to leak a nested template's contents
+ * out as code, and to swallow the whole rest of the line - the following
+ * statement with it.
+ */
+
+test("a template inside an embedded expression does not close the outer one", () => {
+  const source = "x = |a { |b| } c|.";
+  const blanked = blankNonCode(source);
+  assert.equal(blanked.length, source.length);
+  assert.ok(
+    !blanked.includes("b"),
+    `the nested template leaked out as code: ${JSON.stringify(blanked)}`
+  );
+  assert.equal(blanked.trimEnd().endsWith("."), true, "the statement still ends");
+});
+
+test("a pipe inside a literal inside an embedded expression is not the closer", () => {
+  const source = "x = |val { get( 'a|b' ) }|. tag( `Text` ).";
+  const blanked = blankNonCode(source);
+  assert.equal(blanked.length, source.length);
+  // the statement after the template is still code - this is the one that
+  // used to disappear, taking F2, the outline and the formatter with it
+  assert.ok(
+    blanked.includes("tag("),
+    `the following statement was swallowed: ${JSON.stringify(blanked)}`
+  );
+});
+
+test("an escaped pipe does not close a template", () => {
+  const source = "x = |esc \\| still|. tag( `T` ).";
+  const blanked = blankNonCode(source);
+  assert.equal(blanked.length, source.length);
+  assert.ok(blanked.includes("tag("));
+  assert.ok(!blanked.includes("still"));
+});
+
+test("a template spans lines, and the embedded code goes with it", () => {
+  const source = "x = |a\n{ 1 + 2 }\nb|.\ntag( `T` ).";
+  const blanked = blankNonCode(source);
+  assert.equal(blanked.length, source.length);
+  assert.equal(
+    blanked.split("\n").length,
+    source.split("\n").length,
+    "line breaks inside the template have to survive the blanking"
+  );
+  assert.ok(blanked.includes("tag("));
+});
+
+test("blanking keeps its length even on a trailing escape mid-typing", () => {
+  // `j += 2` used to step one past the end, and the blanking loop then wrote
+  // a character that was not there before
+  for (const source of ["x = |a\\", "x = |{ 'a\\", "x = `a"]) {
+    assert.equal(
+      blankNonCode(source).length,
+      source.length,
+      `length changed for ${JSON.stringify(source)}`
+    );
+  }
+});

@@ -194,6 +194,52 @@ export function planExtract(
     return { error: "There is no chain call left after the cursor to extract." };
   }
 
+  /*
+   * The chain has to BE the statement, not sit inside another call.
+   *
+   * The classic one-statement style writes the whole view as an argument:
+   *
+   *     client->view_display( z2ui5_cl_ui5_view_builder=>factory(
+   *       )->ele( `Page`
+   *       )->stringify( ) ).
+   *
+   * Cutting that at a `)->` leaves a head with an unclosed `view_display(`
+   * and a tail carrying a `)` and a `stringify( )` that belong to it - the
+   * "extraction" then produced a head that does not compile and a method body
+   * with a foreign call and a spare paren in it. Everything before the chain
+   * begins must therefore be balanced; when it is not, this is a shape to
+   * refuse rather than to guess at.
+   */
+  const chainStart = /(?:=>\s*factory\s*\(|\w\s*->\s*(?:ele|tag)\s*\()/i.exec(
+    code.slice(statement.start, statement.end)
+  );
+  if (!chainStart) {
+    return { error: "This is not a view builder chain - put the cursor in one." };
+  }
+  const before = code.slice(statement.start, statement.start + chainStart.index);
+  let depth = 0;
+  for (const c of before) {
+    if (c === "(") {
+      depth++;
+    } else if (c === ")") {
+      depth--;
+    }
+  }
+  if (depth !== 0) {
+    return {
+      error:
+        "This chain is written inside another call (client->view_display( … )). " +
+        "Capture it in a variable first - DATA(view) = …factory( ) - then extract from that.",
+    };
+  }
+  if (/->\s*stringify\s*\(/i.test(tail)) {
+    return {
+      error:
+        "The selection reaches past the end of the view (stringify). Put the " +
+        "cursor on the chain call that should start the new method.",
+    };
+  }
+
   /* The head has to end up in a variable, because that variable is what the
    * new method is handed. A chain already captured into one keeps its name -
    * re-capturing it would leave two handles for one chain. */

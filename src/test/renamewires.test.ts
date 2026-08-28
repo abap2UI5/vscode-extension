@@ -163,3 +163,66 @@ test("a chained declaration makes every entry renamable", () => {
 ENDCLASS.`;
   assert.equal(attributeAt(source, source.indexOf("mv_count") + 1)?.name, "mv_count");
 });
+
+test("a marker inside a comment arms nothing", () => {
+  /*
+   * Read raw, "TODO use control_by_id here" armed the scan and the next
+   * literal - a toast text - was recorded as a control id. F2 then offered to
+   * rename it, and renaming a real id whose text matched rewrote it too,
+   * because the other end is found by text.
+   */
+  const source = [
+    "METHOD z2ui5_if_app~main.",
+    "  \" TODO use control_by_id here",
+    "  client->message_toast_display( `SAVE` ).",
+    "ENDMETHOD.",
+  ].join("\n");
+  assert.deepEqual(
+    idLiterals(source).map((s) => s.name),
+    []
+  );
+});
+
+test("a marker whose statement carries no literal does not reach the next one", () => {
+  // `set_focus( lv_id )` passes a variable; the literal below belongs to the
+  // statement after it and is not this wire's id
+  const source = [
+    "METHOD z2ui5_if_app~main.",
+    "  client->set_focus( lv_id ).",
+    "  client->message_toast_display( `SAVED` ).",
+    "ENDMETHOD.",
+  ].join("\n");
+  assert.deepEqual(
+    idLiterals(source).map((s) => s.name),
+    []
+  );
+});
+
+test("a marker with its id in the same statement is still found", () => {
+  const source = [
+    "METHOD z2ui5_if_app~main.",
+    "  client->set_focus( `INPUT1` ).",
+    "  client->message_toast_display( `SAVED` ).",
+    "ENDMETHOD.",
+  ].join("\n");
+  assert.deepEqual(
+    idLiterals(source).map((s) => s.name),
+    ["INPUT1"]
+  );
+});
+
+test("a multi-line wire still reaches its id", () => {
+  // the VALUE #( ( … ) ) table spans lines - the statement, not the line, is
+  // what bounds the search
+  const source = [
+    "METHOD z2ui5_if_app~main.",
+    "  client->follow_up_action( client->_event_client(",
+    "      action = z2ui5_if_client=>cs_event-control_by_id",
+    "      t_arg  = VALUE #( ( `TABLE` ) ( `setBusy` ) ( `true` ) ) ) ).",
+    "ENDMETHOD.",
+  ].join("\n");
+  assert.deepEqual(
+    idLiterals(source).map((s) => s.name),
+    ["TABLE"]
+  );
+});

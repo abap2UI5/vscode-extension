@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import { abapSources } from "./abapsources";
+import { blankNonCode } from "./abapscan";
 import {
   abapBindingContextAt,
   eventNameAt,
@@ -785,9 +786,16 @@ async function expandChainAbbreviation(log: (m: string) => void): Promise<void> 
 
   /* A chain is one statement, so "am I inside one" is answered by the text
    * from the previous period to here: a builder call in it means the
-   * statement is open and the expansion continues it. */
+   * statement is open and the expansion continues it.
+   *
+   * Which period, though, is a lexical question - `lastIndexOf(".")` found one
+   * inside a comment or a literal just as happily (`view->ele( \`Page\`  " main
+   * page.`), cut the statement short, decided it was not a continuation, and
+   * inserted a whole new `DATA(view) = …factory( ).` statement into the middle
+   * of an open chain. `blankNonCode` keeps the offsets, so the index still
+   * points into the real text. */
   const before = doc.getText(new vscode.Range(new vscode.Position(0, 0), range.start));
-  const statement = before.slice(before.lastIndexOf(".") + 1);
+  const statement = before.slice(blankNonCode(before).lastIndexOf(".") + 1);
   const continuation = /->\s*(?:ele|tag|a)\s*\(/i.test(statement);
   const indent = /^[ \t]*/.exec(line.text)?.[0] ?? "";
 
