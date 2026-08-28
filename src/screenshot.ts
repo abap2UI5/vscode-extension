@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { spawn } from "child_process";
+import { run } from "./childproc";
 import { offerInstall, renderGateBrowsers } from "./rendergate";
 
 /*
@@ -50,33 +50,28 @@ export function findChromium(browsersDir: string): string | undefined {
 
 const SHOT_TIMEOUT_MS = 45_000;
 
-function runChromium(
+async function runChromium(
   chromium: string,
   args: string[],
   log: (m: string) => void
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(chromium, args, { stdio: ["ignore", "ignore", "pipe"] });
-    let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error("Chromium did not finish within 45 s"));
-    }, SHOT_TIMEOUT_MS);
-    child.stderr.on("data", (c) => (stderr += String(c)));
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve();
-      } else {
-        log(`screenshot: chromium stderr: ${stderr.slice(0, 400)}`);
-        reject(new Error(`Chromium exited with code ${code}`));
-      }
-    });
-  });
+  // Through the shared runner for the kill: a headless Chromium is a process
+  // TREE (zygote, GPU, renderers), and the plain SIGTERM this used to send to
+  // the parent left the rest of it running after a timeout.
+  const outcome = await run(chromium, args, { timeoutMs: SHOT_TIMEOUT_MS });
+  if (outcome.kind === "spawn-failed") {
+    throw outcome.error;
+  }
+  if (outcome.kind === "timeout") {
+    log(`screenshot: chromium stderr: ${outcome.stderr.slice(0, 400)}`);
+    throw new Error(
+      `Chromium did not finish within ${Math.round(SHOT_TIMEOUT_MS / 1000)} s`
+    );
+  }
+  if (outcome.kind === "closed" && outcome.code !== 0) {
+    log(`screenshot: chromium stderr: ${outcome.stderr.slice(0, 400)}`);
+    throw new Error(`Chromium exited with code ${outcome.code}`);
+  }
 }
 
 /**

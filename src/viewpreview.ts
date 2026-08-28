@@ -3,7 +3,6 @@ import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { spawn } from "child_process";
 import {
   parseScreenshotErrors,
   parseScreenshotOutput,
@@ -14,6 +13,7 @@ import {
   viewportCount,
 } from "./checkcore";
 import { classNameOf } from "./abap";
+import { run } from "./childproc";
 import { checkerCommand, isCheckable, pickDocument, spawnEnv } from "./viewcheck";
 import { createNonce, viewPreviewHtml } from "./webview";
 
@@ -38,6 +38,16 @@ import { createNonce, viewPreviewHtml } from "./webview";
  * look at a view.
  */
 
+
+/** How long the checker may take before it is killed. Shorter than the render
+ *  gate's limit on purpose: this one runs because somebody is LOOKING at the
+ *  panel, and a preview that has not appeared in a minute has failed as a
+ *  preview whatever the process is still doing. */
+const PREVIEW_TIMEOUT_MS = 60_000;
+
+/** `git show` is local and immediate; anything longer is a repository state
+ *  that will not resolve itself (an index lock, a stalled credential helper). */
+const GIT_TIMEOUT_MS = 15_000;
 
 interface Shot {
   uri: string;
@@ -164,7 +174,7 @@ function findMockByName(
  * a scratch file under the name the CLI recognises (`scratchFileName`),
  * exactly as the render gate does it.
  */
-function render(
+async function render(
   source: { text: string; fileName: string; mock?: string; prefix: string },
   dir: string,
   log: (m: string) => void
@@ -186,67 +196,86 @@ function render(
   ];
   log(`view-preview: ${checker.cmd} ${args.join(" ")}`);
 
-  return new Promise((resolve) => {
-    const child =
-      checker.cmd === "node"
-        ? // VS Code's own Node, so nothing has to be on the PATH - the same
-          // way the render gate is spawned
-          spawn(process.execPath, args, {
-            cwd: dir,
-            env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", ...checker.env },
-          })
-        : spawn(checker.cmd, args, {
-            cwd: dir,
-            env: { ...spawnEnv(), ...checker.env },
-            shell: process.platform === "win32",
-          });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (c) => (stdout += String(c)));
-    child.stderr.on("data", (c) => (stderr += String(c)));
-    child.on("error", (err) =>
-      resolve({
-        files: [],
-        errors: [],
-        problem:
-          `The render gate could not be started (${checker.cmd}). ` +
-          `Run "abap2UI5: Install Render Gate" once - it needs no Node ` +
-          `installation of its own. (${String(err)})`,
-      })
-    );
-    child.on("close", () => {
-      const files = parseScreenshotOutput(stdout);
-      if (!files.length) {
-        log(`view-preview: no picture - ${stderr.slice(0, 400)}`);
-        resolve({
-          files: [],
-          errors: [],
-          /*
-           * Reinstalling was the advice here, and it could not possibly
-           * help: the installer fetches the bundle built from the linter
-           * commit this extension pins, so running it again produces the
-           * same gate that just refused the option. Saying "update it" sent
-           * people round that loop as often as they were willing.
-           *
-           * The honest version names the one thing that does move it - a
-           * newer bundle published by the linter - and points at the setting
-           * for anyone who has a current checkout of their own.
-           */
-          problem: screenshotUnsupported(stderr)
-            ? "This render gate is older than the picture feature: its " +
-              "checker does not know --screenshot. Reinstalling fetches the " +
-              "same version again, so it will not help - the bundle for a " +
-              "linter new enough has to be published first. With a local " +
-              "linter checkout you can point abap2ui5.viewCheck.command at " +
-              "its cli.mjs instead. The view check works either way."
-            : parseScreenshotErrors(stderr)[0] ??
-              "Nothing could be rendered from this file.",
-        });
-      } else {
-        resolve({ files, errors: parseScreenshotErrors(stderr) });
-      }
-    });
-  });
+  /*
+   * Same shape as the render gate, and now the same spawn: with a timeout and
+   * a kill of the whole tree. Without them a checker that hung left `running`
+   * true forever - the panel said "busy" until the window was reloaded, every
+   * later save only replaced the queued request, and closing the panel took
+   * the scratch directory away while nothing held the child, so a Chromium
+   * tree stayed behind.
+   */
+  const useShell = checker.cmd !== "node" && process.platform === "win32";
+  const outcome = await run(
+    checker.cmd === "node" ? process.execPath : checker.cmd,
+    args,
+    checker.cmd === "node"
+      ? {
+          cwd: dir,
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", ...checker.env },
+          timeoutMs: PREVIEW_TIMEOUT_MS,
+        }
+      : {
+          cwd: dir,
+          env: { ...spawnEnv(), ...checker.env },
+          shell: useShell,
+          timeoutMs: PREVIEW_TIMEOUT_MS,
+        }
+  );
+
+  if (outcome.kind === "spawn-failed") {
+    return {
+      files: [],
+      errors: [],
+      problem:
+        `The render gate could not be started (${checker.cmd}). ` +
+        `Run "abap2UI5: Install Render Gate" once - it needs no Node ` +
+        `installation of its own. (${String(outcome.error)})`,
+    };
+  }
+  if (outcome.kind === "timeout") {
+    log(`view-preview: the checker exceeded ${PREVIEW_TIMEOUT_MS} ms - killed`);
+    return {
+      files: [],
+      errors: [],
+      problem:
+        `The render gate did not finish within ${Math.round(PREVIEW_TIMEOUT_MS / 1000)} ` +
+        "seconds and was stopped. Saving again runs it afresh.",
+    };
+  }
+  if (outcome.kind === "abandoned") {
+    return { files: [], errors: [] };
+  }
+
+  const { stdout, stderr } = outcome;
+  const files = parseScreenshotOutput(stdout);
+  if (files.length) {
+    return { files, errors: parseScreenshotErrors(stderr) };
+  }
+  log(`view-preview: no picture - ${stderr.slice(0, 400)}`);
+  return {
+    files: [],
+    errors: [],
+    /*
+     * Reinstalling was the advice here, and it could not possibly help: the
+     * installer fetches the bundle built from the linter commit this
+     * extension pins, so running it again produces the same gate that just
+     * refused the option. Saying "update it" sent people round that loop as
+     * often as they were willing.
+     *
+     * The honest version names the one thing that does move it - a newer
+     * bundle published by the linter - and points at the setting for anyone
+     * who has a current checkout of their own.
+     */
+    problem: screenshotUnsupported(stderr)
+      ? "This render gate is older than the picture feature: its " +
+        "checker does not know --screenshot. Reinstalling fetches the " +
+        "same version again, so it will not help - the bundle for a " +
+        "linter new enough has to be published first. With a local " +
+        "linter checkout you can point abap2ui5.viewCheck.command at " +
+        "its cli.mjs instead. The view check works either way."
+      : parseScreenshotErrors(stderr)[0] ??
+        "Nothing could be rendered from this file.",
+  };
 }
 
 /** Paint what we have: pictures, the errors that came with them, or the one
@@ -291,17 +320,18 @@ function committedText(doc: vscode.TextDocument): Promise<string | undefined> {
     .relative(folder.uri.fsPath, doc.uri.fsPath)
     .split(path.sep)
     .join("/");
-  return new Promise((resolve) => {
-    const child = spawn("git", ["show", `HEAD:${relative}`], {
-      cwd: folder.uri.fsPath,
-      env: spawnEnv(),
-      shell: process.platform === "win32",
-    });
-    let stdout = "";
-    child.stdout.on("data", (c) => (stdout += String(c)));
-    child.on("error", () => resolve(undefined));
-    child.on("close", (code) => resolve(code === 0 ? stdout : undefined));
-  });
+  // Through the shared runner: under `shell: true` the path is quoted (a
+  // repository under `C:\\Users\\John Smith\\...` used to break the compare
+  // mode outright), and a git that never answers is killed rather than
+  // holding the preview open for the rest of the session.
+  return run("git", ["show", `HEAD:${relative}`], {
+    cwd: folder.uri.fsPath,
+    env: spawnEnv(),
+    shell: process.platform === "win32",
+    timeoutMs: GIT_TIMEOUT_MS,
+  }).then((outcome) =>
+    outcome.kind === "closed" && outcome.code === 0 ? outcome.stdout : undefined
+  );
 }
 
 /** A refresh asked for while one was running - the latest one, which is the

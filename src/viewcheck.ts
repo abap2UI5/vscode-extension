@@ -3,8 +3,8 @@ import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { spawn } from "child_process";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
+import { run } from "./childproc";
 import { installRenderGate, renderGateBrowsers, renderGateCli } from "./rendergate";
 import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
@@ -16,7 +16,6 @@ import {
   CheckerCommand,
   isCheckableSource,
   parseRenderReport,
-  quoteForShell,
   checkerCwd,
   RenderResult,
   plannedFixes,
@@ -183,7 +182,7 @@ export function spawnEnv(): NodeJS.ProcessEnv {
  */
 const RENDER_TIMEOUT_MS = 180_000;
 
-function runRenderGate(
+async function runRenderGate(
   doc: vscode.TextDocument,
   log: (m: string) => void,
   superseded: () => boolean
@@ -196,12 +195,7 @@ function runRenderGate(
 
   const checker = checkerCommand();
   const useShell = checker.cmd !== "node" && process.platform === "win32";
-  const rawArgs = [...checker.args, scratch, "--json", "--advisory", "--no-properties"];
-  // with shell: true Node passes the args through unquoted, so a path with a
-  // space in it would arrive as two arguments
-  const args = useShell
-    ? rawArgs.map((arg) => quoteForShell(arg, process.platform))
-    : rawArgs;
+  const args = [...checker.args, scratch, "--json", "--advisory", "--no-properties"];
   const cwd = checkerCwd(
     vscode.workspace.getWorkspaceFolder(doc.uri)?.uri,
     os.homedir(),
@@ -209,75 +203,48 @@ function runRenderGate(
   );
   log(`view-check: render gate - ${checker.cmd} ${args.join(" ")}`);
 
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (result: RenderResult | undefined) => {
-      if (settled) {
-        return; // a failed spawn emits "error" and may still emit "close"
-      }
-      settled = true;
-      clearInterval(watch);
-      clearTimeout(limit);
-      fs.rmSync(scratchDir, { recursive: true, force: true });
-      resolve(result);
-    };
-    const child =
+  try {
+    // `run` quotes the PROGRAM as well as its arguments under a shell, which
+    // this call site did not: an explicit `viewCheck.command` naming
+    // `C:\Program Files\nodejs\node.exe` was split at the space by cmd.exe
+    // and reported as "not recognized", with an offer to install a gate that
+    // could not have fixed it.
+    const outcome = await run(
+      checker.cmd === "node" ? process.execPath : checker.cmd,
+      args,
       checker.cmd === "node"
-        ? // run with the Node.js inside VS Code itself - works without any
-          // node installation on the PATH
-          spawn(process.execPath, args, {
+        ? {
+            // run with the Node.js inside VS Code itself - works without any
+            // node installation on the PATH
             cwd,
             env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", ...checker.env },
-          })
-        : spawn(checker.cmd, args, {
+            timeoutMs: RENDER_TIMEOUT_MS,
+            abandoned: superseded,
+          }
+        : {
             cwd,
             env: { ...spawnEnv(), ...checker.env },
             shell: useShell,
-          });
+            timeoutMs: RENDER_TIMEOUT_MS,
+            abandoned: superseded,
+          }
+    );
 
-    /** Kills the child and everything it started - npx spawns the real
-     *  checker, which spawns Chromium, and killing only the shell would
-     *  leave both behind. */
-    const kill = () => {
-      if (child.pid === undefined || child.killed) {
-        return;
-      }
-      try {
-        if (process.platform === "win32") {
-          spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"]);
-        } else {
-          child.kill("SIGKILL");
-        }
-      } catch {
-        /* the child is already gone */
-      }
-    };
-
-    const limit = setTimeout(() => {
+    if (outcome.kind === "abandoned") {
+      // the buffer moved on, or the document was closed - nothing will be
+      // done with this answer, so it was not paid for to the end
+      log("view-check: render gate no longer needed - killed");
+      return undefined;
+    }
+    if (outcome.kind === "timeout") {
       log(
         `view-check: render gate exceeded ${RENDER_TIMEOUT_MS} ms - killed, ` +
           "the property gate's findings still stand"
       );
-      kill();
-      done(undefined);
-    }, RENDER_TIMEOUT_MS);
-
-    // the buffer moved on, or the document was closed - nothing will be done
-    // with this answer, so stop paying for it
-    const watch = setInterval(() => {
-      if (superseded()) {
-        log("view-check: render gate no longer needed - killed");
-        kill();
-        done(undefined);
-      }
-    }, 500);
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (c) => (stdout += String(c)));
-    child.stderr.on("data", (c) => (stderr += String(c)));
-    child.on("error", (err) => {
-      log(`view-check: render gate failed to start - ${String(err)}`);
+      return undefined;
+    }
+    if (outcome.kind === "spawn-failed") {
+      log(`view-check: render gate failed to start - ${String(outcome.error)}`);
       if (!spawnFailed) {
         spawnFailed = true;
         void vscode.window
@@ -296,26 +263,31 @@ function runRenderGate(
             }
           });
       }
-      done(undefined);
-    });
-    child.on("close", () => {
-      if (settled) {
-        return;
-      }
-      const parsed = parseRenderReport(stdout);
-      if (!parsed.ok) {
-        log(
-          parsed.reason === "no-json"
-            ? `view-check: render gate produced no JSON` +
-                (stderr ? ` - stderr: ${stderr.slice(0, 400)}` : "")
-            : `view-check: render gate returned broken JSON - ${parsed.detail}`
-        );
-        done(undefined);
-        return;
-      }
-      done(parsed.result);
-    });
-  });
+      return undefined;
+    }
+
+    const parsed = parseRenderReport(outcome.stdout);
+    if (!parsed.ok) {
+      log(
+        parsed.reason === "no-json"
+          ? `view-check: render gate produced no JSON` +
+              (outcome.stderr ? ` - stderr: ${outcome.stderr.slice(0, 400)}` : "")
+          : `view-check: render gate returned broken JSON - ${parsed.detail}`
+      );
+      return undefined;
+    }
+    return parsed.result;
+  } finally {
+    /* On every path, including a throw: the scratch directory is this run's
+     * alone. It used to be removed inside a timer callback, where a Windows
+     * EBUSY (the killed child had not let go yet) threw with nothing to catch
+     * it - the promise then never settled and its caller waited forever. */
+    try {
+      fs.rmSync(scratchDir, { recursive: true, force: true });
+    } catch (err) {
+      log(`view-check: scratch directory left behind - ${String(err)}`);
+    }
+  }
 }
 
 /**
