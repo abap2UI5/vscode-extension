@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { classNameOf, isAppClass, usesBuilder } from "./abap";
+import { classNameOf, usesBuilder } from "./abap";
+import { isAppSource } from "./appclasses";
 import { abapSources, isAbapDocument } from "./abapsources";
 
 /*
@@ -84,7 +85,7 @@ async function scan(): Promise<AppNode[]> {
   // Files AND open documents - working straight against the system through
   // ADT means there is no file to glob, and this tree was simply empty there.
   for (const source of await abapSources()) {
-    if (!isAppClass(source.text)) {
+    if (!isAppSource(source.text)) {
       continue;
     }
     out.push({

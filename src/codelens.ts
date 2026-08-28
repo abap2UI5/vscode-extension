@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { classDefinitionOffset, isAppClass, usesBuilder } from "./abap";
+import { classDefinitionOffset, usesBuilder } from "./abap";
+import { isAppSource } from "./appclasses";
 import { eventUsagesOf, whenBranches } from "./context";
 import { fixableCount } from "./quickfix";
 
@@ -30,7 +31,7 @@ class AppCodeLens implements vscode.CodeLensProvider {
       return [];
     }
     const text = doc.getText();
-    const app = isAppClass(text);
+    const app = isAppSource(text);
     const builder = usesBuilder(text);
     if (!app && !builder) {
       return [];

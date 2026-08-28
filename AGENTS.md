@@ -95,6 +95,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/snapshot.ts` | Loads the bundled UI5 metadata once, for the gate and the language features |
 | `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over |
 | `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
+| `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
 | `src/abap.ts`, `src/urls.ts`, `src/context.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
 | `src/test/` | `node --test` suite over exactly those modules |
@@ -206,6 +207,16 @@ identity (see Conventions).
   versa — a mismatch only shows up at runtime, not in `tsc`.
 - **Settings live under the `abap2ui5.` prefix** and are read through
   `CONFIG_SECTION`. Command IDs use the same prefix.
+- **"An app" includes a class that INHERITS `z2ui5_if_app`.** `isAppClass`
+  answers only for the source in front of it; every feature that decides
+  whether something is an app — F9, the CodeLens, the apps tree, the
+  navigation map — asks `isAppSource` (`appclasses.ts`) instead, which
+  follows `INHERITING FROM` through the classes the window can see. A shared
+  base class holding the interface is a common house pattern and used to make
+  the whole extension go quiet on every app built that way. The lookup is
+  synchronous by necessity (a CodeLens provider cannot await a scan), so the
+  index is rebuilt in the background; an unknown base class means "not an
+  app", never a guess.
 - **The preview reloads on activation, not on save.** A saved ABAP class is
   still inactive on the server, so reloading would show the old version. Keys
   that other ABAP extensions own (F9, Ctrl+F3) are taken over only with a

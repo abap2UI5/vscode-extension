@@ -103,3 +103,38 @@ test("an ordinary target still resolves next to a namespaced one", () => {
     ["ZCL_NEXT"]
   );
 });
+
+test("an app that inherits the interface is on the map (issue #81)", () => {
+  const base = `CLASS zcl_app_base DEFINITION PUBLIC ABSTRACT.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+ENDCLASS.
+CLASS zcl_app_base IMPLEMENTATION.
+ENDCLASS.`;
+  const child = `CLASS zcl_child DEFINITION PUBLIC FINAL INHERITING FROM zcl_app_base.
+ENDCLASS.
+CLASS zcl_child IMPLEMENTATION.
+  METHOD on_event.
+    client->nav_app_call( NEW zcl_other( ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const other = `CLASS zcl_other DEFINITION PUBLIC INHERITING FROM zcl_app_base.
+ENDCLASS.`;
+  const graph = navGraph([
+    { fileName: "zcl_app_base.clas.abap", source: base },
+    { fileName: "zcl_child.clas.abap", source: child },
+    { fileName: "zcl_other.clas.abap", source: other },
+  ]);
+  const apps = graph.nodes.filter((n) => n.isApp).map((n) => n.className).sort();
+  assert.deepEqual(apps, ["ZCL_APP_BASE", "ZCL_CHILD", "ZCL_OTHER"]);
+  assert.deepEqual(graph.edges, [{ from: "ZCL_CHILD", to: "ZCL_OTHER" }]);
+});
+
+test("a class whose base is not in the set stays off the map", () => {
+  // the base class lives in another package this window cannot see - the
+  // answer is "not an app", the same as before, rather than a guess
+  const child = `CLASS zcl_child DEFINITION PUBLIC INHERITING FROM zcl_unknown_base.
+ENDCLASS.`;
+  const graph = navGraph([{ fileName: "zcl_child.clas.abap", source: child }]);
+  assert.deepEqual(graph.nodes, []);
+});

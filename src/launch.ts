@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { classNameOf, isAppClass } from "./abap";
+import { classNameOf } from "./abap";
+import { isAppSource } from "./appclasses";
 import { originOf, proxiedUrl, sapClientOf, shortUrl } from "./urls";
 import { suggestSystemUi5 } from "./ui5detect";
 import { clearCredentials, ensureCredentials, ensureSystem } from "./systems";
@@ -41,7 +42,7 @@ export async function runApp(
     if (
       !editor ||
       editor.document.languageId !== "abap" ||
-      !isAppClass(editor.document.getText())
+      !isAppSource(editor.document.getText())
     ) {
       await vscode.commands.executeCommand("editor.debug.action.toggleBreakpoint");
       return;
@@ -235,7 +236,7 @@ export async function checkConnection(session: Session): Promise<void> {
     const editorClass =
       editor &&
       editor.document.languageId === "abap" &&
-      isAppClass(editor.document.getText())
+      isAppSource(editor.document.getText())
         ? classNameOf(editor.document.getText(), editor.document.fileName)
         : undefined;
     const className =
