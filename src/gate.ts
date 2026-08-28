@@ -28,25 +28,33 @@ import type { CheckOptions } from "./lintconfig";
 export const VIEW_XML_RE = /\.(view|fragment)\.xml$/i;
 
 /*
- * Four inputs the linter's runtime reads and its `types.d.ts` does not
- * declare yet: `jsonPaths` on the prepareAbap result, `jsonPaths` and
- * `fromAbap` on checkNodes, `minUi5` on checkAbapRules. Leaving them out is
- * not a typing detail - it silences whole rules (see `runGate`), which is
- * how this gate drifted from the CLI in the first place.
+ * Four inputs the linter's runtime reads and the PINNED `types.d.ts` does not
+ * declare: `jsonPaths` on the prepareAbap result, `jsonPaths` and `fromAbap`
+ * on checkNodes, `minUi5` on checkAbapRules. Leaving them out is not a typing
+ * detail - it silences whole rules (see `runGate`), which is how this gate
+ * drifted from the CLI in the first place.
  *
  * They travel through these narrow casts rather than through a local
  * re-description of the linter's shapes: AGENTS.md is explicit that a
  * hand-written `linter.d.ts` here may not come back, because a second copy of
- * those types can only go stale. The declarations are being fixed in the
- * linter itself; when the pin moves, drop the casts - `gate.parity.test.ts`
- * is what proves they were carrying the right values meanwhile.
+ * those types can only go stale. The linter declares all four on its main
+ * branch now (abap2UI5/linter, `./icons` change), so at the next pin bump
+ * these three aliases go and the values are passed directly -
+ * `gate.parity.test.ts` is what proves they were carrying the right values
+ * meanwhile.
+ *
+ * The shapes are the RUNTIME's, not a guess: `jsonPaths` is a `Set` of the
+ * paths bound as JSON. Typing it as a record type-checked fine against a
+ * declaration that did not exist and was simply wrong - which is the standing
+ * risk of a cast, and why the linter's own typings gate now reads its option
+ * names out of the signatures.
  */
 type UndeclaredNodeOptions = {
-  jsonPaths?: Record<string, unknown> | null;
+  jsonPaths?: Set<string> | null;
   fromAbap?: boolean;
 };
 type UndeclaredAbapRuleOptions = { minUi5?: string };
-type UndeclaredPrepared = { jsonPaths?: Record<string, unknown> | null };
+type UndeclaredPrepared = { jsonPaths?: Set<string> | null };
 
 export interface GateResult {
   findings: PropertyFinding[];
