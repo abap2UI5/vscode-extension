@@ -56,7 +56,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
 | `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
 | `src/clientapi.ts` | The bundled `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion |
-| `src/chainformat.ts` | Format Document for builder chains: per-line indents from the chain's own nesting |
+| `src/chainformat.ts` | Format Document for builder chains: hands on the linter's own `chain-house-layout` fixes (never a second layout algorithm) |
 | `src/renderloc.ts` | Places a render-gate error message on the source line quoting its token |
 | `scripts/generate-client-api.mjs` | Regenerates `src/data/client-api.json` from `z2ui5_if_client.intf.abap` (local checkout or GitHub raw) |
 | `src/bindingpaths.ts` | Binding-path offers from the model shape the linter derives (`prepareAbap( ).modelShape`) |
@@ -246,7 +246,13 @@ identity (see Conventions).
   Severity, wording, the `fixes` on a finding, the `rules` block and the
   `abap2ui5lint-disable…` directives all live in `@abap2ui5/linter` and are
   applied through it — never re-derived here. Two copies of that semantics is
-  exactly how the editor and CI drifted apart before. The **types** come from
+  exactly how the editor and CI drifted apart before. **Format Document is the
+  same rule, not a sibling of it**: `chainformat.ts` asks the linter for
+  `chain-house-layout` (switching the opt-in rule on for that one call) and
+  hands its whitespace-only fixes to the editor. It used to derive the layout
+  itself, and was measurably stricter — eight of samples-controls' 637 builder
+  classes would have been re-indented by the editor although the rule calls
+  them correct. The **types** come from
   the linter too: it ships `types.d.ts` and declares it per subpath in its
   `exports` map, so `@abap2ui5/linter/reconstruct` and friends type-check
   straight out of `node_modules`. There used to be a hand-written

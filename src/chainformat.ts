@@ -1,131 +1,94 @@
 /*
- * Indentation for z2ui5_cl_ui5_view_builder chains.
+ * Format Document for z2ui5_cl_ui5_view_builder chains.
  *
- * The chain IS the view hierarchy, so its indentation is not taste but
- * structure: a child sits one step (4 spaces) deeper than the element that
- * contains it, an attribute one step deeper than its element, an end( ) back
- * on the level it closes. The reconstruction knows that nesting exactly;
- * this module turns it into per-line indents so Format Document repairs a
- * chain instead of a human counting parentheses.
+ * The chain IS the view hierarchy, so its layout is not taste but structure:
+ * a child sits one step deeper than the element that contains it, an
+ * attribute one step deeper than its element, an `end( )` back on the level
+ * it closes.
  *
- * Deliberately conservative: only lines that BEGIN a builder verb
- * (`)->ele/tag/a/end`) inside a chain statement are touched. Continuation
- * lines of a multi-line value, comments, and everything outside a chain keep
- * their bytes - a formatter that touches code it does not understand is how
- * formatters lose trust. The canonical shape is the samples-controls corpus style,
- * which a formatted file round-trips unchanged.
+ * This module used to work that out for itself, and that was the mistake.
+ * The layout is a RULE - the linter's `chain-house-layout` - and the linter
+ * carries fixes for it. Deriving the same thing here produced a second,
+ * stricter opinion: measured over the 637 builder classes of
+ * samples-controls, eight files the rule considers correct would have been
+ * re-indented by this module, and not one file the rule flags was missed. So
+ * Format Document churned linter-clean code and disagreed with CI about what
+ * the house style is - the editor/CI divergence AGENTS.md says must not be
+ * re-created here, in the one place it had been.
+ *
+ * Now the linter decides and this module only hands its fixes on. Two
+ * properties of those fixes are what make that safe to apply on a keystroke:
+ * they touch whitespace BETWEEN chain segments (and the indent of a
+ * continuation line) only, and the rule verifies that collapsing every run of
+ * code-whitespace leaves the source identical - a layout fix can never change
+ * what the view builds.
+ *
+ * `chain-house-layout` is opt-in in the linter, because it encodes one house
+ * style. It is switched on explicitly for this call: a repository that has
+ * not enabled it in CI still gets Format Document, and one that has gets
+ * exactly what `--fix` would write.
  *
  * `vscode`-free: pure text -> edits, tested headless.
  */
 
-import { blankNonCode } from "./abapscan";
+import { checkAbapRules } from "@abap2ui5/linter/abap-rules";
 
-export interface IndentEdit {
-  /** 0-based line number. */
-  line: number;
-  /** The leading whitespace the line should have. */
-  indent: string;
+/** A whitespace rewrite, as character offsets into the formatted text. */
+export interface ChainEdit {
+  start: number;
+  end: number;
+  text: string;
 }
 
-const STEP = 4;
-
-/** All builder verbs on one line, in order - `view->ele(` at the chain
- *  start counts like a `)->ele(`. */
-function verbsOn(line: string): string[] {
-  return [...line.matchAll(/(?:\)|\b\w+)->\s*(ele|tag|a|end)\s*\(/g)].map((m) => m[1]);
-}
-
-/** Paren balance of a line that has already been blanked, so a parenthesis
- *  inside a literal, a template or a comment never counts. */
-function parenDelta(line: string): number {
-  let depth = 0;
-  for (const c of line) {
-    if (c === "(") depth++;
-    else if (c === ")") depth--;
-  }
-  return depth;
-}
+/** Switches the opt-in layout rule on for this one call, whatever the
+ *  repository's own config says. */
+const LAYOUT_RULES = { "chain-house-layout": {} };
 
 /**
- * The indent corrections for every builder-verb line of every chain in
- * `text`. Lines already indented canonically produce no edit.
+ * The layout corrections for every builder chain in `text`, in order and
+ * without overlaps. A chain already written canonically produces none.
  */
-export function chainIndentEdits(text: string): IndentEdit[] {
-  const lines = text.split("\n");
-  /*
-   * Every decision below is made on the BLANKED source (see `abapscan.ts`):
-   * same offsets and same leading whitespace, with literals, templates and
-   * comments emptied out. A commented-out `)->end( ).` used to be counted as
-   * a real one, so the chain left a level it had never entered and every line
-   * after it was "corrected" to the wrong indent; an unbalanced `(` inside a
-   * `'...'` literal or a trailing `" note (` kept the statement open forever,
-   * and lines far below were then formatted against a chain that had ended.
-   */
-  const codeLines = blankNonCode(text).split("\n");
-  const edits: IndentEdit[] = [];
-
-  let inChain = false;
-  let base = "";
-  let depth = 0; // element nesting inside the current chain
-  let lastTag = false;
-  let parens = 0; // raw paren balance of the chain statement
-
-  for (let lineNo = 0; lineNo < lines.length; lineNo++) {
-    const line = codeLines[lineNo] ?? "";
-    if (!inChain) {
-      // a chain statement starts where a handle opens the root element
-      const start = /^(\s*)(?:DATA\(\w+\)\s*=\s*)?\w+->ele\(/.exec(line);
-      if (!start) {
-        continue;
-      }
-      inChain = true;
-      base = start[1];
-      depth = 0;
-      lastTag = false;
-      parens = 0;
-      // fall through - the first line carries the first ele( )
+export function chainFormatEdits(text: string): ChainEdit[] {
+  const edits: ChainEdit[] = [];
+  for (const finding of checkAbapRules(text, { rules: LAYOUT_RULES })) {
+    if (finding.type !== "chain-house-layout") {
+      continue;
     }
-
-    const trimmed = line.trimStart();
-    const startsWithVerb = /^\)->\s*(ele|tag|a|end)\b/.exec(trimmed);
-    const verbs = verbsOn(line);
-
-    if (startsWithVerb && verbs.length) {
-      // the indent is decided by the FIRST verb on the line
-      const verb = verbs[0];
-      let level: number;
-      if (verb === "ele" || verb === "tag") {
-        level = depth;
-      } else if (verb === "a") {
-        level = depth + (lastTag ? 1 : 0);
-      } else {
-        level = Math.max(0, depth - 1); // end closes the level it sits on
+    for (const fix of (finding as { fixes?: ChainEdit[] }).fixes ?? []) {
+      if (
+        typeof fix?.start === "number" &&
+        typeof fix?.end === "number" &&
+        typeof fix?.text === "string" &&
+        fix.start <= fix.end &&
+        fix.end <= text.length &&
+        text.slice(fix.start, fix.end) !== fix.text
+      ) {
+        edits.push({ start: fix.start, end: fix.end, text: fix.text });
       }
-      const want = base + " ".repeat(STEP * level);
-      const have = line.slice(0, line.length - trimmed.length);
-      if (have !== want) {
-        edits.push({ line: lineNo, indent: want });
-      }
-    }
-
-    // bookkeeping AFTER deciding the line's own indent
-    for (const verb of verbs) {
-      if (verb === "ele") {
-        depth++;
-        lastTag = false;
-      } else if (verb === "tag") {
-        lastTag = true;
-      } else if (verb === "end") {
-        depth = Math.max(0, depth - 1);
-        lastTag = false;
-      }
-    }
-
-    parens += parenDelta(line);
-    // the statement ends when the parens balance and the line closes with `.`
-    if (parens <= 0 && /\.\s*$/.test(line)) {
-      inChain = false;
     }
   }
-  return edits;
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+
+  /* Overlaps would be applied by the editor in an undefined order. The rule
+   * does not emit any today; dropping the later one keeps that a fact rather
+   * than an assumption. */
+  const kept: ChainEdit[] = [];
+  for (const edit of edits) {
+    if (kept.length === 0 || edit.start >= kept[kept.length - 1].end) {
+      kept.push(edit);
+    }
+  }
+  return kept;
+}
+
+/** The text with the edits applied - what the editor ends up with, and what
+ *  the tests assert against. */
+export function applyChainEdits(text: string, edits: readonly ChainEdit[]): string {
+  let out = "";
+  let at = 0;
+  for (const edit of edits) {
+    out += text.slice(at, edit.start) + edit.text;
+    at = edit.end;
+  }
+  return out + text.slice(at);
 }

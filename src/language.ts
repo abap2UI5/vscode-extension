@@ -22,7 +22,7 @@ import {
   isClientCompletion,
   signatureHead,
 } from "./clientapi";
-import { chainIndentEdits } from "./chainformat";
+import { chainFormatEdits } from "./chainformat";
 import { membersOf } from "./metadata";
 import {
   CompletionKind,
@@ -380,14 +380,15 @@ class ChainFormatting implements vscode.DocumentFormattingEditProvider {
     if (!usesBuilder(text)) {
       return []; // nothing to format - the chains are what this understands
     }
-    return chainIndentEdits(text).map((edit) => {
-      const line = doc.lineAt(edit.line);
-      const leading = line.text.length - line.text.trimStart().length;
-      return vscode.TextEdit.replace(
-        new vscode.Range(edit.line, 0, edit.line, leading),
-        edit.indent
-      );
-    });
+    // Character spans, because that is what the linter's layout fixes are:
+    // they normalise the whitespace BETWEEN chain segments, newline included,
+    // not just a line's indent.
+    return chainFormatEdits(text).map((edit) =>
+      vscode.TextEdit.replace(
+        new vscode.Range(doc.positionAt(edit.start), doc.positionAt(edit.end)),
+        edit.text
+      )
+    );
   }
 }
 
