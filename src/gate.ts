@@ -8,14 +8,20 @@
  * snapshot is handed in by `snapshot.ts`).
  */
 
-import { checkAbapRules, namedModels } from "@abap2ui5/linter/abap-rules";
+import {
+  checkAbapRules,
+  elementBoundSlots,
+  namedModels,
+} from "@abap2ui5/linter/abap-rules";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import {
   checkNodes,
   collectControlIds,
+  collectEnumBoundFields,
   parseXml,
   PropertyFinding,
 } from "@abap2ui5/linter/properties";
+import { checkIcons } from "@abap2ui5/linter/icons";
 import {
   annotate,
   applyDirectives,
@@ -26,35 +32,6 @@ import { snapshot } from "./snapshot";
 import type { CheckOptions } from "./lintconfig";
 
 export const VIEW_XML_RE = /\.(view|fragment)\.xml$/i;
-
-/*
- * Four inputs the linter's runtime reads and the PINNED `types.d.ts` does not
- * declare: `jsonPaths` on the prepareAbap result, `jsonPaths` and `fromAbap`
- * on checkNodes, `minUi5` on checkAbapRules. Leaving them out is not a typing
- * detail - it silences whole rules (see `runGate`), which is how this gate
- * drifted from the CLI in the first place.
- *
- * They travel through these narrow casts rather than through a local
- * re-description of the linter's shapes: AGENTS.md is explicit that a
- * hand-written `linter.d.ts` here may not come back, because a second copy of
- * those types can only go stale. The linter declares all four on its main
- * branch now (abap2UI5/linter, `./icons` change), so at the next pin bump
- * these three aliases go and the values are passed directly -
- * `gate.parity.test.ts` is what proves they were carrying the right values
- * meanwhile.
- *
- * The shapes are the RUNTIME's, not a guess: `jsonPaths` is a `Set` of the
- * paths bound as JSON. Typing it as a record type-checked fine against a
- * declaration that did not exist and was simply wrong - which is the standing
- * risk of a cast, and why the linter's own typings gate now reads its option
- * names out of the signatures.
- */
-type UndeclaredNodeOptions = {
-  jsonPaths?: Set<string> | null;
-  fromAbap?: boolean;
-};
-type UndeclaredAbapRuleOptions = { minUi5?: string };
-type UndeclaredPrepared = { jsonPaths?: Set<string> | null };
 
 export interface GateResult {
   findings: PropertyFinding[];
@@ -89,6 +66,12 @@ export function runGate(
     findings.push(
       ...checkNodes(parseXml(text), { data, minUi5, allow, distribution })
     );
+    /* The icon scan is a TEXT scan, not a walk of the tree - an icon name
+     * travels as data (a bound column, a constant) as often as it travels as
+     * an attribute. `checkXmlSource` runs it here and this gate could not:
+     * `checkIcons` had no subpath export, so the editor judged a `.view.xml`
+     * without the icon rules while CI judged it with them. */
+    findings.push(...checkIcons(text, { minUi5 }));
   } else {
     const prep = prepareAbap(text);
     if (!prep.usesBuilder) {
@@ -110,14 +93,34 @@ export function runGate(
       };
     }
     const controlIds: Record<string, string> = {};
+    const enumFields = new Map<string, Set<string>>();
     // Which `name>` prefixes a binding may use: the class itself is the only
     // place that can widen the framework's three (SET_ODATA_MODEL). `null`
     // means "widened non-literally", which silences unknown-model rather than
     // guessing - passing nothing at all silenced it just the same, and that
     // is not the same statement.
     const models = namedModels(text);
-    const jsonPaths = (prep as UndeclaredPrepared).jsonPaths ?? null;
+    /* `cs_event-bind_element` sets a binding context on a whole view slot at
+     * RUNTIME, so a relative path under it resolves against a row the document
+     * never names. No static walk can see that, so the rules that ask "is
+     * there a context here" have to be told - and told per DOCUMENT, because
+     * the wire binds one slot and a document knows the slot it is displayed
+     * into.
+     *
+     * Without it this gate is STRICTER than the CLI: it reports
+     * relative-binding-without-context on a path the linter accepts, which is
+     * a false positive in the editor. The parity fixture "a relative path
+     * under an element-bound slot" is what measures that. */
+    const bound = elementBoundSlots(text);
     for (const node of prep.nodes) {
+      /* Per DOCUMENT, not per class: the wire binds ONE slot, and a document
+       * knows the slot it is displayed into. A document with no consumer in
+       * its own statement has no slot to compare and keeps the class-wide
+       * answer rather than being judged on a guess. */
+      const boundElement =
+        bound.all ||
+        (bound.slots.size > 0 &&
+          (!node.displaySlot || bound.slots.has(node.displaySlot)));
       // the model derived from the class is what makes the binding-path
       // rules possible - a path nothing in the model has stays silently
       // empty at runtime, and without passing it those rules never run
@@ -130,14 +133,29 @@ export function runGate(
           model: prep.model,
           shape: prep.modelShape,
           rootFields: prep.rootFields,
+          // what the class writes into its own fields - the second author of
+          // every two-way-bound string (picker-value-without-format)
+          rootWrites: prep.rootWrites,
           models,
           // json-bind-on-scalar-property needs the paths a JSON seed wrote,
           // and both raw-javascript-to-frontend rules only judge a value as
           // ABAP-authored when the caller says the source was ABAP.
-          ...({ jsonPaths, fromAbap: true } as UndeclaredNodeOptions),
+          jsonPaths: prep.jsonPaths,
+          boundElement,
+          fromAbap: true,
         })
       );
       Object.assign(controlIds, collectControlIds(node));
+      // the enum-typed fields a bound aggregation exposes, by table: a row
+      // appended without setting one reaches UI5 as '' and fails its strict
+      // validation, which takes the binding update - and the view - down
+      for (const [table, fields] of collectEnumBoundFields(node, data)) {
+        const known = enumFields.get(table) ?? new Set<string>();
+        for (const field of fields) {
+          known.add(field);
+        }
+        enumFields.set(table, known);
+      }
     }
     // Structural defects of the builder chain itself - an excess shut( )
     // asserts at RUNTIME, so this is the loudest thing the gate can find and
@@ -154,11 +172,12 @@ export function runGate(
       ...checkAbapRules(text, {
         data,
         controlIds,
+        enumFields,
         rules: options.rules,
         // the ABAP-side icon check judges against the target release; without
         // it every repo was judged against the 1.71 default, so a higher floor
         // reported icons in the editor that CI called fine
-        ...({ minUi5 } as UndeclaredAbapRuleOptions),
+        minUi5,
       })
     );
     attachNamespaceFixes(findings, text);

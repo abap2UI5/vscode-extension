@@ -914,7 +914,7 @@
     "repo-dirs:check": "node scripts/generate-repo-dirs.mjs --check"
   },
   "devDependencies": {
-    "@abap2ui5/linter": "github:abap2UI5/linter#9c4c0c870005dc9ba97a319c6a152aaadfba70ba",
+    "@abap2ui5/linter": "github:abap2UI5/linter#97229a27ca591ea4e8ab0d70b350cf099da2c547",
     "@types/node": "^26.2.0",
     "@types/vscode": "^1.101.0",
     "@vscode/test-web": "^0.0.81",

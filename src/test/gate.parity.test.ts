@@ -172,6 +172,43 @@ ENDCLASS.
 `;
 ABAP_FIXTURES["an attribute on the bare factory root"] = ATTRIBUTE_ON_ROOT;
 
+/** A class that element-binds the slot its view is displayed into, and then
+ *  writes a RELATIVE binding path under it.
+ *
+ *  `checkAbapSource` works `boundElement` out per document (elementBoundSlots)
+ *  and passes it; it SUPPRESSES the "this path has no context" findings,
+ *  because at runtime the wire supplies one that no static walk can see. A
+ *  gate that does not pass it is stricter than CI - noise in the editor rather
+ *  than silence, but a divergence either way. */
+const ELEMENT_BOUND = `CLASS zcl_parity DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    DATA mt_rows TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
+ENDCLASS.
+
+CLASS zcl_parity IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+
+    client->follow_up_action( client->_event_client(
+        action = z2ui5_if_client=>cs_event-bind_element
+        t_arg  = VALUE #( ( \`/MT_ROWS/1\` ) ) ) ).
+
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
+        )->a( n = \`xmlns\`     v = \`sap.m\`
+        )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
+
+        )->ele( n = \`Page\`
+            )->tag( n = \`Text\`
+                )->a( n = \`text\` v = \`{NAME}\` ) ).
+
+    client->view_display( view->stringify( ) ).
+
+  ENDMETHOD.
+ENDCLASS.
+`;
+ABAP_FIXTURES["a relative path under an element-bound slot"] = ELEMENT_BOUND;
+
 const XML_FIXTURES: Record<string, string> = {
   clean: '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <Button text="Go"/>\n</mvc:View>',
   "unknown property":
@@ -194,73 +231,19 @@ for (const [name, source] of Object.entries(ABAP_FIXTURES)) {
   });
 }
 
-/* The ONE difference that is known and not yet closable here: `checkXmlSource`
- * runs `checkIcons` over the raw XML, and the linter does not export that
- * function through any subpath in `exports`, so the gate cannot call it. The
- * ABAP path is unaffected - `checkAbapRules` runs the icon scan itself. See
- * the test below, which fails the moment the export exists. */
-const ICON_RULES = new Set(["unknown-icon", "icon-too-new", "icon-removed"]);
-const withoutIcons = (findings: Reduced[]): Reduced[] =>
-  findings.filter((f) => !ICON_RULES.has(f.type));
-
 for (const [name, xml] of Object.entries(XML_FIXTURES)) {
   test(`the gate agrees with checkXmlSource - ${name}`, () => {
     const file = "src/view.view.xml";
     const mine = runGate(xml, file, true, OPTIONS);
     const theirs = checkXmlSource(xml, linterOptions(file));
     assert.deepEqual(
-      withoutIcons(reduce(mine.findings)),
-      withoutIcons(reduce(theirs.findings)),
+      reduce(mine.findings),
+      reduce(theirs.findings),
       "gate.ts and checkXmlSource disagree"
     );
   });
 }
 
-test("KNOWN GAP: the XML path cannot run the icon rules yet", () => {
-  /*
-   * Delete this test - and the `withoutIcons` filter above - as soon as it
-   * fails. It fails when `@abap2ui5/linter` starts exporting `checkIcons`
-   * through its `exports` map (there is no other way to reach `lib/icons.mjs`
-   * from here), at which point `gate.ts` should call it on the XML branch the
-   * way `checkXmlSource` does, and the parity assertions above cover it with
-   * no filter.
-   *
-   * Until then this is what the difference IS, written down: an unknown icon
-   * in a `.view.xml` is reported by CI and not by the editor. In an ABAP
-   * class - which is what the extension is mostly pointed at - it is reported
-   * by both.
-   */
-  const xml =
-    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n' +
-    '  <Button text="Go" icon="sap-icon://nosuchicon"/>\n' +
-    "</mvc:View>";
-  const file = "src/view.view.xml";
-  const cli = checkXmlSource(xml, linterOptions(file));
-  const gate = runGate(xml, file, true, OPTIONS);
-
-  assert.ok(
-    cli.findings.some((f) => f.type === "unknown-icon"),
-    "the linter stopped reporting unknown-icon for XML - the gap may be gone"
-  );
-  assert.equal(
-    gate.findings.some((f) => ICON_RULES.has(f.type)),
-    false,
-    "the gate now reports icon findings for XML - close the gap: drop the " +
-      "withoutIcons filter above and delete this test"
-  );
-
-  // and the ABAP side really is covered, so the gap is XML-only
-  const abap = runGate(
-    ABAP_FIXTURES["an icon that is in no release"],
-    "src/zcl_parity.clas.abap",
-    false,
-    OPTIONS
-  );
-  assert.ok(
-    abap.findings.some((f) => f.type === "unknown-icon"),
-    "the ABAP path lost the icon rules too - that one is fixable here"
-  );
-});
 
 test("the fixtures actually produce findings - a vacuous parity proves nothing", () => {
   const types = new Set<string>();

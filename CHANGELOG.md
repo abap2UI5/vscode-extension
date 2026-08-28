@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **The icon rules now judge `.view.xml` files too.** An unknown or too-new
+  `sap-icon://` name was reported by CI and not by the editor whenever it sat
+  in a view or fragment XML file rather than in an ABAP class - the icon scan
+  was not reachable from the in-process gate. It is now, so both paths judge
+  the same file the same way.
+- **Fewer false positives from the view check.** A relative binding path under
+  a slot the class element-binds (`cs_event-bind_element`) has a context at
+  runtime that no static analysis can see. The linter knows that and accepts
+  the path; the editor did not and squiggled it. It now asks the same
+  question, per view document rather than per class.
+- **Two more rules reach the editor**: the picker whose bound value has no
+  format, and the enum-typed row field left unset on an insert - the second is
+  a runtime error in UI5's strict validation, which takes the binding update
+  and the view down with it.
+
 - **F9 recognises an app that INHERITS `z2ui5_if_app`.** A shared base class
   carrying the interface and the lifecycle methods, with each app redefining
   them, is a common way to keep a team's apps uniform - and the extension
