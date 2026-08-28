@@ -2,4 +2,9 @@ node_modules/
 dist/
 *.vsix
 dist-test/
-data/
+# Anchored: the linter's icons.json is fetched into ./data at build time and
+# is not ours to commit. Unanchored, this also matched src/data/ — three
+# GENERATED-but-committed files (app-template, client-api, repo-dirs), each
+# with a --check gate and a bump workflow keeping it in sync. They were
+# tracked and ignored at the same time, which is a state nothing needs.
+/data/
