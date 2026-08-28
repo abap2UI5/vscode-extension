@@ -561,6 +561,11 @@ export interface SweepResult {
 export interface SweptFile {
   uri: vscode.Uri;
   findings: PropertyFinding[];
+  /** The version of the open document the findings were gated against, if it
+   *  was open. `fixWorkspace` refuses to apply offsets to a buffer that has
+   *  been typed in since - the sweep is `await`ed per file, so the window is
+   *  real. Absent when the text came from disk. */
+  version?: number;
 }
 
 /**
@@ -591,8 +596,24 @@ async function sweepWorkspace(
     WORKSPACE_GLOB,
     "**/{node_modules,.git,dist,out}/**"
   );
+  /*
+   * An open document WINS over the file of the same name, always - it is what
+   * the user is looking at, and `fixWorkspace` turns these findings into
+   * offsets that are then applied to exactly that document.
+   *
+   * Reading the file instead was a silent corruption: a class that is open
+   * with unsaved changes AND on disk was gated against the disk text, and the
+   * resulting character offsets were mapped through the dirty buffer. Every
+   * fix after the first divergence landed a few characters off - mid-token,
+   * in one WorkspaceEdit. The same mismatch put the workspace check's
+   * squiggles on the wrong lines.
+   */
+  const open = new Map<string, vscode.TextDocument>();
+  for (const doc of vscode.workspace.textDocuments) {
+    open.set(doc.uri.toString(), doc);
+  }
   const targets: Array<{ uri: vscode.Uri; open?: vscode.TextDocument }> = found.map(
-    (uri) => ({ uri })
+    (uri) => ({ uri, open: open.get(uri.toString()) })
   );
   const known = new Set(found.map((uri) => uri.toString()));
   for (const doc of vscode.workspace.textDocuments) {
@@ -647,7 +668,7 @@ async function sweepWorkspace(
     if (options.baseline && opts.baseline && uri.scheme === "file") {
       applyBaselineTo(gate.findings, opts.baseline, uri.fsPath);
     }
-    swept.push({ uri, findings: gate.findings });
+    swept.push({ uri, findings: gate.findings, version: target.open?.version });
   }
   return { files: swept, cancelled: token.isCancellationRequested };
 }
@@ -751,12 +772,22 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
       const edit = new vscode.WorkspaceEdit();
       let fixes = 0;
       let files = 0;
+      let moved = 0;
       for (const file of swept.files) {
         const planned = plannedFixes(file.findings);
         if (!planned.length) {
           continue;
         }
         const doc = await vscode.workspace.openTextDocument(file.uri);
+        /* A fix is a pair of character offsets into the text that was gated.
+         * If that text has changed since - the sweep awaits each file, and a
+         * fast typist is faster than a workspace scan - the offsets address
+         * different characters now, and applying them rewrites the wrong
+         * span. Skipping is the only safe answer; the next run picks it up. */
+        if (file.version !== undefined && doc.version !== file.version) {
+          moved++;
+          continue;
+        }
         edit.set(
           file.uri,
           planned.map(
@@ -770,9 +801,18 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
         fixes += planned.length;
         files++;
       }
+      if (moved) {
+        log(
+          `view-check: workspace fix - ${moved} file(s) skipped, edited while the sweep ran`
+        );
+      }
+      const skipped = moved
+        ? ` ${moved} file(s) were edited while the sweep ran and were left alone.`
+        : "";
       if (!fixes) {
         vscode.window.showInformationMessage(
-          `abap2UI5: nothing in ${swept.files.length} file(s) can be corrected mechanically.`
+          `abap2UI5: nothing in ${swept.files.length} file(s) can be corrected mechanically.` +
+            skipped
         );
         return;
       }
@@ -783,7 +823,8 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
        * what tells someone to run it again. */
       vscode.window.showInformationMessage(
         `abap2UI5: applied ${fixes} fix(es) in ${files} file(s). ` +
-          "Run it again if fixes overlapped; the files are edited, not saved."
+          "Run it again if fixes overlapped; the files are edited, not saved." +
+          skipped
       );
     }
   );
@@ -853,10 +894,37 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
         );
         return;
       }
+      /*
+       * Only real files under the baseline's own repository go in.
+       *
+       * The sweep deliberately also gates documents that have no file behind
+       * them (a class opened through ADT) and, in a multi-root window, files
+       * of the other folders. Neither can ever produce a matching entry when
+       * the CLI runs over this repository - and a baseline entry that matches
+       * nothing is not inert: it is STALE, which the linter reports and CI
+       * fails on. So writing them would hand somebody a baseline that breaks
+       * the build it was written to unblock.
+       */
+      const root = path.dirname(baselineFile);
+      const inRepo = (uri: vscode.Uri): boolean => {
+        if (uri.scheme !== "file") {
+          return false;
+        }
+        const rel = path.relative(root, uri.fsPath);
+        return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+      };
+      const mine = swept.files.filter((file) => inRepo(file.uri));
+      const foreign = swept.files.length - mine.length;
+      if (foreign) {
+        log(
+          `view-check: baseline - ${foreign} file(s) outside ${root} ` +
+            "(or with no file on disk) were not written into it"
+        );
+      }
       try {
         const written = rebuildBaseline(
           baselineFile,
-          swept.files.map((file) => ({
+          mine.map((file) => ({
             file: file.uri.fsPath,
             findings: file.findings,
           }))
@@ -871,7 +939,10 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
         );
         vscode.window.showInformationMessage(
           `abap2UI5: ${path.basename(baselineFile)} now waives ` +
-            `${written.findings} finding(s) from ${swept.files.length} file(s).`
+            `${written.findings} finding(s) from ${mine.length} file(s).` +
+            (foreign
+              ? ` ${foreign} file(s) outside the repository were not included.`
+              : "")
         );
       } catch (err) {
         vscode.window.showWarningMessage(

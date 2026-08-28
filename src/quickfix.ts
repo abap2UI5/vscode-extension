@@ -4,7 +4,7 @@ import { DIAG_SOURCE, ruleOf } from "./diagnostics";
 import * as path from "path";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
 import { addToBaseline } from "./baselinefile";
-import { plannedFixes } from "./checkcore";
+import { directiveLine, plannedFixes } from "./checkcore";
 import { clearBaselineCache } from "./lintconfig";
 import { CONFIG_SECTION } from "./settings";
 import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
@@ -71,13 +71,15 @@ function suppressionFor(
   line: number,
   rule: string
 ): vscode.TextEdit {
-  const text = doc.lineAt(line).text;
-  const indent = /^[ \t]*/.exec(text)?.[0] ?? "";
   const isXml = /\.(view|fragment)\.xml$/i.test(doc.fileName) || doc.languageId === "xml";
+  // In XML the finding's line is often an attribute line inside a multi-line
+  // start tag, and a comment may not go there - see `directiveLine`.
+  const target = directiveLine(doc.getText(), line, isXml);
+  const indent = /^[ \t]*/.exec(doc.lineAt(target).text)?.[0] ?? "";
   const directive = `abap2ui5lint-disable-next-line ${rule}`;
   const comment = isXml ? `<!-- ${directive} -->` : `" ${directive}`;
   return vscode.TextEdit.insert(
-    new vscode.Position(line, 0),
+    new vscode.Position(target, 0),
     `${indent}${comment}\n`
   );
 }

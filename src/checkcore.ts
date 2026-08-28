@@ -535,3 +535,84 @@ export function ruleSummary(group: RuleGroup): string {
     `${group.files} file${group.files === 1 ? "" : "s"}`
   );
 }
+
+/**
+ * Which line an `abap2ui5lint-disable-next-line` directive has to go ABOVE.
+ *
+ * In ABAP the answer is always the finding's own line: a full-line `"` comment
+ * is legal between any two lines of a statement, chain included.
+ *
+ * XML is not so forgiving. The linter records a finding at the offset of the
+ * ATTRIBUTE it is about, and a control written the way the corpus writes it
+ * spreads its attributes over several lines:
+ *
+ *     <Button
+ *       text="Go"
+ *       nosuchprop="x"/>
+ *
+ * Inserting `<!-- … -->` above `nosuchprop` puts a comment INSIDE the start
+ * tag, which is not well-formed XML - the view then fails to load at all,
+ * which is a far worse outcome than the finding that was being waived. So for
+ * XML the directive climbs to the line the element's own `<` is on.
+ *
+ * Quotes and comments are honoured while scanning, so a `<` inside an
+ * attribute value or an XML comment does not open a tag.
+ */
+export function directiveLine(text: string, line: number, isXml: boolean): number {
+  if (!isXml || line <= 0) {
+    return line;
+  }
+  const lines = text.split(/\r?\n/);
+  let cutoff = 0;
+  for (let i = 0; i < line && i < lines.length; i++) {
+    cutoff += lines[i].length + 1;
+  }
+
+  let tagStart = -1; // offset of the `<` of the start tag we are inside
+  let quote = ""; // the attribute quote we are inside, if any
+  let i = 0;
+  while (i < cutoff && i < text.length) {
+    if (tagStart < 0 && text.startsWith("<!--", i)) {
+      const end = text.indexOf("-->", i + 4);
+      i = end < 0 ? text.length : end + 3;
+      continue;
+    }
+    const c = text[i];
+    if (tagStart < 0) {
+      // `<?xml … ?>` and `<!DOCTYPE …>` are not elements, but they close on
+      // `>` like one, so treating them as a tag is harmless here.
+      if (c === "<") {
+        tagStart = i;
+      }
+      i++;
+      continue;
+    }
+    if (quote) {
+      if (c === quote) {
+        quote = "";
+      }
+      i++;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === ">") {
+      tagStart = -1;
+    }
+    i++;
+  }
+
+  if (tagStart < 0) {
+    return line; // between tags: the finding's own line is fine
+  }
+  // the line the `<` sits on
+  let at = 0;
+  for (let n = 0; n < lines.length; n++) {
+    const next = at + lines[n].length + 1;
+    if (tagStart < next) {
+      return n;
+    }
+    at = next;
+  }
+  return line;
+}
