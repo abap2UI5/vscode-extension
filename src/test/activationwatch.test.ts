@@ -30,6 +30,7 @@ function scriptedSource(
 ): ClassStateSource & { calls: number } {
   return {
     isRunning: true,
+    systemOrigin: "https://sys-a:44300",
     calls: 0,
     async fetchClassState() {
       this.calls++;
@@ -239,4 +240,99 @@ test("without a running proxy the watch does not start", async () => {
   watch.dispose();
   assert.equal(source.calls, 0);
   assert.ok(logs.some((l) => l.includes("no auth proxy")));
+});
+
+test("a system that refuses ADT does not disable the watch for another system", async () => {
+  /*
+   * As a plain flag this latched for the whole window: one launch against a
+   * system whose /sap/bc/adt is closed switched reload-on-activation off for
+   * every other system too, until the window was reloaded - with nothing but
+   * a log line to say so.
+   */
+  const source = {
+    isRunning: true,
+    systemOrigin: "https://closed:44300",
+    calls: 0,
+    async fetchClassState(): Promise<AdtClassState> {
+      this.calls++;
+      throw new AdtStatusError(403);
+    },
+  };
+  const logs: string[] = [];
+  const watch = new ActivationWatch(
+    {
+      source,
+      current: () => ({ className: "ZCL_APP" }),
+      log: (m) => logs.push(m),
+      reload: () => undefined,
+    },
+    { firstMs: 1, pollMs: 5, timeoutMs: 500 }
+  );
+
+  watch.start();
+  await until(() => logs.some((l) => l.includes("giving up on")));
+  const refusedCalls = source.calls;
+
+  // asked again on the SAME system: refused without a request
+  watch.start();
+  await sleep(20);
+  assert.equal(source.calls, refusedCalls, "the refused system was asked again");
+  assert.ok(logs.some((l) => l.includes("already refused on https://closed:44300")));
+
+  // the user switches systems - the other one has never refused anything
+  source.systemOrigin = "https://open:44300";
+  watch.start();
+  await until(() => source.calls > refusedCalls);
+  assert.ok(
+    source.calls > refusedCalls,
+    "the watch stayed off after switching to a system that never refused"
+  );
+});
+
+test("a slow baseline answer cannot resurrect itself after the next save", async () => {
+  /*
+   * captureBaseline is fire-and-forget. A late answer used to overwrite the
+   * baseline of the state the preview had moved on from, which made the next
+   * poll read "changed since shown" for an activation that never happened -
+   * and that reload cleared the "not activated" badge, the one thing telling
+   * the user their saved code is not live yet.
+   */
+  let release: (state: AdtClassState) => void = () => undefined;
+  const source = {
+    isRunning: true,
+    systemOrigin: "https://sys-a:44300",
+    calls: 0,
+    async fetchClassState(): Promise<AdtClassState> {
+      this.calls++;
+      if (this.calls === 1) {
+        return new Promise<AdtClassState>((resolve) => {
+          release = resolve;
+        });
+      }
+      return { version: "active", changedAt: "2026-01-01T00:00:00Z" };
+    },
+  };
+  const logs: string[] = [];
+  const reloads: string[] = [];
+  const watch = new ActivationWatch(
+    {
+      source,
+      current: () => ({ className: "ZCL_APP" }),
+      log: (m) => logs.push(m),
+      reload: (r) => reloads.push(r),
+    },
+    { firstMs: 10_000, pollMs: 10_000, timeoutMs: 60_000 }
+  );
+
+  watch.captureBaseline(); // hangs
+  watch.start(); // the next save: stop() bumps the generation
+  release({ version: "active", changedAt: "2020-01-01T00:00:00Z" });
+  await sleep(20);
+
+  assert.equal(
+    logs.some((l) => l.includes("was last changed")),
+    false,
+    "the superseded baseline answer was still recorded"
+  );
+  watch.stop();
 });

@@ -374,12 +374,12 @@
       "editor/title": [
         {
           "command": "abap2ui5.run",
-          "when": "resourceLangId == abap",
+          "when": "resourceLangId == abap && !isWeb",
           "group": "navigation@1"
         },
         {
           "command": "abap2ui5.activate",
-          "when": "resourceLangId == abap && resourceScheme == adt",
+          "when": "resourceLangId == abap && resourceScheme == adt && !isWeb",
           "group": "navigation@2"
         }
       ],
@@ -471,7 +471,8 @@
         },
         {
           "command": "abap2ui5.showExamples",
-          "group": "2_look@3"
+          "group": "2_look@3",
+          "when": "!isWeb"
         },
         {
           "command": "abap2ui5.checkViews",
@@ -479,7 +480,8 @@
         },
         {
           "command": "abap2ui5.fixAll",
-          "group": "3_check@2"
+          "group": "3_check@2",
+          "when": "!isWeb"
         },
         {
           "command": "abap2ui5.extractViewMethod",
@@ -501,13 +503,13 @@
       {
         "command": "abap2ui5.run",
         "key": "f9",
-        "when": "editorTextFocus && editorLangId == abap"
+        "when": "editorTextFocus && editorLangId == abap && !isWeb"
       },
       {
         "command": "abap2ui5.activate",
         "key": "ctrl+f3",
         "mac": "cmd+f3",
-        "when": "editorTextFocus && editorLangId == abap && resourceScheme == adt"
+        "when": "editorTextFocus && editorLangId == abap && resourceScheme == adt && !isWeb"
       }
     ],
     "viewsContainers": {

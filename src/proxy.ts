@@ -558,6 +558,14 @@ export class SapProxy {
     return !!this.server && !!this.target && !!this.authHeader;
   }
 
+  /** Which SYSTEM this proxy currently forwards to, normalised - undefined
+   *  while it is not running. Callers that remember something about a system
+   *  (rather than about the proxy) key it on this, so switching systems does
+   *  not carry the old one's verdict over. */
+  get systemOrigin(): string | undefined {
+    return this.target?.origin;
+  }
+
   /**
    * The system path an incoming request is asking for, or undefined when the
    * request has no business here. Two ways to be authorized, and a request

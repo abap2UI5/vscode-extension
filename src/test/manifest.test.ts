@@ -20,7 +20,7 @@ interface Manifest {
     menus?: Record<string, Array<{ command?: string; submenu?: string }>>;
     submenus?: Array<{ id: string; label: string }>;
     viewsWelcome?: Array<{ view: string; contents: string }>;
-    views?: Record<string, Array<{ id: string }>>;
+    views?: Record<string, Array<{ id: string; when?: string }>>;
     keybindings?: Array<{ command: string }>;
   };
 }
@@ -196,4 +196,126 @@ test("every command carries the abap2ui5 prefix and an English title", () => {
       `${entry.command} - palette entries all start with "abap2UI5: "`
     );
   }
+});
+
+/*
+ * Desktop-only commands, and where they may appear.
+ *
+ * The web extension host registers a fraction of the commands: the language
+ * features, the property gate, the wizards. Everything that needs a socket or
+ * a process - the preview, F9, the ADT integration, the MCP server - exists
+ * only in `src/extension.ts`. A contribution that offers one of those in the
+ * web host is a button (or a key) that answers "command not found".
+ *
+ * `menus.commandPalette` has carried `"when": "!isWeb"` entries for this from
+ * the start. The editor-title buttons and the keybindings did not, so on
+ * vscode.dev a play button appeared over any ABAP file and F9 failed - which
+ * is exactly the kind of drift no compiler sees.
+ *
+ * The web command set is computed the way the bundler sees it: walk the
+ * relative imports out of `src/web/extension.ts` and collect every
+ * `registerCommand` in the modules it actually reaches.
+ */
+
+/** Every `abap2ui5.*` command reachable from an entry point's import graph. */
+function commandsReachableFrom(entry: string): Set<string> {
+  const seen = new Set<string>();
+  const found = new Set<string>();
+  const visit = (file: string): void => {
+    const resolved = [file, `${file}.ts`, path.join(file, "index.ts")].find(
+      (candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile()
+    );
+    if (!resolved || seen.has(resolved)) {
+      return;
+    }
+    seen.add(resolved);
+    const text = fs.readFileSync(resolved, "utf8");
+    for (const m of text.matchAll(/registerCommand\(\s*["'`]([^"'`]+)["'`]/g)) {
+      found.add(m[1]);
+    }
+    // `import … from "./x"`, `export … from "./x"` and `import("./x")`
+    for (const m of text.matchAll(/from\s+["'](\.[^"']+)["']|import\(\s*["'](\.[^"']+)["']/g)) {
+      const spec = m[1] ?? m[2];
+      visit(path.resolve(path.dirname(resolved), spec));
+    }
+  };
+  visit(path.join(ROOT, entry));
+  return found;
+}
+
+const webCommands = commandsReachableFrom("src/web/extension.ts");
+
+test("the web entry really is a subset - the scan resolves something", () => {
+  assert.ok(
+    webCommands.has("abap2ui5.openHomepage"),
+    "the web import walk found nothing - the scan is broken, not the manifest"
+  );
+  assert.ok(
+    !webCommands.has("abap2ui5.run"),
+    "abap2ui5.run is reachable from the web entry now - if the preview really " +
+      "works there, the !isWeb gating below is what should change"
+  );
+});
+
+test("no contribution offers a desktop-only command in the web host", () => {
+  const desktopOnly = (command: string): boolean =>
+    command.startsWith("abap2ui5.") && !webCommands.has(command);
+  const hidden = (when: string | undefined): boolean =>
+    /!isWeb\b/.test(when ?? "") || (when ?? "").trim() === "false";
+
+  /** Views carry their own `when`; a menu entry scoped to a view that does
+   *  not exist in the web host cannot be reached there either. */
+  const viewGate = new Map<string, string | undefined>();
+  for (const entries of Object.values(manifest.contributes.views ?? {})) {
+    for (const view of entries) {
+      viewGate.set(view.id, (view as { when?: string }).when);
+    }
+  }
+  const throughAGatedView = (when: string | undefined): boolean => {
+    const view = /view\s*==\s*'?([\w.]+)'?/.exec(when ?? "")?.[1];
+    return view !== undefined && hidden(viewGate.get(view));
+  };
+
+  /** A submenu is only as reachable as the places that open it. */
+  const submenuGate = new Map<string, boolean>();
+  for (const id of (manifest.contributes.submenus ?? []).map((e) => e.id)) {
+    const openers = Object.values(manifest.contributes.menus ?? {}).flatMap(
+      (entries) =>
+        entries.filter((e) => e.submenu === id) as Array<{ when?: string }>
+    );
+    submenuGate.set(
+      id,
+      openers.length > 0 && openers.every((e) => hidden(e.when))
+    );
+  }
+
+  const offenders: string[] = [];
+  for (const [menu, entries] of Object.entries(manifest.contributes.menus ?? {})) {
+    if (submenuGate.get(menu)) {
+      continue; // every opener of this submenu is desktop-only
+    }
+    for (const entry of entries) {
+      const when = (entry as { when?: string }).when;
+      if (
+        entry.command &&
+        desktopOnly(entry.command) &&
+        !hidden(when) &&
+        !throughAGatedView(when)
+      ) {
+        offenders.push(`menus.${menu} -> ${entry.command}`);
+      }
+    }
+  }
+  for (const binding of manifest.contributes.keybindings ?? []) {
+    const b = binding as { command: string; when?: string };
+    if (desktopOnly(b.command) && !hidden(b.when)) {
+      offenders.push(`keybinding ${b.command}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'these are not registered by the web entry and need "!isWeb" in their ' +
+      'when clause - in the web host they fail with "command not found"'
+  );
 });

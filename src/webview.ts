@@ -646,6 +646,23 @@ ${BASE_CSS}
   // one - they are counted here and relayed to the host for the output log.
   window.addEventListener('message', (event) => {
     const msg = event.data || {};
+    /*
+     * WHO is talking matters here, not only what they say.
+     *
+     * Two very different senders reach this one listener: the extension host
+     * (load / stale / roundtrip - the trusted chrome) and the app running in
+     * the iframe (its runtime hook, and UI5's frame protection). The iframe is
+     * not confined to the SAP system - the previewed app may link or navigate
+     * anywhere - and any page in there may postMessage to its parent. It could
+     * therefore send a 'load' of its own and rewrite the class name, the
+     * system url shown under it and the reload target: a trusted-looking
+     * frame drawn around a page nobody vouched for.
+     *
+     * event.source is the one thing a sender cannot forge. So the frame's
+     * messages are exactly those from its own contentWindow, and anything the
+     * HOST is allowed to say is refused from anywhere else.
+     */
+    const fromApp = event.source === frame.contentWindow;
 
     /*
      * UI5's own frame protection, answered for the sake of the protocol.
@@ -670,13 +687,15 @@ ${BASE_CSS}
      * allowlisted by its own system) is unlocked by it.
      */
     if (typeof event.data === 'string') {
-      if (event.data === 'SAPFrameProtection*require-origin' && event.source) {
+      if (fromApp && event.data === 'SAPFrameProtection*require-origin') {
         event.source.postMessage('SAPFrameProtection*parent-unlocked', '*');
       }
       return; // no string message carries anything else this listener wants
     }
 
-    const kind = msg.__abap2ui5Runtime;
+    // Everything below the marker is the app talking about itself; a runtime
+    // message from anywhere else is not one.
+    const kind = fromApp ? msg.__abap2ui5Runtime : undefined;
     if (kind === 'inspect') {
       markInspect(false); // one-shot: the click ends the mode
       vscodeApi.postMessage({ type: 'inspected', chain: msg.chain || [] });
@@ -717,6 +736,9 @@ ${BASE_CSS}
       });
       return;
     }
+    // From here on it is the host's protocol: the toolbar's own state. The
+    // app frame may not write any of it.
+    if (fromApp) { return; }
     if (msg.type === 'stale') {
       // Only the first save after a load says it out loud; the badge stays.
       if (msg.reason && body.dataset.stale !== 'true') { showToast(msg.reason); }
@@ -846,10 +868,16 @@ ${BASE_CSS}
     return !!el && (el.tagName === 'INPUT' || el.tagName === 'SELECT');
   }
 
+  // Escapes for BOTH places the result is used: as text, and inside a
+  // double-quoted attribute. The textContent/innerHTML round trip alone
+  // escapes & < >, but NOT the quote - and every value here goes into
+  // value="..." / title="..." / data-name="...". An ABAP literal may
+  // legitimately contain one (a( 'say "hi"' )), which then closed the
+  // attribute early and mangled the form row.
   function esc(text) {
     const div = document.createElement('div');
     div.textContent = String(text);
-    return div.innerHTML;
+    return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function render() {
