@@ -69,12 +69,20 @@ export function snapshotError(): string | undefined {
   return failure;
 }
 
+let ui5Version: { value: string | undefined } | undefined;
+
 /** The UI5 version the snapshot was generated from — read straight from the
- *  file, so an older snapshot without the field is fine. */
+ *  file, so an older snapshot without the field is fine. Read once: the file
+ *  is several MB and does not change while the extension runs. */
 export function snapshotUi5Version(): string | undefined {
-  try {
-    return JSON.parse(fs.readFileSync(FILE, "utf8")).ui5Version;
-  } catch {
-    return undefined;
+  if (!ui5Version) {
+    let value: string | undefined;
+    try {
+      value = JSON.parse(fs.readFileSync(FILE, "utf8")).ui5Version;
+    } catch {
+      value = undefined;
+    }
+    ui5Version = { value };
   }
+  return ui5Version.value;
 }

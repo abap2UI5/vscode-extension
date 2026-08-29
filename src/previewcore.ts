@@ -40,10 +40,24 @@ export function loadMessage(
 
 /**
  * Message posted when the shown class was saved but not activated: the preview
- * still shows the active version, so it says so instead of reloading.
+ * still shows the active version, so it says so instead of reloading. With
+ * `force` the toast shows even when the badge is already up - how the
+ * activation watch's give-up reaches a preview that is already marked stale.
  */
-export function staleMessage(reason: string) {
-  return { type: "stale" as const, reason };
+export function staleMessage(reason: string, force = false) {
+  return force
+    ? { type: "stale" as const, reason, force: true as const }
+    : { type: "stale" as const, reason };
+}
+
+/**
+ * A class name reduced to something safe as a file-name stem: namespaced
+ * classes (`/UI2/CL_X`) carry separators, and names arriving over MCP are
+ * arbitrary strings - neither may steer where a file lands.
+ */
+export function safeFileStem(name: string): string {
+  const stem = name.replace(/[^\w.-]+/g, "_").replace(/^\.+/, "");
+  return stem || "APP";
 }
 
 /** When the preview reloads by itself. */

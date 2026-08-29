@@ -12,6 +12,7 @@
  */
 
 import { abapNsMap, splitName, xmlNsMap } from "./context";
+import { blankComments } from "./abapscan";
 
 /** Channels 0..1, the way VS Code's Color wants them. */
 export interface RgbaColor {
@@ -209,15 +210,17 @@ const ABAP_ATTR_RE =
   /->\s*a\s*\(\s*n\s*=\s*([`'"])([\w:.]+)\1\s*v\s*=\s*([`'"])([^`'"]*)\3/g;
 
 /** Colour values in an ABAP builder source. Regex-scanned on purpose - a
- *  swatch on a commented-out line costs nothing, a full parse per keystroke
- *  would. */
+ *  full parse per keystroke would cost too much - but over blanked comments:
+ *  a commented-out `->tag( )` between a control and its `a( )` used to become
+ *  the owner, and the real attribute was judged against the wrong control. */
 export function abapColorSpans(
   source: string,
   isColorMember: IsColorMember
 ): ColorSpan[] {
   const ns = abapNsMap(source);
+  const code = blankComments(source);
   const controls: Array<{ at: number; control: string }> = [];
-  for (const m of source.matchAll(ABAP_CONTROL_RE)) {
+  for (const m of code.matchAll(ABAP_CONTROL_RE)) {
     const { prefix, local } = splitName(m[2]);
     const library = ns[prefix || m[4] || ""] ?? (prefix || m[4] ? undefined : "sap.m");
     if (library) {
@@ -230,7 +233,7 @@ export function abapColorSpans(
   // control list per attribute made this quadratic on exactly the long
   // generated views it runs over, on every document change.
   let ownerIndex = -1;
-  for (const m of source.matchAll(ABAP_ATTR_RE)) {
+  for (const m of code.matchAll(ABAP_ATTR_RE)) {
     while (
       ownerIndex + 1 < controls.length &&
       controls[ownerIndex + 1].at < m.index

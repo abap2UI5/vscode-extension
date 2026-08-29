@@ -1,4 +1,4 @@
-import { blankComments } from "./abapscan";
+import { blankComments, blankNonCode } from "./abapscan";
 
 /*
  * ABAP source helpers.
@@ -13,14 +13,17 @@ import { blankComments } from "./abapscan";
  * What makes a class an abap2UI5 app. The colon is what the first version of
  * this regex missed: `INTERFACES: z2ui5_if_app.` is the chained form and just
  * as common as the plain one, and F9 silently fell through to "toggle
- * breakpoint" for every class written that way. `\s` covers the newline, so
- * the interface may sit on the line after the colon.
+ * breakpoint" for every class written that way. The next miss was the comma:
+ * `INTERFACES: if_serializable_object, z2ui5_if_app.` lists the app interface
+ * anywhere in the chain, so the whole statement is searched - `[^.]` keeps the
+ * search inside ONE statement, which only works over blanked source where a
+ * period in a literal or comment is already gone.
  */
-export const APP_INTERFACE_RE = /\binterfaces\s*:?\s*z2ui5_if_app\b/i;
+export const APP_INTERFACE_RE = /\binterfaces\b[^.]*?\bz2ui5_if_app\b/i;
 
 /** True when the source ITSELF writes `INTERFACES z2ui5_if_app`. */
 export function isAppClass(source: string): boolean {
-  return APP_INTERFACE_RE.test(blankComments(source));
+  return APP_INTERFACE_RE.test(blankNonCode(source));
 }
 
 /**
@@ -33,16 +36,10 @@ export function isAppClass(source: string): boolean {
  * first for the same reason.
  */
 export function superclassOf(source: string): string | undefined {
-  const code = blankComments(source);
-  const def = CLASS_DEF_RE.exec(code);
-  if (!def) {
-    return undefined;
-  }
-  // the definition statement runs to its first period
-  const from = def.index;
-  const dot = code.indexOf(".", from);
-  const statement = code.slice(from, dot < 0 ? code.length : dot);
-  return /\binheriting\s+from\s+([\w/]+)/i.exec(statement)?.[1].toUpperCase();
+  const def = classDefinitionIn(blankComments(source));
+  return def
+    ? /\binheriting\s+from\s+([\w/]+)/i.exec(def.statement)?.[1].toUpperCase()
+    : undefined;
 }
 
 /**
@@ -102,13 +99,34 @@ export function usesBuilder(source: string): boolean {
  * one: both ABAP comment forms (`*` in column 1 and a leading `"`) put a
  * character other than whitespace in front of the keyword.
  */
-const CLASS_DEF_RE = /^[ \t]*class\s+(\S+)\s+definition/im;
+const CLASS_DEF_RE = /^[ \t]*class\s+(\S+)\s+definition\b/gim;
+
+/**
+ * The first class the source actually DEFINES. A `CLASS lcl_x DEFINITION
+ * DEFERRED.` in front of the real definition is only an announcement - taking
+ * it for the definition returned the wrong class name and, worse, no
+ * superclass at all, so an app inheriting the interface behind such a line
+ * went unrecognised.
+ */
+function classDefinitionIn(
+  code: string
+): { name: string; index: number; statement: string } | undefined {
+  for (const m of code.matchAll(CLASS_DEF_RE)) {
+    const dot = code.indexOf(".", m.index);
+    const statement = code.slice(m.index, dot < 0 ? code.length : dot);
+    if (/\bdeferred\b/i.test(statement)) {
+      continue;
+    }
+    return { name: m[1], index: m.index, statement };
+  }
+  return undefined;
+}
 
 /** Class name from the source, falling back to the file name. Upper case. */
 export function classNameOf(source: string, fileName: string): string {
-  const match = source.match(CLASS_DEF_RE);
-  if (match) {
-    return match[1].toUpperCase();
+  const def = classDefinitionIn(source);
+  if (def) {
+    return def.name.toUpperCase();
   }
   const base = fileName.replace(/^.*[\\/]/, "");
   return base
@@ -122,8 +140,7 @@ export function classNameOf(source: string, fileName: string): string {
  * 0 when the source has none, so the lens still lands somewhere sensible.
  */
 export function classDefinitionOffset(source: string): number {
-  const match = CLASS_DEF_RE.exec(source);
-  return match?.index ?? 0;
+  return classDefinitionIn(source)?.index ?? 0;
 }
 
 /**
@@ -146,20 +163,27 @@ export function declarationSpan(
     return undefined;
   }
   const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // over blanked comments, so a commented-out declaration (`" DATA mv_x TYPE
+  // string - the old spot`) is not where the jump lands - same offsets, so
+  // every index found here still points into the source
+  const code = blankComments(source);
 
   if (segments.length > 1) {
     const field = segments[segments.length - 1];
-    for (const block of source.matchAll(/BEGIN OF \w+\s*,([\s\S]*?)END OF/gi)) {
-      const m = new RegExp(`\\b(${escape(field)})\\s+TYPE\\b`, "i").exec(block[1]);
+    const fieldRe = new RegExp(`\\b(${escape(field)})\\s+TYPE\\b`, "i");
+    // both block shapes: the chained `BEGIN OF x, … END OF x` and the
+    // statement-per-line `TYPES BEGIN OF x. TYPES f TYPE …. TYPES END OF x.`
+    for (const block of code.matchAll(/(BEGIN\s+OF\s+\w+)([\s\S]*?)END\s+OF/gi)) {
+      const m = fieldRe.exec(block[2]);
       if (m) {
-        const start = (block.index ?? 0) + block[0].indexOf(block[1]) + m.index;
+        const start = block.index + block[1].length + m.index;
         return { start, end: start + field.length };
       }
     }
   }
   const root = segments[0];
-  const m = new RegExp(`\\b(${escape(root)})\\s+TYPE\\b`, "i").exec(source);
-  return m ? { start: m.index + m[0].indexOf(m[1]), end: m.index + m[0].indexOf(m[1]) + root.length } : undefined;
+  const m = new RegExp(`\\b(${escape(root)})\\s+TYPE\\b`, "i").exec(code);
+  return m ? { start: m.index, end: m.index + root.length } : undefined;
 }
 
 /**

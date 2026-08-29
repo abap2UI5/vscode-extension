@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { run } from "./childproc";
 import { offerInstall, renderGateBrowsers } from "./rendergate";
+import { safeFileStem } from "./previewcore";
 
 /*
  * "Take App Screenshot" - the running app as a PNG, without leaving the
@@ -17,15 +18,17 @@ import { offerInstall, renderGateBrowsers } from "./rendergate";
  */
 
 /** Where playwright's CLI puts the browser: <dir>/chromium-<build>/<platform>/…
- *  The newest build wins when several are installed. */
+ *  The newest build wins when several are installed - compared by the build
+ *  NUMBER: sorted as strings, "chromium-999" beats "chromium-1181". */
 export function findChromium(browsersDir: string): string | undefined {
+  const buildNo = (name: string): number =>
+    Number(/(\d+)$/.exec(name)?.[1] ?? 0);
   let builds: string[];
   try {
     builds = fs
       .readdirSync(browsersDir)
       .filter((e) => e.startsWith("chromium"))
-      .sort()
-      .reverse();
+      .sort((a, b) => buildNo(b) - buildNo(a));
   } catch {
     return undefined;
   }
@@ -80,7 +83,7 @@ async function runChromium(
  */
 export async function takeScreenshot(
   context: vscode.ExtensionContext,
-  options: { url: string; className: string },
+  options: { url: string; className: string; width?: number; height?: number },
   log: (m: string) => void
 ): Promise<string | undefined> {
   const chromium = findChromium(renderGateBrowsers(context));
@@ -100,13 +103,15 @@ export async function takeScreenshot(
     .toISOString()
     .slice(0, 19)
     .replace(/[:T]/g, "-");
-  const file = path.join(dir, `${options.className}-${stamp}.png`);
+  // The stem, not the raw name: namespaced classes carry `/`, and the name
+  // may arrive over MCP - neither gets to steer where the PNG lands.
+  const file = path.join(dir, `${safeFileStem(options.className)}-${stamp}.png`);
 
   const args = [
     "--headless=new",
     "--disable-gpu",
     "--hide-scrollbars",
-    "--window-size=1280,900",
+    `--window-size=${options.width ?? 1280},${options.height ?? 900}`,
     `--screenshot=${file}`,
     // Fast-forwards the page's timers so the UI5 boot and the first backend
     // roundtrip are through before the shot - deterministic, no sleep.

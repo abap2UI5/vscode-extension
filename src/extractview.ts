@@ -26,6 +26,8 @@ export interface ExtractEdit {
   start: number;
   end: number;
   text: string;
+  /** What this edit does, for a refactor preview. */
+  label: string;
 }
 
 export interface ExtractPlan {
@@ -127,28 +129,62 @@ function reindent(block: string, indent: number): string {
     .join("\n");
 }
 
-/** Where a `METHODS` declaration goes: the PROTECTED section if the class has
- *  one (that is where the samples put view helpers), else PRIVATE, else just
- *  before the definition's ENDCLASS. */
-function declarationPoint(source: string): number | undefined {
-  for (const keyword of ["PROTECTED SECTION.", "PRIVATE SECTION."]) {
-    const at = source.toUpperCase().indexOf(keyword);
-    if (at >= 0) {
-      return at + keyword.length;
+/** One `CLASS … DEFINITION` / `CLASS … IMPLEMENTATION` part, up to its
+ *  `ENDCLASS.`. Read from the BLANKED source: an `ENDCLASS.` in a comment
+ *  or a literal ends nothing. */
+interface ClassPart {
+  name: string;
+  kind: "definition" | "implementation";
+  start: number;
+  /** Offset of the part's `ENDCLASS`, or the end of the source when the
+   *  part is still open. */
+  endclass: number;
+}
+
+/** The class parts of a file, in order. Classes do not nest, so each
+ *  `CLASS` pairs with the next `ENDCLASS.` - `DEFINITION DEFERRED` and
+ *  `DEFINITION … LOAD` carry none and are skipped. */
+function classParts(code: string): ClassPart[] {
+  const parts: ClassPart[] = [];
+  let open: ClassPart | undefined;
+  const re = /\bCLASS\s+([\w/]+)\s+(DEFINITION|IMPLEMENTATION)\b|\bENDCLASS\s*\./gi;
+  for (const m of code.matchAll(re)) {
+    if (m[1]) {
+      const dot = code.indexOf(".", m.index);
+      const statement = code.slice(m.index, dot < 0 ? code.length : dot);
+      if (/\bDEFERRED\b|\bLOAD\b/i.test(statement)) {
+        continue;
+      }
+      open = {
+        name: m[1].toUpperCase(),
+        kind: m[2].toLowerCase() as ClassPart["kind"],
+        start: m.index,
+        endclass: code.length,
+      };
+      parts.push(open);
+    } else if (open) {
+      open.endclass = m.index;
+      open = undefined;
     }
   }
-  const endclass = source.toUpperCase().indexOf("ENDCLASS.");
-  return endclass < 0 ? undefined : endclass;
+  return parts;
 }
 
-/** Where the implementation goes: before the last `ENDCLASS.` of the file,
- *  which is the implementation part's end. */
-function implementationPoint(source: string): number | undefined {
-  const at = source.toUpperCase().lastIndexOf("ENDCLASS.");
-  return at < 0 ? undefined : at;
+/** Where the `METHODS` declaration goes inside the class's DEFINITION: the
+ *  PROTECTED section if it has one (that is where the samples put view
+ *  helpers), else PRIVATE, else just before the definition's ENDCLASS. */
+function declarationPoint(code: string, definition: ClassPart): number {
+  const part = code.slice(definition.start, definition.endclass);
+  for (const section of [/\bPROTECTED\s+SECTION\s*\./i, /\bPRIVATE\s+SECTION\s*\./i]) {
+    const m = section.exec(part);
+    if (m) {
+      return definition.start + m.index + m[0].length;
+    }
+  }
+  return definition.endclass;
 }
 
-const NAME_RE = /^[a-z][a-z0-9_]{0,28}$/i;
+const NAME_RE = /^[a-z][a-z0-9_]{0,29}$/i;
 
 /**
  * The edits that move the selected tail of a chain into `methodName`.
@@ -166,12 +202,15 @@ export function planExtract(
   if (!NAME_RE.test(methodName)) {
     return { error: "A method name starts with a letter and holds letters, digits and _." };
   }
-  if (new RegExp(String.raw`\bMETHODS\s+${methodName}\b`, "i").test(source)) {
-    return { error: `The class already declares a method called ${methodName}.` };
-  }
   // the statement and the cut are decided on code alone - a period or a `->`
   // inside a literal or a comment is neither a statement end nor a boundary
   const code = blankNonCode(source);
+  // the name anywhere in a METHODS statement counts - the chained form
+  // (`METHODS: a, b.`) declares just as well as the plain one, and a name
+  // in a comment declares nothing
+  if (new RegExp(String.raw`\bMETHODS\b[^.]*?\b${methodName}\b`, "i").test(code)) {
+    return { error: `The class already declares a method called ${methodName}.` };
+  }
   const statement = statementAround(code, selectionStart);
   if (!statement) {
     return { error: "The cursor is not inside a statement that ends with a period." };
@@ -251,7 +290,12 @@ export function planExtract(
   if (!captured) {
     // `view->ele( … )` becomes `DATA(content) = view->ele( … )`
     const at = statement.start + (head.length - head.trimStart().length);
-    edits.push({ start: at, end: at, text: `DATA(${handle}) = ` });
+    edits.push({
+      start: at,
+      end: at,
+      text: `DATA(${handle}) = `,
+      label: `Capture the chain in DATA(${handle})`,
+    });
   }
   // the tail leaves the statement; the head closes with a period, and the
   // call to the new method follows it
@@ -259,13 +303,34 @@ export function planExtract(
     start: boundary,
     end: statement.end + 1, // include the statement's own period
     text: `.\n\n${indent}${methodName}( ${handle} ).`,
+    label: `Cut the tail and call ${methodName}( ${handle} )`,
   });
 
-  const declareAt = declarationPoint(source);
-  const implementAt = implementationPoint(source);
-  if (declareAt === undefined || implementAt === undefined) {
+  /*
+   * The insertion points belong to the class the statement lives in - a file
+   * may hold more than one, and both used to be found file-wide: the
+   * declaration went into the FIRST class with a PROTECTED/PRIVATE section
+   * (a base class above, say) while the implementation went before the LAST
+   * ENDCLASS, and the halves ended up in different classes. Read from the
+   * blanked source, so an `ENDCLASS.` or `PROTECTED SECTION.` in a comment
+   * anchors nothing either.
+   */
+  const parts = classParts(code);
+  const implementation = parts.find(
+    (part) =>
+      part.kind === "implementation" &&
+      part.start <= statement.start &&
+      statement.start < part.endclass
+  );
+  const definition = implementation
+    ? parts.find(
+        (part) => part.kind === "definition" && part.name === implementation.name
+      )
+    : undefined;
+  if (!implementation || !definition) {
     return { error: "This file does not look like a class - no ENDCLASS found." };
   }
+  const declareAt = declarationPoint(code, definition);
   edits.push({
     start: declareAt,
     end: declareAt,
@@ -275,14 +340,16 @@ export function planExtract(
       `        box           TYPE REF TO ${builderClass}\n` +
       `      RETURNING\n` +
       `        VALUE(result) TYPE REF TO ${builderClass}.`,
+    label: `Declare ${methodName}`,
   });
   edits.push({
-    start: implementAt,
-    end: implementAt,
+    start: implementation.endclass,
+    end: implementation.endclass,
     text:
       `\n  METHOD ${methodName}.\n\n` +
       `    result = box${reindent(tail, 8).replace(/\s+$/, "")}.\n\n` +
       `  ENDMETHOD.\n\n`,
+    label: `Implement ${methodName}`,
   });
 
   // applied back to front, so an earlier edit cannot move a later offset

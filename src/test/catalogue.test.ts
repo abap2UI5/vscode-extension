@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { blobUrl, catalogueUrl, matchCatalogue, parseCatalogue } from "../catalogue";
+import { blobUrl, catalogueUrl, matchCatalogue, parseCatalogue, rawUrl } from "../catalogue";
 import samples from "./fixtures/catalogue-samples.json";
 import samplesControls from "./fixtures/catalogue-samples-controls.json";
 import samplesStack from "./fixtures/catalogue-samples-stack.json";
@@ -155,5 +155,17 @@ test("an entry without a branch still links to main", () => {
   assert.equal(
     blobUrl("samples", "src/z.clas.abap", undefined),
     "https://github.com/abap2UI5/samples/blob/main/src/z.clas.abap"
+  );
+});
+
+test("the raw url mirrors the blob url's repo, branch and file", () => {
+  // what the read-only editor view of a remote hit fetches
+  assert.equal(
+    rawUrl("samples", "src/z.clas.abap"),
+    "https://raw.githubusercontent.com/abap2UI5/samples/main/src/z.clas.abap"
+  );
+  assert.equal(
+    rawUrl("samples-stack", "src/z.clas.abap", "02-smart-controls"),
+    "https://raw.githubusercontent.com/abap2UI5/samples-stack/02-smart-controls/src/z.clas.abap"
   );
 });

@@ -75,6 +75,12 @@ export function blobUrl(repo: string, file: string, branch = "main"): string {
   return `https://github.com/abap2UI5/${repo}/blob/${branch}/${file}`;
 }
 
+/** The entry's class as raw text - what the read-only editor view of a
+ *  remote hit fetches. Same branch rule as `blobUrl`. */
+export function rawUrl(repo: string, file: string, branch = "main"): string {
+  return `https://raw.githubusercontent.com/abap2UI5/${repo}/${branch}/${file}`;
+}
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }

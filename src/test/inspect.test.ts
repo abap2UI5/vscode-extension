@@ -70,6 +70,47 @@ test("a generated runtime id is never treated as a written one", () => {
   assert.equal(node?.label, "Page");
 });
 
+test("aggregation elements between the controls do not break the match", () => {
+  /*
+   * Regression: corpus views write their aggregations out (`content`,
+   * `items`, `cells`), and those outline ancestors never appear in the
+   * runtime parent chain - the runtime reports controls only. The scorer
+   * exhausted its cursor on the first such miss, every candidate scored
+   * zero, and the FIRST Button in document order won: Inspect on a row
+   * item jumped to the page's button instead of the row template's.
+   */
+  const source =
+    "DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).\n" +
+    "view->ele( n = `View` ns = `mvc`\n" +
+    "    )->a( n = `xmlns` v = `sap.m`\n" +
+    "    )->a( n = `xmlns:mvc` v = `sap.ui.core.mvc`\n" +
+    "    )->ele( n = `Page`\n" +
+    "    )->ele( n = `content`\n" +
+    "    )->tag( n = `Button` )->a( n = `text` v = `In the page` )\n" +
+    "    )->ele( n = `List` )->a( n = `items` v = `{/ROWS}`\n" +
+    "    )->ele( n = `items`\n" +
+    "    )->ele( n = `CustomListItem`\n" +
+    "    )->ele( n = `content`\n" +
+    "    )->tag( n = `Button` )->a( n = `text` v = `In the row` )\n" +
+    "    )->end(\n" +
+    "    )->end(\n" +
+    "    )->end(\n" +
+    "    )->end(\n" +
+    "    )->end( ).\n";
+  const node = matchOutline(viewOutline(source), abapNsMap(source), [
+    { type: "sap.m.Button", id: "__button42" },
+    { type: "sap.m.CustomListItem", id: "__item7" },
+    { type: "sap.m.List", id: "__list0" },
+    { type: "sap.m.Page", id: "__page0" },
+    { type: "sap.ui.core.mvc.XMLView", id: "__xmlview0" },
+  ]);
+  assert.ok(node);
+  assert.ok(
+    node.selStart > source.indexOf("`In the row`") - 80,
+    "the row template's Button wins, not the first Button in the document"
+  );
+});
+
 test("nothing matching returns undefined, not a guess", () => {
   assert.equal(
     matchOutline(outline(), ns(), [{ type: "sap.f.ShellBar", id: "__bar0" }]),

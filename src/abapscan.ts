@@ -278,25 +278,46 @@ export function abapStatements(source: string): AbapStatement[] {
  * `string`, `LENGTH`, the type itself), and treating those as declared is what
  * made F2 on the `string` in `DATA mv_x TYPE string.` offer to rewrite every
  * TYPE clause in the class.
+ *
+ * A `BEGIN OF … END OF` block declares the STRUCTURE, not the words `BEGIN`
+ * and `END` - those two used to come back as names, and the roundtrip-cost
+ * annotation labelled them as attributes the class ships. The fields inside
+ * the block are declared too, but as components of the structure, and the
+ * `component` flag says so - an attribute list must not count them twice.
  */
 export function declaredNames(
   statement: string
-): Array<{ name: string; at: number }> {
+): Array<{ name: string; at: number; component?: boolean }> {
   const code = blankNonCode(statement);
   const keyword = /^\s*(CLASS-DATA|DATA|CONSTANTS|TYPES)\b\s*(:)?/i.exec(code);
   if (!keyword) {
     return [];
   }
-  const out: Array<{ name: string; at: number }> = [];
+  const out: Array<{ name: string; at: number; component?: boolean }> = [];
   const chained = keyword[2] === ":";
   let at = keyword[0].length;
+  let depth = 0; // BEGIN OF nesting
   for (const part of (chained ? code.slice(at).split(",") : [code.slice(at)])) {
-    const declared = /^\s*([A-Za-z_]\w*)/.exec(part);
-    if (declared) {
+    const begin = /^\s*BEGIN\s+OF\s+([A-Za-z_]\w*)/i.exec(part);
+    const end = /^\s*END\s+OF\b/i.exec(part);
+    if (begin) {
       out.push({
-        name: declared[1],
-        at: at + declared[0].length - declared[1].length,
+        name: begin[1],
+        at: at + begin[0].length - begin[1].length,
+        ...(depth > 0 ? { component: true } : {}),
       });
+      depth++;
+    } else if (end) {
+      depth = Math.max(0, depth - 1);
+    } else {
+      const declared = /^\s*([A-Za-z_]\w*)/.exec(part);
+      if (declared) {
+        out.push({
+          name: declared[1],
+          at: at + declared[0].length - declared[1].length,
+          ...(depth > 0 ? { component: true } : {}),
+        });
+      }
     }
     at += part.length + 1; // the comma the split ate
   }

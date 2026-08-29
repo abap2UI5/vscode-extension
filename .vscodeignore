@@ -6,6 +6,9 @@ scripts/**
 AGENTS.md
 CLAUDE.md
 RELEASING.md
+CONTRIBUTING.md
+SECURITY.md
+package-lock.json
 node_modules/**
 esbuild.js
 eslint.config.mjs

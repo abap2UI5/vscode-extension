@@ -125,6 +125,110 @@ test("a name that is not a name, or one already taken, is refused", () => {
   assert.ok("error" in taken && /already declares/.test(taken.error));
 });
 
+test("a 30-character name - ABAP's limit - is a legal name", () => {
+  const name = "render_the_whole_button_area_x"; // 30 characters
+  assert.equal(name.length, 30);
+  const plan = planExtract(SOURCE, SOURCE.indexOf(")->tag("), name);
+  assert.ok(!("error" in plan), `refused: ${"error" in plan ? plan.error : ""}`);
+});
+
+test("a chained METHODS: declaration takes the name too", () => {
+  // regression: `METHODS: view_display, render_button.` declares just as
+  // well as the plain form, but the guard missed it - the plan then wrote a
+  // second declaration and the class stopped compiling
+  const taken = planExtract(
+    SOURCE.replace(
+      "  PROTECTED SECTION.",
+      "  PROTECTED SECTION.\n    METHODS: view_display, render_button."
+    ),
+    SOURCE.indexOf(")->tag("),
+    "render_button"
+  );
+  assert.ok("error" in taken && /already declares/.test(taken.error));
+});
+
+test("a method name in a comment declares nothing", () => {
+  const plan = planExtract(
+    SOURCE.replace(
+      "  PROTECTED SECTION.",
+      "  PROTECTED SECTION.\n    \" TODO write METHODS render_button here"
+    ),
+    SOURCE.indexOf(")->tag("),
+    "render_button"
+  );
+  assert.ok(!("error" in plan), `refused: ${"error" in plan ? plan.error : ""}`);
+});
+
+test("a section named in a comment is not an insertion point", () => {
+  // regression: `declarationPoint` searched the raw source, and a comment
+  // mentioning `PROTECTED SECTION.` had the METHODS block inserted into its
+  // middle - splitting the comment and leaving its tail behind as code
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    " later: move helpers to the PROTECTED SECTION. of this class
+ENDCLASS.
+
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`Page\`
+        )->tag( n = \`Button\` )->a( n = \`text\` v = \`Go\` ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const out = apply(source, planAt(source, ")->tag("));
+  // the comment line survives in one piece
+  assert.ok(out.includes('" later: move helpers to the PROTECTED SECTION. of this class'));
+  // and the declaration sits inside the definition, before its ENDCLASS
+  const decl = out.indexOf("METHODS render_button");
+  assert.ok(decl >= 0 && decl < out.indexOf("CLASS zcl_app IMPLEMENTATION"));
+});
+
+test("both halves land in the class the chain lives in", () => {
+  // regression: the declaration went into the FIRST class with a section
+  // (the base class) while the implementation went before the LAST
+  // ENDCLASS - the halves ended up in different classes and neither compiled
+  const source = `CLASS zcl_base DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+  PROTECTED SECTION.
+    DATA client TYPE REF TO z2ui5_if_client.
+ENDCLASS.
+CLASS zcl_base IMPLEMENTATION.
+ENDCLASS.
+
+CLASS zcl_app DEFINITION PUBLIC INHERITING FROM zcl_base.
+  PUBLIC SECTION.
+ENDCLASS.
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`Page\`
+        )->tag( n = \`Button\` )->a( n = \`text\` v = \`Go\` ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const out = apply(source, planAt(source, ")->tag("));
+  const decl = out.indexOf("METHODS render_button");
+  const impl = out.indexOf("METHOD render_button.");
+  assert.ok(decl > out.indexOf("CLASS zcl_app DEFINITION"), "declared in zcl_app");
+  assert.ok(decl < out.indexOf("CLASS zcl_app IMPLEMENTATION"), "declared in the definition");
+  assert.ok(impl > out.indexOf("CLASS zcl_app IMPLEMENTATION"), "implemented in zcl_app");
+  // the base class is untouched
+  assert.ok(!out.slice(0, out.indexOf("CLASS zcl_app")).includes("render_button"));
+});
+
+test("every edit says what it does, for a refactor preview", () => {
+  const plan = planAt(SOURCE, ")->tag( n = `Button`");
+  assert.ok(plan.edits.length >= 3);
+  for (const edit of plan.edits) {
+    assert.ok(edit.label.trim(), "each edit carries a label");
+  }
+  assert.ok(plan.edits.some((e) => /Declare render_button/.test(e.label)));
+  assert.ok(plan.edits.some((e) => /Implement render_button/.test(e.label)));
+});
+
 test("the first call of a chain has no head to leave behind", () => {
   // `view->ele( )` - there is nothing before it to keep
   const plan = planExtract(SOURCE, SOURCE.indexOf("view->ele( n = `View`") + 4, "render_all");

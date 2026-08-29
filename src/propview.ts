@@ -30,9 +30,20 @@ interface Shown {
   tokenStart: number;
 }
 
+/** How far around the cursor a builder call has to appear for a full scan to
+ *  be worth it. A chain writes one call per line, so a cursor inside a
+ *  control block always has one nearby - a cursor in ordinary ABAP does not,
+ *  and used to pay a whole-file `controlCallAt` every 200ms anyway. */
+const CALL_WINDOW = 10000;
+
+const NEARBY_CALL = /->\s*(?:ele|tag|a)\s*\(/i;
+
 export class PropertyEditorProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private shown?: Shown;
+  /** The last scan, keyed by uri, version and cursor offset - visibility
+   *  toggles and debounced duplicate events re-render without re-scanning. */
+  private lastScan?: { key: string; call: ControlCall | undefined };
 
   constructor(private readonly log: (m: string) => void) {}
 
@@ -79,7 +90,18 @@ export class PropertyEditorProvider implements vscode.WebviewViewProvider {
       return;
     }
     const offset = editor.document.offsetAt(editor.selection.active);
-    const call = controlCallAt(text, offset);
+    const key = `${editor.document.uri.toString()}@${editor.document.version}:${offset}`;
+    let call: ControlCall | undefined;
+    if (this.lastScan?.key === key) {
+      call = this.lastScan.call;
+    } else {
+      const nearby = text.slice(
+        Math.max(0, offset - CALL_WINDOW),
+        offset + CALL_WINDOW
+      );
+      call = NEARBY_CALL.test(nearby) ? controlCallAt(text, offset) : undefined;
+      this.lastScan = { key, call };
+    }
     if (!call) {
       this.shown = undefined;
       void view.webview.postMessage({

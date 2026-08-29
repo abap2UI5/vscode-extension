@@ -33,6 +33,45 @@ import type { CheckOptions } from "./lintconfig";
 
 export const VIEW_XML_RE = /\.(view|fragment)\.xml$/i;
 
+/** The frozen builders the linter reports `frozen-view-builder` for. Like
+ *  `checkIcons` before it, `frozenBuilderOf` has no subpath in the linter's
+ *  `exports` map, so the two names are mirrored here - `gate.parity.test.ts`
+ *  pins this list to `checkAbapSource`'s answer. */
+const FROZEN_BUILDERS = ["z2ui5_cl_xml_view", "z2ui5_cl_xml_view_cc"];
+
+/** The frozen builder a source builds its view with, or undefined. */
+export function frozenBuilderOf(text: string): string | undefined {
+  return FROZEN_BUILDERS.find((c) =>
+    new RegExp(`\\b${c}\\s*=>\\s*factory`, "i").test(text)
+  );
+}
+
+/**
+ * The file as the repo's CI names it: relative to the governing config's
+ * directory. `rules.*.exclude` patterns are written against that spelling
+ * (`^src/02/`), and the linter derives its relative form from `process.cwd()`
+ * - the repo root for a CLI run, the extension host's arbitrary directory
+ * here. So the config-relative spelling is derived too and `applyRules` runs
+ * over both, or an exclude CI honours kept squiggling in the editor.
+ */
+function configRelative(
+  file: string,
+  configFile: string | undefined
+): string | undefined {
+  if (!configFile) {
+    return undefined;
+  }
+  const norm = (p: string): string => p.replace(/\\/g, "/");
+  const config = norm(configFile);
+  const cut = config.lastIndexOf("/");
+  if (cut < 0) {
+    return undefined;
+  }
+  const dir = config.slice(0, cut);
+  const f = norm(file);
+  return f.startsWith(`${dir}/`) ? f.slice(dir.length + 1) : undefined;
+}
+
 export interface GateResult {
   findings: PropertyFinding[];
   /** True when the source is one the render gate could load as a whole. */
@@ -58,9 +97,21 @@ export function runGate(
 ): GateResult {
   const { minUi5, distribution, allow } = options;
   const data = snapshot();
-  let findings: PropertyFinding[] = [];
+  const findings: PropertyFinding[] = [];
   let renderable = true;
   let helperNote = "";
+
+  // the linter's `settle`, plus the config-relative spelling of the file for
+  // `rules.*.exclude` - see `configRelative`
+  const settled = (raw: PropertyFinding[]): PropertyFinding[] => {
+    annotate(raw, text);
+    let out = applyRules(raw, options.rules, fileName);
+    const rel = configRelative(fileName, options.configFile);
+    if (rel !== undefined && rel !== fileName) {
+      out = applyRules(out, options.rules, rel);
+    }
+    return applyDirectives(out, text);
+  };
 
   if (isXml) {
     findings.push(
@@ -75,6 +126,21 @@ export function runGate(
   } else {
     const prep = prepareAbap(text);
     if (!prep.usesBuilder) {
+      /* A class on a FROZEN builder gets the one finding `checkAbapSource`
+       * gives it and nothing else - the other rules are written for the
+       * current dialect. Answering "nothing to check" here while CI reported
+       * `frozen-view-builder` was an editor/CI divergence. */
+      const frozen = frozenBuilderOf(text);
+      if (frozen) {
+        const at = text.search(new RegExp(`\\b${frozen}\\s*=>\\s*factory`, "i"));
+        return {
+          findings: settled([
+            { type: "frozen-view-builder", value: frozen, offset: at < 0 ? 0 : at },
+          ]),
+          renderable: false,
+          helperNote: "",
+        };
+      }
       return {
         findings: [],
         renderable: false,
@@ -188,10 +254,7 @@ export function runGate(
   }
 
   // severity, wording and the line/column behind each recorded offset - the
-  // directives are keyed by line, so this has to happen before they are
-  // applied
-  annotate(findings, text);
-  findings = applyRules(findings, options.rules, fileName);
-  findings = applyDirectives(findings, text);
-  return { findings, renderable, helperNote };
+  // directives are keyed by line, so annotation has to happen before they
+  // are applied; both live in `settled`
+  return { findings: settled(findings), renderable, helperNote };
 }

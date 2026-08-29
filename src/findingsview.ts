@@ -1,7 +1,12 @@
 import * as vscode from "vscode";
+import * as path from "path";
+import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { DIAG_SOURCE, RULES_PAGE, ruleOf } from "./diagnostics";
 
 import { labelOf } from "./abapsources";
+import { addToBaseline } from "./baselinefile";
+import { clearBaselineCache } from "./lintconfig";
+import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
 import {
   FindingSeverity,
   groupByRule,
@@ -52,8 +57,12 @@ const ICON: Record<FindingSeverity, vscode.ThemeIcon> = {
 class FindingsTree implements vscode.TreeDataProvider<Node> {
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changed.event;
+  private groups: RuleGroup[] = [];
 
-  refresh(): void {
+  /** One walk feeds both the tree and the badge - `collect` runs once per
+   *  refresh, not once per consumer. */
+  setEntries(entries: readonly RuleEntry[]): void {
+    this.groups = groupByRule(entries);
     this.changed.fire();
   }
 
@@ -63,7 +72,7 @@ class FindingsTree implements vscode.TreeDataProvider<Node> {
 
   getChildren(node?: Node): Node[] {
     if (!node) {
-      return groupByRule(collect());
+      return this.groups;
     }
     return isGroup(node) ? node.entries : [];
   }
@@ -135,11 +144,12 @@ export function registerFindingsView(context: vscode.ExtensionContext): void {
     showCollapseAll: true,
   });
   let lastTotal = 0;
-  const updateBadge = () => {
-    const total = collect().length;
-    lastTotal = total;
-    view.badge = total
-      ? { value: total, tooltip: `${total} abap2UI5 finding(s)` }
+  const apply = () => {
+    const entries = collect();
+    provider.setEntries(entries);
+    lastTotal = entries.length;
+    view.badge = entries.length
+      ? { value: entries.length, tooltip: `${entries.length} abap2UI5 finding(s)` }
       : undefined;
   };
   /*
@@ -167,8 +177,7 @@ export function registerFindingsView(context: vscode.ExtensionContext): void {
     }
     pending = setTimeout(() => {
       pending = undefined;
-      provider.refresh();
-      updateBadge();
+      apply();
     }, 150);
   };
 
@@ -183,7 +192,102 @@ export function registerFindingsView(context: vscode.ExtensionContext): void {
           vscode.Uri.parse(`${RULES_PAGE}#${node.rule}`)
         );
       }
-    })
+    }),
+    /*
+     * "Add All Findings of This Rule to the Baseline" - the context-menu
+     * action on a rule group. The grouped tree is where a dozen findings of
+     * one rule become ONE decision, and baselining them one squiggle at a
+     * time (the quick fix) is the wrong size for it. Same machinery as the
+     * quick fix: `baselineFileFor` decides whether the repo config names a
+     * baseline for the file, `addToBaseline` writes the entry, and the
+     * finding matched per line so a buffer that moved since the diagnostics
+     * were published is skipped rather than baselined wrongly.
+     */
+    vscode.commands.registerCommand(
+      "abap2ui5.baselineRule",
+      async (node: Node) => {
+        if (!node || !isGroup(node)) {
+          return;
+        }
+        const rule = node.rule;
+        let added = 0;
+        let noBaseline = 0;
+        let missed = 0;
+        const touchedBaselines = new Set<string>();
+        const files = [...new Set(node.entries.map((entry) => entry.file))];
+        for (const file of files) {
+          let doc: vscode.TextDocument;
+          try {
+            doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(file));
+          } catch {
+            missed++;
+            continue; // deleted or unreachable since the tree was filled
+          }
+          const baselineFile = baselineFileFor(doc);
+          if (!baselineFile) {
+            noBaseline++;
+            continue;
+          }
+          const lines = new Set(
+            node.entries
+              .filter((entry) => entry.file === file)
+              .map((entry) => entry.line)
+          );
+          let findings: PropertyFinding[];
+          try {
+            findings = findingsNow(doc);
+          } catch {
+            missed++;
+            continue; // an unparsable buffer mid-edit
+          }
+          for (const finding of findings) {
+            if (
+              finding.type !== rule ||
+              typeof finding.line !== "number" ||
+              !lines.has(finding.line - 1)
+            ) {
+              continue;
+            }
+            try {
+              addToBaseline(baselineFile, doc.uri.fsPath, finding);
+              added++;
+              touchedBaselines.add(baselineFile);
+            } catch (err) {
+              vscode.window.showWarningMessage(
+                `abap2UI5: could not update ${baselineFile} - ${String(err)}`
+              );
+              return;
+            }
+          }
+        }
+        for (const baselineFile of touchedBaselines) {
+          // the memo is keyed on mtime, and these writes may land in the
+          // same second as the read that filled it
+          clearBaselineCache(baselineFile);
+        }
+        if (added) {
+          recheckOpenDocuments();
+        }
+        const names = [...touchedBaselines]
+          .map((file) => path.basename(file))
+          .join(", ");
+        vscode.window.showInformationMessage(
+          added
+            ? `abap2UI5: added ${added} ${rule} finding(s) to ${names}.` +
+                (noBaseline
+                  ? ` ${noBaseline} file(s) skipped - no baseline is configured for them.`
+                  : "")
+            : noBaseline
+              ? "abap2UI5: nothing baselined - no abap2ui5lint.jsonc names a " +
+                "baseline file for these files."
+              : `abap2UI5: nothing to baseline - the ${rule} findings ` +
+                (missed
+                  ? "could not be re-read (files moved or buffers changed). "
+                  : "moved since the tree was filled. ") +
+                "Run the check again."
+        );
+      }
+    )
   );
-  updateBadge();
+  apply();
 }

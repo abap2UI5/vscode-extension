@@ -28,11 +28,13 @@ jobs:
 
       - run: npm ci
 
-      # Same four commands AGENTS.md asks for before pushing.
+      # Same gate AGENTS.md asks for before pushing.
       # lint = tsc --noEmit + eslint (config in eslint.config.mjs).
+      # `npm run vsix` covers `npm run package` too: vsce runs the
+      # vscode:prepublish script, which IS the production build - running it
+      # separately built the same bundles twice.
       - run: npm run lint
       - run: npm test
-      - run: npm run package
       - run: npm run vsix
 
       # The web bundle, activated in a real (headless) browser extension

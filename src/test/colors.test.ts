@@ -95,6 +95,25 @@ test("abapColorSpans finds colour-typed values, not colour-looking text", () => 
   // `text = red` and the hex in a non-colour member never become swatches
 });
 
+test("a commented-out control does not become the owner", () => {
+  // the dead line used to shift ownership: the attribute was judged against
+  // sap.m.Button, and the swatch on Avatar's real colour property vanished
+  const source = [
+    "view->ele( n = `View` )->a( n = `xmlns` v = `sap.m`",
+    "    )->tag( n = `Avatar`",
+    "    \" )->tag( n = `Button` )",
+    "    )->a( n = `backgroundColor` v = `#123456` ).",
+  ].join("\n");
+  const asked: string[] = [];
+  const spans = abapColorSpans(source, (control) => {
+    asked.push(control);
+    return control === "sap.m.Avatar";
+  });
+  assert.ok(!asked.includes("sap.m.Button"), `asked for: ${asked.join(", ")}`);
+  assert.equal(spans.length, 1);
+  assert.equal(source.slice(spans[0].start, spans[0].end), "#123456");
+});
+
 const XML = `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">
   <ObjectStatus text="ok" iconColor="rgb(24, 115, 180)"/>
   <Text text="#abcdef"/>

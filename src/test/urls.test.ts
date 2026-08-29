@@ -21,6 +21,15 @@ test("the protocol survives slash collapsing", () => {
   );
 });
 
+test("the query survives slash collapsing", () => {
+  // a parameter value is allowed to carry a URL of its own
+  assert.equal(
+    normalizeUrl("https://host//sap/bc/z2ui5?redirect=https://x//y&p=a//b"),
+    "https://host/sap/bc/z2ui5?redirect=https://x//y&p=a//b"
+  );
+  assert.equal(normalizeUrl("https://host//p#a//b"), "https://host/p#a//b");
+});
+
 test("the class placeholder is replaced upper-cased and encoded", () => {
   assert.equal(
     expandTemplate(TEMPLATE, "zcl_my_app"),

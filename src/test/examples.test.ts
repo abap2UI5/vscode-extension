@@ -121,3 +121,30 @@ test("a positional literal of another control is not a hit", () => {
     []
   );
 });
+
+test("a commented-out chain is not an example", () => {
+  // A sample keeping an old variant behind `*` or `"` is common; offering the
+  // dead copy as a working example - and ranking it by its dead attributes -
+  // is the mistake the blanked source exists to prevent.
+  const source = [
+    "* view->tag( `Button` )->a( n = `text` v = `old` ).",
+    '    " view->tag( `Button` )->a( n = `x` v = `y` ).',
+    "    view->tag( `Button` )->a( n = `text` v = `Go` ).",
+  ].join("\n");
+  const hits = findControlUses(source, "Button", { file: "z", catalogue: "s" });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 3);
+  assert.equal(hits[0].attributes, 1);
+});
+
+test("a trailing comment does not end the attribute count", () => {
+  const source = [
+    "    view->tag( `Button`",
+    '        " )->ele( `Dead` )',
+    "        )->a( n = `text` v = `Go`",
+    "        )->a( n = `press` v = `X` ).",
+  ].join("\n");
+  const [hit] = findControlUses(source, "Button", { file: "z", catalogue: "s" });
+  assert.ok(hit);
+  assert.equal(hit.attributes, 2);
+});

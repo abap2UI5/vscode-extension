@@ -16,6 +16,9 @@ import { xmlToAbap, XmlElement } from "./xmltoabap";
  *   #id        the id attribute Button#GO
  *   [a=b c=d]  attributes       Button[text=Go type=Emphasized]
  *   {text}     the text one     Button{Go}
+ *   (…)*n      group            Page>(Label+Input)*3
+ *   $          repeat counter   Button#btn$*3 - $$ pads to two digits, and
+ *                               `${…}` stays an expression binding
  *
  * The chain itself is emitted by `xmltoabap.ts`, which already writes the
  * house layout - one call per line, four spaces per level, the closing call
@@ -50,16 +53,17 @@ function parseAttributes(block: string): Array<[string, string]> {
   return out;
 }
 
-/** `Button#GO[text=Go type=Emphasized]{Press me}*2` -> its parts. */
+/** `Button#GO[text=Go type=Emphasized]{Press me}*2` -> its parts. `$` is
+ *  legal in a name or id - it is the repeat counter. */
 function parseToken(text: string): Token | undefined {
-  const match = /^([\w:.-]+)/.exec(text);
+  const match = /^([\w:.$-]+)/.exec(text);
   if (!match) {
     return undefined;
   }
   const token: Token = { name: match[1], attrs: [], repeat: 1 };
   let rest = text.slice(match[1].length);
   for (;;) {
-    const id = /^#([\w-]+)/.exec(rest);
+    const id = /^#([\w$-]+)/.exec(rest);
     if (id) {
       token.attrs.push(["id", id[1]]);
       rest = rest.slice(id[0].length);
@@ -88,8 +92,9 @@ function parseToken(text: string): Token | undefined {
   return rest ? undefined : token;
 }
 
-/** The abbreviation as (separator, token) pairs. `>` and `+` inside `[]` or
- *  `{}` belong to a value - `Button[text=a+b]` is one token. */
+/** The abbreviation as (separator, token) pairs. `>` and `+` inside `[]`,
+ *  `{}` or a `(…)` group belong to a value or to the group -
+ *  `Button[text=a+b]` and `(Label+Input)*2` are one token each. */
 function tokenize(text: string): Array<{ op: ">" | "+" | ""; text: string }> {
   const out: Array<{ op: ">" | "+" | ""; text: string }> = [];
   let depth = 0;
@@ -97,9 +102,9 @@ function tokenize(text: string): Array<{ op: ">" | "+" | ""; text: string }> {
   let op: ">" | "+" | "" = "";
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
-    if (ch === "[" || ch === "{") {
+    if (ch === "[" || ch === "{" || ch === "(") {
       depth++;
-    } else if (ch === "]" || ch === "}") {
+    } else if (ch === "]" || ch === "}" || ch === ")") {
       depth--;
     } else if ((ch === ">" || ch === "+") && depth === 0) {
       out.push({ op, text: text.slice(start, i) });
@@ -111,9 +116,40 @@ function tokenize(text: string): Array<{ op: ">" | "+" | ""; text: string }> {
   return out;
 }
 
-function element(token: Token): XmlElement {
-  return { name: token.name, attrs: [...token.attrs], children: [] };
+/** `$` runs replaced by the 1-based repeat counter, `$$` zero-padded - and
+ *  `${…}` left alone, that is an expression binding, not a counter. */
+function numbered(text: string, n: number | undefined): string {
+  if (n === undefined) {
+    return text;
+  }
+  return text.replace(/\$+(?!\{)/g, (run) =>
+    String(n).padStart(run.length, "0")
+  );
 }
+
+function element(token: Token, n?: number): XmlElement {
+  return {
+    name: numbered(token.name, n),
+    attrs: token.attrs.map(
+      ([name, value]) => [name, numbered(value, n)] as [string, string]
+    ),
+    children: [],
+  };
+}
+
+/** A deep copy with the group's repeat counter applied throughout. */
+function cloneNumbered(el: XmlElement, n: number | undefined): XmlElement {
+  return {
+    name: numbered(el.name, n),
+    attrs: el.attrs.map(
+      ([name, value]) => [name, numbered(value, n)] as [string, string]
+    ),
+    children: el.children.map((child) => cloneNumbered(child, n)),
+  };
+}
+
+/** A `(…)` group with an optional repeat suffix. */
+const GROUP_RE = /^\((.*)\)(?:\*(\d+))?$/s;
 
 /**
  * The element tree an abbreviation describes.
@@ -129,13 +165,18 @@ export function parseAbbreviation(text: string): Abbreviation {
   if (!trimmed) {
     return { roots: [], error: "nothing to expand" };
   }
+  return parseSequence(trimmed);
+}
+
+function parseSequence(text: string): Abbreviation {
   const roots: XmlElement[] = [];
   /** Where the next elements attach - null while at the top level. */
   let attach: XmlElement[] | null = null;
   /** What the previous token created, which is what a `>` descends into. */
   let last: XmlElement[] = [];
-  for (const [index, { op, text: piece }] of tokenize(trimmed).entries()) {
-    if (!piece.trim()) {
+  for (const [index, { op, text: piece }] of tokenize(text).entries()) {
+    const part = piece.trim();
+    if (!part) {
       // `>Button`, `Page>`, `Page>>` - a separator with nothing on one side
       return {
         roots: [],
@@ -145,10 +186,6 @@ export function parseAbbreviation(text: string): Abbreviation {
             : "a separator needs an element on both sides",
       };
     }
-    const token = parseToken(piece.trim());
-    if (!token) {
-      return { roots: [], error: `not an abbreviation: "${piece.trim()}"` };
-    }
     if (op === ">") {
       if (!last.length) {
         return { roots: [], error: "a `>` needs an element in front of it" };
@@ -156,27 +193,52 @@ export function parseAbbreviation(text: string): Abbreviation {
       attach = last;
     }
     const created: XmlElement[] = [];
-    if (attach === null) {
-      for (let i = 0; i < token.repeat; i++) {
-        const made = element(token);
-        roots.push(made);
-        created.push(made);
-      }
-    } else {
+    const grow = (make: (n: number | undefined) => XmlElement[], repeat: number) => {
       /* A repeated parent gets its own copy of what follows, the way Emmet
        * does it: `Column*2>Text` is two columns each holding a text, not two
-       * columns sharing one. */
-      for (const parent of attach) {
-        for (let i = 0; i < token.repeat; i++) {
-          const made = element(token);
-          parent.children.push(made);
-          created.push(made);
+       * columns sharing one. The counter only counts when there IS a repeat,
+       * so a lone `$` in a binding stays what was written. */
+      for (const parent of attach ?? [null]) {
+        for (let i = 0; i < repeat; i++) {
+          for (const made of make(repeat > 1 ? i + 1 : undefined)) {
+            (parent === null ? roots : parent.children).push(made);
+            created.push(made);
+          }
         }
       }
+    };
+
+    const group = GROUP_RE.exec(part);
+    if (group) {
+      const inner = parseSequence(group[1].trim());
+      if (inner.error) {
+        return inner;
+      }
+      if (!inner.roots.length) {
+        return { roots: [], error: "an empty group expands to nothing" };
+      }
+      const repeat = Math.min(group[2] ? Number(group[2]) : 1, 50);
+      grow((n) => inner.roots.map((root) => cloneNumbered(root, n)), repeat);
+    } else {
+      const token = parseToken(part);
+      if (!token) {
+        return { roots: [], error: `not an abbreviation: "${part}"` };
+      }
+      grow((n) => [element(token, n)], token.repeat);
     }
     last = created;
   }
   return { roots };
+}
+
+/** An attribute value on its way into XML. `&` FIRST - without it the
+ *  emitter's entity decoding read `Button{5 &gt; 3}` as `5 > 3`, silently
+ *  altering what the user typed. */
+function escapeXmlValue(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/"/g, "&quot;");
 }
 
 /** The XML an element tree stands for - the emitter's input. */
@@ -184,7 +246,7 @@ function toXml(nodes: readonly XmlElement[]): string {
   return nodes
     .map((node) => {
       const attrs = node.attrs
-        .map(([name, value]) => ` ${name}="${value.replace(/"/g, "&quot;")}"`)
+        .map(([name, value]) => ` ${name}="${escapeXmlValue(value)}"`)
         .join("");
       return node.children.length
         ? `<${node.name}${attrs}>${toXml(node.children)}</${node.name}>`

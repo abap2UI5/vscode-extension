@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
-import { abapSources } from "./abapsources";
+import { AbapSource, abapSources } from "./abapsources";
 import { blankNonCode } from "./abapscan";
 import {
   abapBindingContextAt,
@@ -19,12 +19,15 @@ import {
   clientCallAt,
   clientMethod,
   clientMethods,
+  clientSignatureContext,
   isClientCompletion,
   signatureHead,
+  signatureParameters,
 } from "./clientapi";
 import { chainFormatEdits } from "./chainformat";
 import { membersOf } from "./metadata";
 import {
+  CompletionEntry,
   CompletionKind,
   completionAt,
   hoverAt,
@@ -77,33 +80,51 @@ function markdown(text: string): vscode.MarkdownString {
 // Binding paths - offered from the model shape the linter derives
 // ---------------------------------------------------------------------------
 
+type Prep = ReturnType<typeof prepareAbap>;
+
 /**
- * The derived model shape of a class, memoised on the document version -
- * deriving it walks the whole source, and completion asks on keystrokes.
+ * The linter's reconstruction of a class, memoised on the document version -
+ * deriving it walks the whole source, and completion asks on keystrokes. The
+ * inline annotations read the same reconstruction (`nodes`, `model`), so one
+ * parse per version serves both instead of each paying its own.
  *
  * Per document, not one global slot: with an app and its detail class open
  * side by side, alternating requests evicted each other and every switch paid
  * the full derivation again. Entries of closed documents are dropped so the
  * map cannot outgrow what is open.
  */
-const shapeMemo = new Map<string, { version: number; shape: unknown }>();
+const prepMemo = new Map<string, { version: number; prep: Prep | undefined }>();
+
+export function preparedAbapOf(doc: vscode.TextDocument): Prep | undefined {
+  const key = doc.uri.toString();
+  const cached = prepMemo.get(key);
+  if (cached && cached.version === doc.version) {
+    return cached.prep;
+  }
+  let prep: Prep | undefined;
+  try {
+    prep = prepareAbap(doc.getText());
+  } catch {
+    prep = undefined; // an unparsable buffer mid-edit answers with nothing
+  }
+  prepMemo.set(key, { version: doc.version, prep });
+  return prep;
+}
 
 function modelShapeOf(doc: vscode.TextDocument): unknown {
-  const key = doc.uri.toString();
-  const cached = shapeMemo.get(key);
-  if (cached && cached.version === doc.version) {
-    return cached.shape;
-  }
-  const prep = prepareAbap(doc.getText());
-  const shape = prep.usesBuilder ? prep.modelShape : undefined;
-  shapeMemo.set(key, { version: doc.version, shape });
-  return shape;
+  const prep = preparedAbapOf(doc);
+  return prep?.usesBuilder ? prep.modelShape : undefined;
 }
 
-/** Called when a document closes - see `shapeMemo`. */
+/** Called when a document closes - see `prepMemo`. */
 function forgetModelShape(uri: vscode.Uri): void {
-  shapeMemo.delete(uri.toString());
+  prepMemo.delete(uri.toString());
 }
+
+/** The core entry behind each offered item, for `resolveCompletionItem` -
+ *  the documentation is a lazy getter there, and reading it for every entry
+ *  of a several-hundred-item list on the keystroke is what this avoids. */
+const completionEntries = new WeakMap<vscode.CompletionItem, CompletionEntry>();
 
 class ViewCompletion implements vscode.CompletionItemProvider {
   provideCompletionItems(
@@ -132,9 +153,7 @@ class ViewCompletion implements vscode.CompletionItemProvider {
       if (entry.detail !== undefined) {
         item.detail = entry.detail;
       }
-      if (entry.documentation !== undefined) {
-        item.documentation = markdown(entry.documentation);
-      }
+      completionEntries.set(item, entry);
       item.range = range;
       if (entry.sortText !== undefined) {
         item.sortText = entry.sortText;
@@ -144,6 +163,14 @@ class ViewCompletion implements vscode.CompletionItemProvider {
       }
       return item;
     });
+  }
+
+  resolveCompletionItem(item: vscode.CompletionItem): vscode.CompletionItem {
+    const documentation = completionEntries.get(item)?.documentation;
+    if (documentation) {
+      item.documentation = markdown(documentation);
+    }
+    return item;
   }
 }
 
@@ -297,15 +324,31 @@ class EventDefinition implements vscode.DefinitionProvider {
 // The client API: hover and completion for client-> calls
 // ---------------------------------------------------------------------------
 
+/** The line as the LEXER sees it: comments and literal content blanked, so a
+ *  `client->` quoted in either stays quiet. The raw line is tested first -
+ *  blanking the whole document for a line that plainly has no client call
+ *  would be work for nothing. */
+function blankedLineOf(
+  doc: vscode.TextDocument,
+  position: vscode.Position
+): string {
+  const line = doc.lineAt(position.line);
+  const start = doc.offsetAt(line.range.start);
+  return blankNonCode(doc.getText()).slice(start, start + line.text.length);
+}
+
 class ClientApiHover implements vscode.HoverProvider {
   provideHover(
     doc: vscode.TextDocument,
     position: vscode.Position
   ): vscode.Hover | undefined {
     const line = doc.lineAt(position.line).text;
-    const name = clientCallAt(line, position.character);
-    if (!name) {
+    if (!clientCallAt(line, position.character)) {
       return undefined;
+    }
+    const name = clientCallAt(blankedLineOf(doc, position), position.character);
+    if (!name) {
+      return undefined; // a comment or a literal quoting the call
     }
     const method = clientMethod(name);
     if (!method) {
@@ -338,6 +381,13 @@ class ClientApiCompletion implements vscode.CompletionItemProvider {
     if (!isClientCompletion(upToCursor)) {
       return [];
     }
+    if (
+      !isClientCompletion(
+        blankedLineOf(doc, position).slice(0, position.character)
+      )
+    ) {
+      return []; // the arrow stands in a comment or a literal
+    }
     // replace the partial member already typed, so accepting an item never
     // doubles what stands there
     const typed = /(\w*)$/.exec(upToCursor)![1];
@@ -365,6 +415,53 @@ class ClientApiCompletion implements vscode.CompletionItemProvider {
       item.sortText = `${method.obsolete ? "1" : "0"}${method.name}`;
       return item;
     });
+  }
+}
+
+/**
+ * Signature help inside a `client->…( )` call: the parameters from the
+ * bundled interface, the one being written highlighted. The context comes
+ * from the blanked line, so an `=` inside a literal argument does not pass
+ * for a parameter assignment and a call quoted in a comment offers nothing.
+ */
+class ClientApiSignatureHelp implements vscode.SignatureHelpProvider {
+  provideSignatureHelp(
+    doc: vscode.TextDocument,
+    position: vscode.Position
+  ): vscode.SignatureHelp | undefined {
+    const prefix = blankedLineOf(doc, position).slice(0, position.character);
+    const context = clientSignatureContext(prefix);
+    if (!context) {
+      return undefined;
+    }
+    const { method, parameter } = context;
+    const params = signatureParameters(method);
+    const labels = params.map((name) => `${name} = …`);
+    const signature = new vscode.SignatureInformation(
+      `${method.name}( ${labels.join("  ")} )`
+    );
+    const lines = method.signature.split("\n");
+    signature.parameters = params.map((name, ix) => {
+      const info = new vscode.ParameterInformation(labels[ix]);
+      const declared = lines.find((line) =>
+        new RegExp(`^\\s+${name}\\s+TYPE\\b`).test(line)
+      );
+      if (declared) {
+        info.documentation = declared.trim();
+      }
+      return info;
+    });
+    if (method.doc) {
+      signature.documentation = markdown(method.doc);
+    }
+    const help = new vscode.SignatureHelp();
+    help.signatures = [signature];
+    help.activeSignature = 0;
+    const active = parameter
+      ? params.findIndex((name) => name.toLowerCase() === parameter)
+      : -1;
+    help.activeParameter = active >= 0 ? active : 0;
+    return help;
   }
 }
 
@@ -436,6 +533,63 @@ class MethodDefinition implements vscode.DefinitionProvider {
  *  this a workspace is better served by a real ABAP language server. */
 const SYMBOL_FILE_CAP = 500;
 
+/*
+ * The symbol picker re-queries on every keystroke, and `abapSources` reads
+ * every file from disk each time - so one typed word cost hundreds of reads
+ * per letter. A few seconds of staleness is invisible in a picker; the
+ * per-file method lists are memoised on the text, which the source cache
+ * hands back unchanged between refreshes.
+ */
+const SYMBOL_CACHE_MS = 5000;
+const SYMBOL_CACHE_DROP_MS = 30000;
+let symbolSources: { at: number; sources: AbapSource[] } | undefined;
+let symbolCacheDrop: NodeJS.Timeout | undefined;
+const methodMemo = new Map<
+  string,
+  { text: string; methods: ReturnType<typeof methodImplementations> }
+>();
+
+/** The picker is a burst: cache hard while it types, let go of the texts
+ *  soon after it closes. */
+function scheduleSymbolCacheDrop(): void {
+  if (symbolCacheDrop) {
+    clearTimeout(symbolCacheDrop);
+  }
+  symbolCacheDrop = setTimeout(() => {
+    symbolCacheDrop = undefined;
+    symbolSources = undefined;
+    methodMemo.clear();
+  }, SYMBOL_CACHE_DROP_MS);
+}
+
+async function symbolSourcesCached(): Promise<AbapSource[]> {
+  scheduleSymbolCacheDrop();
+  const now = Date.now();
+  if (symbolSources && now - symbolSources.at < SYMBOL_CACHE_MS) {
+    return symbolSources.sources;
+  }
+  const sources = await abapSources(SYMBOL_FILE_CAP);
+  symbolSources = { at: now, sources };
+  const known = new Set(sources.map((source) => source.uri.toString()));
+  for (const key of [...methodMemo.keys()]) {
+    if (!known.has(key)) {
+      methodMemo.delete(key);
+    }
+  }
+  return sources;
+}
+
+function methodsOf(uri: vscode.Uri, text: string) {
+  const key = uri.toString();
+  const cached = methodMemo.get(key);
+  if (cached && cached.text === text) {
+    return cached.methods;
+  }
+  const methods = methodImplementations(text);
+  methodMemo.set(key, { text, methods });
+  return methods;
+}
+
 class MethodWorkspaceSymbols implements vscode.WorkspaceSymbolProvider {
   async provideWorkspaceSymbols(
     query: string,
@@ -446,14 +600,14 @@ class MethodWorkspaceSymbols implements vscode.WorkspaceSymbolProvider {
     }
     // files and open documents, so the methods of a class opened through ADT
     // are reachable from Ctrl+T like any other
-    const sources = await abapSources(SYMBOL_FILE_CAP);
+    const sources = await symbolSourcesCached();
     const needle = query.toLowerCase();
     const symbols: vscode.SymbolInformation[] = [];
     for (const { uri, text } of sources) {
       if (token.isCancellationRequested) {
         break;
       }
-      for (const m of methodImplementations(text)) {
+      for (const m of methodsOf(uri, text)) {
         if (!m.name.toLowerCase().includes(needle)) {
           continue;
         }
@@ -626,6 +780,12 @@ export function registerLanguageFeatures(
   log: (m: string) => void
 ): void {
   context.subscriptions.push(
+    new vscode.Disposable(() => {
+      if (symbolCacheDrop) {
+        clearTimeout(symbolCacheDrop);
+        symbolCacheDrop = undefined;
+      }
+    }),
     vscode.languages.registerCompletionItemProvider(
       VIEW_SELECTOR,
       new ViewCompletion(),
@@ -670,6 +830,14 @@ export function registerLanguageFeatures(
       ">"
     ),
     vscode.languages.registerHoverProvider(ABAP_SELECTOR, new ClientApiHover()),
+    // the parameters of the call being written, from the same bundled
+    // interface the hover reads
+    vscode.languages.registerSignatureHelpProvider(
+      ABAP_SELECTOR,
+      new ClientApiSignatureHelp(),
+      "(",
+      ","
+    ),
     vscode.languages.registerDocumentFormattingEditProvider(
       ABAP_SELECTOR,
       new ChainFormatting()
@@ -717,7 +885,7 @@ async function extractViewMethod(
     prompt: "Name for the new method - it takes the builder and returns it",
     value: "render_section",
     validateInput: (value) =>
-      /^[a-z][a-z0-9_]{0,28}$/i.test(value)
+      /^[a-z][a-z0-9_]{0,29}$/i.test(value)
         ? undefined
         : "A method name starts with a letter and holds letters, digits and _.",
   });
@@ -735,16 +903,17 @@ async function extractViewMethod(
     return;
   }
   const edit = new vscode.WorkspaceEdit();
-  edit.set(
-    doc.uri,
-    plan.edits.map(
-      (e) =>
-        new vscode.TextEdit(
-          new vscode.Range(doc.positionAt(e.start), doc.positionAt(e.end)),
-          e.text
-        )
-    )
-  );
+  /* Marked with refactor metadata so VS Code can show what the extraction
+   * does per edit - the labels come from the plan itself, which knows which
+   * edit cuts the chain and which one adds the method. */
+  for (const e of plan.edits) {
+    edit.replace(
+      doc.uri,
+      new vscode.Range(doc.positionAt(e.start), doc.positionAt(e.end)),
+      e.text,
+      { needsConfirmation: true, label: e.label }
+    );
+  }
   await vscode.workspace.applyEdit(edit);
   log(`extract: ${name}( ${plan.handle} ) created`);
   vscode.window.showInformationMessage(

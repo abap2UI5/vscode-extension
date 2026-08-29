@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { classNameOf } from "./abap";
 import { isAppSource } from "./appclasses";
-import { originOf, proxiedUrl, sapClientOf, shortUrl } from "./urls";
+import { originOf, proxiedUrl, sapClientOf, shortUrl, withParams } from "./urls";
 import { suggestSystemUi5 } from "./ui5detect";
 import { clearCredentials, ensureCredentials, ensureSystem } from "./systems";
 import { PreviewSurface, Session } from "./session";
@@ -11,6 +11,7 @@ import {
   CheckStep,
   checkTemplate,
   classifyBody,
+  classifyClientProbe,
   classifyStatus,
   describeConnectFailure,
   firstFailure,
@@ -66,10 +67,9 @@ export async function runApp(
 
   const mode = session.openMode();
 
-  await session.rememberApp(className);
-
   if (mode === "external") {
     await vscode.env.openExternal(vscode.Uri.parse(externalUrl));
+    await session.rememberApp(className);
     return;
   }
 
@@ -98,8 +98,17 @@ export async function runApp(
   }
 
   // First contact with this system: ask it which UI5 it serves, and offer
-  // to align the view check with the answer. Fire-and-forget by design.
-  void suggestSystemUi5(session.ctx, session.proxy, origin, (m) => session.log(m));
+  // to align the view check with the answer. Fire-and-forget by design. The
+  // probe carries the launch URL's sap-client - credentials live per client,
+  // and a probe against the default client can be rejected while the launch
+  // itself is fine.
+  void suggestSystemUi5(
+    session.ctx,
+    session.proxy,
+    origin,
+    (m) => session.log(m),
+    sapClientOf(externalUrl)
+  );
 
   // Remember the cursor position; open the window in which focus stolen by
   // the loading app is handed back (the content loads asynchronously).
@@ -110,6 +119,14 @@ export async function runApp(
 
   // Remember for auto-reload on save and for the status bar.
   session.watch.stop();
+  // The other surface may still hold an app from before `openMode` was
+  // changed in the settings (the move commands reconcile, a settings edit
+  // does not) - left alone, BOTH surfaces would receive every reload.
+  if (mode === "panel") {
+    session.appPanel?.dispose();
+  } else {
+    provider.clear();
+  }
   session.currentTarget = { className, frameUrl, externalUrl, system: system.name };
   session.updateStatusItem();
 
@@ -120,6 +137,7 @@ export async function runApp(
     provider.refreshWelcome();
   }
   session.watch.captureBaseline();
+  await session.rememberApp(className);
 
   // Focus straight back to the same spot in the source.
   await session.restoreSourceFocus();
@@ -289,6 +307,38 @@ export async function checkConnection(session: Session): Promise<void> {
             if (statusStep.ok) {
               steps.push(classifyBody(answer.body));
             }
+            // When the launch URL names a sap-client, ask the same path
+            // WITHOUT it: credentials live per client, so the two answers
+            // disagreeing is a real state worth a step ("valid in 100,
+            // rejected in the default client" - or the other way round,
+            // which points at a wrong sap-client in the URL). A background
+            // fetch so this best-effort probe cannot trip the 401 breaker.
+            const sapClient = sapClientOf(externalUrl);
+            if (sapClient) {
+              const strippedPath = pathAndQueryOf(
+                withParams(externalUrl, { "sap-client": undefined })
+              );
+              if (strippedPath) {
+                try {
+                  const withoutClient = await session.proxy.fetchFromSystem(
+                    strippedPath,
+                    "text/html, */*",
+                    { background: true }
+                  );
+                  const clientStep = classifyClientProbe({
+                    sapClient,
+                    withClient: answer.status,
+                    withoutClient: withoutClient.status,
+                  });
+                  if (clientStep) {
+                    steps.push(clientStep);
+                  }
+                } catch {
+                  // best-effort probe - the check already reported the
+                  // answer the launch itself would get
+                }
+              }
+            }
           }
         );
       } catch (err) {
@@ -367,10 +417,14 @@ export function watchProxyStatus(session: Session): void {
     }
     session.lastAuthPrompt = now;
     // Until they are entered the proxy answers locally, so the burst of
-    // requests behind this one stops here rather than at the system.
-    const origin = session.currentTarget
-      ? originOf(session.currentTarget.externalUrl)
-      : undefined;
+    // requests behind this one stops here rather than at the system. The
+    // origin comes from the proxy itself: a 401 from a probe before any app
+    // is shown has no currentTarget, and the button must not be a dead end.
+    const origin =
+      session.proxy.systemOrigin ??
+      (session.currentTarget
+        ? originOf(session.currentTarget.externalUrl)
+        : undefined);
     void vscode.window
       .showWarningMessage(
         `abap2UI5: the system rejected the logon (HTTP ${status})` +

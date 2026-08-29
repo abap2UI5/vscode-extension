@@ -55,7 +55,10 @@ export type RunOutcome =
  *
  * `npx` spawns the real checker, which spawns Chromium - killing only the
  * shell leaves both behind, which is how a cancelled check used to cost a
- * browser process for the rest of the session.
+ * browser process for the rest of the session. On Windows `taskkill /t` walks
+ * the tree; elsewhere `run` starts the child as its own process GROUP
+ * (`detached`), so the negative-pid kill reaches every descendant - signalling
+ * only the direct child left the grandchildren running.
  */
 export function killTree(
   child: ChildProcess,
@@ -68,7 +71,12 @@ export function killTree(
     if (platform === "win32") {
       spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"]);
     } else {
-      child.kill("SIGKILL");
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // not a group leader (spawned elsewhere) - the child itself, then
+        child.kill("SIGKILL");
+      }
     }
   } catch {
     /* already gone */
@@ -111,6 +119,8 @@ export function run(
       cwd: options.cwd,
       env: options.env,
       shell,
+      // its own process group, so killTree can reach the grandchildren
+      detached: platform !== "win32",
     });
 
     // A failed spawn emits "error" and may still emit "close" - and a timeout
@@ -141,6 +151,10 @@ export function run(
         }, options.pollMs ?? 500)
       : undefined;
 
+    // decoded by the stream, not per chunk: String(chunk) cut multibyte
+    // UTF-8 at the 64 KiB pipe boundary into two replacement characters
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (c) => (stdout += String(c)));
     child.stderr?.on("data", (c) => (stderr += String(c)));
     child.on("error", (error) => finish({ kind: "spawn-failed", error }));

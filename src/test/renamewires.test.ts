@@ -98,6 +98,76 @@ test("comments and unrelated text are left alone", () => {
   assert.ok(!spans.some((s) => s.start === commentAt));
 });
 
+test("a nested segment is left alone even when a declared name reads the same", () => {
+  /*
+   * Regression: the path pattern matched EVERY `/SEG`, so a class declaring
+   * both `DATA title` and a row type with a `title` field had the nested
+   * `{/MT_TAB/TITLE}` rewritten along with the attribute - the row binding
+   * then resolved to nothing and the column rendered empty, silently.
+   */
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    DATA mt_tab TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
+    DATA title TYPE string.
+ENDCLASS.
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`Page\` )->a( n = \`title2\` v = \`{/TITLE}\`
+        )->tag( n = \`Text\` )->a( n = \`text\` v = \`{/MT_TAB/TITLE}\` ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const spans = attributeSpans(source, "title");
+  const nested = source.indexOf("{/MT_TAB/TITLE}") + "{/MT_TAB/".length;
+  assert.ok(spans.length > 0, "the attribute itself is renameable");
+  assert.ok(
+    !spans.some((s) => s.start === nested),
+    "the nested TITLE stays what it is - a field of the row"
+  );
+  const root = source.indexOf("{/TITLE}") + 2;
+  assert.ok(spans.some((s) => s.start === root), "the root path is renamed");
+});
+
+test("an icon URL is not a binding path", () => {
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    DATA delete TYPE string.
+ENDCLASS.
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    view->tag( n = \`Button\` )->a( n = \`icon\` v = \`sap-icon://delete\` ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const spans = attributeSpans(source, "delete");
+  assert.ok(
+    !spans.some((s) => source.slice(s.start - 2, s.start) === "//"),
+    "sap-icon://delete keeps its icon"
+  );
+});
+
+test("a structure field is not a rename target - its relative bindings are not tracked", () => {
+  /*
+   * A field is addressed by RELATIVE paths (`{TITLE}` inside the row
+   * template) that no pattern here finds - offering the rename would
+   * rewrite the declaration and leave the binding behind, the exact
+   * half-renamed wire this module exists to prevent.
+   */
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_row,
+             title TYPE string,
+           END OF ty_row.
+    DATA mt_tab TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
+ENDCLASS.`;
+  assert.deepEqual(attributeSpans(source, "title"), []);
+  assert.equal(
+    attributeAt(source, source.indexOf("title TYPE") + 1),
+    undefined
+  );
+});
+
 test("only a name the class declares is a rename target", () => {
   // a binding path into a nested structure, or a word that merely looks like
   // an attribute, must not offer a rename that would replace half a view

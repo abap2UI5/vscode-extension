@@ -445,8 +445,23 @@ test("a Windows shell argument with a space in it is quoted", () => {
   const scratch = "C:\\Users\\John Smith\\AppData\\Local\\Temp\\x.clas.abap";
   assert.equal(quoteForShell(scratch, "win32"), `"${scratch}"`);
   assert.equal(quoteForShell("--json", "win32"), "--json");
-  // no shell is involved off Windows, so nothing is quoted there
-  assert.equal(quoteForShell("/tmp/a b/x.abap", "linux"), "/tmp/a b/x.abap");
+});
+
+test("cmd.exe metacharacters force the quotes, % and ! included", () => {
+  // quotes do not stop cmd expanding %VAR% - nothing can - but an argument
+  // carrying any of these must at least not be split or interpreted
+  assert.equal(quoteForShell("a%PATH%b", "win32"), '"a%PATH%b"');
+  assert.equal(quoteForShell("say!", "win32"), '"say!"');
+  assert.equal(quoteForShell('he said "hi"', "win32"), '"he said ""hi"""');
+});
+
+test("posix arguments are single-quoted, so shell:true is safe there too", () => {
+  // the current callers only use a shell on Windows, but the contract of
+  // RunOptions.shell is that both platforms are - it used to be a no-op here
+  assert.equal(quoteForShell("/tmp/a b/x.abap", "linux"), "'/tmp/a b/x.abap'");
+  assert.equal(quoteForShell("--json", "linux"), "--json");
+  assert.equal(quoteForShell("we'ird$(x)", "linux"), "'we'\\''ird$(x)'");
+  assert.equal(quoteForShell("", "linux"), "''");
 });
 
 test("a finding with several fix spans is still one finding", () => {
@@ -610,4 +625,61 @@ test("directiveLine survives the prolog", () => {
     "</mvc:View>",
   ].join("\n");
   assert.equal(directiveLine(xml, 3, true), 2);
+});
+
+test("directiveLine is CRLF-exact - the drift grew by one column per line", () => {
+  // `length + 1` per line undercounted every CRLF break, so by line 40 the
+  // scan stopped 40 characters short of the finding's line: the directive
+  // then landed above the wrong line, or inside a start tag
+  const lines = [
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">',
+    '  <Page title="a page with a somewhat longer title">',
+    '  <Input value="v"/>',
+    '  <Text text="t"/>',
+    '  <Button text="Go" nosuchprop="x"/>',
+    "  </Page>",
+    "</mvc:View>",
+  ];
+  const lf = lines.join("\n");
+  const crlf = lines.join("\r\n");
+  // a single-line tag: the directive goes directly above the finding's line
+  assert.equal(directiveLine(lf, 4, true), 4);
+  assert.equal(directiveLine(crlf, 4, true), 4);
+});
+
+test("directiveLine climbs out of a CRLF multi-line start tag too", () => {
+  const crlf = [
+    '<mvc:View xmlns="sap.m">',
+    "  <Button",
+    '    text="Go"',
+    '    nosuchprop="x"/>',
+    "</mvc:View>",
+  ].join("\r\n");
+  assert.equal(directiveLine(crlf, 3, true), 1);
+  assert.equal(directiveLine(crlf, 2, true), 1);
+});
+
+// ---------------------------------------------------------------------------
+// The frozen builders count as checkable - the gate answers with the
+// linter's own frozen-view-builder finding instead of "nothing to check"
+// ---------------------------------------------------------------------------
+
+const FROZEN_CLASS =
+  "CLASS zcl_old DEFINITION PUBLIC.\nENDCLASS.\n" +
+  "CLASS zcl_old IMPLEMENTATION.\n  METHOD z2ui5_if_app~main.\n" +
+  "    DATA(view) = z2ui5_cl_xml_view=>factory( ).\n" +
+  "  ENDMETHOD.\nENDCLASS.\n";
+
+test("a class on a frozen builder is checkable", () => {
+  assert.equal(isCheckableSource("zcl_old.clas.abap", "abap", FROZEN_CLASS), true);
+  assert.equal(
+    isCheckableSource(
+      "zcl_old.clas.abap",
+      "abap",
+      FROZEN_CLASS.replace("z2ui5_cl_xml_view", "z2ui5_cl_xml_view_cc")
+    ),
+    true
+  );
+  // still not a license for quoting files
+  assert.equal(isCheckableSource("notes.md", "markdown", FROZEN_CLASS), false);
 });

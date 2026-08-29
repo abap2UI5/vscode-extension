@@ -61,6 +61,53 @@ export function signatureHead(method: ClientMethod): string {
   return method.signature.split("\n")[0].replace(/\s+/g, " ").trim();
 }
 
+/** The parameter names of a method, in signature order - every `name TYPE …`
+ *  line of the declaration (`VALUE(result)` is the returning value, not a
+ *  parameter to fill, and does not match). */
+export function signatureParameters(method: ClientMethod): string[] {
+  const out: string[] = [];
+  for (const line of method.signature.split("\n")) {
+    const m = /^\s+(\w+)\s+TYPE\b/.exec(line);
+    if (m) {
+      out.push(m[1]);
+    }
+  }
+  return out;
+}
+
+/**
+ * The client call whose argument list is OPEN at the end of the line prefix,
+ * with the parameter being written (`val` in `client->_event( val = ‸`).
+ * Undefined when the innermost open parenthesis is not a `client->` call -
+ * signature help inside some other call's arguments would mislead.
+ *
+ * The prefix should have literals and comments blanked (`blankNonCode`), so
+ * an `=` inside a string does not pass for a parameter assignment.
+ */
+export function clientSignatureContext(
+  lineUpToCursor: string
+): { method: ClientMethod; parameter?: string } | undefined {
+  let depth = 0;
+  for (let i = lineUpToCursor.length - 1; i >= 0; i--) {
+    const c = lineUpToCursor[i];
+    if (c === ")") {
+      depth++;
+    } else if (c === "(") {
+      if (depth === 0) {
+        const m = /client->(\w+)\s*$/i.exec(lineUpToCursor.slice(0, i));
+        const method = m && clientMethod(m[1]);
+        if (!method) {
+          return undefined;
+        }
+        const named = /(\w+)\s*=\s*[^=]*$/.exec(lineUpToCursor.slice(i + 1));
+        return { method, parameter: named?.[1].toLowerCase() };
+      }
+      depth--;
+    }
+  }
+  return undefined;
+}
+
 /** The published Client API reference - the docs site's page generated from
  *  the same interface this bundled JSON is parsed from
  *  (docs/scripts/generate-api-reference.mjs). */

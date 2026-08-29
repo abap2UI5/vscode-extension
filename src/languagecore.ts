@@ -3,6 +3,8 @@ import {
   abapContextAt,
   abapNsMap,
   BindingContext,
+  eventRaises,
+  whenLiteralAt,
   WriteContext,
   xmlContextAt,
   xmlNsMap,
@@ -16,10 +18,12 @@ import {
   rowShapeFor,
 } from "./bindingpaths";
 import {
+  controlInfo,
   controlsIn,
   describeControl,
   describeMember,
   deprecationText,
+  librariesIn,
   memberInfo,
   membersOf,
   Section,
@@ -77,10 +81,27 @@ export interface CompletionEntry {
   label: string;
   kind: CompletionKind;
   detail?: string;
-  /** Markdown for the details pane. */
+  /** Markdown for the details pane. For controls and members this is a lazy
+   *  getter: one list holds hundreds of entries, and only the highlighted one
+   *  ever shows its documentation - the plumbing reads it in
+   *  `resolveCompletionItem`, not while building the list. */
   documentation?: string;
   sortText?: string;
   deprecated?: boolean;
+}
+
+/** The entry, with its documentation computed on first read. */
+function withLazyDocumentation(
+  entry: CompletionEntry,
+  compute: () => string
+): CompletionEntry {
+  let computed: string | undefined;
+  Object.defineProperty(entry, "documentation", {
+    get: () => (computed ??= compute()),
+    enumerable: true,
+    configurable: true,
+  });
+  return entry;
 }
 
 /** The entries to offer, replacing the span `[start, end)` of the text. */
@@ -154,6 +175,28 @@ export function completionAt(
         entries: bindingEntries(binding, shapeOf()),
       };
     }
+    // Inside a `WHEN '…'` of the dispatch: the events the view raises are
+    // the only names that belong there - and typos here are exactly the
+    // silent wire breaks the rename exists for.
+    const when = whenLiteralAt(text, offset);
+    if (when) {
+      const seen = new Map<string, string>();
+      for (const raise of eventRaises(text)) {
+        const key = raise.name.toUpperCase();
+        if (!seen.has(key)) {
+          seen.set(key, raise.name);
+        }
+      }
+      return {
+        start: when.start,
+        end: when.end,
+        entries: [...seen.values()].sort().map((name) => ({
+          label: name,
+          kind: "events" as const,
+          detail: "raised in the view",
+        })),
+      };
+    }
   }
 
   const context = contextAt(text, fileName, offset);
@@ -167,36 +210,61 @@ export function completionAt(
       ...span,
       entries: controlsIn(data, context.library).map((local) => {
         const full = `${context.library}.${local}`;
-        return {
-          label: local,
-          kind: "control" as const,
-          detail: context.library,
-          documentation: describeControl(data, full),
-          deprecated: !!deprecationText(data[full]?.deprecated),
-        };
+        return withLazyDocumentation(
+          {
+            label: local,
+            kind: "control" as const,
+            detail: context.library,
+            deprecated: !!deprecationText(data[full]?.deprecated),
+          },
+          () => describeControl(data, full)
+        );
       }),
     };
   }
 
   if (context.kind === "member" && context.control) {
+    const defaultAggregation = controlInfo(
+      data,
+      context.control
+    )?.defaultAggregation;
     return {
       ...span,
       entries: membersOf(data, context.control).map((member) => {
         // Own members before inherited ones, properties before the rest.
         const inherited = member.declaredOn === context.control ? "0" : "1";
-        return {
-          label: member.name,
-          kind: member.section,
-          detail: member.type ?? member.section,
-          documentation: describeMember(data, context.control!, member.name),
-          sortText: `${SECTION_ORDER[member.section]}${inherited}${member.name}`,
-          deprecated: !!deprecationText(member.deprecated),
-        };
+        const isDefault =
+          member.section === "aggregations" &&
+          member.name === defaultAggregation;
+        return withLazyDocumentation(
+          {
+            label: member.name,
+            kind: member.section,
+            detail: isDefault
+              ? `${member.type ?? member.section} · default aggregation`
+              : member.type ?? member.section,
+            sortText: `${SECTION_ORDER[member.section]}${inherited}${member.name}`,
+            deprecated: !!deprecationText(member.deprecated),
+          },
+          () => describeMember(data, context.control!, member.name)
+        );
       }),
     };
   }
 
   if (context.kind === "value" && context.control && context.member) {
+    // The xmlns VALUE is a library name, and the snapshot knows them all -
+    // everything else in a value position comes from the member's type.
+    if (/^xmlns(:|$)/i.test(context.member)) {
+      return {
+        ...span,
+        entries: librariesIn(data).map((library) => ({
+          label: library,
+          kind: "namespace" as const,
+          detail: "UI5 library",
+        })),
+      };
+    }
     const values = valuesFor(data, context.control, context.member);
     return {
       ...span,

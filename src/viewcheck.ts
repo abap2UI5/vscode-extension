@@ -9,7 +9,7 @@ import { installRenderGate, renderGateBrowsers, renderGateCli } from "./renderga
 import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
 import { usesBuilder } from "./abap";
-import { GateResult, runGate, VIEW_XML_RE } from "./gate";
+import { frozenBuilderOf, GateResult, runGate, VIEW_XML_RE } from "./gate";
 import { labelOf, noWorkspaceFolders } from "./abapsources";
 import {
   augmentedPath,
@@ -22,7 +22,7 @@ import {
   resolveCheckerCommand,
   scratchFileName,
 } from "./checkcore";
-import { toDiagnostics } from "./diagnostics";
+import { textSource, toDiagnostics } from "./diagnostics";
 import { rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
@@ -60,10 +60,10 @@ const LIVE_DEBOUNCE_MS = 400;
  *  warning on every save. */
 let spawnFailed = false;
 
-/** True while a workspace sweep runs. The sweep opens every file it reports
- *  on (finding ranges are computed against real lines), and each open fires
- *  onDidOpenTextDocument - which scheduled a second full check of the same
- *  file, doubling the sweep's work and racing its own diagnostics.set. */
+/** True while a workspace sweep runs. `fixWorkspace` opens every file it
+ *  edits, and each open fires onDidOpenTextDocument - which scheduled a
+ *  second full check of the same file, doubling the sweep's work and racing
+ *  its own diagnostics.set. */
 let sweeping = false;
 
 /** The target/metadata versions are logged once per session, and again
@@ -291,7 +291,10 @@ async function runRenderGate(
 }
 
 /**
- * The findings of a document as it stands right now, memoised on its version.
+ * The findings of a document as it stands right now, memoised per document on
+ * its version - one slot per URI, so two checkable editors side by side do
+ * not evict each other, and `checkDocument` seeds it so the status bar and
+ * the code lens read the check's own result instead of gating a second time.
  *
  * The quick-fix provider needs them, and it must not work off the findings
  * behind the diagnostics currently shown: a fix carries character offsets into
@@ -299,7 +302,7 @@ async function runRenderGate(
  * the lightbulb is opened the buffer may have moved. Recomputing is a few
  * milliseconds - applying a stale offset would corrupt the file.
  */
-let memo: { key: string; version: number; findings: PropertyFinding[] } | undefined;
+const memos = new Map<string, { version: number; findings: PropertyFinding[] }>();
 
 /** Set by registerViewCheck - lets the quick-fix module ask for a re-check
  *  after it changed something OUTSIDE the document (the baseline file), which
@@ -307,13 +310,14 @@ let memo: { key: string; version: number; findings: PropertyFinding[] } | undefi
 let recheckAll: () => void = () => {};
 
 export function recheckOpenDocuments(): void {
-  memo = undefined;
+  memos.clear();
   recheckAll();
 }
 
 export function findingsNow(doc: vscode.TextDocument): PropertyFinding[] {
   const key = doc.uri.toString();
-  if (memo && memo.key === key && memo.version === doc.version) {
+  const memo = memos.get(key);
+  if (memo && memo.version === doc.version) {
     return memo.findings;
   }
   if (!isCheckable(doc)) {
@@ -330,7 +334,7 @@ export function findingsNow(doc: vscode.TextDocument): PropertyFinding[] {
     // offered for a finding the baseline already swallowed makes no sense
     applyBaselineTo(gate.findings, options.baseline, doc.uri.fsPath);
   }
-  memo = { key, version: doc.version, findings: gate.findings };
+  memos.set(key, { version: doc.version, findings: gate.findings });
   return gate.findings;
 }
 
@@ -451,6 +455,9 @@ async function checkDocument(
   if (options.baseline && doc.uri.scheme === "file") {
     baselined = applyBaselineTo(gate.findings, options.baseline, doc.uri.fsPath);
   }
+  // the same pipeline `findingsNow` runs - seeding it here spares the status
+  // bar and the code lens a second gate run over the identical text
+  memos.set(key, { version: startVersion, findings: gate.findings });
 
   if (gate.nothingChecked) {
     diagnostics.delete(doc.uri);
@@ -538,6 +545,26 @@ export interface SweptFile {
    *  been typed in since - the sweep is `await`ed per file, so the window is
    *  real. Absent when the text came from disk. */
   version?: number;
+  /** The gated text, when it came from disk and produced findings - what
+   *  `checkWorkspace` computes the ranges from without opening the file. */
+  text?: string;
+  /** The config file governing it, or undefined when the settings do - what
+   *  `updateBaseline` filters on, so a nested config's files do not land in
+   *  the root baseline as entries the CLI would call stale. */
+  configFile?: string;
+}
+
+/** Gate results per file, keyed on what the text was when it was gated - the
+ *  open document's version, or the file's mtime. Pre-baseline, so one cache
+ *  serves the check, the fix and the baseline rebuild alike; dropped whenever
+ *  a config or a setting changes the answer. */
+const sweepCache = new Map<
+  string,
+  { stamp: string; findings: PropertyFinding[]; text?: string; skip?: boolean }
+>();
+
+function clearSweepCache(): void {
+  sweepCache.clear();
 }
 
 /**
@@ -604,43 +631,78 @@ async function sweepWorkspace(
       message: `${index + 1}/${targets.length} - ${labelOf(uri)}`,
       increment: 100 / targets.length,
     });
-    let text: string;
+    /* Gated once per text: the cache key is the open document's version or
+     * the file's mtime, so a re-run only pays for what changed since. The
+     * cached findings are PRE-baseline - the baseline is applied per run
+     * below, because the rebuild needs the unfiltered truth. */
+    let stamp: string;
     if (target.open) {
-      text = target.open.getText();
+      stamp = `v${target.open.version}`;
     } else {
       try {
-        text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+        stamp = `m${(await vscode.workspace.fs.stat(uri)).mtime}`;
       } catch {
         continue;
       }
     }
-    const isXml = VIEW_XML_RE.test(uri.path);
-    if (!isXml && !usesBuilder(text)) {
-      continue;
-    }
+    const key = uri.toString();
     // a document with no path on disk has no directory to discover a config
     // from - the workspace's own config governs it, as it does on the live path
     const opts = resolveOptions(discoveryDirOf(uri), {
       minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
       distribution: config().get<string>("viewCheck.distribution", "sapui5"),
       allow: config().get<string[]>("viewCheck.allow", []),
-    rules: ruleSettings(),
+      rules: ruleSettings(),
     });
-    let gate: GateResult;
-    try {
-      gate = runGate(text, uri.scheme === "file" ? uri.fsPath : uri.path, isXml, opts);
-    } catch (err) {
-      // one file that cannot be parsed is not a reason to abandon the sweep
-      log(`view-check: ${labelOf(uri)} skipped - ${String(err)}`);
+    const cached = sweepCache.get(key);
+    let entry = cached && cached.stamp === stamp ? cached : undefined;
+    if (!entry) {
+      let text: string;
+      if (target.open) {
+        text = target.open.getText();
+      } else {
+        try {
+          text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+        } catch {
+          continue;
+        }
+      }
+      const isXml = VIEW_XML_RE.test(uri.path);
+      if (!isXml && !usesBuilder(text) && !frozenBuilderOf(text)) {
+        sweepCache.set(key, { stamp, findings: [], skip: true });
+        continue;
+      }
+      let gate: GateResult;
+      try {
+        gate = runGate(text, uri.scheme === "file" ? uri.fsPath : uri.path, isXml, opts);
+      } catch (err) {
+        // one file that cannot be parsed is not a reason to abandon the sweep
+        log(`view-check: ${labelOf(uri)} skipped - ${String(err)}`);
+        continue;
+      }
+      entry = gate.nothingChecked
+        ? { stamp, findings: [], skip: true }
+        : {
+            stamp,
+            findings: gate.findings,
+            text: !target.open && gate.findings.length ? text : undefined,
+          };
+      sweepCache.set(key, entry);
+    }
+    if (entry.skip) {
       continue;
     }
-    if (gate.nothingChecked) {
-      continue;
-    }
+    const findings = entry.findings.slice();
     if (options.baseline && opts.baseline && uri.scheme === "file") {
-      applyBaselineTo(gate.findings, opts.baseline, uri.fsPath);
+      applyBaselineTo(findings, opts.baseline, uri.fsPath);
     }
-    swept.push({ uri, findings: gate.findings, version: target.open?.version });
+    swept.push({
+      uri,
+      findings,
+      version: target.open?.version,
+      text: entry.text,
+      configFile: opts.configFile,
+    });
   }
   return { files: swept, cancelled: token.isCancellationRequested };
 }
@@ -673,13 +735,35 @@ async function checkWorkspace(
           diagnostics.clear();
         }
         let problems = 0;
+        let moved = 0;
         for (const file of swept.files) {
-          // The file is opened as a text document so the finding ranges are
-          // computed against real lines, exactly like the on-save check does.
-          const doc = await vscode.workspace.openTextDocument(file.uri);
-          const diags = toDiagnostics(doc, file.findings, []);
+          /* Ranges come from the text that was gated: the open document when
+           * it still is what was gated, the swept text otherwise - never a
+           * buffer that was typed in while the sweep ran, whose lines the
+           * findings no longer describe. Opening every clean file as a
+           * document just to place nothing was the old cost here. */
+          let source;
+          if (file.version !== undefined) {
+            const doc = vscode.workspace.textDocuments.find(
+              (d) => d.uri.toString() === file.uri.toString()
+            );
+            if (!doc || doc.version !== file.version) {
+              moved++;
+              continue;
+            }
+            source = doc;
+          } else if (file.findings.length) {
+            source = textSource(file.text ?? "");
+          }
+          const diags = source ? toDiagnostics(source, file.findings, []) : [];
           diagnostics.set(file.uri, diags);
           problems += diags.length;
+        }
+        if (moved) {
+          log(
+            `view-check: workspace check - ${moved} file(s) not reported, ` +
+              "edited while the sweep ran"
+          );
         }
         log(
           `view-check: workspace sweep - ${swept.files.length} file(s), ` +
@@ -727,77 +811,83 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
       cancellable: true,
     },
     async (progress, token) => {
+      // held through the open loop below too: every openTextDocument fires
+      // onDidOpenTextDocument, which would schedule a full check per file
       sweeping = true;
-      let swept: SweepResult;
       try {
-        swept = await sweepWorkspace(progress, token, { baseline: true }, log);
+        const swept = await sweepWorkspace(progress, token, { baseline: true }, log);
+        if (swept.cancelled) {
+          // half a workspace's fixes applied as if they were the workspace's
+          vscode.window.showInformationMessage(
+            "abap2UI5: cancelled - nothing was changed."
+          );
+          return;
+        }
+        const edit = new vscode.WorkspaceEdit();
+        let fixes = 0;
+        let files = 0;
+        let moved = 0;
+        for (const file of swept.files) {
+          const planned = plannedFixes(file.findings);
+          if (!planned.length) {
+            continue;
+          }
+          const doc = await vscode.workspace.openTextDocument(file.uri);
+          /* A fix is a pair of character offsets into the text that was gated.
+           * If that text has changed since - the sweep awaits each file, and a
+           * fast typist is faster than a workspace scan - the offsets address
+           * different characters now, and applying them rewrites the wrong
+           * span. Skipping is the only safe answer; the next run picks it up. */
+          if (file.version !== undefined && doc.version !== file.version) {
+            moved++;
+            continue;
+          }
+          for (const fix of planned) {
+            edit.replace(
+              file.uri,
+              new vscode.Range(doc.positionAt(fix.start), doc.positionAt(fix.end)),
+              fix.text,
+              // through the refactor preview: a workspace's worth of edits
+              // is reviewed, not sprung
+              { needsConfirmation: true, label: "abap2UI5 mechanical fix" }
+            );
+          }
+          fixes += planned.length;
+          files++;
+        }
+        if (moved) {
+          log(
+            `view-check: workspace fix - ${moved} file(s) skipped, edited while the sweep ran`
+          );
+        }
+        const skipped = moved
+          ? ` ${moved} file(s) were edited while the sweep ran and were left alone.`
+          : "";
+        if (!fixes) {
+          vscode.window.showInformationMessage(
+            `abap2UI5: nothing in ${swept.files.length} file(s) can be corrected mechanically.` +
+              skipped
+          );
+          return;
+        }
+        if (!(await vscode.workspace.applyEdit(edit))) {
+          vscode.window.showInformationMessage(
+            "abap2UI5: no fixes were applied." + skipped
+          );
+          return;
+        }
+        log(`view-check: workspace fix - ${fixes} fix(es) in ${files} file(s)`);
+        /* Overlapping fixes are left for the next run, here as everywhere -
+         * so the count is what was applied, not what remains, and saying so is
+         * what tells someone to run it again. */
+        vscode.window.showInformationMessage(
+          `abap2UI5: applied ${fixes} fix(es) in ${files} file(s). ` +
+            "Run it again if fixes overlapped; the files are edited, not saved." +
+            skipped
+        );
       } finally {
         sweeping = false;
       }
-      if (swept.cancelled) {
-        // half a workspace's fixes applied as if they were the workspace's
-        vscode.window.showInformationMessage(
-          "abap2UI5: cancelled - nothing was changed."
-        );
-        return;
-      }
-      const edit = new vscode.WorkspaceEdit();
-      let fixes = 0;
-      let files = 0;
-      let moved = 0;
-      for (const file of swept.files) {
-        const planned = plannedFixes(file.findings);
-        if (!planned.length) {
-          continue;
-        }
-        const doc = await vscode.workspace.openTextDocument(file.uri);
-        /* A fix is a pair of character offsets into the text that was gated.
-         * If that text has changed since - the sweep awaits each file, and a
-         * fast typist is faster than a workspace scan - the offsets address
-         * different characters now, and applying them rewrites the wrong
-         * span. Skipping is the only safe answer; the next run picks it up. */
-        if (file.version !== undefined && doc.version !== file.version) {
-          moved++;
-          continue;
-        }
-        edit.set(
-          file.uri,
-          planned.map(
-            (fix) =>
-              new vscode.TextEdit(
-                new vscode.Range(doc.positionAt(fix.start), doc.positionAt(fix.end)),
-                fix.text
-              )
-          )
-        );
-        fixes += planned.length;
-        files++;
-      }
-      if (moved) {
-        log(
-          `view-check: workspace fix - ${moved} file(s) skipped, edited while the sweep ran`
-        );
-      }
-      const skipped = moved
-        ? ` ${moved} file(s) were edited while the sweep ran and were left alone.`
-        : "";
-      if (!fixes) {
-        vscode.window.showInformationMessage(
-          `abap2UI5: nothing in ${swept.files.length} file(s) can be corrected mechanically.` +
-            skipped
-        );
-        return;
-      }
-      await vscode.workspace.applyEdit(edit);
-      log(`view-check: workspace fix - ${fixes} fix(es) in ${files} file(s)`);
-      /* Overlapping fixes are left for the next run, here as everywhere -
-       * so the count is what was applied, not what remains, and saying so is
-       * what tells someone to run it again. */
-      vscode.window.showInformationMessage(
-        `abap2UI5: applied ${fixes} fix(es) in ${files} file(s). ` +
-          "Run it again if fixes overlapped; the files are edited, not saved." +
-          skipped
-      );
     }
   );
 }
@@ -820,12 +910,13 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
     );
     return;
   }
-  const baselineFile = resolveOptions(folder.uri.fsPath, {
+  const rootOptions = resolveOptions(folder.uri.fsPath, {
     minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
     distribution: config().get<string>("viewCheck.distribution", "sapui5"),
     allow: config().get<string[]>("viewCheck.allow", []),
     rules: ruleSettings(),
-  }).baseline;
+  });
+  const baselineFile = rootOptions.baseline;
   if (!baselineFile) {
     vscode.window.showWarningMessage(
       'abap2UI5: this repository names no baseline. Add "baseline": ' +
@@ -867,15 +958,17 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
         return;
       }
       /*
-       * Only real files under the baseline's own repository go in.
+       * Only real files this baseline's own config governs go in.
        *
        * The sweep deliberately also gates documents that have no file behind
-       * them (a class opened through ADT) and, in a multi-root window, files
-       * of the other folders. Neither can ever produce a matching entry when
-       * the CLI runs over this repository - and a baseline entry that matches
-       * nothing is not inert: it is STALE, which the linter reports and CI
-       * fails on. So writing them would hand somebody a baseline that breaks
-       * the build it was written to unblock.
+       * them (a class opened through ADT), files of the other folders in a
+       * multi-root window, and files a NESTED config governs - whose findings
+       * the CLI applies against that config's own baseline, never this one.
+       * None of them can ever produce a matching entry when the CLI runs over
+       * this repository - and a baseline entry that matches nothing is not
+       * inert: it is STALE, which the linter reports and CI fails on. So
+       * writing them would hand somebody a baseline that breaks the build it
+       * was written to unblock.
        */
       const root = path.dirname(baselineFile);
       const inRepo = (uri: vscode.Uri): boolean => {
@@ -885,12 +978,14 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
         const rel = path.relative(root, uri.fsPath);
         return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
       };
-      const mine = swept.files.filter((file) => inRepo(file.uri));
+      const mine = swept.files.filter(
+        (file) => inRepo(file.uri) && file.configFile === rootOptions.configFile
+      );
       const foreign = swept.files.length - mine.length;
       if (foreign) {
         log(
-          `view-check: baseline - ${foreign} file(s) outside ${root} ` +
-            "(or with no file on disk) were not written into it"
+          `view-check: baseline - ${foreign} file(s) outside ${root}, with no ` +
+            "file on disk, or governed by another config were not written into it"
         );
       }
       try {
@@ -913,7 +1008,8 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
           `abap2UI5: ${path.basename(baselineFile)} now waives ` +
             `${written.findings} finding(s) from ${mine.length} file(s).` +
             (foreign
-              ? ` ${foreign} file(s) outside the repository were not included.`
+              ? ` ${foreign} file(s) outside the repository or governed by ` +
+                "another config were not included."
               : "")
         );
       } catch (err) {
@@ -958,6 +1054,7 @@ export function registerViewCheck(
   );
   const configChanged = () => {
     clearConfigCache();
+    clearSweepCache();
     lastVersionLine = "";
     // the memoised findings behind the lightbulb and the "fix all" lens were
     // computed under the old config - the version they are keyed on does not
@@ -966,12 +1063,32 @@ export function registerViewCheck(
     recheckOpen();
   };
 
+  /* The baseline files the configs name are part of the answer too: a pull
+   * that updated one left the editor waiving findings CI reports (or the
+   * other way round) until the next edit - the mtime memo would have noticed,
+   * but nothing asked it to. Custom names without "baseline" in them still
+   * escape this net, like the web build's watcher. */
+  const baselineWatcher = vscode.workspace.createFileSystemWatcher(
+    "**/*baseline*.json"
+  );
+  const baselineChanged = (uri: vscode.Uri) => {
+    if (uri.path.includes("/node_modules/")) {
+      return;
+    }
+    clearBaselineCache();
+    recheckOpenDocuments();
+  };
+
   context.subscriptions.push(
     diagnostics,
     configWatcher,
     configWatcher.onDidChange(configChanged),
     configWatcher.onDidCreate(configChanged),
     configWatcher.onDidDelete(configChanged),
+    baselineWatcher,
+    baselineWatcher.onDidChange(baselineChanged),
+    baselineWatcher.onDidCreate(baselineChanged),
+    baselineWatcher.onDidDelete(baselineChanged),
     { dispose: () => timers.forEach((t) => clearTimeout(t)) },
 
     vscode.commands.registerCommand("abap2ui5.checkViews", async () => {
@@ -1002,9 +1119,19 @@ export function registerViewCheck(
 
     vscode.commands.registerCommand("abap2ui5.updateBaseline", () => updateBaseline(log)),
 
+    // A document that STOPPED being checkable - its builder call deleted -
+    // must lose its findings too: no check runs for it any more, so the old
+    // squiggles would sit on unrelated text until the file was closed.
     // Saving is the moment the expensive gate is allowed to run.
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (!config().get<boolean>("viewCheck.onSave", true) || !isCheckable(doc)) {
+      if (!config().get<boolean>("viewCheck.onSave", true)) {
+        return;
+      }
+      if (!isCheckable(doc)) {
+        if (diagnostics.has(doc.uri)) {
+          cancelScheduled(doc.uri);
+          diagnostics.delete(doc.uri);
+        }
         return;
       }
       check(doc, 0, { render: true, announce: false });
@@ -1013,10 +1140,14 @@ export function registerViewCheck(
     // Typing: the property gate only, debounced. It is in-process and needs
     // no I/O, so the cost is a few milliseconds per pause.
     vscode.workspace.onDidChangeTextDocument((e) => {
-      if (!config().get<boolean>("viewCheck.live", true)) {
+      if (!config().get<boolean>("viewCheck.live", true) || !e.contentChanges.length) {
         return;
       }
-      if (!e.contentChanges.length || !isCheckable(e.document)) {
+      if (!isCheckable(e.document)) {
+        if (diagnostics.has(e.document.uri)) {
+          cancelScheduled(e.document.uri);
+          diagnostics.delete(e.document.uri);
+        }
         return;
       }
       check(e.document, LIVE_DEBOUNCE_MS, { render: false, announce: false });
@@ -1036,6 +1167,7 @@ export function registerViewCheck(
       // just made every in-flight run for the document stale, and the
       // generation it was given cannot be handed out again.
       generations.delete(doc.uri.toString());
+      memos.delete(doc.uri.toString());
     }),
 
     vscode.workspace.onDidChangeConfiguration((e) => {
@@ -1044,6 +1176,7 @@ export function registerViewCheck(
         // the checker that could not be started may be exactly what was just
         // changed - without this the gate stayed off until the window reloaded
         spawnFailed = false;
+        clearSweepCache();
         recheckOpenDocuments();
         recheckOpen();
       }

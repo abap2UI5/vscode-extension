@@ -86,9 +86,21 @@ export async function newProjectWizard(): Promise<void> {
   }
   const root = folders[0];
 
-  // An existing project is not something to write files into: a scaffold that
-  // overwrites abap2ui5lint.jsonc or package.json takes settings with it.
-  for (const name of ["package.json", "abap2ui5lint.jsonc", "src"]) {
+  // An existing project is not something to write files into: a scaffold
+  // that overwrites a README or a .gitignore takes content with it just as a
+  // package.json takes settings. The probe list is the scaffold's OWN file
+  // list (its top-level entries), so a file added to the scaffold is guarded
+  // without an edit here.
+  const guarded = [
+    ...new Set(
+      scaffoldFiles(
+        projectNameFrom("probe"),
+        "zcl_probe",
+        APP_TEMPLATES[0]
+      ).map((file) => file.path.split("/")[0])
+    ),
+  ];
+  for (const name of guarded) {
     try {
       await vscode.workspace.fs.stat(vscode.Uri.joinPath(root, name));
       void vscode.window.showErrorMessage(

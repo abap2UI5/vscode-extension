@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { createNonce, previewHtml, welcomeHtml } from "./webview";
+import { createNonce, previewHtml, THEMES, welcomeHtml } from "./webview";
 import { AppTarget, loadMessage, modelRootsOfSource } from "./previewcore";
 import { classNameOf, errorTokens } from "./abap";
 import { proxiedUrl } from "./urls";
@@ -23,10 +23,61 @@ export function openAbapDocs(className?: string): vscode.TextDocument[] {
   );
 }
 
+/** `modelRootsOfSource` runs the linter's whole preparation over the class -
+ *  too much to repeat for every reload of an unchanged document. */
+const modelRootsCache = new Map<string, { version: number; roots: string[] }>();
+const MODEL_ROOTS_CACHE_MAX = 20;
+
 /** The class's own top-level model paths - see `modelRootsOfSource`. */
 export function modelRootsOf(className: string): string[] {
   const doc = openAbapDocs(className)[0];
-  return doc ? modelRootsOfSource(doc.getText()) : [];
+  if (!doc) {
+    return [];
+  }
+  const key = doc.uri.toString();
+  const hit = modelRootsCache.get(key);
+  if (hit && hit.version === doc.version) {
+    return hit.roots;
+  }
+  const roots = modelRootsOfSource(doc.getText());
+  if (modelRootsCache.size >= MODEL_ROOTS_CACHE_MAX && !modelRootsCache.has(key)) {
+    const oldest = modelRootsCache.keys().next().value;
+    if (oldest !== undefined) {
+      modelRootsCache.delete(oldest);
+    }
+  }
+  modelRootsCache.set(key, { version: doc.version, roots });
+  return roots;
+}
+
+/**
+ * The theme picker's entries: the built-in list plus whatever
+ * `abap2ui5.previewThemes` adds - a custom theme deployed on the system is a
+ * launch parameter like any other, and typing it into the URL by hand is what
+ * the picker exists to avoid. Merged here, on the `vscode` side, so
+ * `webview.ts` stays a pure renderer of what it is handed; a malformed entry
+ * is skipped rather than rendered as "undefined".
+ */
+export function mergedThemes(): ReadonlyArray<[string, string]> {
+  const extras = vscode.workspace
+    .getConfiguration(CONFIG_SECTION)
+    .get<Array<{ value?: unknown; label?: unknown }>>("previewThemes", []);
+  const merged: Array<[string, string]> = [...THEMES];
+  const known = new Set(merged.map(([value]) => value));
+  for (const entry of extras) {
+    const value = typeof entry?.value === "string" ? entry.value.trim() : "";
+    if (!value || known.has(value)) {
+      continue;
+    }
+    known.add(value);
+    merged.push([
+      value,
+      typeof entry?.label === "string" && entry.label.trim()
+        ? entry.label.trim()
+        : value,
+    ]);
+  }
+  return merged;
 }
 
 /** The load message of one target, with the session's preview parameters. */
@@ -157,6 +208,7 @@ export class PreviewViewProvider
         runningClass: session.appPanel
           ? session.currentTarget?.className
           : undefined,
+        recentApp: session.recentApps()[0],
       });
       this.previewRendered = false;
       return;
@@ -167,6 +219,7 @@ export class PreviewViewProvider
         theme: session.theme(),
         language: session.language(),
         modelRoots: modelRootsOf(target.className),
+        themes: mergedThemes(),
         nonce: createNonce(),
       });
       this.previewRendered = true;
@@ -194,6 +247,7 @@ export function reloadShownApp(session: Session, reason?: string): void {
     return;
   }
   session.watch.stop(); // whatever loads now is current, the badge clears
+  lastErrorLocation = undefined; // the fresh page's errors are its own
   postToShownApp(session, loadMessageFor(session, session.currentTarget, reason));
   session.watch.captureBaseline(); // remember which state is shown from now on
 }
@@ -235,6 +289,20 @@ export async function applyPreviewParam(
   );
 }
 
+/** Source position of the last located runtime error - what the error badge
+ *  jumps to. Cleared on every reload; the fresh page's errors are its own. */
+let lastErrorLocation:
+  | { doc: vscode.TextDocument; offset: number }
+  | undefined;
+
+/** The iframe can post runtime errors at any rate (an error loop, or a page
+ *  nobody vouched for) - each one costs a scan of the open documents and two
+ *  log lines, so the processing is capped per window of time. */
+const RUNTIME_ERROR_WINDOW_MS = 10_000;
+const RUNTIME_ERROR_MAX_PER_WINDOW = 20;
+let runtimeErrorWindowStart = 0;
+let runtimeErrorWindowCount = 0;
+
 export function handleWebviewMessage(
   session: Session,
   msg: unknown,
@@ -250,6 +318,7 @@ export function handleWebviewMessage(
         text?: string;
         error?: string;
         chain?: unknown;
+        device?: string;
       }
     | undefined;
   // Inspect mode: a control was clicked in the running app.
@@ -275,6 +344,21 @@ export function handleWebviewMessage(
   // A runtime error the app reported through the hook the proxy plants: the
   // output channel is where the full text lives, the toolbar badge only counts.
   if (message?.type === "runtimeError") {
+    const now = Date.now();
+    if (now - runtimeErrorWindowStart > RUNTIME_ERROR_WINDOW_MS) {
+      runtimeErrorWindowStart = now;
+      runtimeErrorWindowCount = 0;
+    }
+    runtimeErrorWindowCount++;
+    if (runtimeErrorWindowCount > RUNTIME_ERROR_MAX_PER_WINDOW) {
+      if (runtimeErrorWindowCount === RUNTIME_ERROR_MAX_PER_WINDOW + 1) {
+        session.log(
+          `app ${target?.className ?? "?"}: more runtime errors - ` +
+            "further ones are dropped for a moment"
+        );
+      }
+      return;
+    }
     const kind =
       message.kind === "rejection"
         ? "unhandled rejection"
@@ -284,12 +368,25 @@ export function handleWebviewMessage(
     session.log(`app ${target?.className ?? "?"}: ${kind}: ${message.text ?? ""}`);
     const located = locateErrorInSource(message.text ?? "", target?.className);
     if (located) {
-      session.log(`  ↳ ${located}`);
+      session.log(`  ↳ ${located.label}`);
+      lastErrorLocation = { doc: located.doc, offset: located.offset };
     }
     return;
   }
   if (message?.type === "showRuntimeLog") {
     session.output.show(true);
+    const location = lastErrorLocation;
+    if (location && !location.doc.isClosed) {
+      const pos = location.doc.positionAt(location.offset);
+      const column = vscode.window.visibleTextEditors.find(
+        (editor) => editor.document === location.doc
+      )?.viewColumn;
+      void vscode.window.showTextDocument(location.doc, {
+        viewColumn: column,
+        selection: new vscode.Range(pos, pos),
+        preserveFocus: false,
+      });
+    }
     return;
   }
   if (message?.type === "showTraffic") {
@@ -297,7 +394,18 @@ export function handleWebviewMessage(
     return;
   }
   if (message?.type === "screenshot") {
-    void vscode.commands.executeCommand("abap2ui5.screenshot");
+    void vscode.commands.executeCommand(
+      "abap2ui5.screenshot",
+      typeof message.device === "string" ? message.device : undefined
+    );
+    return;
+  }
+  // The welcome screen's one-click relaunch. Only a class this window really
+  // launched before is accepted - the webview does not get to name others.
+  if (message?.type === "runRecent" && typeof message.value === "string") {
+    if (session.recentApps().includes(message.value)) {
+      void vscode.commands.executeCommand("abap2ui5.run", message.value);
+    }
     return;
   }
   if (message?.type === "param" && session.previewProvider) {
@@ -320,7 +428,7 @@ export function handleWebviewMessage(
 function locateErrorInSource(
   errorText: string,
   className: string | undefined
-): string | undefined {
+): { doc: vscode.TextDocument; offset: number; label: string } | undefined {
   if (!errorText) {
     return undefined;
   }
@@ -341,7 +449,11 @@ function locateErrorInSource(
         doc.uri.scheme === "file"
           ? vscode.workspace.asRelativePath(doc.uri)
           : doc.fileName;
-      return `${label}:${line}  (matched "${token}")`;
+      return {
+        doc,
+        offset: ix,
+        label: `${label}:${line}  (matched "${token}")`,
+      };
     }
   }
   return undefined;
@@ -434,6 +546,7 @@ export function showInTab(session: Session, target: AppTarget): void {
     theme: session.theme(),
     language: session.language(),
     modelRoots: modelRootsOf(target.className),
+    themes: mergedThemes(),
     nonce: createNonce(),
   });
 }

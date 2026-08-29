@@ -87,9 +87,18 @@ function runWithVsCodeNode(
   });
 }
 
+/** How long the bundle download may take before it is treated as stuck. A
+ *  fetch without a limit that stalls silently never settles - and with it
+ *  the install, whose guard flag then refuses every retry. */
+const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+
 /** Downloads to `dest` and returns the SHA-256 of what was written. */
-async function download(url: string, dest: string): Promise<string> {
-  const res = await fetch(url);
+async function download(
+  url: string,
+  dest: string,
+  signal: AbortSignal
+): Promise<string> {
+  const res = await fetch(url, { signal });
   if (!res.ok || !res.body) {
     throw new Error(`download failed - HTTP ${res.status} for ${url}`);
   }
@@ -102,7 +111,8 @@ async function download(url: string, dest: string): Promise<string> {
         yield chunk;
       }
     },
-    fs.createWriteStream(dest)
+    fs.createWriteStream(dest),
+    { signal }
   );
   return digest.digest("hex");
 }
@@ -140,7 +150,9 @@ async function verifyBundle(
 ): Promise<void> {
   let published: string | undefined;
   try {
-    const res = await fetch(`${url}.sha256`);
+    const res = await fetch(`${url}.sha256`, {
+      signal: AbortSignal.timeout(10_000),
+    });
     if (res.ok) {
       // `<hex>  view-check-bundle.tgz`, the shasum(1) format
       const hex = /\b([0-9a-f]{64})\b/i.exec(await res.text())?.[1];
@@ -164,12 +176,21 @@ async function verifyBundle(
 
   const remembered = context.globalState.get<string>(digestKey(url));
   if (remembered && remembered !== actual) {
-    throw new Error(
-      "bundle changed since it was last installed from the same URL. That URL " +
-        "names one immutable linter commit, so its content should never move. " +
-        `Expected ${remembered.slice(0, 12)}…, got ${actual.slice(0, 12)}…. ` +
-        "Nothing was installed."
-    );
+    // The rolling tag is republished on every linter merge - a changed
+    // digest there is the expected case, not the alarm.
+    if (url === ROLLING_BUNDLE_URL) {
+      log(
+        `render-gate: rolling bundle moved since the last install ` +
+          `(${remembered.slice(0, 12)}… -> ${actual.slice(0, 12)}…) - expected for a rolling tag`
+      );
+    } else {
+      throw new Error(
+        "bundle changed since it was last installed from the same URL. That URL " +
+          "names one immutable linter commit, so its content should never move. " +
+          `Expected ${remembered.slice(0, 12)}…, got ${actual.slice(0, 12)}…. ` +
+          "Nothing was installed."
+      );
+    }
   }
   await context.globalState.update(digestKey(url), actual);
   log(
@@ -185,6 +206,7 @@ export async function installRenderGate(
   log: (m: string) => void
 ): Promise<boolean> {
   if (installing) {
+    log("render-gate: an install is already running - not starting a second one");
     return false;
   }
   installing = true;
@@ -195,14 +217,22 @@ export async function installRenderGate(
   // all instead of the one they already had.
   const staging = `${dir}.installing`;
   const previous = `${dir}.previous`;
+  const aborter = new AbortController();
+  const timeout = setTimeout(
+    () => aborter.abort(new Error("download timed out")),
+    DOWNLOAD_TIMEOUT_MS
+  );
   try {
     return await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
         title: "abap2UI5: installing the render gate",
-        cancellable: false,
+        cancellable: true,
       },
-      async (progress) => {
+      async (progress, token) => {
+        token.onCancellationRequested(() =>
+          aborter.abort(new Error("install cancelled"))
+        );
         progress.report({ message: "downloading the checker bundle (~30 MB)..." });
         log(`render-gate: installing to ${dir}`);
         fs.rmSync(staging, { recursive: true, force: true });
@@ -217,9 +247,14 @@ export async function installRenderGate(
         if (PINNED_BUNDLE_URL && !allowRolling) {
           try {
             bundleUrl = PINNED_BUNDLE_URL;
-            digest = await download(PINNED_BUNDLE_URL, tgz);
+            digest = await download(PINNED_BUNDLE_URL, tgz, aborter.signal);
             log(`render-gate: bundle ${LINTER_PIN.slice(0, 12)} (matches the pinned linter)`);
           } catch (e) {
+            if (aborter.signal.aborted) {
+              throw aborter.signal.reason instanceof Error
+                ? aborter.signal.reason
+                : e;
+            }
             throw new Error(
               `no render-gate bundle published for linter commit ${LINTER_PIN.slice(0, 12)}, ` +
                 `which is the one this extension build was tested against. ` +
@@ -230,7 +265,7 @@ export async function installRenderGate(
           }
         } else {
           bundleUrl = ROLLING_BUNDLE_URL;
-          digest = await download(ROLLING_BUNDLE_URL, tgz);
+          digest = await download(ROLLING_BUNDLE_URL, tgz, aborter.signal);
           log(
             PINNED_BUNDLE_URL
               ? "render-gate: rolling bundle (abap2ui5.viewCheck.rollingBundle) - this is the linter's current main, not the commit this build pins"
@@ -248,6 +283,9 @@ export async function installRenderGate(
         if (!fs.existsSync(path.join(staging, "cli.mjs"))) {
           throw new Error("bundle did not contain cli.mjs");
         }
+        if (token.isCancellationRequested) {
+          throw new Error("install cancelled");
+        }
 
         progress.report({
           message: "downloading Chromium for headless rendering (one time)...",
@@ -261,6 +299,9 @@ export async function installRenderGate(
           { PLAYWRIGHT_BROWSERS_PATH: path.join(staging, "browsers") },
           log
         );
+        if (token.isCancellationRequested) {
+          throw new Error("install cancelled");
+        }
 
         // the download is through and the bundle is complete - only now does
         // the installation that was there make way
@@ -311,8 +352,38 @@ export async function installRenderGate(
     );
     return false;
   } finally {
+    clearTimeout(timeout);
     installing = false;
   }
+}
+
+/**
+ * What "abap2UI5: Update Render Gate" reports before reinstalling: which
+ * bundle URL is in effect (the pinned per-commit one, or the rolling tag),
+ * the linter commit this build pins, whether a gate is installed at all, and
+ * the digest remembered for that URL - the trust-on-first-use anchor
+ * `verifyBundle` compares the next download against.
+ */
+export function renderGateStatus(context: vscode.ExtensionContext): {
+  installed: boolean;
+  bundleUrl: string;
+  /** The full SHA of the pinned linter commit; undefined in a dev build. */
+  pinnedCommit?: string;
+  /** The remembered sha256 of the effective bundle URL, when one download
+   *  from it has been verified before. */
+  storedDigest?: string;
+} {
+  const allowRolling = vscode.workspace
+    .getConfiguration("abap2ui5")
+    .get<boolean>("viewCheck.rollingBundle", false);
+  const bundleUrl =
+    PINNED_BUNDLE_URL && !allowRolling ? PINNED_BUNDLE_URL : ROLLING_BUNDLE_URL;
+  return {
+    installed: renderGateCli(context) !== undefined,
+    bundleUrl,
+    pinnedCommit: LINTER_PIN || undefined,
+    storedDigest: context.globalState.get<string>(digestKey(bundleUrl)),
+  };
 }
 
 /** One-time offer to install the gate; shown when the render gate is wanted

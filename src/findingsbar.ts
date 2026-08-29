@@ -61,12 +61,14 @@ export function registerFindingsBar(context: vscode.ExtensionContext): void {
       : counts.warnings
         ? new vscode.ThemeColor("statusBarItem.warningBackground")
         : undefined;
-    /* Clicking opens the list the numbers came from. The one thing it must
-     * NOT do is change the file: an autofix behind a status-bar click is a
-     * silent edit of everything the number covers. */
+    /* Clicking opens the list the numbers came from - our own findings tree
+     * (`<viewId>.focus` is registered by VS Code for every contributed view),
+     * where the counts are not mixed in with every other provider's entries.
+     * The one thing it must NOT do is change the file: an autofix behind a
+     * status-bar click is a silent edit of everything the number covers. */
     item.command = {
       title: "Show the findings",
-      command: "workbench.actions.view.problems",
+      command: "abap2ui5.findings.focus",
     };
     item.show();
   };

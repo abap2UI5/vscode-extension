@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { classNameOf, usesBuilder } from "./abap";
-import { formatDocument } from "./xmlformat";
+import { formatDocument, lineForOffset } from "./xmlformat";
 
 /*
  * "Show Reconstructed XML View" - the linter's view of the class, for people.
@@ -54,6 +54,9 @@ let lastOffsets: Array<number | undefined> | undefined;
  *  and until it did, a jump used the previous class's offsets against the new
  *  source - landing somewhere arbitrary in it rather than on the call. */
 let lastOffsetsFor: string | undefined;
+/** Source uri + version of the last render - `prepareAbap` over an
+ *  unchanged buffer (tab switches, provider re-fires) is pure cost. */
+let lastRenderKey: string | undefined;
 
 /** A source the preview can follow: an ABAP buffer that builds views. */
 function isFollowable(doc: vscode.TextDocument): boolean {
@@ -71,31 +74,6 @@ function activeSourceDoc(): vscode.TextDocument | undefined {
   return vscode.workspace.textDocuments.find(
     (doc) => doc.uri.toString() === key
   );
-}
-
-/** The XML line a source offset renders on: the exact line when one carries
- *  that offset, otherwise the nearest line whose call starts before it - a
- *  finding recorded inside an argument list still lands on its element. */
-function lineForOffset(
-  offsets: Array<number | undefined>,
-  target: number
-): number | undefined {
-  let best: number | undefined;
-  let bestOffset = -1;
-  for (let line = 0; line < offsets.length; line++) {
-    const offset = offsets[line];
-    if (offset === undefined || offset > target) {
-      continue;
-    }
-    if (offset === target) {
-      return line;
-    }
-    if (offset >= bestOffset) {
-      bestOffset = offset;
-      best = line;
-    }
-  }
-  return best;
 }
 
 const SEVERITY = {
@@ -159,6 +137,15 @@ export function registerXmlPreview(
   }
 
   function render(source: vscode.TextDocument): string {
+    const key = `${source.uri.toString()}@${source.version}`;
+    if (key === lastRenderKey && lastContent !== undefined) {
+      // same buffer, same version - re-mirror (the findings may be newer),
+      // but do not reconstruct again
+      if (lastOffsets && lastOffsetsFor === source.uri.toString()) {
+        mirrorFindings(source, lastOffsets, lastContent.split("\n"));
+      }
+      return lastContent;
+    }
     const prep = prepareAbap(source.getText());
     const className =
       classNameOf(source.getText(), source.fileName).toUpperCase() ||
@@ -171,6 +158,7 @@ export function registerXmlPreview(
       lastContent = empty;
       lastOffsets = undefined;
       lastOffsetsFor = undefined;
+      lastRenderKey = key;
       diagnostics.delete(PREVIEW_URI);
       return empty;
     }
@@ -178,6 +166,7 @@ export function registerXmlPreview(
     lastContent = formatted.text;
     lastOffsets = formatted.lineOffsets;
     lastOffsetsFor = source.uri.toString();
+    lastRenderKey = key;
     mirrorFindings(source, formatted.lineOffsets, formatted.text.split("\n"));
     return formatted.text;
   }
@@ -209,6 +198,45 @@ export function registerXmlPreview(
     }, delay);
   };
 
+  /** The reverse of Go to Definition: the XML line whose builder call the
+   *  ABAP cursor sits on, highlighted and scrolled into view. */
+  const syncHighlight = vscode.window.createTextEditorDecorationType({
+    backgroundColor: new vscode.ThemeColor("editor.rangeHighlightBackground"),
+    isWholeLine: true,
+  });
+
+  const syncPreviewToCursor = (e: vscode.TextEditorSelectionChangeEvent) => {
+    if (!previewOpen) {
+      return;
+    }
+    const doc = e.textEditor.document;
+    if (
+      doc.uri.toString() !== activeSource?.toString() ||
+      !lastOffsets ||
+      lastOffsetsFor !== doc.uri.toString()
+    ) {
+      return;
+    }
+    const active = e.selections[0]?.active ?? e.textEditor.selection.active;
+    const line = lineForOffset(lastOffsets, doc.offsetAt(active));
+    const previewKey = PREVIEW_URI.toString();
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (editor.document.uri.toString() !== previewKey) {
+        continue;
+      }
+      if (line === undefined || line >= editor.document.lineCount) {
+        editor.setDecorations(syncHighlight, []);
+        continue;
+      }
+      const range = editor.document.lineAt(line).range;
+      editor.setDecorations(syncHighlight, [range]);
+      editor.revealRange(
+        range,
+        vscode.TextEditorRevealType.InCenterIfOutsideViewport
+      );
+    }
+  };
+
   /** Points the preview at a class; re-renders when it is a new one. */
   const follow = (doc: vscode.TextDocument) => {
     const changed = activeSource?.toString() !== doc.uri.toString();
@@ -225,6 +253,7 @@ export function registerXmlPreview(
       provider
     ),
     diagnostics,
+    syncHighlight,
     {
       dispose: () => {
         if (timer) {
@@ -232,6 +261,9 @@ export function registerXmlPreview(
         }
       },
     },
+
+    // The preview follows the cursor within the class, not just the class.
+    vscode.window.onDidChangeTextEditorSelection(syncPreviewToCursor),
 
     // A line of the XML knows the builder call that wrote it.
     vscode.languages.registerDefinitionProvider(

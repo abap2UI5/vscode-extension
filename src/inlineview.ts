@@ -4,12 +4,17 @@ import { CONFIG_SECTION } from "./settings";
 import { DIAG_SOURCE } from "./diagnostics";
 
 import * as fs from "fs";
-import { prepareAbap } from "@abap2ui5/linter/reconstruct";
-import { memberInfo, controlInfo } from "./metadata";
+import { deprecationText, memberInfo, controlInfo } from "./metadata";
 import { snapshot } from "./snapshot";
 import { abapNsMap } from "./context";
-import { Annotation, costAnnotations, sinceAnnotations } from "./annotations";
+import {
+  Annotation,
+  costAnnotations,
+  deprecationAnnotations,
+  sinceAnnotations,
+} from "./annotations";
 import { usesBuilder } from "./abap";
+import { preparedAbapOf } from "./language";
 
 /*
  * What the editor says about a line without being asked - the three inline
@@ -102,7 +107,10 @@ export function registerInlineAnnotations(
     return out;
   };
 
-  /** The `@since` and roundtrip-cost annotations of one document. */
+  /** The deprecation, `@since` and roundtrip-cost annotations of one
+   *  document. The reconstruction comes out of the language features'
+   *  version-keyed memo, so a paint after a completion (or of a second
+   *  editor on the same document) does not parse the class again. */
   const metadataLines = (doc: vscode.TextDocument): Annotation[] => {
     const text = doc.getText();
     if (!usesBuilder(text)) {
@@ -111,19 +119,34 @@ export function registerInlineAnnotations(
     const data = snapshot();
     const floor = config().get<string>("viewCheck.minUi5", "1.71");
     const out: Annotation[] = [];
-    let prep;
-    try {
-      prep = prepareAbap(text);
-    } catch {
+    const prep = preparedAbapOf(doc);
+    if (!prep) {
       return []; // an unparsable buffer mid-edit is not worth reporting
     }
-    if (config().get<boolean>("inlineSince", true) && data) {
-      out.push(
-        ...sinceAnnotations(prep.nodes, abapNsMap(text), floor, {
-          control: (control) => controlInfo(data, control)?.since,
-          member: (control, member) => memberInfo(data, control, member)?.since,
-        })
-      );
+    const showDeprecated = config().get<boolean>("inlineDeprecated", true);
+    const showSince = config().get<boolean>("inlineSince", true);
+    if (data && (showDeprecated || showSince)) {
+      const ns = abapNsMap(text);
+      // deprecations first - where a line carries both, the deprecation is
+      // the one worth the line's single annotation
+      if (showDeprecated) {
+        out.push(
+          ...deprecationAnnotations(prep.nodes, ns, {
+            control: (control) =>
+              deprecationText(controlInfo(data, control)?.deprecated),
+            member: (control, member) =>
+              deprecationText(memberInfo(data, control, member)?.deprecated),
+          })
+        );
+      }
+      if (showSince) {
+        out.push(
+          ...sinceAnnotations(prep.nodes, ns, floor, {
+            control: (control) => controlInfo(data, control)?.since,
+            member: (control, member) => memberInfo(data, control, member)?.since,
+          })
+        );
+      }
     }
     if (config().get<boolean>("inlineRoundtripCost", true)) {
       const mock = mockModel(doc);
@@ -253,6 +276,7 @@ export function registerInlineAnnotations(
       if (
         e.affectsConfiguration("abap2ui5.inlineFindings") ||
         e.affectsConfiguration("abap2ui5.inlineSince") ||
+        e.affectsConfiguration("abap2ui5.inlineDeprecated") ||
         e.affectsConfiguration("abap2ui5.inlineRoundtripCost") ||
         e.affectsConfiguration("abap2ui5.viewCheck.minUi5")
       ) {

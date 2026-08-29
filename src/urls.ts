@@ -7,9 +7,15 @@
 import { URL } from "url";
 
 /** Collapses duplicate slashes in the path but leaves `://` in the protocol
- *  intact — a template ending in `/` next to a path starting with `/`. */
+ *  intact — a template ending in `/` next to a path starting with `/`. The
+ *  query and fragment stay untouched: a parameter value legitimately carries
+ *  `//` (a URL in a URL), and collapsing there corrupted it. */
 export function normalizeUrl(url: string): string {
-  return url.replace(/(?<!:)\/{2,}/g, "/");
+  const cut = url.search(/[?#]/);
+  if (cut === -1) {
+    return url.replace(/(?<!:)\/{2,}/g, "/");
+  }
+  return url.slice(0, cut).replace(/(?<!:)\/{2,}/g, "/") + url.slice(cut);
 }
 
 /** `https://host:44300/sap/bc/z2ui5?app_start=X` -> `host:44300/sap/bc/z2ui5` */

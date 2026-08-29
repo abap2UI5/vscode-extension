@@ -17,9 +17,29 @@ test("an app class is recognised in both INTERFACES spellings", () => {
   assert.ok(isAppClass("  interfaces z2ui5_if_app ."));
 });
 
+test("the app interface counts anywhere in a chained INTERFACES", () => {
+  // one comma further than the colon bug: listed after another interface,
+  // the app interface used to fall through exactly the same way
+  assert.ok(isAppClass("  INTERFACES: if_serializable_object, z2ui5_if_app.\n"));
+  assert.ok(
+    isAppClass(
+      "  INTERFACES:\n    if_serializable_object,\n    z2ui5_if_app.\n"
+    )
+  );
+  // but never across a statement boundary
+  assert.equal(
+    isAppClass("  INTERFACES if_serializable_object.\n  DATA z2ui5_if_app TYPE string.\n"),
+    false
+  );
+});
+
 test("a class implementing something else is not an app", () => {
   assert.equal(isAppClass("INTERFACES z2ui5_if_app_types."), false);
   assert.equal(isAppClass("INTERFACES if_oo_adt_classrun."), false);
+  assert.equal(
+    isAppClass("INTERFACES: if_serializable_object, z2ui5_if_app_types."),
+    false
+  );
 });
 
 test("only the generic builder counts as checkable", () => {
@@ -48,6 +68,24 @@ test("a class name quoted in a comment does not win", () => {
 test("without a definition the file name is used", () => {
   assert.equal(classNameOf("* nothing here", "/tmp/zcl_fallback.clas.abap"), "ZCL_FALLBACK");
   assert.equal(classNameOf("", "zcl_plain.abap"), "ZCL_PLAIN");
+});
+
+test("a DEFINITION DEFERRED is an announcement, not the definition", () => {
+  const source = [
+    "CLASS lcl_helper DEFINITION DEFERRED.",
+    "CLASS zcl_app DEFINITION PUBLIC INHERITING FROM zcl_app_base.",
+    "  PUBLIC SECTION.",
+    "ENDCLASS.",
+  ].join("\n");
+  assert.equal(classNameOf(source, "zcl_app.clas.abap"), "ZCL_APP");
+  // the deferred line used to answer for the real class - with no
+  // INHERITING FROM, so an app behind it went unrecognised
+  assert.equal(superclassOf(source), "ZCL_APP_BASE");
+  // a file holding only local classes still names its first one
+  assert.equal(
+    classNameOf("CLASS lcl_only DEFINITION.\nENDCLASS.", "x.abap"),
+    "LCL_ONLY"
+  );
 });
 
 test("errorTokens pulls paths and quoted names out of an error text", () => {
@@ -86,6 +124,37 @@ test("declarationSpan finds the TYPES field, else the DATA line", () => {
   const rel = declarationSpan(src, "/MT_TRAVELS/ID");
   assert.equal(src.slice(rel!.start, rel!.end), "id");
   assert.equal(declarationSpan(src, "/NOPE"), undefined);
+});
+
+test("declarationSpan does not land on a commented-out declaration", () => {
+  const { declarationSpan } = require("../abap") as typeof import("../abap");
+  const src = [
+    '" DATA mv_title TYPE string - the old spot',
+    "CLASS zcl_x DEFINITION PUBLIC.",
+    "  PUBLIC SECTION.",
+    "    DATA mv_title TYPE string.",
+    "ENDCLASS.",
+  ].join("\n");
+  const span = declarationSpan(src, "/MV_TITLE");
+  assert.ok(span);
+  assert.equal(src.slice(span!.start, span!.end), "mv_title");
+  assert.equal(src.slice(0, span!.start).split("\n").length, 4, "the comment won");
+});
+
+test("declarationSpan reads the statement-per-line BEGIN OF form too", () => {
+  const { declarationSpan } = require("../abap") as typeof import("../abap");
+  const src = [
+    "CLASS zcl_x DEFINITION PUBLIC.",
+    "  PUBLIC SECTION.",
+    "    TYPES BEGIN OF ty_s_row.",
+    "    TYPES id TYPE string.",
+    "    TYPES END OF ty_s_row.",
+    "    DATA mt_rows TYPE STANDARD TABLE OF ty_s_row WITH EMPTY KEY.",
+    "ENDCLASS.",
+  ].join("\n");
+  const span = declarationSpan(src, "/MT_ROWS/ID");
+  assert.ok(span, "the non-chained block form was not entered");
+  assert.equal(src.slice(span!.start, span!.end), "id");
 });
 
 /*
