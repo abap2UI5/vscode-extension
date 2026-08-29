@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { classDefinitionOffset, usesBuilder } from "./abap";
 import { isAppSource } from "./appclasses";
-import { eventUsagesOf, whenBranches } from "./context";
+import { eventRaises, whenBranches } from "./context";
 import { fixableCount } from "./quickfix";
 
 /*
@@ -101,12 +101,32 @@ function fixLens(range: vscode.Range, doc: vscode.TextDocument): vscode.CodeLens
  * the view", opening a peek at the `_event( )` call(s). A WHEN nothing
  * raises gets no lens - the CASE may switch over something else entirely,
  * and a wrong "0×" would accuse innocent code.
+ *
+ * And the counterpart on the raise: an `_event( )` naming an event no WHEN
+ * of the class handles gets a lens saying so - the wire that addresses
+ * nothing does nothing at runtime, silently. Only when the class dispatches
+ * at all (it has WHEN branches); a class handing its events elsewhere would
+ * otherwise be accused on every raise.
+ *
+ * One scan of the source serves every lens: the raises are indexed once,
+ * where each branch used to re-read the whole class for its own count.
  */
 function whenLenses(doc: vscode.TextDocument, text: string): vscode.CodeLens[] {
   const lenses: vscode.CodeLens[] = [];
-  for (const branch of whenBranches(text)) {
-    const usages = eventUsagesOf(text, branch.name);
-    if (!usages.length) {
+  const raises = eventRaises(text);
+  const branches = whenBranches(text);
+  const raisesByName = new Map<string, number[]>();
+  for (const raise of raises) {
+    const key = raise.name.toUpperCase();
+    const list = raisesByName.get(key) ?? [];
+    list.push(raise.at);
+    raisesByName.set(key, list);
+  }
+  const handled = new Set(branches.map((branch) => branch.name.toUpperCase()));
+
+  for (const branch of branches) {
+    const usages = raisesByName.get(branch.name.toUpperCase());
+    if (!usages?.length) {
       continue;
     }
     const at = doc.positionAt(branch.start);
@@ -122,6 +142,27 @@ function whenLenses(doc: vscode.TextDocument, text: string): vscode.CodeLens[] {
         arguments: [doc.uri, at, locations],
       })
     );
+  }
+
+  if (branches.length) {
+    const flagged = new Set<string>();
+    for (const raise of raises) {
+      const key = raise.name.toUpperCase();
+      if (handled.has(key) || flagged.has(key)) {
+        continue;
+      }
+      flagged.add(key);
+      const at = doc.positionAt(raise.at);
+      lenses.push(
+        new vscode.CodeLens(new vscode.Range(at, at), {
+          title: `$(warning) '${raise.name}' has no WHEN branch`,
+          tooltip:
+            "The view raises this event, but no WHEN of this class handles it - " +
+            "at runtime the raise does nothing, silently.",
+          command: "",
+        })
+      );
+    }
   }
   return lenses;
 }

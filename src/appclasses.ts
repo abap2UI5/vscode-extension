@@ -28,7 +28,33 @@ import { abapSources, isAbapDocument } from "./abapsources";
 /** Upper-cased class name -> its source, for the classes this window sees. */
 let index = new Map<string, string>();
 let refreshing: Promise<void> | undefined;
+let rerun = false;
 let scheduled: NodeJS.Timeout | undefined;
+
+/** What an open document last told us about itself, keyed on the document so
+ *  a closed one falls away with it. `sourceOf` runs per inheritance hop on
+ *  every CodeLens pass - re-reading and re-parsing every open document each
+ *  time is what this memo replaces with a version check. */
+const docNames = new WeakMap<
+  vscode.TextDocument,
+  { version: number; name: string; text: string }
+>();
+
+function docEntry(
+  doc: vscode.TextDocument
+): { version: number; name: string; text: string } {
+  let entry = docNames.get(doc);
+  if (!entry || entry.version !== doc.version) {
+    const text = doc.getText();
+    entry = {
+      version: doc.version,
+      name: classNameOf(text, doc.uri.path),
+      text,
+    };
+    docNames.set(doc, entry);
+  }
+  return entry;
+}
 
 /** Open documents first: they are what the user is editing, so their text
  *  beats whatever is on disk for the same class. */
@@ -38,15 +64,18 @@ function openDocuments(): Map<string, string> {
     if (!isAbapDocument(doc)) {
       continue;
     }
-    const text = doc.getText();
-    out.set(classNameOf(text, doc.uri.path), text);
+    const entry = docEntry(doc);
+    out.set(entry.name, entry.text);
   }
   return out;
 }
 
-/** Rebuilds the index from the workspace's files and the open documents. */
+/** Rebuilds the index from the workspace's files and the open documents. A
+ *  request landing while a rebuild is running marks it to run again - the
+ *  in-flight pass read the files before the change that asked for it. */
 export async function refreshAppClasses(): Promise<void> {
   if (refreshing) {
+    rerun = true;
     return refreshing;
   }
   refreshing = (async () => {
@@ -67,7 +96,18 @@ export async function refreshAppClasses(): Promise<void> {
     await refreshing;
   } finally {
     refreshing = undefined;
+    if (rerun) {
+      rerun = false;
+      void refreshAppClasses();
+    }
   }
+}
+
+/** One document's entry, updated in place - a save can only change that one
+ *  class, so the whole workspace does not need to be re-read for it. */
+function updateFromDocument(doc: vscode.TextDocument): void {
+  const entry = docEntry(doc);
+  index.set(entry.name, entry.text);
 }
 
 /** The source of a class this window knows, by name. */
@@ -78,9 +118,9 @@ function sourceOf(className: string): string | undefined {
     if (!isAbapDocument(doc)) {
       continue;
     }
-    const text = doc.getText();
-    if (classNameOf(text, doc.uri.path) === name) {
-      return text;
+    const entry = docEntry(doc);
+    if (entry.name === name) {
+      return entry.text;
     }
   }
   return index.get(name);
@@ -128,12 +168,21 @@ export function registerAppClasses(context: vscode.ExtensionContext): void {
         }
       },
     },
+    // a save or an open concerns one document, and its entry is updated in
+    // place - the full rebuild is for what those events cannot see
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (isAbapDocument(doc)) {
-        schedule();
+        updateFromDocument(doc);
       }
     }),
     vscode.workspace.onDidOpenTextDocument((doc) => {
+      if (isAbapDocument(doc)) {
+        updateFromDocument(doc);
+      }
+    }),
+    // a closed ADT or untitled document leaves the window's view - the
+    // rebuild drops it (a file on disk is picked up again)
+    vscode.workspace.onDidCloseTextDocument((doc) => {
       if (isAbapDocument(doc)) {
         schedule();
       }

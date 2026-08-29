@@ -1,8 +1,12 @@
 import * as vscode from "vscode";
 import * as os from "os";
-import { registerMcp } from "./mcp";
+import { mcpStatus, registerMcp } from "./mcp";
 import { createSystemMcpServer } from "./mcpsystem";
-import { registerRenderGate } from "./rendergate";
+import {
+  installRenderGate,
+  registerRenderGate,
+  renderGateStatus,
+} from "./rendergate";
 import { findingsNow, registerViewCheck } from "./viewcheck";
 import { registerXmlPreview } from "./xmlpreview";
 import { registerQuickFix } from "./quickfix";
@@ -69,6 +73,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const provider = new PreviewViewProvider(session);
   session.previewProvider = provider;
   session.reloadShown = (reason) => reloadShownApp(session, reason);
+  session.notifyShown = (message) => postToShownApp(session, message);
   const log = (message: string) => session.log(message);
 
   // The session is the dispose chain: channels, status bar, proxy,
@@ -82,9 +87,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Every request the embedded app makes goes through the proxy - log it
   // with its full roundtrip time, and feed the toolbar's badge with the
-  // POSTs (the app's backend roundtrips).
+  // POSTs (the app's backend roundtrips). The same lines feed a bounded
+  // ring so the system MCP server's `get_traffic` can hand an agent what
+  // the traffic channel shows - an output channel cannot be read back.
+  const TRAFFIC_RING_CAP = 200;
+  const trafficRing: string[] = [];
   session.proxy.onTraffic = (entry) => {
-    session.trafficOutput.appendLine(formatTrafficLine(entry));
+    const line = formatTrafficLine(entry);
+    session.trafficOutput.appendLine(line);
+    trafficRing.push(line);
+    if (trafficRing.length > TRAFFIC_RING_CAP) {
+      trafficRing.shift();
+    }
     if (isRoundtrip(entry)) {
       postToShownApp(session, { type: "roundtrip", ms: entry.durationMs });
     }
@@ -104,8 +118,14 @@ export function activate(context: vscode.ExtensionContext): void {
       // nowhere. The tab surface has kept its context for the same reason.
       { webviewOptions: { retainContextWhenHidden: true } }
     ),
-    vscode.commands.registerCommand("abap2ui5.run", () =>
-      runApp(session, provider)
+    // The optional class name serves the welcome screen's one-click relaunch;
+    // the palette, F9 and the CodeLens pass nothing and keep the editor path.
+    vscode.commands.registerCommand("abap2ui5.run", (className?: unknown) =>
+      runApp(
+        session,
+        provider,
+        typeof className === "string" ? className : undefined
+      )
     ),
     vscode.commands.registerCommand("abap2ui5.reload", () => {
       if (!session.currentTarget) {
@@ -219,13 +239,13 @@ export function activate(context: vscode.ExtensionContext): void {
       if (trigger === "never") {
         return;
       }
-      if (!isAppSource(doc.getText())) {
+      // The cheap name check first: it dismisses every save of another class
+      // before the full app-source scan runs.
+      const text = doc.getText();
+      if (classNameOf(text, doc.fileName) !== session.currentTarget.className) {
         return;
       }
-      if (
-        classNameOf(doc.getText(), doc.fileName) !==
-        session.currentTarget.className
-      ) {
+      if (!isAppSource(text)) {
         return;
       }
       if (trigger === "activation") {
@@ -259,7 +279,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("abap2ui5.showTraffic", () => {
       session.trafficOutput.show(true);
     }),
-    vscode.commands.registerCommand("abap2ui5.screenshot", async () => {
+    // `device` comes from the preview toolbar, so the PNG matches the width
+    // the user is looking at; the palette passes nothing and gets desktop.
+    vscode.commands.registerCommand("abap2ui5.screenshot", async (device?: unknown) => {
       if (!session.currentTarget || !session.proxy.isRunning) {
         vscode.window.showInformationMessage(
           "abap2UI5: run an app in tab or panel mode first - the screenshot " +
@@ -267,11 +289,14 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
+      const widths: Record<string, number> = { tablet: 834, phone: 414 };
+      const width = typeof device === "string" ? widths[device] : undefined;
       const file = await takeScreenshot(
         context,
         {
           url: session.currentTarget.frameUrl,
           className: session.currentTarget.className,
+          width,
         },
         log
       );
@@ -306,7 +331,80 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.env.openExternal(
         vscode.Uri.parse("https://github.com/abap2UI5/abap2UI5")
       )
-    )
+    ),
+    // The status-bar item's click: everything one does WITH a running
+    // preview, in one QuickPick, instead of five commands to remember.
+    vscode.commands.registerCommand("abap2ui5.previewMenu", async () => {
+      const target = session.currentTarget;
+      const mode = session.openMode();
+      type Action = vscode.QuickPickItem & { run(): Thenable<unknown> | void };
+      const items: Action[] = [
+        {
+          label: "$(refresh) Reload",
+          description: target?.className,
+          run: () => vscode.commands.executeCommand("abap2ui5.reload"),
+        },
+        mode === "panel"
+          ? {
+              label: "$(window) Move Preview to an Editor Tab",
+              run: () => vscode.commands.executeCommand("abap2ui5.previewInTab"),
+            }
+          : {
+              label: "$(layout-panel) Move Preview to the Panel",
+              run: () => vscode.commands.executeCommand("abap2ui5.previewInPanel"),
+            },
+        {
+          label: "$(link-external) Open in Browser",
+          description: target ? shortUrl(target.externalUrl) : undefined,
+          run: () =>
+            target
+              ? vscode.env.openExternal(vscode.Uri.parse(target.externalUrl))
+              : vscode.window.showInformationMessage(
+                  "abap2UI5: no app is running yet - press F9 in an app class."
+                ),
+        },
+        {
+          label: "$(device-camera) Take App Screenshot",
+          run: () => vscode.commands.executeCommand("abap2ui5.screenshot"),
+        },
+        {
+          label: "$(plug) Check System Connection",
+          run: () => vscode.commands.executeCommand("abap2ui5.checkConnection"),
+        },
+      ];
+      const pick = await vscode.window.showQuickPick(items, {
+        title: "abap2UI5: Preview Actions",
+        placeHolder: target
+          ? `${target.className} on ${target.system}`
+          : "No app is running - press F9 in an app class to start one",
+      });
+      await pick?.run();
+    }),
+    // Reinstall the render gate on demand - and say first what is installed:
+    // the pinned linter commit and the remembered bundle digest are what a
+    // bug report about a render-gate finding needs.
+    vscode.commands.registerCommand("abap2ui5.updateRenderGate", async () => {
+      const status = renderGateStatus(context);
+      log(
+        `render-gate: ${status.installed ? "installed" : "not installed"} - ` +
+          `pinned linter commit ${
+            status.pinnedCommit ? status.pinnedCommit.slice(0, 12) : "none (dev build)"
+          }, stored bundle digest ${
+            status.storedDigest
+              ? `${status.storedDigest.slice(0, 12)}…`
+              : "none (nothing downloaded from this URL yet)"
+          }`
+      );
+      log(`render-gate: bundle URL ${status.bundleUrl}`);
+      const installed = await installRenderGate(context, log);
+      // success and failure already speak for themselves (installRenderGate
+      // shows both); the log ties the outcome to the digests above
+      log(
+        installed
+          ? "render-gate: update finished"
+          : "render-gate: update did not complete - see the messages above"
+      );
+    })
   );
 
   const connectSystem = makeConnectSystem(session);
@@ -340,13 +438,61 @@ export function activate(context: vscode.ExtensionContext): void {
         const externalUrl = session.urlFor(system, className);
         return proxiedUrl(externalUrl, session.proxy.origin);
       },
-      screenshot: (className, url) =>
-        takeScreenshot(context, { url, className }, log),
+      screenshot: (className, url, viewport) =>
+        takeScreenshot(
+          context,
+          { url, className, width: viewport?.width, height: viewport?.height },
+          log
+        ),
+      recentTraffic: () => [...trafficRing],
       log,
     },
     String(context.extension.packageJSON.version ?? "0.0.0")
   );
   context.subscriptions.push({ dispose: () => systemMcp.dispose() });
+
+  // What the MCP registration resolved - the answer to "why does my agent
+  // not see the abap2UI5 tools". The system server's URL is shown as origin
+  // only: the token path segment authorizes acting with the stored system
+  // credentials and belongs in no message or log.
+  context.subscriptions.push(
+    vscode.commands.registerCommand("abap2ui5.showMcpStatus", () => {
+      const status = mcpStatus();
+      const stdio = status.stdioEnabled
+        ? `${status.stdioCommand.join(" ")} (from ${status.stdioSource})`
+        : "disabled (abap2ui5.mcp.enabled is off)";
+      const systemUrl = systemMcp.currentUrl();
+      const systemOrigin = (() => {
+        if (!systemUrl) {
+          return undefined;
+        }
+        try {
+          return new URL(systemUrl).origin;
+        } catch {
+          return undefined;
+        }
+      })();
+      const system = !status.systemEnabled
+        ? "disabled (abap2ui5.mcp.system is off)"
+        : systemOrigin
+          ? `running on ${systemOrigin}`
+          : "enabled, not started yet (starts when an MCP client asks for it)";
+      log(`mcp: status - stdio server: ${stdio}`);
+      const envEntries = Object.entries(status.env);
+      if (status.stdioEnabled && envEntries.length) {
+        log(
+          `mcp: status - checkout env: ${envEntries
+            .map(([key, value]) => `${key}=${value}`)
+            .join(", ")}`
+        );
+      }
+      log(`mcp: status - system server: ${system}`);
+      vscode.window.showInformationMessage(
+        `abap2UI5 MCP - stdio server: ${stdio}; system server: ${system}. ` +
+          "Details in the abap2UI5 output channel."
+      );
+    })
+  );
 
   // before the features that ask it whether a class is an app - an app that
   // inherits z2ui5_if_app is only recognised once the window's classes are

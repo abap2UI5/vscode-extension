@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as http from "http";
 import * as https from "https";
+import * as net from "net";
 import { AddressInfo } from "net";
 import {
   allowFraming,
@@ -201,6 +202,21 @@ test("ADT search answers reduce to unique class names", () => {
   assert.deepEqual(parseAdtClassNames(xml), ["ZCL_APP_ONE", "ZCL_APP_TWO"]);
 });
 
+test("ADT search answers keep the short text and the package", () => {
+  const { parseAdtClassRefs } = require("../proxy") as typeof import("../proxy");
+  const xml =
+    `<adtcore:objectReference adtcore:type="CLAS/OC" adtcore:name="ZCL_A" ` +
+    `adtcore:description="My app" adtcore:packageName="ZPKG"/>` +
+    `<adtcore:objectReference adtcore:type="CLAS/OC" adtcore:name="ZCL_B"/>`;
+  const refs = parseAdtClassRefs(xml);
+  assert.equal(refs[0].name, "ZCL_A");
+  assert.equal(refs[0].description, "My app");
+  assert.equal(refs[0].packageName, "ZPKG");
+  assert.equal(refs[1].name, "ZCL_B");
+  assert.equal(refs[1].description, undefined);
+  assert.equal(refs[1].packageName, undefined);
+});
+
 // ---------------------------------------------------------------------------
 // Who may use the proxy - the token, the Host check and the cookie
 // ---------------------------------------------------------------------------
@@ -337,9 +353,13 @@ test("the first answer plants the cookie an absolute path needs", async () => {
     const entry = await rawGet(proxy, `${tokenPath(proxy)}/sap/bc/z2ui5`);
     assert.equal(entry.status, 200);
     const planted = entry.setCookie.find((c) =>
-      c.startsWith("__abap2ui5_proxy=")
+      c.startsWith("__abap2ui5_proxy_")
     );
     assert.ok(planted, "the answer carries the cookie");
+    assert.ok(
+      planted!.startsWith(`__abap2ui5_proxy_${new URL(proxy.origin).port}=`),
+      "named after the port - cookies are host-scoped, two windows are not"
+    );
     assert.match(planted!, /HttpOnly/, "the page cannot read it back out");
     // in the preview the page sits in an iframe whose top-level document is
     // the vscode-webview:// origin - every request it makes is cross-site
@@ -366,10 +386,80 @@ test("the proxy's own cookie stops at the proxy", async () => {
   try {
     await proxy.start(system.origin, "user", "pass");
     const token = tokenPath(proxy).split("/")[2];
+    const port = new URL(proxy.origin).port;
     await rawGet(proxy, `${tokenPath(proxy)}/sap/bc/z2ui5`, {
-      cookie: `sap-usercontext=x; __abap2ui5_proxy=${token}`,
+      // its own cookie, another window's port-scoped one, and a pre-0.24
+      // unscoped leftover - none of them is the system's business
+      cookie:
+        `sap-usercontext=x; __abap2ui5_proxy_${port}=${token}; ` +
+        `__abap2ui5_proxy_9999=other; __abap2ui5_proxy=stale`,
     });
     assert.equal(system.seen[0].cookie, "sap-usercontext=x");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the cookie is port-scoped, so two proxies do not fight over it", async () => {
+  // two windows, two systems at once is a supported setup - and cookies are
+  // host-scoped, so one shared name meant the second proxy's cookie
+  // overwrote the first's and broke its absolute-path requests
+  const one = await recordingSystem();
+  const two = await recordingSystem();
+  const a = new SapProxy();
+  const b = new SapProxy();
+  try {
+    await a.start(one.origin, "user", "pass");
+    await b.start(two.origin, "user", "pass");
+    const cookieOf = async (proxy: SapProxy) =>
+      (await rawGet(proxy, `${tokenPath(proxy)}/entry`)).setCookie
+        .find((c) => c.startsWith("__abap2ui5_proxy_"))!
+        .split(";")[0];
+    const cookieA = await cookieOf(a);
+    const cookieB = await cookieOf(b);
+    assert.notEqual(cookieA.split("=")[0], cookieB.split("=")[0]);
+    // the browser sends BOTH to either port - each proxy takes its own
+    const jar = `${cookieA}; ${cookieB}`;
+    assert.equal((await rawGet(a, "/abs.js", { cookie: jar })).status, 200);
+    assert.equal((await rawGet(b, "/abs.js", { cookie: jar })).status, 200);
+    // the other proxy's cookie alone authorizes nothing
+    assert.equal((await rawGet(a, "/abs.js", { cookie: cookieB })).status, 404);
+  } finally {
+    await a.stop();
+    await b.stop();
+    one.close();
+    two.close();
+  }
+});
+
+test("the gate fails closed while the proxy holds no token", async () => {
+  // during stop( )'s close window the token is already cleared, and the
+  // cookie comparison used to authorize a cookie-less request with
+  // `undefined === undefined` - straight into the cleared state
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  const gate = proxy as unknown as {
+    route(req: {
+      headers: Record<string, string | undefined>;
+      url?: string;
+    }): string | undefined;
+  };
+  const cookieless = { headers: { host: "127.0.0.1" }, url: "/sap/bc/z2ui5" };
+  try {
+    assert.equal(gate.route(cookieless), undefined, "never started");
+    await proxy.start(system.origin, "user", "pass");
+    assert.equal(gate.route(cookieless), undefined, "running, but no token");
+    await proxy.stop();
+    assert.equal(gate.route(cookieless), undefined, "stopped");
+    assert.equal(
+      gate.route({
+        headers: { host: "127.0.0.1" },
+        url: "/__abap2ui5/undefined/sap/bc/z2ui5",
+      }),
+      undefined,
+      "the cleared token is not addressable by its spelling"
+    );
   } finally {
     await proxy.stop();
     system.close();
@@ -894,4 +984,231 @@ test("a style whose end tag carries a space does not reach the log either", () =
     `<style\n>.x { color: red }</style\n>` +
     `<h1>Password must be changed</h1></body></html>`;
   assert.equal(describeRejection(page), "Password must be changed");
+});
+
+// ---------------------------------------------------------------------------
+// fetchFromSystem: the cap, the abort, and the background flag
+// ---------------------------------------------------------------------------
+
+test("fetchFromSystem stops downloading a huge answer at the cap", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end(Buffer.alloc(2 * 1024 * 1024, 0x61));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(`http://127.0.0.1:${port}`, "user", "pass");
+    const { status, body } = await proxy.fetchFromSystem("/big");
+    assert.equal(status, 200);
+    assert.ok(body.length >= 256 * 1024, "the answerable part is kept");
+    assert.ok(body.length < 2 * 1024 * 1024, "the rest is not downloaded");
+  } finally {
+    await proxy.stop();
+    server.close();
+  }
+});
+
+test("fetchFromSystem can be aborted by its caller", async () => {
+  // the app search supersedes its own lookups while the user types
+  const server = http.createServer(() => {
+    // never answers
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(`http://127.0.0.1:${port}`, "user", "pass");
+    const abort = new AbortController();
+    const pending = proxy.fetchFromSystem("/slow", undefined, {
+      signal: abort.signal,
+    });
+    setTimeout(() => abort.abort(), 20);
+    await assert.rejects(pending);
+  } finally {
+    await proxy.stop();
+    server.close();
+  }
+});
+
+test("a background probe's 401 does not trip the retry breaker", async () => {
+  // the UI5-version probes run against paths (and possibly a client) the
+  // user never asked for - their rejection must not break the launch whose
+  // own credentials are fine, and must not raise the re-logon prompt
+  const system = await rejectingSystem();
+  const proxy = new SapProxy();
+  const reported: number[] = [];
+  proxy.onResponse = (r) => reported.push(r.status);
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const probe = await proxy.fetchFromSystem("/version", undefined, {
+      background: true,
+    });
+    assert.equal(probe.status, 401, "the caller still sees the rejection");
+    assert.deepEqual(reported, [], "but nobody is prompted over a probe");
+    const real = await throughProxy(proxy, "/sap/bc/z2ui5");
+    assert.equal(real.status, 401);
+    assert.deepEqual(
+      system.seen,
+      ["/version", "/sap/bc/z2ui5"],
+      "the real request still went out - the breaker was not tripped"
+    );
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Lifecycle: stopping under load
+// ---------------------------------------------------------------------------
+
+test("stopping does not wait for a request the system never answers", async () => {
+  // stop( ) is what a system SWITCH awaits - held hostage by one hanging
+  // forward, F9 against the new system used to stall for the full timeout
+  const server = http.createServer(() => {
+    // accepts and says nothing
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(`http://127.0.0.1:${port}`, "user", "pass");
+    const hung = new Promise<void>((resolve) => {
+      const req = http.get(`${proxy.origin}/hang`, () => resolve());
+      req.on("error", () => resolve());
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    const before = Date.now();
+    await proxy.stop();
+    assert.ok(Date.now() - before < 2000, "stop did not wait out the forward");
+    await hung;
+  } finally {
+    await proxy.stop();
+    server.close();
+  }
+});
+
+test("a failed forward still writes a traffic entry", async () => {
+  const dead = http.createServer();
+  await new Promise<void>((r) => dead.listen(0, "127.0.0.1", r));
+  const port = (dead.address() as AddressInfo).port;
+  await new Promise<void>((r) => dead.close(() => r()));
+
+  const proxy = new SapProxy();
+  const entries: { status: number; path: string }[] = [];
+  proxy.onTraffic = (t) => entries.push({ status: t.status, path: t.path });
+  try {
+    await proxy.start(`http://127.0.0.1:${port}`, "user", "pass");
+    const answer = await throughProxy(proxy, "/x");
+    assert.equal(answer.status, 502);
+    assert.deepEqual(entries, [{ status: 502, path: "/x" }]);
+  } finally {
+    await proxy.stop();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// WebSocket upgrades: same gate, same credentials
+// ---------------------------------------------------------------------------
+
+/** A system with one WebSocket endpoint that echoes what it receives. */
+function upgradingSystem(): Promise<{
+  origin: string;
+  seen: { path?: string; auth?: string }[];
+  close: () => void;
+}> {
+  const seen: { path?: string; auth?: string }[] = [];
+  const server = http.createServer((_req, res) => res.end("plain"));
+  server.on("upgrade", (req, socket) => {
+    seen.push({ path: req.url, auth: String(req.headers.authorization ?? "") });
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\n" +
+        "Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+    );
+    socket.on("data", (chunk) => socket.write(chunk));
+    socket.on("error", () => socket.destroy());
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      resolve({
+        origin: `http://127.0.0.1:${port}`,
+        seen,
+        close: () => server.close(),
+      });
+    });
+  });
+}
+
+/** One raw upgrade attempt against the proxy - returns everything the
+ *  socket said until it closed or answered the probe payload. */
+function rawUpgrade(
+  proxy: SapProxy,
+  path: string
+): Promise<string> {
+  const port = Number(new URL(proxy.origin).port);
+  return new Promise((resolve) => {
+    const socket = net.connect(port, "127.0.0.1", () => {
+      socket.write(
+        `GET ${path} HTTP/1.1\r\n` +
+          `Host: 127.0.0.1:${port}\r\n` +
+          "Upgrade: websocket\r\nConnection: Upgrade\r\n" +
+          "Sec-WebSocket-Key: x\r\nSec-WebSocket-Version: 13\r\n\r\n"
+      );
+    });
+    let buffer = "";
+    let sent = false;
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      if (buffer.includes("ping")) {
+        socket.end();
+        resolve(buffer);
+        return;
+      }
+      if (!sent && buffer.includes("\r\n\r\n")) {
+        sent = true;
+        socket.write("ping");
+      }
+    });
+    socket.on("close", () => resolve(buffer));
+    // a refused upgrade may surface as ECONNRESET rather than a clean close
+    socket.on("error", () => resolve(buffer));
+    setTimeout(() => {
+      socket.destroy();
+      resolve(buffer);
+    }, 3000).unref();
+  });
+}
+
+test("a WebSocket upgrade is forwarded, credentials injected", async () => {
+  const system = await upgradingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const answer = await rawUpgrade(proxy, `${tokenPath(proxy)}/sap/bc/apc/ws`);
+    assert.match(answer, /^HTTP\/1\.1 101 /, answer);
+    assert.ok(answer.endsWith("ping"), "data flows both ways");
+    assert.equal(system.seen.length, 1);
+    assert.equal(system.seen[0].path, "/sap/bc/apc/ws", "token-free path");
+    assert.match(system.seen[0].auth ?? "", /^Basic /, "auth injected");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a WebSocket upgrade without the token is refused", async () => {
+  const system = await upgradingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const answer = await rawUpgrade(proxy, "/sap/bc/apc/ws");
+    assert.equal(answer, "", "destroyed without an answer");
+    assert.deepEqual(system.seen, [], "nothing was forwarded");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
 });

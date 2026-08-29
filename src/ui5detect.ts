@@ -53,8 +53,17 @@ function parseVersionJson(body: string): Ui5VersionInfo | undefined {
   }
 }
 
+/** What each origin answered this session - the probes are per launch, and
+ *  three round trips per F9 against an answer that cannot change while the
+ *  system runs were three too many. Failures are not cached, so a system
+ *  that was merely unreachable is asked again next launch. */
+const detected = new Map<string, Ui5VersionInfo>();
+
 /** The detected version, kept visible - guessing it once was the problem. */
 let statusItem: vscode.StatusBarItem | undefined;
+
+/** Which origin the status item currently describes. */
+let statusOrigin: string | undefined;
 
 function showStatus(
   context: vscode.ExtensionContext,
@@ -87,19 +96,27 @@ function showStatus(
 /**
  * Looks up the system's UI5 version and, when it disagrees with the
  * settings, offers once to adopt it. Fire-and-forget from the launch path.
+ *
+ * The probes carry the launch URL's `sap-client` and run as background
+ * fetches: credentials live per client, and a probe against the default
+ * client used to trip the proxy's 401 breaker - breaking a launch whose own
+ * client and credentials were fine, and counting a failed logon towards a
+ * lockout the user never caused.
  */
 export async function suggestSystemUi5(
   context: vscode.ExtensionContext,
   proxy: SapProxy,
   origin: string,
-  log: (m: string) => void
+  log: (m: string) => void,
+  sapClient?: string
 ): Promise<void> {
-  let info: Ui5VersionInfo | undefined;
-  for (const path of VERSION_PATHS) {
+  let info = detected.get(origin);
+  for (const path of info ? [] : VERSION_PATHS) {
     try {
       const { status, body } = await proxy.fetchFromSystem(
-        path,
-        "application/json, */*"
+        path + (sapClient ? `?sap-client=${encodeURIComponent(sapClient)}` : ""),
+        "application/json, */*",
+        { background: true }
       );
       if (status === 200) {
         info = parseVersionJson(body);
@@ -112,13 +129,21 @@ export async function suggestSystemUi5(
     }
   }
   if (!info) {
+    // no answer from THIS system: a version bar still showing the previous
+    // system's answer would be wrong twice over
+    if (statusOrigin && statusOrigin !== origin) {
+      statusItem?.hide();
+      statusOrigin = undefined;
+    }
     return;
   }
+  detected.set(origin, info);
   log(
     `ui5-detect: ${origin} serves UI5 ${info.minor}` +
       (info.distribution ? ` (${info.distribution})` : "")
   );
   showStatus(context, origin, info);
+  statusOrigin = origin;
 
   // The bundled metadata can only describe what existed when it was built -
   // against a NEWER system, a genuinely new control would be reported as

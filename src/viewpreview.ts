@@ -177,7 +177,8 @@ function findMockByName(
 async function render(
   source: { text: string; fileName: string; mock?: string; prefix: string },
   dir: string,
-  log: (m: string) => void
+  log: (m: string) => void,
+  superseded: () => boolean
 ): Promise<{ files: string[]; errors: string[]; problem?: string }> {
   const scratchDir = path.join(dir, source.prefix);
   fs.mkdirSync(scratchDir, { recursive: true });
@@ -197,12 +198,13 @@ async function render(
   log(`view-preview: ${checker.cmd} ${args.join(" ")}`);
 
   /*
-   * Same shape as the render gate, and now the same spawn: with a timeout and
-   * a kill of the whole tree. Without them a checker that hung left `running`
-   * true forever - the panel said "busy" until the window was reloaded, every
-   * later save only replaced the queued request, and closing the panel took
-   * the scratch directory away while nothing held the child, so a Chromium
-   * tree stayed behind.
+   * Same shape as the render gate, and now the same spawn: with a timeout, a
+   * kill of the whole tree, and `abandoned` - a closed panel stops paying for
+   * its picture. Without them a checker that hung left `running` true forever
+   * - the panel said "busy" until the window was reloaded, every later save
+   * only replaced the queued request, and closing the panel took the scratch
+   * directory away while nothing held the child, so a Chromium tree stayed
+   * behind.
    */
   const useShell = checker.cmd !== "node" && process.platform === "win32";
   const outcome = await run(
@@ -213,12 +215,14 @@ async function render(
           cwd: dir,
           env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", ...checker.env },
           timeoutMs: PREVIEW_TIMEOUT_MS,
+          abandoned: superseded,
         }
       : {
           cwd: dir,
           env: { ...spawnEnv(), ...checker.env },
           shell: useShell,
           timeoutMs: PREVIEW_TIMEOUT_MS,
+          abandoned: superseded,
         }
   );
 
@@ -283,9 +287,9 @@ async function render(
 function paint(
   target: vscode.WebviewPanel,
   doc: vscode.TextDocument,
-  state: { shots: Shot[]; errors: string[]; busy?: boolean; problem?: string }
+  state: { shots: Shot[]; errors: string[]; busy?: boolean; problem?: string },
+  mock: string | undefined
 ): void {
-  const mock = mockFileFor(doc);
   target.webview.html = viewPreviewHtml({
     nonce: createNonce(),
     cspSource: target.webview.cspSource,
@@ -359,8 +363,12 @@ async function refresh(
   const dir = workDir;
   const sizes = viewportCount(config().get<string>("viewPreview.viewport", "1280x900"));
   const mock = mockFileFor(doc);
+  // the panel went away, or was pointed at another document - whose render
+  // this is not, so the child is killed instead of finishing for nobody
+  const superseded = () =>
+    target !== panel || previewed?.toString() !== startedFor;
   try {
-    paint(target, doc, { ...shown, busy: true });
+    paint(target, doc, { ...shown, busy: true }, mock);
     const runs: Array<{ prefix: string; caption: string; text: string }> = [];
     if (options.compare) {
       const before = await committedText(doc);
@@ -368,12 +376,17 @@ async function refresh(
         return; // closed while git was answering
       }
       if (before === undefined) {
-        paint(target, doc, {
-          ...shown,
-          problem:
-            "There is no committed version of this file to compare with - " +
-            "it is outside a git repository, or git does not know it yet.",
-        });
+        paint(
+          target,
+          doc,
+          {
+            ...shown,
+            problem:
+              "There is no committed version of this file to compare with - " +
+              "it is outside a git repository, or git does not know it yet.",
+          },
+          mock
+        );
         return;
       }
       runs.push({ prefix: "head", caption: "HEAD", text: before });
@@ -391,11 +404,10 @@ async function refresh(
       const result = await render(
         { text: run.text, fileName: doc.fileName, mock, prefix: run.prefix },
         dir,
-        log
+        log,
+        superseded
       );
-      if (target !== panel || previewed?.toString() !== startedFor) {
-        // the panel went away while the browser was starting, or it was
-        // pointed at another document - whose pictures these are not
+      if (superseded()) {
         return;
       }
       problem ??= result.problem;
@@ -413,7 +425,7 @@ async function refresh(
     // a failed re-render keeps the last good pictures and says what went
     // wrong above them; a first render that fails has none to keep
     shown = shots.length ? { shots, errors } : shown;
-    paint(target, doc, { ...shown, problem });
+    paint(target, doc, { ...shown, problem }, mock);
     log(
       `view-preview: ${shots.length} picture(s), ${errors.length} render error(s)` +
         (mock ? `, data from ${path.basename(mock)}` : "")
@@ -423,10 +435,17 @@ async function refresh(
     log(`view-preview: refresh failed - ${String(err)}`);
   } finally {
     running = false;
-    const next = queued;
-    queued = undefined;
-    if (next && panel) {
-      void refresh(next.doc, log, next.options);
+    if (!panel) {
+      // closed while rendering: the dispose handler left the directory to
+      // this run, so the killed child could not write into a deleted path
+      queued = undefined;
+      disposeWorkDir();
+    } else {
+      const next = queued;
+      queued = undefined;
+      if (next) {
+        void refresh(next.doc, log, next.options);
+      }
     }
   }
 }
@@ -461,7 +480,12 @@ function openPanel(doc: vscode.TextDocument): void {
       panel = undefined;
       previewed = undefined;
       shown = { shots: [], errors: [] };
-      disposeWorkDir();
+      // a render still in flight is killed via its `abandoned` poll and
+      // removes the directory itself when it settles - deleting it under a
+      // live child recreated paths nothing ever cleaned up
+      if (!running) {
+        disposeWorkDir();
+      }
     });
   }
   panel.reveal(vscode.ViewColumn.Beside, true);

@@ -58,6 +58,38 @@ export interface FormattedXml {
   lineOffsets: Array<number | undefined>;
 }
 
+/**
+ * The XML line a source offset renders on: the exact line when one carries
+ * that offset, otherwise the nearest line whose call starts before it - a
+ * finding recorded inside an argument list still lands on its element.
+ *
+ * Ties take the EARLIEST line: an element's opening and closing line both
+ * carry the element's offset, and `>=` here once sent a finding recorded a
+ * few characters into the root's argument list onto `</mvc:View>` at the
+ * bottom of the document.
+ */
+export function lineForOffset(
+  offsets: Array<number | undefined>,
+  target: number
+): number | undefined {
+  let best: number | undefined;
+  let bestOffset = -1;
+  for (let line = 0; line < offsets.length; line++) {
+    const offset = offsets[line];
+    if (offset === undefined || offset > target) {
+      continue;
+    }
+    if (offset === target) {
+      return line;
+    }
+    if (offset > bestOffset) {
+      bestOffset = offset;
+      best = line;
+    }
+  }
+  return best;
+}
+
 interface Out {
   lines: string[];
   offsets: Array<number | undefined>;

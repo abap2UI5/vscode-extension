@@ -4,6 +4,7 @@ import {
   CheckStep,
   checkTemplate,
   classifyBody,
+  classifyClientProbe,
   classifyStatus,
   describeConnectFailure,
   firstFailure,
@@ -84,6 +85,9 @@ test("certificate rejections point at allowUnauthorizedCerts", () => {
     "DEPTH_ZERO_SELF_SIGNED_CERT",
     "SELF_SIGNED_CERT_IN_CHAIN",
     "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+    // what a private CA the machine does not trust actually produces
+    "UNABLE_TO_GET_ISSUER_CERT",
+    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
     "CERT_HAS_EXPIRED",
     "ERR_TLS_CERT_ALTNAME_INVALID",
   ]) {
@@ -158,6 +162,48 @@ test("5xx says the request arrived and where to look", () => {
   const step = classifyStatus({ status: 500, path: "/sap/bc/z2ui5" });
   assert.equal(step.ok, false);
   assert.ok(step.fix?.includes("ST22"));
+});
+
+// ---------------------------------------------------------------------------
+// Step 3b - does the sap-client change the answer
+// ---------------------------------------------------------------------------
+
+test("credentials valid only in the URL's client pass with a caveat", () => {
+  const step = classifyClientProbe({
+    sapClient: "100",
+    withClient: 200,
+    withoutClient: 401,
+  });
+  assert.equal(step?.ok, true);
+  assert.ok(step?.detail.includes("sap-client=100"));
+  assert.ok(step?.detail.includes("401"));
+});
+
+test("credentials rejected only in the URL's client fail the check", () => {
+  const step = classifyClientProbe({
+    sapClient: "999",
+    withClient: 401,
+    withoutClient: 200,
+  });
+  assert.equal(step?.ok, false);
+  assert.ok(step?.detail.includes("client 999"));
+  assert.ok(step?.fix?.includes("sap-client"));
+});
+
+test("agreeing answers add no client step at all", () => {
+  assert.equal(
+    classifyClientProbe({ sapClient: "100", withClient: 200, withoutClient: 200 }),
+    undefined
+  );
+  assert.equal(
+    classifyClientProbe({ sapClient: "100", withClient: 401, withoutClient: 401 }),
+    undefined
+  );
+  // a 404 without the client is an ICF quirk, not a credentials story
+  assert.equal(
+    classifyClientProbe({ sapClient: "100", withClient: 200, withoutClient: 404 }),
+    undefined
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -25,4 +25,17 @@ test("isRoundtrip counts successful POSTs only", () => {
   assert.ok(isRoundtrip({ ...base, method: "POST", status: 200 }));
   assert.ok(!isRoundtrip({ ...base, method: "GET", status: 200 }));
   assert.ok(!isRoundtrip({ ...base, method: "POST", status: 401 }));
+  // a redirected POST is a logon dance, not an app roundtrip
+  assert.ok(!isRoundtrip({ ...base, method: "POST", status: 302 }));
+});
+
+test("a request that got no answer renders a dash, not a zero", () => {
+  const line = formatTrafficLine({
+    method: "GET",
+    path: "/sap/bc/z2ui5",
+    status: 0,
+    durationMs: 12,
+    bytes: 0,
+  });
+  assert.equal(line, "GET    -        12 ms       0 B  /sap/bc/z2ui5");
 });

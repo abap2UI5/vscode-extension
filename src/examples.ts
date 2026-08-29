@@ -14,6 +14,8 @@
  * QuickPick and the file opening.
  */
 
+import { blankComments } from "./abapscan";
+
 /** One builder call naming the searched control, with its chain around it. */
 export interface ExampleHit {
   /** Absolute path of the class the hit is in. */
@@ -70,18 +72,30 @@ export function findControlUses(
   where: { file: string; catalogue: string }
 ): ExampleHit[] {
   const hits: ExampleHit[] = [];
+  // Comments blanked, literals kept: the control name lives INSIDE a literal,
+  // so `blankNonCode` would take away the very text this matches on - but a
+  // commented-out chain must not be offered as a working example, nor may its
+  // dead `a( )` calls inflate the ranking.
+  const code = blankComments(source);
   const re = callRe(control);
-  for (const match of source.matchAll(re)) {
+  let line = 1;
+  let counted = 0;
+  for (const match of code.matchAll(re)) {
     const at = match.index ?? 0;
+    for (let i = counted; i < at; i++) {
+      if (code.charCodeAt(i) === 10) {
+        line++;
+      }
+    }
+    counted = at;
     const lineStart = source.lastIndexOf("\n", at) + 1;
     const lineEnd = source.indexOf("\n", at);
-    const before = source.slice(0, at);
     hits.push({
       file: where.file,
       catalogue: where.catalogue,
-      line: before.split("\n").length,
+      line,
       text: source.slice(lineStart, lineEnd < 0 ? source.length : lineEnd).trim(),
-      attributes: attributesAfter(source, at + match[0].length),
+      attributes: attributesAfter(code, at + match[0].length),
     });
   }
   return hits;

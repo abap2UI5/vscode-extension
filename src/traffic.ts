@@ -25,12 +25,14 @@ export function formatBytes(bytes: number): string {
 
 /**
  * One aligned log line:  `POST  200    342 ms   1.2 kB  /sap/bc/z2ui5`.
- * The columns are fixed so a scan down the duration column works.
+ * The columns are fixed so a scan down the duration column works. Status 0
+ * is a request that got no answer at all (aborted, or the forward failed
+ * before one arrived) and renders as `-`.
  */
 export function formatTrafficLine(entry: TrafficEntry): string {
   return [
     entry.method.padEnd(6),
-    String(entry.status).padEnd(4),
+    (entry.status ? String(entry.status) : "-").padEnd(4),
     `${entry.durationMs} ms`.padStart(9),
     formatBytes(entry.bytes).padStart(9),
     ` ${entry.path}`,
@@ -40,9 +42,13 @@ export function formatTrafficLine(entry: TrafficEntry): string {
 /**
  * True for the requests the toolbar badge times: the POSTs are the app's
  * backend roundtrips (every abap2UI5 event is one), everything else is
- * resource loading. Failed roundtrips stay out of the badge - the error
- * handling owns those - but they do land in the log.
+ * resource loading. Only 2xx counts - failed roundtrips belong to the error
+ * handling, and a redirected POST is a logon dance, not an app event.
  */
 export function isRoundtrip(entry: TrafficEntry): boolean {
-  return entry.method.toUpperCase() === "POST" && entry.status < 400;
+  return (
+    entry.method.toUpperCase() === "POST" &&
+    entry.status >= 200 &&
+    entry.status < 300
+  );
 }

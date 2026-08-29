@@ -87,6 +87,26 @@ test("a value knows both the control and the member it belongs to", () => {
   assert.equal(context?.member, "type");
 });
 
+test("an a( ) after end( ) belongs to the closed container, not the last tag", () => {
+  // the builder (and the linter's reconstruction) pops on end( ): what
+  // follows is an attribute of the container - reading it lexically offered
+  // the tag's members where the gate validates the container's
+  const context = abapAt(
+    HEAD +
+      "    )->ele( n = `VBox`\n" +
+      "    )->tag( n = `Text` )->a( n = `text` v = `x`\n" +
+      "    )->end(\n" +
+      "    )->a( n = `wid‸` )"
+  );
+  assert.equal(context?.kind, "member");
+  assert.equal(context?.control, "sap.m.VBox");
+});
+
+test("a commented-out xmlns declares nothing", () => {
+  const source = HEAD + '    " )->a( n = `xmlns:x` v = `sap.x`\n';
+  assert.equal(abapNsMap(source).x, undefined);
+});
+
 test("a control inside a comment is never the owner", () => {
   const context = abapAt(
     HEAD +
@@ -534,4 +554,59 @@ test("a commented-out _event wire is not a usage", () => {
     "      )->a( n = `press` v = client->_event( `SAVE` ) ).",
   ].join("\n");
   assert.equal(eventUsagesOf(source, "SAVE").length, 1);
+});
+
+test("a nested VALUE #( ) before val does not hide the raise", () => {
+  /*
+   * `[^)]*?` stood in for a parenthesis walk and stopped at the `)` of the
+   * nested constructor - F2 then renamed the WHEN branch and silently left
+   * this end of the wire behind.
+   */
+  const source =
+    "view->a( n = `press` v = client->_event( t_arg = VALUE #( ( lv ) ) val = 'GO' ) ).\n" +
+    "WHEN 'GO'.";
+  assert.equal(eventUsagesOf(source, "GO").length, 1);
+  const spans = eventNameSpans(source, "GO");
+  assert.equal(spans.length, 2); // the raise and the WHEN
+  for (const span of spans) {
+    assert.equal(source.slice(span.start, span.end), "GO");
+  }
+});
+
+test("a literal that is an argument, not the event name, is no usage", () => {
+  const source =
+    "view->a( n = `press` v = client->_event( val = 'GO' t_arg = VALUE #( ( `STOP` ) ) ) ).";
+  assert.equal(eventUsagesOf(source, "STOP").length, 0);
+  assert.equal(eventUsagesOf(source, "GO").length, 1);
+});
+
+test("every alternative of WHEN 'A' OR 'B' is a branch of its own", () => {
+  const source = [
+    "CASE lv_event.",
+    "  WHEN 'SAVE' OR 'SAVE_ALL'.",
+    "    save( ).",
+    "ENDCASE.",
+  ].join("\n");
+  assert.deepEqual(
+    whenBranches(source).map((b) => b.name),
+    ["SAVE", "SAVE_ALL"]
+  );
+  // goto from the raise finds the branch whichever alternative names it
+  assert.ok(whenBranchOf(source, "SAVE_ALL") !== undefined);
+  // and the cursor on the second alternative is recognised
+  const { whenNameAt } = require("../context") as typeof import("../context");
+  const at = source.indexOf("SAVE_ALL") + 2;
+  assert.equal(whenNameAt(source, at)?.name, "SAVE_ALL");
+  // an OR outside a WHEN chain arms nothing
+  const cond = "IF lv_a = 'X' OR lv_b = 'Y'.";
+  assert.equal(whenNameAt(cond, cond.indexOf("Y") + 1), undefined);
+});
+
+test("a > inside a quoted attribute value does not end the XML tag", () => {
+  const context = xmlAt(
+    '<mvc:View xmlns="sap.m"><Button tooltip="a > b" te‸xt="x"/></mvc:View>'
+  );
+  assert.equal(context?.kind, "member");
+  assert.equal(context?.control, "sap.m.Button");
+  assert.equal(context?.prefix, "te");
 });

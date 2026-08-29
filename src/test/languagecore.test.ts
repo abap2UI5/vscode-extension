@@ -124,6 +124,50 @@ test("outside anything completable there is no offer", () => {
   assert.equal(completeAbap(HEAD + "    )->tag( n = `Button` )‸ "), undefined);
 });
 
+test("inside a WHEN literal the raised events are offered", () => {
+  const offer = completeAbap(
+    HEAD +
+      "    )->tag( n = `Button` )->a( n = `press` v = client->_event( `GO` ) ).\n" +
+      "    )->tag( n = `Button` )->a( n = `press` v = client->_event( val = `STOP` ) ).\n" +
+      "CASE client->get( )-event.\n" +
+      "  WHEN `‸`.\n" +
+      "ENDCASE.\n"
+  );
+  assert.ok(offer, "the WHEN literal is a completable position");
+  assert.deepEqual(
+    offer.entries.map((e) => e.label),
+    ["GO", "STOP"]
+  );
+  assert.ok(offer.entries.every((e) => e.kind === "events"));
+});
+
+test("the xmlns value completes to the snapshot's libraries", () => {
+  const head =
+    "DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).\n" +
+    "view->ele( n = `View` ns = `mvc`\n" +
+    "    )->a( n = `xmlns:mvc` v = `sap.ui.core.mvc`\n";
+  const offer = completeAbap(head + "    )->a( n = `xmlns` v = `‸`\n");
+  assert.ok(offer);
+  const labels = offer.entries.map((e) => e.label);
+  assert.ok(labels.includes("sap.m"));
+  assert.ok(labels.includes("sap.f"));
+  assert.ok(labels.includes("sap.ui.layout"));
+  assert.ok(offer.entries.every((e) => e.kind === "namespace"));
+  // the prefixed declaration completes the same way
+  const prefixed = completeAbap(head + "    )->a( n = `xmlns:f` v = `sap.‸`\n");
+  assert.ok(prefixed?.entries.some((e) => e.label === "sap.f"));
+});
+
+test("the default aggregation is marked in the member list", () => {
+  const offer = completeAbap(HEAD + "    )->ele( n = `Page` )->a( n = `‸` )");
+  assert.ok(offer);
+  const content = offer.entries.find((e) => e.label === "content");
+  assert.ok(content, "sap.m.Page offers its content aggregation");
+  assert.match(content!.detail ?? "", /default aggregation/);
+  const title = offer.entries.find((e) => e.label === "title");
+  assert.ok(!/default aggregation/.test(title?.detail ?? ""));
+});
+
 // ---------------------------------------------------------------------------
 // Completion: binding paths from the derived model
 // ---------------------------------------------------------------------------

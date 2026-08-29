@@ -129,6 +129,17 @@ test("the last attribute of a chain can be removed too", () => {
   assert.equal(parens(chain, "("), parens(chain, ")"));
 });
 
+test("a value that would cross ABAP's 255-character line limit is refused", () => {
+  const long = "x".repeat(300);
+  const call = controlCallAt(SOURCE, SOURCE.indexOf("`Press me`"))!;
+  // in place - the rewritten line would not survive an abapGit import
+  assert.equal(setAttributeEdit(SOURCE, call, "text", long), undefined);
+  // appended - the new line would not either
+  assert.equal(setAttributeEdit(SOURCE, call, "enabled", long), undefined);
+  // and a value that fits still goes through
+  assert.ok(setAttributeEdit(SOURCE, call, "text", "x".repeat(100)));
+});
+
 test("rewriting a value with a doubled quote replaces all of it", () => {
   /*
    * The literal's span used to stop at the first half of a doubled quote, so

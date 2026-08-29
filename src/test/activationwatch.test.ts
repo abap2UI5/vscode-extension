@@ -121,10 +121,12 @@ test("a 4xx from ADT gives up for the session", async () => {
   assert.equal(h.source.calls, callsAfterGiveUp, "no more polls after a 4xx");
   // and a restart refuses outright
   h.watch.start();
-  await until(() =>
-    h.logs.some((l) => l.includes("ADT already refused earlier this session"))
-  );
+  await until(() => h.logs.some((l) => l.includes("ADT already refused on")));
   h.watch.dispose();
+  assert.ok(
+    h.logs.some((l) => l.includes("ADT already refused on")),
+    "the restart did not log the refusal"
+  );
   assert.deepEqual(h.reloads, []);
 });
 
@@ -287,6 +289,55 @@ test("a system that refuses ADT does not disable the watch for another system", 
     source.calls > refusedCalls,
     "the watch stayed off after switching to a system that never refused"
   );
+});
+
+test("the poll backs off once the slow threshold is reached", async () => {
+  // always active with no baseline: the watch keeps polling until disposed
+  const source = scriptedSource([
+    { version: "active", changedAt: "2026-01-01T00:00:00Z" },
+  ]);
+  const logs: string[] = [];
+  const watch = new ActivationWatch(
+    {
+      source,
+      current: () => ({ className: "ZCL_APP" }),
+      log: (m) => logs.push(m),
+      reload: () => assert.fail("must not reload"),
+    },
+    { firstMs: 1, pollMs: 1, timeoutMs: 5000, slowAfterMs: 0, slowPollMs: 60 }
+  );
+  watch.start();
+  await sleep(150);
+  watch.dispose();
+  // at pollMs=1 this window would hold dozens of polls; slowPollMs=60 caps it
+  assert.ok(
+    source.calls <= 5,
+    `expected the slow cadence, saw ${source.calls} polls in 150 ms`
+  );
+});
+
+test("a watch that times out tells the preview it gave up", async () => {
+  const source = scriptedSource([
+    { version: "active", changedAt: "2026-01-01T00:00:00Z" },
+  ]);
+  const logs: string[] = [];
+  const gaveUp: string[] = [];
+  const watch = new ActivationWatch(
+    {
+      source,
+      current: () => ({ className: "ZCL_APP" }),
+      log: (m) => logs.push(m),
+      reload: () => assert.fail("must not reload"),
+      gaveUp: (reason) => gaveUp.push(reason),
+    },
+    { firstMs: 1, pollMs: 2, timeoutMs: 30 }
+  );
+  watch.start();
+  await until(() => gaveUp.length > 0);
+  watch.dispose();
+  assert.equal(gaveUp.length, 1);
+  assert.ok(gaveUp[0].includes("gave up"));
+  assert.ok(logs.some((l) => l.includes("giving up")));
 });
 
 test("a slow baseline answer cannot resurrect itself after the next save", async () => {

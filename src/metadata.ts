@@ -122,6 +122,32 @@ export function controlsIn(data: Snapshot, library: string): string[] {
   return out.sort();
 }
 
+/** Memo for {@link librariesIn} - the snapshot never changes, so its library
+ *  list does not either. */
+const libraryCache = new WeakMap<Snapshot, string[]>();
+
+/**
+ * Every library the snapshot knows a control in - `sap.m`, `sap.f`,
+ * `sap.ui.layout`, … What an `xmlns` VALUE completes to: the namespace of
+ * each control name, deduplicated and sorted.
+ */
+export function librariesIn(data: Snapshot): string[] {
+  const cached = libraryCache.get(data);
+  if (cached) {
+    return cached;
+  }
+  const libraries = new Set<string>();
+  for (const name of Object.keys(data)) {
+    const dot = name.lastIndexOf(".");
+    if (dot > 0) {
+      libraries.add(name.slice(0, dot));
+    }
+  }
+  const sorted = [...libraries].sort();
+  libraryCache.set(data, sorted);
+  return sorted;
+}
+
 /**
  * Memo for {@link membersOf}, per snapshot. The snapshot is loaded once and
  * never mutated, so what is derived from it holds for as long as it does; a
@@ -153,7 +179,11 @@ export function membersOf(data: Snapshot, control: string): MemberInfo[] {
     return cached;
   }
   const members = computeMembersOf(data, control);
-  perControl.set(control, members);
+  // an unknown control costs nothing to recompute, and every half-typed name
+  // the cursor passes through is one - caching those only grows the map
+  if (members.length) {
+    perControl.set(control, members);
+  }
   return members;
 }
 

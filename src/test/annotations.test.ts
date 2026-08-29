@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import {
   costAnnotations,
+  deprecationAnnotations,
   formatBytes,
   publicAttributes,
   sinceAnnotations,
@@ -100,6 +101,53 @@ test("what the metadata does not know gets no annotation, not a guess", () => {
   assert.deepEqual(found, []);
 });
 
+test("an undeclared prefix qualifies nothing, not the default namespace", () => {
+  // `x:Card` with no xmlns:x used to fall back to sap.m.Card and could be
+  // annotated with that unrelated control's version
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+ENDCLASS.
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->tag( n = \`Card\` ns = \`x\` ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const prep = prepareAbap(source);
+  const asked: string[] = [];
+  const found = sinceAnnotations(prep.nodes, { "": "sap.m" }, "1.71", {
+    control: (control) => {
+      asked.push(control);
+      return "1.0";
+    },
+    member: () => undefined,
+  });
+  assert.ok(!asked.includes("sap.m.Card"), `asked for: ${asked.join(", ")}`);
+  assert.ok(!found.some((a) => a.tooltip?.includes("sap.m.Card")));
+});
+
+test("a deprecated control and member are labelled with the metadata's line", () => {
+  const prep = prepareAbap(SOURCE);
+  const found = deprecationAnnotations(
+    prep.nodes,
+    { "": "sap.m", mvc: "sap.ui.core.mvc" },
+    {
+      control: (control) =>
+        control === "sap.m.Avatar" ? "Deprecated since 1.120" : undefined,
+      member: (control, member) =>
+        control === "sap.m.Avatar" && member === "displaySize"
+          ? "Deprecated — use avatarSize"
+          : undefined,
+    }
+  );
+  assert.equal(found.length, 2);
+  assert.ok(found.every((a) => a.text === "deprecated" && a.warn));
+  assert.match(found[0].tooltip ?? "", /sap\.m\.Avatar: Deprecated since 1\.120/);
+  assert.match(found[1].tooltip ?? "", /displaySize: Deprecated — use avatarSize/);
+  assert.ok(SOURCE.slice(found[0].offset, found[0].offset + 40).includes("Avatar"));
+});
+
 // ---------------------------------------------------------------------------
 // What a roundtrip carries
 // ---------------------------------------------------------------------------
@@ -117,6 +165,20 @@ test("the chained DATA: form is read to its last entry", () => {
   const attrs = publicAttributes(SOURCE);
   assert.equal(attrs.length, 3);
   assert.ok(SOURCE.slice(attrs[2].offset).startsWith("mv_flag"));
+});
+
+test("a BEGIN OF block ships as the structure, not as BEGIN and END", () => {
+  // three bogus "sent every roundtrip" lines - on BEGIN, the component and
+  // END - while the attribute actually serialized had none
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    DATA: BEGIN OF ms_head,
+            title TYPE string,
+          END OF ms_head.
+    DATA mv_x TYPE string.
+ENDCLASS.`;
+  const names = publicAttributes(source).map((a) => a.name);
+  assert.deepEqual(names, ["ms_head", "mv_x"]);
 });
 
 test("a measured attribute says its size, an unknown one says it is sent", () => {

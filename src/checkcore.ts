@@ -1,6 +1,6 @@
 import * as path from "path";
 import { usesBuilder } from "./abap";
-import { VIEW_XML_RE } from "./gate";
+import { frozenBuilderOf, VIEW_XML_RE } from "./gate";
 
 /*
  * The `vscode`-free decisions behind the view check: what counts as
@@ -11,9 +11,11 @@ import { VIEW_XML_RE } from "./gate";
  */
 
 /** Checkable = a view/fragment XML, or an ABAP source calling the generic
- *  builder's factory. "ABAP source" means the abap language id or an *.abap
- *  file name - ABAP extensions differ in what they register, but a log or
- *  markdown file merely QUOTING builder code must not qualify. */
+ *  builder's factory - or a frozen builder's, which the gate answers with the
+ *  linter's own `frozen-view-builder` finding. "ABAP source" means the abap
+ *  language id or an *.abap file name - ABAP extensions differ in what they
+ *  register, but a log or markdown file merely QUOTING builder code must not
+ *  qualify. */
 export function isCheckableSource(
   fileName: string,
   languageId: string | undefined,
@@ -25,7 +27,7 @@ export function isCheckableSource(
   if (languageId !== "abap" && !/\.abap$/i.test(fileName)) {
     return false;
   }
-  return usesBuilder(text);
+  return usesBuilder(text) || frozenBuilderOf(text) !== undefined;
 }
 
 /** The checker is a CLI working on files, but the document may be unsaved or
@@ -95,17 +97,27 @@ export function splitCommandLine(line: string): string[] {
 }
 
 /**
- * One argument as a Windows shell swallows it. The checker is spawned through
- * cmd.exe there (npx is a `.cmd`, which Node cannot exec directly), and with
- * `shell: true` Node hands the arguments over unquoted - so a scratch file
- * under `C:\Users\John Smith\AppData\...` arrived as two arguments and the
- * gate answered "no JSON" for everyone whose profile has a space in it.
+ * One argument as the platform's shell swallows it. On Windows the checker is
+ * spawned through cmd.exe (npx is a `.cmd`, which Node cannot exec directly),
+ * and with `shell: true` Node hands the arguments over unquoted - so a scratch
+ * file under `C:\Users\John Smith\AppData\...` arrived as two arguments and
+ * the gate answered "no JSON" for everyone whose profile has a space in it.
+ * `%` and `!` at least force the quotes; cmd.exe expands `%VAR%` even inside
+ * them, which no quoting can prevent. Elsewhere the arg is single-quoted for
+ * `sh` - the current callers only use a shell on Windows, but the contract of
+ * `RunOptions.shell` is that BOTH platforms are safe.
  */
 export function quoteForShell(arg: string, platform: NodeJS.Platform): string {
-  if (platform !== "win32" || !/[\s&|<>^()"]/.test(arg)) {
+  if (platform === "win32") {
+    if (!/[\s&|<>^()"%!]/.test(arg)) {
+      return arg;
+    }
+    return `"${arg.replace(/"/g, '""')}"`;
+  }
+  if (arg !== "" && !/[^\w@%+=:,./-]/.test(arg)) {
     return arg;
   }
-  return `"${arg.replace(/"/g, '""')}"`;
+  return `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
 /** Everything the command resolution reads - handed in, so the decision
@@ -562,11 +574,16 @@ export function directiveLine(text: string, line: number, isXml: boolean): numbe
   if (!isXml || line <= 0) {
     return line;
   }
-  const lines = text.split(/\r?\n/);
-  let cutoff = 0;
-  for (let i = 0; i < line && i < lines.length; i++) {
-    cutoff += lines[i].length + 1;
+  // real offsets, not `length + 1` per line: a CRLF file is two characters
+  // per break, and the drift grew by one per line - enough to place the
+  // directive above the wrong line, or inside a start tag
+  const starts: number[] = [0];
+  for (let j = 0; j < text.length; j++) {
+    if (text[j] === "\n") {
+      starts.push(j + 1);
+    }
   }
+  const cutoff = line < starts.length ? starts[line] : text.length;
 
   let tagStart = -1; // offset of the `<` of the start tag we are inside
   let quote = ""; // the attribute quote we are inside, if any
@@ -606,13 +623,10 @@ export function directiveLine(text: string, line: number, isXml: boolean): numbe
     return line; // between tags: the finding's own line is fine
   }
   // the line the `<` sits on
-  let at = 0;
-  for (let n = 0; n < lines.length; n++) {
-    const next = at + lines[n].length + 1;
-    if (tagStart < next) {
+  for (let n = starts.length - 1; n >= 0; n--) {
+    if (starts[n] <= tagStart) {
       return n;
     }
-    at = next;
   }
   return line;
 }

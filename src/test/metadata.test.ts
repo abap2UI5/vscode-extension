@@ -4,6 +4,7 @@ import {
   controlsIn,
   deprecationText,
   describeMember,
+  librariesIn,
   memberInfo,
   membersOf,
   valuesFor,
@@ -35,6 +36,17 @@ test("a library offers its own controls, not its sub-namespaces", () => {
   );
   // Sorted, so the completion list does not reorder between snapshots.
   assert.deepEqual(controls, [...controls].sort());
+});
+
+test("the snapshot's libraries are listed once each, sorted", () => {
+  const libraries = librariesIn(data);
+  assert.ok(libraries.includes("sap.m"));
+  assert.ok(libraries.includes("sap.f"));
+  assert.ok(libraries.includes("sap.ui.layout"));
+  assert.deepEqual(libraries, [...libraries].sort());
+  assert.equal(new Set(libraries).size, libraries.length);
+  // memoised per snapshot - the same array comes back
+  assert.equal(librariesIn(data), libraries);
 });
 
 test("members are collected across the parent chain", () => {

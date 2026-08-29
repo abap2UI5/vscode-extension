@@ -60,12 +60,15 @@ export interface SinceLookup {
   member(control: string, member: string): string | undefined;
 }
 
-/** `f:Card` + the class's namespace map -> `sap.f.Card`. */
+/** `f:Card` + the class's namespace map -> `sap.f.Card`. An UNDECLARED
+ *  prefix resolves to nothing - falling back to the default namespace
+ *  qualified `x:Card` as a sap.m control and annotated it with that
+ *  control's version. */
 function qualify(node: ViewNode, ns: Record<string, string>): string | undefined {
   if (!node.name) {
     return undefined;
   }
-  const library = ns[node.ns ?? ""] ?? ns[""];
+  const library = node.ns ? ns[node.ns] : ns[""];
   return library ? `${library}.${node.name}` : undefined;
 }
 
@@ -121,6 +124,57 @@ export function sinceAnnotations(
   return out.sort((a, b) => a.offset - b.offset);
 }
 
+/**
+ * A deprecation next to every control and attribute the metadata deprecates.
+ *
+ * Same mechanism, sharper message: `@since` answers "does my system have this
+ * yet?", this one answers "should I still be writing this at all?". The
+ * lookup hands back the deprecation as one line (the metadata's own wording),
+ * or undefined for anything current - so, like `@since`, nothing is guessed.
+ */
+export function deprecationAnnotations(
+  nodes: readonly ViewNode[],
+  ns: Record<string, string>,
+  lookup: SinceLookup
+): Annotation[] {
+  const out: Annotation[] = [];
+  const walk = (node: ViewNode) => {
+    const control = qualify(node, ns);
+    if (control && node.offset !== undefined) {
+      const text = lookup.control(control);
+      if (text) {
+        out.push({
+          offset: node.offset,
+          text: "deprecated",
+          warn: true,
+          tooltip: `${control}: ${text}`,
+        });
+      }
+    }
+    if (control) {
+      for (const attr of node.attrs) {
+        const [name, , offset] = attr as [string, string, number | undefined];
+        if (offset === undefined) {
+          continue;
+        }
+        const text = lookup.member(control, name);
+        if (!text) {
+          continue;
+        }
+        out.push({
+          offset,
+          text: "deprecated",
+          warn: true,
+          tooltip: `${control} ${name}: ${text}`,
+        });
+      }
+    }
+    node.children.forEach(walk);
+  };
+  nodes.forEach(walk);
+  return out.sort((a, b) => a.offset - b.offset);
+}
+
 // ---------------------------------------------------------------------------
 // What a PUBLIC attribute costs per roundtrip
 // ---------------------------------------------------------------------------
@@ -160,8 +214,12 @@ export function publicAttributes(source: string): PublicAttribute[] {
     // the names the statement DECLARES, not every word in it that is followed
     // by TYPE: a commented-out chain entry (`" old: mv_b TYPE string`) is
     // still part of the statement's text, and used to be annotated as if it
-    // were an attribute the class ships
+    // were an attribute the class ships. Components of a `BEGIN OF` block are
+    // declared names but not attributes - the structure is what is shipped.
     for (const declared of declaredNames(statement.text)) {
+      if (declared.component) {
+        continue;
+      }
       out.push({
         name: declared.name,
         offset: from + statement.start + declared.at,

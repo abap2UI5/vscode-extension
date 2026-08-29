@@ -123,6 +123,40 @@ test("a statement that is not a declaration declares nothing", () => {
   assert.deepEqual(declaredNames("mv_title = `Hello`"), []);
 });
 
+test("a BEGIN OF block declares the structure, not BEGIN and END", () => {
+  // `BEGIN` and `END` used to come back as declared names, and the
+  // roundtrip-cost annotation labelled them as attributes the class ships
+  const statement =
+    "DATA: BEGIN OF ms_head,\n        title TYPE string,\n      END OF ms_head";
+  const declared = declaredNames(statement);
+  assert.deepEqual(
+    declared.map((d) => d.name),
+    ["ms_head", "title"]
+  );
+  const structure = declared.find((d) => d.name === "ms_head");
+  const component = declared.find((d) => d.name === "title");
+  assert.equal(structure?.component, undefined, "the structure is the attribute");
+  assert.equal(component?.component, true, "a field is a component of it");
+  assert.equal(
+    statement.slice(structure!.at, structure!.at + structure!.name.length),
+    "ms_head"
+  );
+});
+
+test("a nested BEGIN OF is a component of the outer structure", () => {
+  const statement =
+    "DATA: BEGIN OF ms_outer, BEGIN OF ms_inner, x TYPE i, END OF ms_inner, END OF ms_outer";
+  const declared = declaredNames(statement);
+  assert.deepEqual(
+    declared.map((d) => [d.name, d.component === true]),
+    [
+      ["ms_outer", false],
+      ["ms_inner", true],
+      ["x", true],
+    ]
+  );
+});
+
 /*
  * String templates with embedded expressions.
  *

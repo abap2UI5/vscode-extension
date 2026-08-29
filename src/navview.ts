@@ -65,19 +65,29 @@ export function registerNavMap(
       panel.onDidDispose(() => {
         panel = undefined;
       });
-      panel.webview.onDidReceiveMessage(async (msg: { type?: string; file?: string }) => {
-        if (msg?.type !== "open" || !msg.file) {
-          return;
+      panel.webview.onDidReceiveMessage(
+        async (msg: { type?: string; file?: string; offset?: number }) => {
+          if (msg?.type !== "open" || !msg.file) {
+            return;
+          }
+          try {
+            const doc = await vscode.workspace.openTextDocument(
+              vscode.Uri.parse(msg.file)
+            );
+            // an edge carries the nav_app_call's offset; a node opens plain
+            const at =
+              typeof msg.offset === "number" && msg.offset >= 0
+                ? doc.positionAt(Math.min(msg.offset, doc.getText().length))
+                : undefined;
+            await vscode.window.showTextDocument(doc, {
+              preview: false,
+              selection: at ? new vscode.Range(at, at) : undefined,
+            });
+          } catch (err) {
+            log(`nav-map: could not open ${msg.file} - ${String(err)}`);
+          }
         }
-        try {
-          const doc = await vscode.workspace.openTextDocument(
-            vscode.Uri.parse(msg.file)
-          );
-          await vscode.window.showTextDocument(doc, { preview: false });
-        } catch (err) {
-          log(`nav-map: could not open ${msg.file} - ${String(err)}`);
-        }
-      });
+      );
     } else {
       panel.reveal();
     }

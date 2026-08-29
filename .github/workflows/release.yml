@@ -102,6 +102,9 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
+      # A tag can point at a commit CI never saw - the suite runs here too,
+      # so a release is never built from a tree the tests have not judged.
+      - run: npm test
       - run: npm run vsix
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

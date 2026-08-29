@@ -1,6 +1,8 @@
 import * as http from "http";
 import * as https from "https";
-import { randomBytes } from "crypto";
+import type { Duplex } from "stream";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { StringDecoder } from "string_decoder";
 import { URL } from "url";
 import { redact } from "./report";
 import { rebasedLocation } from "./urls";
@@ -391,22 +393,41 @@ export function withUtf8Charset(contentType: string): string {
     : `${contentType}; charset=utf-8`;
 }
 
+/** One class reference out of an ADT quick-search answer. */
+export interface AdtClassRef {
+  name: string;
+  /** The class's short text, when the answer carried one. */
+  description?: string;
+  /** The package the class lives in, when the answer carried it. */
+  packageName?: string;
+}
+
 /**
- * Class names out of an ADT quick-search answer. The tag's attribute order
- * is not fixed, so the tag is matched first and its attributes second; only
- * classes count (`CLAS/OC`) - the search itself is not told, because not
+ * Class references out of an ADT quick-search answer. The tag's attribute
+ * order is not fixed, so the tag is matched first and its attributes second;
+ * only classes count (`CLAS/OC`) - the search itself is not told, because not
  * every ADT version accepts the filter parameter.
  */
-export function parseAdtClassNames(xml: string): string[] {
-  const names: string[] = [];
+export function parseAdtClassRefs(xml: string): AdtClassRef[] {
+  const refs: AdtClassRef[] = [];
   for (const tag of xml.matchAll(/<adtcore:objectReference\b[^>]*>/g)) {
     const type = /adtcore:type="([^"]*)"/.exec(tag[0])?.[1];
     const name = /adtcore:name="([^"]*)"/.exec(tag[0])?.[1];
-    if (type === "CLAS/OC" && name && !names.includes(name)) {
-      names.push(name);
+    if (type !== "CLAS/OC" || !name || refs.some((ref) => ref.name === name)) {
+      continue;
     }
+    refs.push({
+      name,
+      description: /adtcore:description="([^"]*)"/.exec(tag[0])?.[1] || undefined,
+      packageName: /adtcore:packageName="([^"]*)"/.exec(tag[0])?.[1] || undefined,
+    });
   }
-  return names;
+  return refs;
+}
+
+/** The names alone - what the MCP tools hand on. */
+export function parseAdtClassNames(xml: string): string[] {
+  return parseAdtClassRefs(xml).map((ref) => ref.name);
 }
 
 /** First segment of every url the proxy hands out, so the token that follows
@@ -416,8 +437,24 @@ const TOKEN_SEGMENT = "__abap2ui5";
 /** Carries the token on requests whose path the proxy never sees prefixed -
  *  an app configured with an absolute bootstrap (`/sap/public/...`) asks for
  *  it from the server root. Planted on the first answer, HttpOnly so the page
- *  itself cannot read it back out. */
+ *  itself cannot read it back out. The name carries the PORT: cookies are
+ *  host-scoped, not port-scoped, so two windows' proxies (two systems at
+ *  once is a supported setup) would otherwise overwrite each other's cookie
+ *  and break the other window's absolute-path requests. */
 const TOKEN_COOKIE = "__abap2ui5_proxy";
+
+/**
+ * Whether two tokens match, in constant time. The gate compares against
+ * whatever a caller sent, and a local process gets unlimited low-jitter
+ * attempts against loopback - hashing first makes the comparison's timing
+ * independent of where the strings diverge.
+ */
+function tokensEqual(candidate: string, token: string): boolean {
+  return timingSafeEqual(
+    createHash("sha256").update(candidate).digest(),
+    createHash("sha256").update(token).digest()
+  );
+}
 
 /** The loopback names a browser can have connected through. Anything else in
  *  the Host header means the request arrived under a different hostname than
@@ -438,10 +475,33 @@ export function isLoopbackHost(host: string | undefined): boolean {
   return LOOPBACK_HOST.test(String(host ?? ""));
 }
 
-/** How long a forwarded request may take before the proxy gives up. Without
- *  it a system that accepts the connection and then goes quiet holds the
+/** How long a forwarded request may go QUIET before the proxy gives up - an
+ *  inactivity timeout, so a slow but progressing download survives. Without
+ *  it a system that accepts the connection and then says nothing holds the
  *  request - and the preview - open with nothing to show for it. */
 const FORWARD_TIMEOUT_MS = 120_000;
+
+/** Absolute deadline for the small text answers `fetchFromSystem` asks for -
+ *  a socket-inactivity timeout would let a trickling server hold an ADT
+ *  lookup open forever. */
+const FETCH_TIMEOUT_MS = 8000;
+
+/** Everything asked for via `fetchFromSystem` is a small text answer - once
+ *  this much arrived, the rest is not worth downloading. */
+const FETCH_BODY_CAP = 256 * 1024;
+
+/** The request headers that describe one hop rather than the request, and so
+ *  must not travel through a proxy (RFC 7230 section 6.1). `transfer-encoding`
+ *  stays: Node manages the framing of what it forwards itself. */
+const HOP_BY_HOP_HEADERS = [
+  "connection",
+  "keep-alive",
+  "proxy-authorization",
+  "proxy-connection",
+  "te",
+  "trailer",
+  "upgrade",
+];
 
 export class SapProxy {
   private server?: http.Server;
@@ -462,6 +522,11 @@ export class SapProxy {
    * RELATIVE to that url, so a prefix travels with them at no cost.
    */
   private token?: string;
+
+  /** Live WebSocket tunnels. An upgraded socket no longer belongs to the
+   *  http server, so `close( )` neither waits for it nor closes it - stop( )
+   *  has to take these down itself or hang on them forever. */
+  private readonly tunnels = new Set<Duplex>();
 
   /**
    * Whether requests to the system may proceed when its TLS certificate
@@ -542,11 +607,22 @@ export class SapProxy {
     this.target = target;
     this.token = randomBytes(16).toString("base64url");
     this.server = http.createServer((req, res) => this.handle(req, res));
+    this.server.on("upgrade", (req, socket, head) =>
+      this.handleUpgrade(req, socket, head)
+    );
 
-    await new Promise<void>((resolve, reject) => {
-      this.server!.once("error", reject);
-      this.server!.listen(0, "127.0.0.1", resolve);
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.server!.once("error", reject);
+        this.server!.listen(0, "127.0.0.1", resolve);
+      });
+    } catch (err) {
+      // a proxy that never got its port must not LOOK started: the
+      // same-origin fast path above would keep handing out
+      // `http://127.0.0.1:undefined/...` forever
+      await this.stopNow();
+      throw err;
+    }
 
     const addr = this.server.address();
     this.port = typeof addr === "object" && addr ? addr.port : 0;
@@ -576,12 +652,25 @@ export class SapProxy {
     return this.target?.origin;
   }
 
+  /** The cookie name of THIS proxy - see {@link TOKEN_COOKIE} on the port. */
+  private get cookieName(): string {
+    return `${TOKEN_COOKIE}_${this.port}`;
+  }
+
   /**
    * The system path an incoming request is asking for, or undefined when the
    * request has no business here. Two ways to be authorized, and a request
    * that is neither is answered 404 rather than told what it got wrong.
    */
   private route(req: http.IncomingMessage): string | undefined {
+    // Fail closed while the proxy is not fully started: during stop( )'s
+    // close window the token is already gone, and `undefined === undefined`
+    // used to AUTHORIZE a cookie-less request against the cleared state.
+    const token = this.token;
+    if (!token || !this.target || !this.authHeader || this.port === undefined) {
+      return undefined;
+    }
+
     // A browser sends the host it connected to. Ours is always loopback, so
     // anything else is a name that resolves here without being ours - which
     // is what DNS rebinding looks like from this side.
@@ -590,26 +679,29 @@ export class SapProxy {
     }
 
     const url = String(req.url ?? "/");
-    const prefix = `/${TOKEN_SEGMENT}/${this.token}`;
-    if (url === prefix) {
-      return "/";
-    }
-    if (url.startsWith(`${prefix}/`)) {
-      return url.slice(prefix.length);
-    }
-    // a launch url without a path (`https://host:44300?app_start=...`) leaves
-    // the query directly behind the prefix - forwarding it as written would
-    // put `GET ?app_start=... HTTP/1.1` on the wire, which servers reject
-    if (url.startsWith(`${prefix}?`)) {
-      return "/" + url.slice(prefix.length);
+    const root = `/${TOKEN_SEGMENT}/`;
+    if (url.startsWith(root)) {
+      const rest = url.slice(root.length);
+      const end = rest.search(/[/?]/);
+      const candidate = end === -1 ? rest : rest.slice(0, end);
+      if (tokensEqual(candidate, token)) {
+        if (end === -1) {
+          return "/";
+        }
+        // a launch url without a path (`https://host:44300?app_start=...`)
+        // leaves the query directly behind the prefix - forwarding it as
+        // written would put `GET ?app_start=... HTTP/1.1` on the wire,
+        // which servers reject
+        return rest[end] === "?" ? "/" + rest.slice(end) : rest.slice(end);
+      }
     }
 
     // no prefix: only the cookie from an earlier authorized answer counts
     const cookie = String(req.headers.cookie ?? "")
       .split(";")
       .map((part) => part.trim())
-      .find((part) => part.startsWith(`${TOKEN_COOKIE}=`));
-    return cookie?.slice(TOKEN_COOKIE.length + 1) === this.token
+      .find((part) => part.startsWith(`${this.cookieName}=`));
+    return cookie && tokensEqual(cookie.slice(this.cookieName.length + 1), token)
       ? url
       : undefined;
   }
@@ -618,10 +710,17 @@ export class SapProxy {
    * One GET against the system with the credentials the proxy already holds -
    * what the ADT lookups and the UI5-version detection are built on. The
    * body is capped: everything asked for this way is a small text answer.
+   *
+   * `background` marks a best-effort probe nobody asked for: its 401 must
+   * neither trip the retry breaker (`authRejected`) nor raise the re-logon
+   * prompt - a probe against the wrong client would otherwise break a
+   * launch whose own credentials are fine. `signal` aborts the request, for
+   * callers that supersede their own lookups while the user types.
    */
   fetchFromSystem(
     path: string,
-    accept = "application/xml, application/json, */*"
+    accept = "application/xml, application/json, */*",
+    options: { background?: boolean; signal?: AbortSignal } = {}
   ): Promise<{ status: number; body: string; authenticate?: string }> {
     const target = this.target;
     const auth = this.authHeader;
@@ -651,22 +750,23 @@ export class SapProxy {
             accept,
           },
           rejectUnauthorized: !this.allowUnauthorized,
+          signal: options.signal,
         },
         (res) => {
           const status = res.statusCode ?? 0;
           let body = "";
+          let settled = false;
           res.setEncoding("utf8");
-          res.on("data", (chunk: string) => {
-            if (body.length < 256 * 1024) {
-              body += chunk;
+          const finish = () => {
+            if (settled) {
+              return;
             }
-          });
-          res.on("end", () => {
+            settled = true;
             // A rejection here used to be silent: these requests happen on a
             // timer rather than on a keystroke, so nothing in the UI said the
             // logon had stopped working.
             const authenticate = headerValue(res.headers["www-authenticate"]);
-            if (status === 401 || status === 403) {
+            if ((status === 401 || status === 403) && !options.background) {
               if (status === 401) {
                 this.authRejected = true;
               }
@@ -680,15 +780,31 @@ export class SapProxy {
             // The header travels with the answer too: the connection check
             // needs it to tell "wrong password" from "no basic auth at all".
             resolve({ status, body, authenticate });
+          };
+          res.on("data", (chunk: string) => {
+            if (body.length < FETCH_BODY_CAP) {
+              body += chunk;
+            } else {
+              // enough arrived to answer with - stop downloading the rest
+              finish();
+              res.destroy();
+            }
           });
+          res.on("end", finish);
           // a connection that dies mid-body emits on the RESPONSE stream, and
           // an unhandled "error" there takes the extension host down with it
-          res.on("error", reject);
+          res.on("error", (err) => {
+            if (!settled) {
+              reject(err);
+            }
+          });
         }
       );
-      req.setTimeout(8000, () =>
-        req.destroy(new Error("request to the system timed out"))
+      const deadline = setTimeout(
+        () => req.destroy(new Error("request to the system timed out")),
+        FETCH_TIMEOUT_MS
       );
+      req.on("close", () => clearTimeout(deadline));
       req.on("error", reject);
       req.end();
     });
@@ -759,6 +875,12 @@ export class SapProxy {
     // that an absolute-path resource is authorized too
     const seedCookie = String(req.url ?? "").startsWith(`/${TOKEN_SEGMENT}/`);
 
+    // captured now: a system switch while this request is in flight must not
+    // rewrite its response against the NEXT proxy's port and token
+    const proxyOrigin = this.origin;
+    const cookieName = this.cookieName;
+    const token = this.token!;
+
     // What the traffic log and the status reports are allowed to see. The
     // incoming url carries the token, and those two end up in output channels
     // users paste into issues - which would hand over a working authorized
@@ -770,16 +892,39 @@ export class SapProxy {
     const mod = isHttps ? https : http;
     const startedAt = Date.now();
 
-    // Take over the incoming headers, overwrite host + auth
+    // One traffic entry per request, whichever way it ends - completed,
+    // failed toward the system, or abandoned by the client.
+    let trafficLogged = false;
+    const logTraffic = (status: number, bytes: number) => {
+      if (trafficLogged) {
+        return;
+      }
+      trafficLogged = true;
+      this.onTraffic?.({
+        method: String(req.method ?? "GET"),
+        path: reportedPath,
+        status,
+        durationMs: Date.now() - startedAt,
+        bytes,
+      });
+    };
+
+    // Take over the incoming headers, overwrite host + auth. Hop-by-hop
+    // headers describe the browser's connection to the proxy, not the
+    // request, and must not travel on.
     const headers: http.OutgoingHttpHeaders = { ...req.headers };
+    for (const name of HOP_BY_HOP_HEADERS) {
+      delete headers[name];
+    }
     headers.host = target.host;
     headers.authorization = this.authHeader;
-    // the token is the proxy's own business and stops here
+    // the token is the proxy's own business and stops here - matched by
+    // prefix, so another window's port-scoped cookie stops here too
     if (headers.cookie) {
       const kept = String(headers.cookie)
         .split(";")
         .map((part) => part.trim())
-        .filter((part) => part && !part.startsWith(`${TOKEN_COOKIE}=`));
+        .filter((part) => part && !part.startsWith(TOKEN_COOKIE));
       if (kept.length > 0) {
         headers.cookie = kept.join("; ");
       } else {
@@ -809,7 +954,7 @@ export class SapProxy {
     }
     if (headers.referer) {
       headers.referer = String(headers.referer).replace(
-        this.origin,
+        proxyOrigin,
         target.origin
       );
     }
@@ -846,9 +991,13 @@ export class SapProxy {
           this.authRejected = true;
         }
         let sniff = "";
+        const sniffDecoder = new StringDecoder("utf8");
         proxyRes.on("data", (chunk: Buffer) => {
-          if (sniff.length < REJECTION_SNIFF_BYTES) {
-            sniff += chunk.toString("utf8");
+          const wanted = REJECTION_SNIFF_BYTES - sniff.length;
+          if (wanted > 0) {
+            // sliced, and through a decoder: a chunk boundary inside a
+            // multibyte character must not become a replacement character
+            sniff += sniffDecoder.write(chunk.subarray(0, wanted));
           }
         });
         let reported = false;
@@ -873,21 +1022,25 @@ export class SapProxy {
       }
       // The traffic log: measured to the last body byte, so the duration is
       // what the user actually waited for. The extra data listener rides
-      // alongside pipe( ) without disturbing it.
+      // alongside pipe( ) without disturbing it. "close" logs the answers
+      // that never reach "end" - a client that gave up mid-body used to
+      // leave no line at all, exactly the request one debugs with this log.
       let receivedBytes = 0;
       proxyRes.on("data", (chunk: Buffer) => {
         receivedBytes += chunk.length;
       });
-      proxyRes.on("end", () => {
-        this.onTraffic?.({
-          method: String(req.method ?? "GET"),
-          path: reportedPath,
-          status: proxyRes.statusCode ?? 0,
-          durationMs: Date.now() - startedAt,
-          bytes: receivedBytes,
-        });
-      });
+      proxyRes.on("end", () =>
+        logTraffic(proxyRes.statusCode ?? 0, receivedBytes)
+      );
+      proxyRes.on("close", () =>
+        logTraffic(proxyRes.statusCode ?? 0, receivedBytes)
+      );
       const outHeaders: http.OutgoingHttpHeaders = { ...proxyRes.headers };
+
+      // hop-by-hop again, on the way back: the system's connection handling
+      // is not the browser's
+      delete outHeaders.connection;
+      delete outHeaders["keep-alive"];
 
       // Allow framing: otherwise the server forbids embedding via
       // X-Frame-Options / CSP frame-ancestors -> the iframe would stay blank.
@@ -917,7 +1070,7 @@ export class SapProxy {
         outHeaders.location = rebasedLocation(
           String(outHeaders.location),
           target,
-          this.origin
+          proxyOrigin
         );
       }
 
@@ -945,7 +1098,7 @@ export class SapProxy {
         // Chromium takes the pair over plain http (same reasoning as the SAP
         // session cookies above).
         cookies.push(
-          `${TOKEN_COOKIE}=${this.token}; Path=/; HttpOnly; SameSite=None; Secure`
+          `${cookieName}=${token}; Path=/; HttpOnly; SameSite=None; Secure`
         );
       }
       if (cookies.length > 0) {
@@ -1016,11 +1169,15 @@ export class SapProxy {
 
     proxyReq.on("error", (err) => {
       if (res.writableEnded || res.destroyed) {
-        return; // the client is already gone - nothing left to tell
+        // the client is already gone - nothing left to tell, but the log
+        // still gets its line (status 0: no answer reached anybody)
+        logTraffic(0, 0);
+        return;
       }
       if (!res.headersSent) {
         res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
       }
+      logTraffic(502, 0);
       res.end("abap2UI5 proxy error: " + err.message);
     });
 
@@ -1041,6 +1198,98 @@ export class SapProxy {
     req.pipe(proxyReq);
   }
 
+  /**
+   * A WebSocket upgrade, forwarded through the same gate and with the same
+   * injected credentials as every other request. Node destroys the socket of
+   * any `Upgrade:` request nobody listens for, so an app opening a WebSocket
+   * used to die silently in the preview.
+   */
+  private handleUpgrade(
+    req: http.IncomingMessage,
+    socket: Duplex,
+    head: Buffer
+  ): void {
+    const path = this.route(req);
+    if (path === undefined || this.authRejected) {
+      socket.destroy();
+      return;
+    }
+
+    const target = this.target!;
+    const isHttps = target.protocol === "https:";
+    const mod = isHttps ? https : http;
+
+    // The upgrade needs its `Connection`/`Upgrade` pair to travel, so no
+    // hop-by-hop stripping here - this IS the hop the pair is about.
+    const headers: http.OutgoingHttpHeaders = { ...req.headers };
+    headers.host = target.host;
+    headers.authorization = this.authHeader;
+    if (headers.cookie) {
+      const kept = String(headers.cookie)
+        .split(";")
+        .map((part) => part.trim())
+        .filter((part) => part && !part.startsWith(TOKEN_COOKIE));
+      if (kept.length > 0) {
+        headers.cookie = kept.join("; ");
+      } else {
+        delete headers.cookie;
+      }
+    }
+    if (headers.origin) {
+      headers.origin = target.origin;
+    }
+
+    const proxyReq = mod.request({
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || (isHttps ? 443 : 80),
+      method: req.method,
+      path,
+      headers,
+      rejectUnauthorized: !this.allowUnauthorized,
+    });
+    proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
+      this.tunnels.add(socket);
+      this.tunnels.add(proxySocket);
+      const teardown = () => {
+        this.tunnels.delete(socket);
+        this.tunnels.delete(proxySocket);
+        socket.destroy();
+        proxySocket.destroy();
+      };
+      socket.on("close", teardown);
+      proxySocket.on("close", teardown);
+      proxySocket.on("error", () => socket.destroy());
+      socket.on("error", () => proxySocket.destroy());
+      const lines = [
+        `HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage ?? ""}`.trimEnd(),
+      ];
+      for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
+        lines.push(`${proxyRes.rawHeaders[i]}: ${proxyRes.rawHeaders[i + 1]}`);
+      }
+      socket.write(lines.join("\r\n") + "\r\n\r\n");
+      if (proxyHead.length) {
+        socket.write(proxyHead);
+      }
+      if (head.length) {
+        proxySocket.write(head);
+      }
+      proxySocket.pipe(socket);
+      socket.pipe(proxySocket);
+    });
+    proxyReq.on("response", (proxyRes) => {
+      // the system refused the upgrade - relay the refusal and hang up
+      socket.end(
+        `HTTP/1.1 ${proxyRes.statusCode ?? 502} ` +
+          `${proxyRes.statusMessage ?? ""}\r\nconnection: close\r\n\r\n`
+      );
+      proxyRes.destroy();
+    });
+    proxyReq.on("error", () => socket.destroy());
+    socket.on("error", () => proxyReq.destroy());
+    proxyReq.end();
+  }
+
   stop(): Promise<void> {
     return this.serialize(() => this.stopNow());
   }
@@ -1054,8 +1303,18 @@ export class SapProxy {
     // and isRunning read true for a proxy that had already been stopped
     this.authHeader = undefined;
     this.token = undefined;
+    for (const tunnel of this.tunnels) {
+      tunnel.destroy();
+    }
+    this.tunnels.clear();
     if (server) {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        // close( ) alone waits for in-flight requests - up to the forward
+        // timeout - and a system SWITCH awaits this before it can start, so
+        // the connections go down with the server they belonged to
+        server.closeAllConnections();
+      });
     }
   }
 

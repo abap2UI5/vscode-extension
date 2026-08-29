@@ -6,6 +6,7 @@ import {
   modelRootsOfSource,
   nextRecentApps,
   resolveReloadTrigger,
+  safeFileStem,
   staleMessage,
 } from "../previewcore";
 import { APP_TEMPLATES } from "../template";
@@ -94,6 +95,37 @@ test("the stale message says why", () => {
     type: "stale",
     reason: "Saved - activate to update",
   });
+});
+
+test("a forced stale message carries the flag - the watch's give-up toast", () => {
+  assert.deepEqual(staleMessage("The watch gave up", true), {
+    type: "stale",
+    reason: "The watch gave up",
+    force: true,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// safeFileStem - class names as file-name stems
+// ---------------------------------------------------------------------------
+
+test("a plain class name stays itself", () => {
+  assert.equal(safeFileStem("ZCL_APP"), "ZCL_APP");
+});
+
+test("a namespaced class loses its separators", () => {
+  assert.equal(safeFileStem("/UI2/CL_APP"), "_UI2_CL_APP");
+});
+
+test("a traversal attempt cannot leave the directory", () => {
+  const stem = safeFileStem("../../etc/passwd");
+  assert.ok(!stem.includes("/") && !stem.includes("\\"));
+  assert.ok(!stem.startsWith("."));
+});
+
+test("an empty or dot-only name still yields a stem", () => {
+  assert.equal(safeFileStem(""), "APP");
+  assert.equal(safeFileStem("..."), "APP");
 });
 
 // ---------------------------------------------------------------------------

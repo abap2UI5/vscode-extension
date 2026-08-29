@@ -143,7 +143,7 @@ export function describeConnectFailure(failure: {
         "connected, or a firewall between this machine and the system.",
     };
   }
-  if (/^(CERT_|ERR_TLS_|DEPTH_ZERO|SELF_SIGNED|UNABLE_TO_VERIFY|ERR_SSL)/.test(code) ||
+  if (/^(CERT_|ERR_TLS_|DEPTH_ZERO|SELF_SIGNED|UNABLE_TO_|ERR_SSL)/.test(code) ||
     code === "HOSTNAME_MISMATCH"
   ) {
     return {
@@ -278,6 +278,54 @@ export function classifyStatus(answer: {
     detail: `the system answered ${status}`,
     fix: "Unexpected answer - open the launch URL in a normal browser to see it.",
   };
+}
+
+// ---------------------------------------------------------------------------
+// Step 3b: does the sap-client change the answer
+// ---------------------------------------------------------------------------
+
+/**
+ * What it means when the same probe answers differently with and without the
+ * launch URL's `sap-client`. Credentials live per client, so "valid in 100,
+ * invalid in the default client" is a real and confusing state: the launch
+ * works while every request that forgets the parameter is rejected - or the
+ * other way round, which points at a wrong `sap-client` in the URL. Nothing
+ * worth a step when the two answers agree, or when the URL names no client.
+ */
+export function classifyClientProbe(probe: {
+  /** The `sap-client` the launch URL carries. */
+  sapClient: string;
+  /** Status of the probe WITH that client - what the launch experiences. */
+  withClient: number;
+  /** Status of the probe WITHOUT it - what the default client says. */
+  withoutClient: number;
+}): CheckStep | undefined {
+  const label = "sap-client";
+  const { sapClient, withClient, withoutClient } = probe;
+  const rejected = (status: number) => status === 401 || status === 403;
+  if (rejected(withClient) && !rejected(withoutClient)) {
+    return {
+      label,
+      ok: false,
+      detail:
+        `the logon is rejected in client ${sapClient} but not in the ` +
+        "system's default client",
+      fix:
+        "The stored user does not work in this client - check the " +
+        "sap-client in the launch URL, or use credentials valid there.",
+    };
+  }
+  if (!rejected(withClient) && rejected(withoutClient)) {
+    return {
+      label,
+      ok: true,
+      detail:
+        `the logon works only with sap-client=${sapClient} - the default ` +
+        `client answers ${withoutClient}, so requests without the ` +
+        "parameter are rejected",
+    };
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

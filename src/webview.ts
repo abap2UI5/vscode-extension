@@ -28,6 +28,13 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/** JSON for interpolation into an inline `<script>`: `JSON.stringify` leaves
+ *  `<` alone, so a value containing `</script>` would end the script element
+ *  mid-string and put markup behind the nonce'd tag. */
+export function scriptJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
 /*
  * The UI5 themes a preview can be switched to, and the logon languages the
  * picker offers. Both travel as ordinary URL parameters (`sap-ui-theme`,
@@ -61,19 +68,28 @@ export const LANGUAGES: ReadonlyArray<[value: string, label: string]> = [
   ["JA", "Japanese"],
 ];
 
-/** `<option>` list with the current value pre-selected. */
+/** `<option>` list with the current value pre-selected. A current value the
+ *  list does not know (written by another version, say) gets its own entry -
+ *  a select showing the wrong value silently would misreport what the URL
+ *  actually carries. */
 function optionList(
   entries: ReadonlyArray<[string, string]>,
   current: string
 ): string {
-  return entries
-    .map(
-      ([value, label]) =>
-        `<option value="${escapeHtml(value)}"${
-          value === current ? " selected" : ""
-        }>${escapeHtml(label)}</option>`
-    )
-    .join("");
+  const known = entries.some(([value]) => value === current);
+  return (
+    entries
+      .map(
+        ([value, label]) =>
+          `<option value="${escapeHtml(value)}"${
+            value === current ? " selected" : ""
+          }>${escapeHtml(label)}</option>`
+      )
+      .join("") +
+    (known
+      ? ""
+      : `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)}</option>`)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +176,9 @@ export interface PreviewOptions {
   language: string;
   /** Top-level model paths of the class - what a stateful reload restores. */
   modelRoots: string[];
+  /** The theme picker's entries - `THEMES` plus whatever the host merged in
+   *  (the `abap2ui5.previewThemes` setting). Defaults to `THEMES`. */
+  themes?: ReadonlyArray<[value: string, label: string]>;
   nonce: string;
 }
 
@@ -395,7 +414,8 @@ ${BASE_CSS}
     <span class="dot" id="dot"></span>
     <span class="name" id="name">${className}</span>
     <button class="badge" id="stale" title="The source was saved but not activated - the preview still shows the active version. Click to reload it anyway.">not activated</button>
-    <button class="errors" id="errors" title="Runtime errors the app reported since the last load. Click to open the abap2UI5 output log."></button>
+    <button class="badge" id="act" title="Activate the class through your ABAP tooling and reload (Ctrl+F3)">activate</button>
+    <button class="errors" id="errors" title="Runtime errors the app reported since the last load. Click to jump to the likely source line and open the abap2UI5 output log."></button>
     <button class="rt" id="rt" title="Last backend roundtrip (POST through the auth proxy). Click to open the traffic log."></button>
     <span class="url" id="url" title="${externalUrl}">${urlLabel}</span>
     <div class="seg" role="group" aria-label="Preview size">
@@ -404,7 +424,7 @@ ${BASE_CSS}
       <button id="d-phone" data-device="phone" aria-pressed="false" title="Phone width (414px)">${icon("phone")}</button>
     </div>
     <select id="theme" title="UI5 theme (sap-ui-theme)" aria-label="UI5 theme">${optionList(
-      THEMES,
+      options.themes ?? THEMES,
       options.theme
     )}</select>
     <select id="language" title="Logon language (sap-language)" aria-label="Logon language">${optionList(
@@ -450,7 +470,7 @@ ${BASE_CSS}
   const toast = document.getElementById('toast');
   const reloadBtn = document.getElementById('reload');
 
-  let frameUrl = ${JSON.stringify(options.frameUrl)};
+  let frameUrl = ${scriptJson(options.frameUrl)};
   let slowTimer;
   let toastTimer;
 
@@ -476,8 +496,16 @@ ${BASE_CSS}
   const inspectBtn = document.getElementById('inspect');
   const modelBtn = document.getElementById('model');
   let inspectOn = false;
+  // Commands - and above all the restored model data - go only to the page
+  // the preview itself loaded. The app may navigate the frame anywhere, and
+  // a '*' target would hand whatever page sits there the captured model.
+  function frameOrigin() {
+    try { return new URL(frameUrl).origin; } catch (e) { return null; }
+  }
   function postToApp(message) {
-    try { frame.contentWindow.postMessage(message, '*'); } catch (e) { /* not loaded yet */ }
+    const origin = frameOrigin();
+    if (!origin) { return; }
+    try { frame.contentWindow.postMessage(message, origin); } catch (e) { /* not loaded yet */ }
   }
   function markInspect(on) {
     inspectOn = on;
@@ -491,7 +519,7 @@ ${BASE_CSS}
     postToApp({ __abap2ui5Cmd: 'model' });
   });
   document.getElementById('shot').addEventListener('click', () => {
-    vscodeApi.postMessage({ type: 'screenshot' });
+    vscodeApi.postMessage({ type: 'screenshot', device: stage.dataset.device });
   });
 
   // Stateful reload: while the pin is on, the model is captured right before
@@ -499,7 +527,7 @@ ${BASE_CSS}
   // not fall back to square one on every activation.
   const pinBtn = document.getElementById('pin');
   let pinOn = false;
-  let modelRoots = ${JSON.stringify(options.modelRoots)};
+  let modelRoots = ${scriptJson(options.modelRoots)};
   let pendingRestore = null;  // captured model JSON, waiting for the fresh page
   let awaitingCapture = null; // {url, message} while the capture is in flight
   function markPin(on) {
@@ -608,6 +636,12 @@ ${BASE_CSS}
 
   document.getElementById('stale').addEventListener('click', () => {
     load(frameUrl, 'Reloading ' + nameEl.textContent + '\\u2026');
+  });
+
+  // Activating is what actually updates the server - the reload alone would
+  // show the old version again.
+  document.getElementById('act').addEventListener('click', () => {
+    vscodeApi.postMessage({ type: 'command', command: 'abap2ui5.activate' });
   });
 
   document.getElementById('ext').addEventListener('click', openExternal);
@@ -741,7 +775,10 @@ ${BASE_CSS}
     if (fromApp) { return; }
     if (msg.type === 'stale') {
       // Only the first save after a load says it out loud; the badge stays.
-      if (msg.reason && body.dataset.stale !== 'true') { showToast(msg.reason); }
+      // 'force' is the watch's give-up, worth a toast even on a stale badge.
+      if (msg.reason && (msg.force || body.dataset.stale !== 'true')) {
+        showToast(msg.reason);
+      }
       body.dataset.stale = 'true';
       return;
     }
@@ -1105,6 +1142,8 @@ ${BASE_CSS}
     fill: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.15));
     stroke: var(--vscode-panel-border, rgba(128,128,128,0.4));
   }
+  .edge[data-file] { cursor: pointer; pointer-events: stroke; }
+  .edge[data-file]:hover { stroke: var(--vscode-focusBorder); opacity: 1; }
   .node[data-file] { cursor: pointer; }
   .node[data-file]:hover rect {
     stroke: var(--vscode-focusBorder);
@@ -1125,7 +1164,7 @@ ${BASE_CSS}
       ? "No abap2UI5 app classes found in the workspace - the map draws every class implementing <code>z2ui5_if_app</code> and each <code>nav_app_call( )</code> between them."
       : `${appCount} app${appCount === 1 ? "" : "s"}, ${edgeCount} navigation${
           edgeCount === 1 ? "" : "s"
-        } - dashed nodes are nav targets whose source is not in this workspace. Click a node to open its class.`
+        } - dashed nodes are nav targets whose source is not in this workspace. Click a node to open its class, an arrow to jump to its <code>nav_app_call( )</code>.`
   }</p>
   ${svg}
 <script nonce="${nonce}">
@@ -1134,6 +1173,17 @@ ${BASE_CSS}
   for (const node of document.querySelectorAll('.node[data-file]')) {
     node.addEventListener('click', () => {
       vscodeApi.postMessage({ type: 'open', file: node.dataset.file });
+    });
+  }
+  // an edge carries the nav_app_call( ) that draws it - clicking the arrow
+  // jumps to that call rather than to the top of the class
+  for (const edge of document.querySelectorAll('.edge[data-file]')) {
+    edge.addEventListener('click', () => {
+      vscodeApi.postMessage({
+        type: 'open',
+        file: edge.dataset.file,
+        offset: Number(edge.dataset.offset),
+      });
     });
   }
 })();
@@ -1160,6 +1210,8 @@ export interface WelcomeOptions {
   openMode: OpenMode;
   /** Class of the app shown in an editor tab right now, if there is one. */
   runningClass?: string;
+  /** Most recently launched app in this window - one click to run it again. */
+  recentApp?: string;
 }
 
 /**
@@ -1171,10 +1223,19 @@ export interface WelcomeOptions {
  * one click that moves it here.
  */
 export function welcomeHtml(options: WelcomeOptions): string {
-  const { nonce, hasLaunchUrl, openMode, runningClass } = options;
+  const { nonce, hasLaunchUrl, openMode, runningClass, recentApp } = options;
   const here = openMode === "panel";
   const elsewhere = openMode === "external" ? "in your browser" : "in an editor tab";
   const running = runningClass ? escapeHtml(runningClass) : "";
+
+  // The last launched app, one click away - only while nothing is running,
+  // and only once a launch URL exists to run it against.
+  const rerun =
+    !running && hasLaunchUrl && recentApp
+      ? `<button data-run="${escapeHtml(recentApp)}">${icon("refresh")}Run ${escapeHtml(
+          recentApp
+        )}</button>`
+      : "";
 
   // The three steps of the first run — step 2 names the place the app opens.
   const steps = `
@@ -1301,6 +1362,7 @@ ${BASE_CSS}
     <p class="sub">${subtitle}</p>
     ${running && !here ? away : steps}
     <div class="actions">
+      ${rerun}
       ${primary}
       ${
         running && !here
@@ -1318,6 +1380,11 @@ ${BASE_CSS}
   for (const btn of document.querySelectorAll('[data-command]')) {
     btn.addEventListener('click', () => {
       vscodeApi.postMessage({ type: 'command', command: btn.dataset.command });
+    });
+  }
+  for (const btn of document.querySelectorAll('[data-run]')) {
+    btn.addEventListener('click', () => {
+      vscodeApi.postMessage({ type: 'runRecent', value: btn.dataset.run });
     });
   }
 })();

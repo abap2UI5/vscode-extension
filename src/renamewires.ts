@@ -18,10 +18,10 @@
  */
 
 import {
-  abapLiterals,
   abapSpans,
   abapStatements,
   blankComments,
+  blankNonCode,
   declaredNames,
   type AbapStatement,
 } from "./abapscan";
@@ -56,30 +56,79 @@ interface Literal {
 }
 
 /**
- * Every ABAP string literal with its content span, from the shared lexer.
+ * Everything the detectors read out of one source, lexed once.
  *
- * This used to be its own scan, and it read a `'` inside a `" comment` as the
- * start of a literal - one apostrophe in one comment ("that's the wire") then
- * swallowed the rest of the file, and F2 found no wires at all. Silently: the
- * rename went through on the id alone and the binding it belonged to kept
- * pointing at the old name, which is the exact defect this module exists to
- * prevent.
+ * The lexing used to happen per detector per call - one F2 walks
+ * `eventNameAt`, `idAt`, `attributeAt` and then the span collectors, and
+ * each of them re-lexed the whole class. The single-entry cache keys on the
+ * source TEXT (the callers hand in `getText( )` results, so identity is
+ * useless), which makes every detector after the first free for the same
+ * buffer version.
  */
-function literals(source: string): Literal[] {
-  return abapLiterals(source).map((span) => ({
-    start: span.start,
-    end: span.end,
-    text: source.slice(span.start, span.end),
-  }));
+interface Lexed {
+  source: string;
+  /** Every string literal with its content span, from the shared lexer.
+   *
+   *  This used to be its own scan, and it read a `'` inside a `" comment` as
+   *  the start of a literal - one apostrophe in one comment ("that's the
+   *  wire") then swallowed the rest of the file, and F2 found no wires at
+   *  all. Silently: the rename went through on the id alone and the binding
+   *  it belonged to kept pointing at the old name, which is the exact defect
+   *  this module exists to prevent. */
+  literals: Literal[];
+  /** Comment spans, `[from, to)`. */
+  comments: Array<[number, number]>;
+  /** The source with only comments blanked. */
+  code: string;
+  /** The source with everything non-code blanked. */
+  blanked: string;
+  statements: AbapStatement[];
 }
 
-/** The first literal starting after `from`, within reach AND before `limit`. */
+let cached: Lexed | undefined;
+
+function lex(source: string): Lexed {
+  if (cached && cached.source === source) {
+    return cached;
+  }
+  const spans = abapSpans(source);
+  cached = {
+    source,
+    literals: spans
+      .filter((span) => span.kind === "literal")
+      .map((span) => ({
+        start: span.start,
+        end: span.end,
+        text: source.slice(span.start, span.end),
+      })),
+    comments: spans
+      .filter((span) => span.kind === "comment")
+      .map((span) => [span.from, span.to] as [number, number]),
+    code: blankComments(source),
+    blanked: blankNonCode(source),
+    statements: abapStatements(source),
+  };
+  return cached;
+}
+
+/** The first literal starting after `from`, within reach AND before `limit`.
+ *  Binary search - the literals are in source order. */
 function literalAfter(
   all: readonly Literal[],
   from: number,
   limit: number
 ): Literal | undefined {
-  const hit = all.find((literal) => literal.start > from);
+  let lo = 0;
+  let hi = all.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (all[mid].start > from) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  const hit = all[lo];
   return hit && hit.start - from <= MARKER_REACH && hit.start < limit
     ? hit
     : undefined;
@@ -89,13 +138,21 @@ function literalAfter(
  *  own statement carries no literal (`set_focus( lv_id )`) must not reach
  *  forward into the NEXT statement and bless whatever it says first. */
 function statementEnd(statements: readonly AbapStatement[], at: number): number {
-  for (const statement of statements) {
-    const end = statement.start + statement.text.length;
-    if (at < end) {
-      return end;
+  let lo = 0;
+  let hi = statements.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const statement = statements[mid];
+    if (at < statement.start + statement.text.length) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
     }
   }
-  return Number.MAX_SAFE_INTEGER;
+  const statement = statements[lo];
+  return statement
+    ? statement.start + statement.text.length
+    : Number.MAX_SAFE_INTEGER;
 }
 
 /**
@@ -108,7 +165,6 @@ function statementEnd(statements: readonly AbapStatement[], at: number): number 
  * wire it belongs to.
  */
 export function idLiterals(source: string): NamedSpan[] {
-  const all = literals(source);
   /*
    * The markers are looked for in CODE, not in the raw text. Read raw, a
    * comment mentioning one ("TODO use control_by_id here") armed the scan,
@@ -118,13 +174,12 @@ export function idLiterals(source: string): NamedSpan[] {
    * text. `blankComments` keeps every offset - and keeps the literals, which
    * one of the markers reads (`n = \`id\``).
    */
-  const code = blankComments(source);
-  const statements = abapStatements(source);
+  const { literals, code, statements } = lex(source);
   const out: NamedSpan[] = [];
   const seen = new Set<number>();
   for (const marker of code.matchAll(ID_MARKERS)) {
     const at = (marker.index ?? 0) + marker[0].length;
-    const literal = literalAfter(all, at, statementEnd(statements, at));
+    const literal = literalAfter(literals, at, statementEnd(statements, at));
     if (!literal || !literal.text || seen.has(literal.start)) {
       continue;
     }
@@ -150,38 +205,46 @@ export function idSpans(source: string, id: string): NamedSpan[] {
 // Bound attributes: the ABAP name and the binding path
 // ---------------------------------------------------------------------------
 
-/** `{/MV_TITLE}`, `{/MT_TAB/COLUMN}`, `${/MV_TITLE}`, `path: '/MV_TITLE'` -
- *  a root path segment inside a view literal. */
-const ROOT_PATH_SEGMENT = /\/([A-Z_][A-Z0-9_]*)/gi;
+/** `{/MV_TITLE}`, `${/MV_TITLE}`, `path: '/MV_TITLE'` - a ROOT path segment
+ *  inside a view literal: the `/` opening the path, not one between two
+ *  segments. `{/MT_TAB/COLUMN}`'s COLUMN is a field of the row type, not the
+ *  attribute - matching every `/SEG` used to rewrite it whenever a declared
+ *  name happened to read the same (and `sap-icon://…` URLs with it). */
+const ROOT_PATH_SEGMENT = /(^|[^\w/])\/([A-Z_][A-Z0-9_]*)/gi;
+
+/** Statements that declare a CLASS ATTRIBUTE - what a binding path can
+ *  resolve to. `TYPES` deliberately does not count: a structure field is
+ *  addressed by RELATIVE paths (`{TITLE}`) this module does not track, so
+ *  offering to rename one would rewrite the declaration and leave the
+ *  binding behind - the half-renamed wire this module exists to prevent. */
+const DECLARING = /^\s*(?:CLASS-DATA|DATA|CONSTANTS)\b/i;
 
 /** An ABAP declaration of the attribute, which is what makes it a rename
  *  target rather than a coincidence: only a name the class DECLARES may be
  *  renamed, so a binding path into a nested structure is left alone. */
-function declares(source: string, name: string): boolean {
+function declares(lexed: Lexed, name: string): boolean {
   // The name has to stand where a declaration puts the thing it introduces.
   // Any word inside the statement used to count, so `TYPE`, `string` and
   // `LENGTH` all looked declared - and F2 on the `string` in
   // `DATA mv_x TYPE string.` offered a rename that would have rewritten every
   // TYPE clause in the class.
-  return abapStatements(source).some((statement) =>
-    declaredNames(statement.text).some(
+  return lexed.statements.some((statement) => {
+    const blanked = lexed.blanked.slice(
+      statement.start,
+      statement.start + statement.text.length
+    );
+    if (!DECLARING.test(blanked)) {
+      return false;
+    }
+    return declaredNames(statement.text).some(
       (declared) => declared.name.toUpperCase() === name.toUpperCase()
-    )
-  );
+    );
+  });
 }
 
 /** Is this offset inside one of the source's string literals? */
 function insideLiteral(all: readonly Literal[], offset: number): boolean {
   return all.some((literal) => offset >= literal.start && offset < literal.end);
-}
-
-/** The comment spans of an ABAP source - `*` in column one and `"` to the end
- *  of the line, as the shared lexer sees them (a `"` inside a literal is not
- *  a comment, and it knows which is which). */
-function commentRanges(source: string): Array<[number, number]> {
-  return abapSpans(source)
-    .filter((span) => span.kind === "comment")
-    .map((span) => [span.from, span.to] as [number, number]);
 }
 
 /**
@@ -199,36 +262,36 @@ function commentRanges(source: string): Array<[number, number]> {
  * confident local one.
  */
 export function attributeSpans(source: string, name: string): NamedSpan[] {
-  if (!declares(source, name)) {
+  const lexed = lex(source);
+  if (!declares(lexed, name)) {
     return [];
   }
-  const all = literals(source);
-  const comments = commentRanges(source);
   const inComment = (at: number) =>
-    comments.some(([from, to]) => at >= from && at < to);
+    lexed.comments.some(([from, to]) => at >= from && at < to);
   const out: NamedSpan[] = [];
 
   // the ABAP identifier, outside literals and comments
   const identifier = new RegExp(String.raw`\b${name}\b`, "gi");
   for (const match of source.matchAll(identifier)) {
     const at = match.index ?? 0;
-    if (insideLiteral(all, at) || inComment(at)) {
+    if (insideLiteral(lexed.literals, at) || inComment(at)) {
       continue;
     }
     out.push({ name: match[0], start: at, end: at + match[0].length });
   }
 
-  // the binding paths inside view literals, where a segment is the name
-  for (const literal of all) {
+  // the binding paths inside view literals, where the ROOT segment is the name
+  for (const literal of lexed.literals) {
     if (!literal.text.includes("{") && !literal.text.includes("/")) {
       continue;
     }
     for (const segment of literal.text.matchAll(ROOT_PATH_SEGMENT)) {
-      if (segment[1].toUpperCase() !== name.toUpperCase()) {
+      if (segment[2].toUpperCase() !== name.toUpperCase()) {
         continue;
       }
-      const at = literal.start + (segment.index ?? 0) + 1;
-      out.push({ name: segment[1], start: at, end: at + segment[1].length });
+      const at =
+        literal.start + (segment.index ?? 0) + segment[1].length + 1;
+      out.push({ name: segment[2], start: at, end: at + segment[2].length });
     }
   }
   return out.sort((a, b) => a.start - b.start);
@@ -238,7 +301,7 @@ export function attributeSpans(source: string, name: string): NamedSpan[] {
  *  segment - provided the class declares it. */
 export function attributeAt(source: string, offset: number): NamedSpan | undefined {
   const word = wordAt(source, offset);
-  if (!word || !declares(source, word.name)) {
+  if (!word || !declares(lex(source), word.name)) {
     return undefined;
   }
   return attributeSpans(source, word.name).find(

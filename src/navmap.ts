@@ -9,6 +9,7 @@
  */
 
 import { classNameOf, isAppClassDeep } from "./abap";
+import { blankNonCode } from "./abapscan";
 
 export interface NavSource {
   fileName: string;
@@ -26,6 +27,9 @@ export interface NavNode {
 export interface NavEdge {
   from: string;
   to: string;
+  /** Offset of the `nav_app_call` in the FROM class's source - what an edge
+   *  click jumps to. */
+  offset?: number;
 }
 
 export interface NavGraph {
@@ -44,11 +48,22 @@ const NOT_A_CLASS = new Set([
   "get_app_prev",
 ]);
 
-/** The class a nav_app_call argument names: `NEW zcl_x( )`,
- *  `zcl_x=>factory( … )` or a variable it cannot resolve (skipped). */
-export function navTargetsOf(source: string): string[] {
-  const targets: string[] = [];
-  for (const m of source.matchAll(/nav_app_call\s*\(([^)]*)/gi)) {
+/** One `nav_app_call( )` and the class it names. */
+export interface NavCall {
+  target: string;
+  /** Offset of the call in the source. */
+  offset: number;
+}
+
+/** Every nav_app_call with the class its argument names: `NEW zcl_x( )`,
+ *  `zcl_x=>factory( … )` or a variable it cannot resolve (skipped).
+ *
+ *  Read from the BLANKED source: a commented-out navigation, or one quoted
+ *  inside a toast text, used to draw a live edge on the map. Blanking keeps
+ *  every offset, so the recorded position still points into the original. */
+export function navCallsOf(source: string): NavCall[] {
+  const calls: NavCall[] = [];
+  for (const m of blankNonCode(source).matchAll(/nav_app_call\s*\(([^)]*)/gi)) {
     const arg = m[1];
     // `/dmo/cl_travel_app` counts as one word: the namespace is part of the
     // class name, and a pattern that could only start at a letter never saw
@@ -60,12 +75,17 @@ export function navTargetsOf(source: string): string[] {
       }
       // Only class-looking names: the customer namespaces and z2ui5's own.
       if (/^(Z|Y|\/)/i.test(name) || /^CL_/i.test(name)) {
-        targets.push(name);
+        calls.push({ target: name, offset: m.index ?? 0 });
         break; // the first class name is the target; the rest are arguments
       }
     }
   }
-  return [...new Set(targets)];
+  return calls;
+}
+
+/** The distinct classes a source navigates to. */
+export function navTargetsOf(source: string): string[] {
+  return [...new Set(navCallsOf(source).map((call) => call.target))];
 }
 
 /** The graph over a set of sources. Nav targets without a source in the set
@@ -81,33 +101,39 @@ export function navGraph(sources: NavSource[]): NavGraph {
   for (const { fileName, source } of sources) {
     byName.set(classNameOf(source, fileName), source);
   }
-  const isApp = (source: string): boolean =>
-    isAppClassDeep(source, (name) => byName.get(name.toUpperCase()));
+  // once per source - the lookup walks the inheritance chain and both loops
+  // below used to ask again
+  const appFlags = sources.map(({ source }) =>
+    isAppClassDeep(source, (name) => byName.get(name.toUpperCase()))
+  );
 
-  for (const { fileName, source } of sources) {
-    if (!isApp(source)) {
-      continue;
+  sources.forEach(({ fileName, source }, ix) => {
+    if (!appFlags[ix]) {
+      return;
     }
     const className = classNameOf(source, fileName);
     nodes.set(className, { className, fileName, isApp: true });
-  }
-  for (const { fileName, source } of sources) {
-    if (!isApp(source)) {
-      continue;
+  });
+  const seenEdges = new Set<string>();
+  sources.forEach(({ fileName, source }, ix) => {
+    if (!appFlags[ix]) {
+      return;
     }
     const from = classNameOf(source, fileName);
-    for (const to of navTargetsOf(source)) {
+    for (const { target: to, offset } of navCallsOf(source)) {
       if (to === from) {
         continue;
       }
       if (!nodes.has(to)) {
         nodes.set(to, { className: to, isApp: false });
       }
-      if (!edges.some((e) => e.from === from && e.to === to)) {
-        edges.push({ from, to });
+      const key = `${from}>${to}`;
+      if (!seenEdges.has(key)) {
+        seenEdges.add(key);
+        edges.push({ from, to, offset });
       }
     }
-  }
+  });
   return { nodes: [...nodes.values()], edges };
 }
 
@@ -124,7 +150,17 @@ export interface PlacedNode extends NavNode {
 
 export interface NavLayout {
   nodes: PlacedNode[];
-  edges: Array<NavEdge & { x1: number; y1: number; x2: number; y2: number }>;
+  edges: Array<
+    NavEdge & {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      /** The FROM class's file, when it is in the workspace - together with
+       *  `offset` it makes the edge clickable. */
+      file?: string;
+    }
+  >;
   width: number;
   height: number;
 }
@@ -140,6 +176,12 @@ export function layoutGraph(graph: NavGraph): NavLayout {
   for (const edge of graph.edges) {
     incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
   }
+  const outgoing = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    (outgoing.get(edge.from) ?? outgoing.set(edge.from, []).get(edge.from)!).push(
+      edge.to
+    );
+  }
   // BFS depth from the roots; a cycle's nodes keep the depth they get first.
   const depth = new Map<string, number>();
   const queue: string[] = graph.nodes
@@ -148,10 +190,10 @@ export function layoutGraph(graph: NavGraph): NavLayout {
   queue.forEach((name) => depth.set(name, 0));
   for (let i = 0; i < queue.length; i++) {
     const current = queue[i];
-    for (const edge of graph.edges) {
-      if (edge.from === current && !depth.has(edge.to)) {
-        depth.set(edge.to, (depth.get(current) ?? 0) + 1);
-        queue.push(edge.to);
+    for (const to of outgoing.get(current) ?? []) {
+      if (!depth.has(to)) {
+        depth.set(to, (depth.get(current) ?? 0) + 1);
+        queue.push(to);
       }
     }
   }
@@ -207,6 +249,7 @@ export function layoutGraph(graph: NavGraph): NavLayout {
       y1: from.y + from.height / 2,
       x2: to.x,
       y2: to.y + to.height / 2,
+      file: from.fileName,
     };
   });
 
@@ -248,8 +291,14 @@ export function navMapSvg(layout: NavLayout): string {
   );
   for (const edge of layout.edges) {
     const midX = (edge.x1 + edge.x2) / 2;
+    // the calling class and the call's offset ride along, so a click on the
+    // edge can open the nav_app_call itself
+    const jump =
+      edge.file && typeof edge.offset === "number"
+        ? ` data-file="${escapeXml(edge.file)}" data-offset="${edge.offset}"`
+        : "";
     parts.push(
-      `<path class="edge" d="M${edge.x1} ${edge.y1} C ${midX} ${edge.y1}, ` +
+      `<path class="edge"${jump} d="M${edge.x1} ${edge.y1} C ${midX} ${edge.y1}, ` +
         `${midX} ${edge.y2}, ${edge.x2 - 2} ${edge.y2}" marker-end="url(#arrow)"/>`
     );
   }

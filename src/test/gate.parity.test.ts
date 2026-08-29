@@ -209,6 +209,31 @@ ENDCLASS.
 `;
 ABAP_FIXTURES["a relative path under an element-bound slot"] = ELEMENT_BOUND;
 
+/** A class on the FROZEN builder. `checkAbapSource` answers with the one
+ *  `frozen-view-builder` finding and nothing else; the gate used to answer
+ *  "nothing to check" - an editor/CI divergence. `frozenBuilderOf` has no
+ *  subpath in the linter's `exports` map, so `gate.ts` mirrors the two class
+ *  names, and this fixture is what pins the mirror to the linter's answer. */
+const FROZEN_CLASS = `CLASS zcl_parity DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+ENDCLASS.
+
+CLASS zcl_parity IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+
+    DATA(view) = z2ui5_cl_xml_view=>factory( ).
+    view->page( title = \`old\` )->stringify( ).
+
+  ENDMETHOD.
+ENDCLASS.
+`;
+ABAP_FIXTURES["a class on the frozen builder"] = FROZEN_CLASS;
+ABAP_FIXTURES["a class on the frozen cc builder"] = FROZEN_CLASS.replace(
+  "z2ui5_cl_xml_view=>factory",
+  "z2ui5_cl_xml_view_cc=>factory"
+);
+
 const XML_FIXTURES: Record<string, string> = {
   clean: '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <Button text="Go"/>\n</mvc:View>',
   "unknown property":
@@ -313,4 +338,39 @@ test("the rules the missing inputs used to silence are reachable through the gat
     ),
     "raw-javascript-to-frontend is missing - fromAbap is not reaching checkNodes"
   );
+  assert.ok(
+    typesOf(ABAP_FIXTURES["a class on the frozen builder"]).has(
+      "frozen-view-builder"
+    ),
+    "frozen-view-builder is missing - the gate answered 'nothing to check' " +
+      "for a class on the frozen builder, which CI reports"
+  );
+});
+
+test("a rules exclude anchored the way CI writes it matches in the editor too", () => {
+  /* The linter matches `exclude` against the path as given, its absolute
+   * form and its cwd-relative form - and a CLI run's cwd is the repo root,
+   * so `^src/02/` matches there. The editor names the file absolutely and
+   * its host's cwd is arbitrary, so the gate derives the CONFIG-relative
+   * spelling too; without it the editor squiggled what CI had waived. */
+  const source = ABAP_FIXTURES["an unknown property"];
+  const rules = { "unknown-property": { exclude: ["^src/02/"] } };
+  const abs = "/repo/src/02/zcl_parity.clas.abap";
+  const config = "/repo/abap2ui5lint.jsonc";
+  const control = runGate(source, abs, false, { ...OPTIONS, configFile: config });
+  assert.ok(
+    control.findings.some((f) => f.type === "unknown-property"),
+    "the fixture stopped producing the finding - the test measures nothing"
+  );
+  const mine = runGate(source, abs, false, { ...OPTIONS, rules, configFile: config });
+  assert.ok(
+    !mine.findings.some((f) => f.type === "unknown-property"),
+    "the exclude did not match the config-relative spelling of the file"
+  );
+  // CI's own answer for the spelling the pattern was written against
+  const theirs = checkAbapSource(source, {
+    ...linterOptions("src/02/zcl_parity.clas.abap"),
+    rules,
+  });
+  assert.ok(!theirs.findings.some((f) => f.type === "unknown-property"));
 });

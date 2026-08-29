@@ -1,6 +1,147 @@
 # Changelog
 
-## Unreleased
+## 0.25.0
+
+The result of a full adversarial review of the extension: over sixty bugs
+fixed, the per-keystroke hot paths measured and cut down, and a round of
+features that the existing plumbing had almost finished anyway. The
+highlights, by surface:
+
+- **The preview's badges now act.** The "not activated" badge offers
+  **Activate** directly (reloading only showed the old version - the exact
+  trap the badge warns about), the runtime-error badge jumps to the source
+  line it already knew about (it used to only write it to the log), and when
+  the activation watch gives up after ten minutes it now says so in the
+  preview instead of leaving the badge promising a reload that will never
+  come. The welcome screen offers to relaunch the last app after a window
+  reload, the screenshot button captures at the preview's current device
+  width (desktop/tablet/phone), and the status-bar entry opens a small menu -
+  Reload, move the preview, open in the browser, screenshot, connection
+  check - instead of only reloading. Custom UI5 themes can be added to the
+  theme picker via the new `abap2ui5.previewThemes` setting.
+- **Two previews could end up running the same app.** Changing
+  `abap2ui5.openMode` in the settings (rather than through "Move Preview")
+  and pressing F9 left the old surface alive: every save reloaded the app
+  twice, and closing the leftover tab killed the status bar for the panel
+  that was still showing the app. F9 now reconciles the surfaces the way the
+  move command always did. A launch canceled at the credentials prompt no
+  longer lands in "Recently launched".
+- **The render gate installs reliably again.** The rolling bundle
+  (`viewCheck.rollingBundle`) was uninstallable from the second time on - the
+  "content must never change" integrity check applied to the one URL whose
+  content changes by design. A stalled download no longer disables installing
+  for the rest of the session (it times out, can be cancelled, and says what
+  happened), and the new "Update Render Gate" command shows the installed
+  digest next to the pinned linter commit before refreshing.
+- **The proxy fails closed, and two windows stop fighting.** During the short
+  window while the proxy shuts down, a request without the token cookie was
+  accepted instead of refused (nothing was forwarded - the credentials were
+  already gone - but the gate is now checked first and fails closed, and both
+  the path token and the cookie are compared timing-safe). The auth cookie is
+  now scoped per proxy port, so two VS Code windows pointed at two systems no
+  longer overwrite each other's cookie and blank each other's preview.
+  Stopping or switching systems no longer waits up to two minutes for a
+  hanging request, a failed port bind no longer leaves a half-started proxy
+  that hands out `port: undefined`, and **WebSocket connections are now
+  forwarded** - an app using them found the tunnel dead before.
+- **Correct credentials could get locked out.** The background UI5-version
+  probe ran without the launch URL's `sap-client`; on systems whose default
+  client rejects the logon it tripped the proxy's 401 breaker with perfectly
+  valid credentials - breaking the running app, prompting for a re-entry, and
+  counting a real failed logon toward the system's lockout, once per F9. The
+  probe now carries the client and can no longer trip the breaker. "Check
+  System Connection" gained a client-mismatch probe that diagnoses exactly
+  this setup, and its TLS classification now recognises the private-CA error
+  codes (`UNABLE_TO_GET_ISSUER_CERT*`). Credentials migrated from pre-0.14
+  installs can be deleted again by "Clear Stored SAP Credentials", and adding
+  a system under an already-used name no longer activates the old one.
+- **A cancelled check no longer leaks a browser.** On macOS and Linux,
+  killing a running checker killed only the wrapper process - the linter and
+  its Chromium kept running (the Windows path always killed the tree). The
+  whole process group dies now, a closed preview panel kills its render
+  instead of letting Chromium finish for nobody, and checker output with
+  umlauts can no longer be corrupted at a chunk boundary.
+- **The editor and CI disagree less.** Classes on a frozen view builder are
+  reported as `frozen-view-builder` in the editor (they were "nothing to
+  check" while CI failed them), `rules.*.exclude` patterns anchored to the
+  repository root now match in the editor too, the suppress quick fix places
+  its directive on the right line in CRLF files (it could land inside a start
+  tag and break the XML), diagnostics are cleared when a file stops being
+  checkable, workspace-check results no longer land on text that changed
+  during the sweep, and rebuilding the baseline in a repository with nested
+  configs no longer writes entries CI would immediately call stale. A changed
+  baseline file (a `git pull`) now triggers a re-check on desktop, and the
+  web build reacts to settings changes without waiting for a keystroke.
+- **Baselines and fixes with more control.** "Fix All in Workspace" and
+  "Extract View" open VS Code's refactor preview instead of applying blind,
+  a rule group in the findings view can be baselined as one action, the
+  suppress quick fix has a "with a reason" variant, the findings status-bar
+  item opens the abap2UI5 findings view rather than the generic Problems
+  panel - and **"Check All Views in Workspace" now works on vscode.dev and
+  Business Application Studio** too.
+- **Apps are recognised the way teams actually write them.**
+  `INTERFACES: if_something, z2ui5_if_app.` - the interface anywhere in a
+  chained declaration - is an app now (only the first position was), and a
+  leading `CLASS ... DEFINITION DEFERRED.` no longer hides a class's
+  superclass, which silently disabled the inheritance lookup for exactly the
+  base-class pattern it exists for.
+- **Completion and hover answer for the right control.** An attribute written
+  after `)->end( )` belongs to the closed container - the builder and the
+  linter always knew, completion and hover now agree instead of offering the
+  inner control's members and then squiggling the accepted offer. `client->`
+  hover and completion stay quiet in comments and string literals,
+  go-to-definition on a binding path no longer lands on a commented-out
+  declaration, `DATA: BEGIN OF ...` blocks no longer annotate `BEGIN` and
+  `END` as roundtrip cost, and a `>` inside a quoted XML attribute no longer
+  kills completion for the rest of the tag.
+- **New language smarts**: signature help for `client->` methods, completion
+  inside `WHEN '...'` offering the events the view actually raises, a warning
+  lens on an `_event( )` no `WHEN` branch handles, deprecation as an inline
+  annotation (toggle: `abap2ui5.inlineDeprecated`), completion for `xmlns`
+  library values, and the default aggregation marked in member completion.
+  Events raised with a nested `VALUE #( )` before the name are now found by
+  F2, go-to-definition and the lenses, and `WHEN 'A' OR 'B'` branches count
+  all their alternatives.
+- **F2 on an attribute stays inside its wires.** Renaming `title` no longer
+  rewrites a same-named component inside `{/MT_TAB/TITLE}` paths or `TYPES`
+  blocks (and structure components, whose relative bindings F2 cannot track,
+  are honestly not offered for rename any more). Inspect mode finds the
+  builder call for a control inside an aggregation template instead of the
+  first control in the document, and "Extract View" no longer writes a broken
+  class when methods are declared in a chain or the file holds two classes.
+- **Converting XML views got sharper.** Event handlers become
+  `client->_event( \`ON_PRESS\` )` wires with a TODO instead of dead string
+  literals, lines longer than ABAP's 255-character limit are split with `&&`
+  (they failed the abapGit import before), entity text like `&amp;` survives
+  the abbreviation round-trip, and Emmet abbreviations learned groups and
+  counters (`(Label+Input)*3`, `Button$*3`). The XML preview follows the
+  cursor (the ABAP side highlights the matching XML line), maps findings to
+  the opening tag instead of sometimes the closing one, and the navigation
+  map draws no arrows for commented-out `nav_app_call`s - and its arrows are
+  clickable now, jumping to the call.
+- **The example search tells the truth.** Commented-out chains no longer
+  count as (or rank) examples, the three remote catalogues are fetched in
+  parallel instead of one after another, the corpus walk no longer freezes
+  the extension host, a remote hit opens read-only in the editor instead of
+  bouncing to github.com, and the day cache revalidates with ETags.
+- **The MCP surface grew and locked down.** New tools: `check_view_source`
+  (the bundled view check over agent-supplied source), `get_traffic` (the
+  proxy's recent roundtrip log), and a `viewport` parameter plus `sap-ui-theme`
+  support for `run_app_on_system`. Turning `abap2ui5.mcp.system` off now
+  actually stops the running server (a connected client kept its access
+  before), its token is compared timing-safe, the servers are registered even
+  in a window without ABAP files, and the new "Show MCP Status" command says
+  what the registration resolved. Screenshots work for namespaced classes
+  (`/UI2/CL_...`) and the file name can no longer be steered outside the
+  storage folder.
+- **Hardening and housekeeping**: releases run the test suite before
+  publishing, `abap2ui5.systems` and `abap2ui5.launchUrlTemplate` are
+  restricted in untrusted workspaces (a cloned repository could point F9 - and
+  the credential prompt - at its own host), the apps tree notices files
+  changed by a `git pull`, the `.vsix` no longer ships `package-lock.json`,
+  and the per-keystroke paths (live check, code lens, rename, inline
+  annotations, completion docs) each do their expensive work once per
+  document version instead of once per consumer.
 
 - **The icon rules now judge `.view.xml` files too.** An unknown or too-new
   `sap-icon://` name was reported by CI and not by the editor whenever it sat

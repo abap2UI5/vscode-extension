@@ -7,8 +7,10 @@ import {
   clientCallAt,
   clientMethod,
   clientMethods,
+  clientSignatureContext,
   isClientCompletion,
   signatureHead,
+  signatureParameters,
 } from "../clientapi";
 
 test("the bundled client API knows the methods every app calls", () => {
@@ -88,4 +90,39 @@ test("the signature head is one line, for the completion detail", () => {
   const head = signatureHead(method);
   assert.ok(!head.includes("\n"));
   assert.match(head, /METHODS view_display/);
+});
+
+test("signatureParameters reads the parameter lines, not the result", () => {
+  const method = clientMethod("_event");
+  assert.ok(method);
+  const params = signatureParameters(method!);
+  assert.ok(params.includes("val"));
+  assert.ok(params.includes("t_arg"));
+  // `VALUE(result)` is the returning value, not a parameter to fill
+  assert.ok(!params.includes("VALUE"));
+  assert.ok(!params.includes("result"));
+});
+
+test("the open client call and its written parameter are recognised", () => {
+  const open = clientSignatureContext("    client->_event( val = ");
+  assert.equal(open?.method.name, "_event");
+  assert.equal(open?.parameter, "val");
+
+  // a later parameter, past a nested closed call
+  const later = clientSignatureContext(
+    "    client->_event( val = get_name( x = 1 ) t_arg = "
+  );
+  assert.equal(later?.method.name, "_event");
+  assert.equal(later?.parameter, "t_arg");
+
+  // right after the paren nothing is written yet
+  const fresh = clientSignatureContext("client->popup_display(");
+  assert.equal(fresh?.method.name, "popup_display");
+  assert.equal(fresh?.parameter, undefined);
+
+  // inside some OTHER call's parentheses there is nothing to say
+  assert.equal(clientSignatureContext("client->_event( get_name( "), undefined);
+  // a closed call is over
+  assert.equal(clientSignatureContext("client->_event( `GO` ) "), undefined);
+  assert.equal(clientSignatureContext("no call here"), undefined);
 });

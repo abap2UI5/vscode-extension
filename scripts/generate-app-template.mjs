@@ -128,6 +128,17 @@ if (invokedDirectly) {
   if (!JSON.parse(files["package.json"]).devDependencies?.["@abap2ui5/linter"]) {
     missing.push("package.json no longer depends on @abap2ui5/linter");
   }
+  /* The scaffold drops every template script that runs files out of the
+   * template's own scripts/ directory (a scaffolded project does not get
+   * one). `check` moving there would silently take `npm run check` away from
+   * every new project - the one command its README and AGENTS.md tell the
+   * reader to run. */
+  const checkScript = JSON.parse(files["package.json"]).scripts?.check;
+  if (!checkScript || checkScript.includes("scripts/")) {
+    missing.push(
+      'package.json\'s "check" script is missing or runs files under scripts/ - the scaffold drops such scripts, so a new project would lose `npm run check`'
+    );
+  }
   /* The scaffold reads values out of these two and copies the rest; a shared
    * list that stopped naming them is a scaffold that would silently write a
    * project without a manifest or without CI. */

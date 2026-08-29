@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { controlCallAt } from "./context";
 import { ExampleHit, findControlUses, rankExamples } from "./examples";
-import { CatalogueEntry, CatalogueHit, catalogueUrl, matchCatalogue, parseCatalogue } from "./catalogue";
+import { CatalogueEntry, CatalogueHit, catalogueUrl, matchCatalogue, parseCatalogue, rawUrl } from "./catalogue";
 import { CORPUS_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
 
 /*
@@ -23,7 +23,8 @@ import { CORPUS_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
  * example is exactly the person who has cloned nothing yet. So each
  * repository WITHOUT a local checkout is answered from the `catalogue.json`
  * it commits at its root, fetched from GitHub and cached for a day - those
- * hits name whole samples rather than lines, and open on github.com.
+ * hits name whole samples rather than lines, and open read-only in the
+ * editor (on github.com when the fetch fails).
  */
 
 /** The three sample repositories: the GitHub name that publishes the
@@ -40,14 +41,22 @@ const GROUPS: ReadonlyArray<{ repo: string; dirs: readonly string[] }> = [
  *  filesystem crawl. */
 const FILE_LIMIT = 4000;
 
-/** How long a fetched catalogue stays good. A day, like the ecosystem's
- *  other snapshots-of-elsewhere: the catalogues move with sample merges,
- *  which is far slower than anyone re-runs this command. */
+/** Sources read at a time - enough to keep the disk busy, few enough to keep
+ *  the extension host responsive while a corpus is searched. */
+const READ_CONCURRENCY = 8;
+
+/** How long a fetched catalogue stays good without asking. A day, like the
+ *  ecosystem's other snapshots-of-elsewhere - and after that the stored ETag
+ *  makes the re-ask a 304 rather than a re-download. */
 const CATALOGUE_TTL_MS = 24 * 60 * 60 * 1000;
+
+const FETCH_TIMEOUT_MS = 8000;
 
 interface CachedCatalogue {
   at: number;
   entries: CatalogueEntry[];
+  /** The catalogue response's ETag, for If-None-Match revalidation. */
+  etag?: string;
 }
 
 /** Fetched catalogues, per repo - the session-lifetime layer over the
@@ -60,7 +69,8 @@ function cacheKey(repo: string): string {
 
 /**
  * The remote catalogue of one repository: memory, then `globalState`, then
- * a fetch of the committed `catalogue.json` (cached back into both).
+ * a fetch of the committed `catalogue.json` (cached back into both, with a
+ * stored ETag turning an unchanged catalogue into a 304).
  *
  * `undefined` means "this repository could not answer at all" - fetch failed
  * and nothing cached - which the caller distinguishes from an answer with no
@@ -76,21 +86,39 @@ async function remoteEntries(
   const now = Date.now();
   const stored = (): CachedCatalogue | undefined =>
     memoryCache.get(repo) ?? context.globalState.get<CachedCatalogue>(cacheKey(repo));
+  const usable = (c: CachedCatalogue | undefined): c is CachedCatalogue =>
+    c !== undefined && Array.isArray(c.entries);
   if (!force) {
     const cached = stored();
-    if (cached && Array.isArray(cached.entries) && now - cached.at < CATALOGUE_TTL_MS) {
+    if (usable(cached) && now - cached.at < CATALOGUE_TTL_MS) {
       memoryCache.set(repo, cached);
       return cached.entries;
     }
   }
   try {
-    const res = await fetch(catalogueUrl(repo), { signal: AbortSignal.timeout(8000) });
+    const cached = stored();
+    const headers: Record<string, string> = {};
+    if (usable(cached) && cached.etag) {
+      headers["if-none-match"] = cached.etag;
+    }
+    const res = await fetch(catalogueUrl(repo), {
+      headers,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (res.status === 304 && usable(cached)) {
+      const value = { ...cached, at: now };
+      memoryCache.set(repo, value);
+      await context.globalState.update(cacheKey(repo), value);
+      log(`examples: ${repo} catalogue unchanged (304) - cache renewed`);
+      return cached.entries;
+    }
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
+    const etag = res.headers.get("etag") ?? undefined;
     const entries = parseCatalogue(await res.text());
     log(`examples: fetched ${repo} catalogue - ${entries.length} entries`);
-    const value = { at: now, entries };
+    const value: CachedCatalogue = { at: now, entries, ...(etag ? { etag } : {}) };
     memoryCache.set(repo, value);
     await context.globalState.update(cacheKey(repo), value);
     return entries;
@@ -101,7 +129,7 @@ async function remoteEntries(
       }`
     );
     const cached = stored();
-    return cached && Array.isArray(cached.entries) ? cached.entries : undefined;
+    return usable(cached) ? cached.entries : undefined;
   }
 }
 
@@ -127,15 +155,15 @@ function catalogueRoots(): Array<{ dir: string; name: string; repo: string }> {
 
 /** Every ABAP class under a catalogue - the corpus is abapGit-shaped, so the
  *  naming convention is what tells a class from an include. */
-function classFiles(dir: string, budget: { left: number }): string[] {
+async function classFiles(dir: string, budget: { left: number }): Promise<string[]> {
   const out: string[] = [];
-  const walk = (current: string) => {
+  const walk = async (current: string): Promise<void> => {
     if (budget.left <= 0) {
       return;
     }
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
+      entries = await fs.promises.readdir(current, { withFileTypes: true });
     } catch {
       return;
     }
@@ -148,14 +176,14 @@ function classFiles(dir: string, budget: { left: number }): string[] {
       }
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        walk(full);
+        await walk(full);
       } else if (entry.name.endsWith(".clas.abap") && !entry.name.endsWith(".testclasses.abap")) {
         out.push(full);
         budget.left--;
       }
     }
   };
-  walk(dir);
+  await walk(dir);
   return out;
 }
 
@@ -176,22 +204,38 @@ async function askControl(editor: vscode.TextEditor | undefined): Promise<string
   });
 }
 
-function searchLocal(
+/** Reads and searches the checkouts without blocking the extension host - a
+ *  corpus is thousands of files, and a synchronous read of each stalls every
+ *  other feature for the duration. */
+async function searchLocal(
   roots: ReadonlyArray<{ dir: string; name: string }>,
   control: string,
   log: (m: string) => void
-): ExampleHit[] {
+): Promise<ExampleHit[]> {
   const budget = { left: FILE_LIMIT };
   const hits: ExampleHit[] = [];
   for (const catalogue of roots) {
-    for (const file of classFiles(catalogue.dir, budget)) {
-      let source: string;
-      try {
-        source = fs.readFileSync(file, "utf8");
-      } catch {
-        continue;
+    const files = await classFiles(catalogue.dir, budget);
+    for (let i = 0; i < files.length; i += READ_CONCURRENCY) {
+      const batch = await Promise.all(
+        files.slice(i, i + READ_CONCURRENCY).map(async (file) => {
+          try {
+            return { file, source: await fs.promises.readFile(file, "utf8") };
+          } catch {
+            return undefined;
+          }
+        })
+      );
+      for (const read of batch) {
+        if (read) {
+          hits.push(
+            ...findControlUses(read.source, control, {
+              file: read.file,
+              catalogue: catalogue.name,
+            })
+          );
+        }
       }
-      hits.push(...findControlUses(source, control, { file, catalogue: catalogue.name }));
     }
   }
   log(`examples: ${control} - ${hits.length} use(s) in the local catalogues`);
@@ -220,12 +264,12 @@ function quickPickItems(
     });
   }
   if (separators) {
-    items.push({ label: "on github.com", kind: vscode.QuickPickItemKind.Separator });
+    items.push({ label: "from GitHub", kind: vscode.QuickPickItemKind.Separator });
   }
   for (const entry of remote) {
     items.push({
       label: `$(github) ${entry.className}`,
-      description: `${entry.repo} · opens on GitHub`,
+      description: `${entry.repo} · opens read-only`,
       detail: entry.summary ? `${entry.title} — ${entry.summary}` : entry.title,
       remote: entry,
     });
@@ -233,11 +277,65 @@ function quickPickItems(
   return items;
 }
 
+/** Scheme of the read-only documents a remote hit opens as. */
+const SAMPLE_SCHEME = "abap2ui5-sample";
+
+/** Where the sample lives is carried in the query, so a branch or file path
+ *  with unusual characters cannot distort the document's own path - that one
+ *  only names the editor tab. */
+function sampleUri(hit: CatalogueHit): vscode.Uri {
+  return vscode.Uri.from({
+    scheme: SAMPLE_SCHEME,
+    path: `/${hit.file.split("/").pop() ?? hit.className}`,
+    query: JSON.stringify({ repo: hit.repo, branch: hit.branch ?? "main", file: hit.file }),
+  });
+}
+
+async function fetchSampleText(uri: vscode.Uri): Promise<string> {
+  const { repo, branch, file } = JSON.parse(uri.query) as {
+    repo: string;
+    branch: string;
+    file: string;
+  };
+  const res = await fetch(rawUrl(repo, file, branch), {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.text();
+}
+
+/** Opens a remote hit read-only in the editor; github.com is the fallback
+ *  when the raw file cannot be fetched. */
+async function openRemote(hit: CatalogueHit, log: (m: string) => void): Promise<void> {
+  try {
+    const doc = await vscode.workspace.openTextDocument(sampleUri(hit));
+    if (/\.abap$/i.test(hit.file)) {
+      try {
+        await vscode.languages.setTextDocumentLanguage(doc, "abap");
+      } catch {
+        // no ABAP language contribution in this window - plain text is fine
+      }
+    }
+    await vscode.window.showTextDocument(doc, { preview: true });
+  } catch (err) {
+    log(
+      `examples: could not fetch ${hit.repo}/${hit.file} - ` +
+        `${err instanceof Error ? err.message : String(err)} - opening on GitHub`
+    );
+    await vscode.env.openExternal(vscode.Uri.parse(hit.url));
+  }
+}
+
 export function registerExamples(
   context: vscode.ExtensionContext,
   log: (m: string) => void
 ): void {
   context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(SAMPLE_SCHEME, {
+      provideTextDocumentContent: (uri) => fetchSampleText(uri),
+    }),
     vscode.commands.registerCommand("abap2ui5.showExamples", async () => {
       const control = await askControl(vscode.window.activeTextEditor);
       if (!control) {
@@ -249,22 +347,32 @@ export function registerExamples(
         const searched = await vscode.window.withProgress(
           { location: vscode.ProgressLocation.Window, title: `abap2UI5: searching ${control}` },
           async () => {
-            const hits = roots.length ? searchLocal(roots, control, log) : [];
             /* Each repository without a checkout is asked remotely - the
              * checkout stays primary, so a cloned samples-controls is never
-             * shadowed by its own catalogue. */
+             * shadowed by its own catalogue. Local search and the remote
+             * fetches run side by side, and the fetches side by side with
+             * each other - serial 8-second timeouts were most of what an
+             * offline user waited on. */
+            const missing = GROUPS.filter(
+              (group) => !roots.some((r) => r.repo === group.repo)
+            );
+            const [hits, fetched] = await Promise.all([
+              roots.length
+                ? searchLocal(roots, control, log)
+                : Promise.resolve<ExampleHit[]>([]),
+              Promise.all(
+                missing.map((group) => remoteEntries(context, group.repo, log, force))
+              ),
+            ]);
             const remote: CatalogueHit[] = [];
             let remoteAnswered = false;
-            for (const group of GROUPS) {
-              if (roots.some((r) => r.repo === group.repo)) {
-                continue;
-              }
-              const entries = await remoteEntries(context, group.repo, log, force);
+            missing.forEach((group, i) => {
+              const entries = fetched[i];
               if (entries !== undefined) {
                 remoteAnswered = true;
                 remote.push(...matchCatalogue(entries, control, group.repo));
               }
-            }
+            });
             return { hits, remote, remoteAnswered };
           }
         );
@@ -317,7 +425,7 @@ export function registerExamples(
           return;
         }
         if ("remote" in picked) {
-          await vscode.env.openExternal(vscode.Uri.parse(picked.remote.url));
+          await openRemote(picked.remote, log);
           return;
         }
         const doc = await vscode.workspace.openTextDocument(picked.hit.file);

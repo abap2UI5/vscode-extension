@@ -61,6 +61,22 @@ function touchesLines(a: vscode.Range, b: vscode.Range): boolean {
   return a.start.line <= b.end.line && a.end.line >= b.start.line;
 }
 
+function isXmlDoc(doc: vscode.TextDocument): boolean {
+  return /\.(view|fragment)\.xml$/i.test(doc.fileName) || doc.languageId === "xml";
+}
+
+/** Where the directive goes and how it is indented. In XML the finding's
+ *  line is often an attribute line inside a multi-line start tag, and a
+ *  comment may not go there - see `directiveLine`. */
+function suppressionSpot(
+  doc: vscode.TextDocument,
+  line: number
+): { target: number; indent: string } {
+  const target = directiveLine(doc.getText(), line, isXmlDoc(doc));
+  const indent = /^[ \t]*/.exec(doc.lineAt(target).text)?.[0] ?? "";
+  return { target, indent };
+}
+
 /**
  * The directive that waives a rule for the next line, in the comment syntax
  * of the file it goes into. Indented like the line it protects, so it does
@@ -71,16 +87,35 @@ function suppressionFor(
   line: number,
   rule: string
 ): vscode.TextEdit {
-  const isXml = /\.(view|fragment)\.xml$/i.test(doc.fileName) || doc.languageId === "xml";
-  // In XML the finding's line is often an attribute line inside a multi-line
-  // start tag, and a comment may not go there - see `directiveLine`.
-  const target = directiveLine(doc.getText(), line, isXml);
-  const indent = /^[ \t]*/.exec(doc.lineAt(target).text)?.[0] ?? "";
+  const { target, indent } = suppressionSpot(doc, line);
   const directive = `abap2ui5lint-disable-next-line ${rule}`;
-  const comment = isXml ? `<!-- ${directive} -->` : `" ${directive}`;
+  const comment = isXmlDoc(doc) ? `<!-- ${directive} -->` : `" ${directive}`;
   return vscode.TextEdit.insert(
     new vscode.Position(target, 0),
     `${indent}${comment}\n`
+  );
+}
+
+/**
+ * The same directive with a `-- <reason>` tail, as a snippet whose
+ * placeholder is the reason - the linter ignores everything after `--`, so
+ * the waiver documents itself where CI reads it. ABAP only: in XML the
+ * comment's own `-->` is the `--`, and a second one inside it would not be
+ * well-formed.
+ */
+function suppressionWithReason(
+  doc: vscode.TextDocument,
+  line: number,
+  rule: string
+): vscode.SnippetTextEdit {
+  const { target, indent } = suppressionSpot(doc, line);
+  const snippet = new vscode.SnippetString();
+  snippet.appendText(`${indent}" abap2ui5lint-disable-next-line ${rule} -- `);
+  snippet.appendPlaceholder("why");
+  snippet.appendText("\n");
+  return new vscode.SnippetTextEdit(
+    new vscode.Range(target, 0, target, 0),
+    snippet
   );
 }
 
@@ -160,6 +195,19 @@ class ViewCheckActions implements vscode.CodeActionProvider {
       action.diagnostics = [diagnostic];
       actions.push(action);
 
+      if (!isXmlDoc(doc)) {
+        const reasoned = new vscode.CodeAction(
+          `abap2UI5: suppress ${rule} on this line, with a reason`,
+          vscode.CodeActionKind.QuickFix
+        );
+        reasoned.edit = new vscode.WorkspaceEdit();
+        reasoned.edit.set(doc.uri, [
+          suppressionWithReason(doc, diagnostic.range.start.line, rule),
+        ]);
+        reasoned.diagnostics = [diagnostic];
+        actions.push(reasoned);
+      }
+
       /* --- switch the rule off everywhere ---------------------------------
        *
        * The setting exists, but a rule id is not something anybody knows by
@@ -180,14 +228,19 @@ class ViewCheckActions implements vscode.CodeActionProvider {
       actions.push(offAction);
 
       // --- adopt into the baseline, when the repo config names one --------
+      // Only the finding on the diagnostic's own line: falling back to the
+      // first finding of the same rule could baseline a DIFFERENT one - its
+      // key carries control/member/value - leaving the clicked squiggle
+      // standing and waiving an unrelated finding. If the buffer moved since
+      // the diagnostics were published, the action is simply not offered
+      // until the next check.
       if (baselineFile) {
-        const finding =
-          findings.find(
-            (f) =>
-              f.type === rule &&
-              typeof f.line === "number" &&
-              f.line - 1 === diagnostic.range.start.line
-          ) ?? findings.find((f) => f.type === rule);
+        const finding = findings.find(
+          (f) =>
+            f.type === rule &&
+            typeof f.line === "number" &&
+            f.line - 1 === diagnostic.range.start.line
+        );
         if (finding) {
           const baseline = new vscode.CodeAction(
             `abap2UI5: add ${rule} to ${path.basename(baselineFile)}`,
@@ -325,9 +378,20 @@ export function registerQuickFix(
         vscode.window.showInformationMessage("abap2UI5: no file open to fix.");
         return;
       }
+      let findings: PropertyFinding[];
+      try {
+        findings = findingsNow(editor.document);
+      } catch (err) {
+        // the gate throws on an unparsable buffer mid-edit - the other
+        // callers guard it, and a raw exception toast helps nobody
+        vscode.window.showWarningMessage(
+          `abap2UI5: this file cannot be checked right now - ${String(err)}`
+        );
+        return;
+      }
       const all = applyAll(
         editor.document,
-        findingsNow(editor.document).filter((f) => f.fixes?.length)
+        findings.filter((f) => f.fixes?.length)
       );
       if (!all) {
         vscode.window.showInformationMessage(

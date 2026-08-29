@@ -110,15 +110,39 @@ async function withOpenClass(node: AppNode | undefined, command: string): Promis
   await vscode.commands.executeCommand(command);
 }
 
+/** How long event-driven refreshes are coalesced. A branch switch touches
+ *  hundreds of files at once, and every refresh means a full rescan of the
+ *  window's ABAP sources in getChildren. */
+const REFRESH_DEBOUNCE_MS = 300;
+
 export function registerAppView(context: vscode.ExtensionContext): void {
   const provider = new AppTree();
   const watcher = vscode.workspace.createFileSystemWatcher(APP_GLOB);
-  const refresh = () => provider.refresh();
+  let pending: NodeJS.Timeout | undefined;
+  const refresh = () => {
+    if (pending) {
+      clearTimeout(pending);
+    }
+    pending = setTimeout(() => {
+      pending = undefined;
+      provider.refresh();
+    }, REFRESH_DEBOUNCE_MS);
+  };
   context.subscriptions.push(
     provider,
     watcher,
+    {
+      dispose: () => {
+        if (pending) {
+          clearTimeout(pending);
+        }
+      },
+    },
     vscode.window.createTreeView("abap2ui5.apps", { treeDataProvider: provider }),
     watcher.onDidCreate(refresh),
+    // content changes from outside the editor too - a git pull can turn an
+    // existing, unopened class into an app without any create or save event
+    watcher.onDidChange(refresh),
     watcher.onDidDelete(refresh),
     // a saved class can BECOME an app (or stop being one) - the tree follows
     vscode.workspace.onDidSaveTextDocument((doc) => {
@@ -139,7 +163,8 @@ export function registerAppView(context: vscode.ExtensionContext): void {
         refresh();
       }
     }),
-    vscode.commands.registerCommand("abap2ui5.refreshApps", refresh),
+    // the explicit command answers now, not after the debounce
+    vscode.commands.registerCommand("abap2ui5.refreshApps", () => provider.refresh()),
     vscode.commands.registerCommand("abap2ui5.runApp", (node: AppNode) =>
       withOpenClass(node, "abap2ui5.run")
     ),

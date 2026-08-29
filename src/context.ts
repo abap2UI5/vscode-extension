@@ -18,7 +18,7 @@
  * and the test suite drives it directly.
  */
 
-import { abapSpans, blankComments } from "./abapscan";
+import { abapSpans, blankComments, blankNonCode } from "./abapscan";
 
 /** Which of the three writable positions the cursor sits in. */
 export type ContextKind = "control" | "member" | "value" | "namespace";
@@ -58,26 +58,39 @@ export const DEFAULT_LIBRARY = "sap.m";
  * The map is keyed by prefix, `""` for the default namespace.
  */
 /** Same story as the scan memo below: both context calls of one completion ask
- *  for the namespace map of the same source. */
-let lastNsMap: { source: string; map: Record<string, string> } | undefined;
+ *  for the namespace map of the same source. A few slots rather than one, so
+ *  the colour pass and the outline of a second visible document do not evict
+ *  the entry the completion is about to ask for again. */
+const NS_MEMO_SLOTS = 4;
+const nsMemo: Array<{ source: string; map: Record<string, string> }> = [];
 
 export function abapNsMap(source: string): Record<string, string> {
-  if (lastNsMap && lastNsMap.source === source) {
-    return lastNsMap.map;
+  for (let i = 0; i < nsMemo.length; i++) {
+    if (nsMemo[i].source === source) {
+      const [entry] = nsMemo.splice(i, 1);
+      nsMemo.unshift(entry);
+      return entry.map;
+    }
   }
   const map = abapNsMapUncached(source);
-  lastNsMap = { source, map };
+  nsMemo.unshift({ source, map });
+  if (nsMemo.length > NS_MEMO_SLOTS) {
+    nsMemo.pop();
+  }
   return map;
 }
 
 function abapNsMapUncached(source: string): Record<string, string> {
   const map: Record<string, string> = {};
+  // over blanked comments: a commented-out `xmlns` line is not a declaration,
+  // and used to re-resolve a prefix to whatever the dead line said
+  const code = blankComments(source);
   const pair =
     /n\s*=\s*[`'"]xmlns(?::([\w.]+))?[`'"]\s*v\s*=\s*[`'"]([\w.]+)[`'"]/gi;
   const flat = /[`'"]xmlns(?::([\w.]+))?=([\w.]+)[`'"]/gi;
   for (const re of [pair, flat]) {
     let m: RegExpExecArray | null;
-    while ((m = re.exec(source))) {
+    while ((m = re.exec(code))) {
       map[m[1] ?? ""] = m[2];
     }
   }
@@ -155,16 +168,23 @@ interface AbapScan {
  * The scan's Call objects are read, never written, by the callers - so handing
  * the same ones out twice is safe.
  */
-let lastScan:
-  | { source: string; offset: number; scan: AbapScan }
-  | undefined;
+const SCAN_MEMO_SLOTS = 4;
+const scanMemo: Array<{ source: string; offset: number; scan: AbapScan }> = [];
 
 function scanAbap(source: string, offset: number): AbapScan {
-  if (lastScan && lastScan.offset === offset && lastScan.source === source) {
-    return lastScan.scan;
+  for (let i = 0; i < scanMemo.length; i++) {
+    const entry = scanMemo[i];
+    if (entry.offset === offset && entry.source === source) {
+      scanMemo.splice(i, 1);
+      scanMemo.unshift(entry);
+      return entry.scan;
+    }
   }
   const scan = scanAbapUncached(source, offset);
-  lastScan = { source, offset, scan };
+  scanMemo.unshift({ source, offset, scan });
+  if (scanMemo.length > SCAN_MEMO_SLOTS) {
+    scanMemo.pop();
+  }
   return scan;
 }
 
@@ -327,20 +347,40 @@ function writtenName(args: string): string | undefined {
   );
 }
 
-/** The control an `a( )` call attaches to: the last `ele( )` / `tag( )`
- *  started before it — exactly the rule z2ui5_cl_ui5_view_builder itself follows. */
+/**
+ * The control an `a( )` call attaches to — the rule the builder itself (and
+ * the linter's reconstruction) follows: the last CHILD of the open container,
+ * or the container itself while it has none. `end( )` pops a level, so an
+ * `a( )` after it belongs to the container that was just closed, not to the
+ * last `tag( )` written — reading it lexically made completion offer the
+ * tag's members where the gate validates the container's.
+ */
 function controlCallBefore(calls: Call[], before: number): Call | undefined {
-  let found: Call | undefined;
+  interface Frame {
+    call?: Call;
+    lastChild?: Call;
+  }
+  let stack: Frame[] = [{}];
   for (const call of calls) {
     if (call.open >= before) {
       break;
     }
     const name = call.name.toLowerCase();
-    if (name === "ele" || name === "tag") {
-      found = call;
+    if (name === "factory" || name === "stringify") {
+      stack = [{}];
+    } else if (name === "ele") {
+      stack[stack.length - 1].lastChild = call;
+      stack.push({ call });
+    } else if (name === "tag") {
+      stack[stack.length - 1].lastChild = call;
+    } else if (name === "end") {
+      if (stack.length > 1) {
+        stack.pop();
+      }
     }
   }
-  return found;
+  const top = stack[stack.length - 1];
+  return top.lastChild ?? top.call;
 }
 
 /** Library-qualified control name of an `ele( )` / `tag( )` call. */
@@ -889,25 +929,34 @@ export function eventNameAt(
   return name ? { name, start: literal.start, end: literal.end } : undefined;
 }
 
+/** The literal the cursor sits in when it is a `WHEN '…'` alternative -
+ *  `WHEN 'A' OR 'B'` puts every alternative in play, not only the first. */
+export function whenLiteralAt(
+  source: string,
+  offset: number
+): { start: number; end: number } | undefined {
+  const { literal } = scanAbap(source, offset);
+  if (!literal) {
+    return undefined;
+  }
+  const before = source.slice(Math.max(0, literal.start - 200), literal.start);
+  if (!/\bWHEN\s*(?:(['`])[\w-]+\1\s+OR\s+)*['`]$/i.test(before)) {
+    return undefined;
+  }
+  return { start: literal.start, end: literal.end };
+}
+
 /** The event name the cursor sits on inside a `WHEN '…'` of the dispatch. */
 export function whenNameAt(
   source: string,
   offset: number
 ): NamedSpan | undefined {
-  const { literal } = scanAbap(source, offset);
-  if (!literal) {
+  const span = whenLiteralAt(source, offset);
+  if (!span) {
     return undefined;
   }
-  const before = source.slice(Math.max(0, literal.start - 20), literal.start);
-  if (!/\bWHEN\s*['`]$/i.test(before)) {
-    return undefined;
-  }
-  const name = source.slice(literal.start, literal.end);
-  return name ? { name, start: literal.start, end: literal.end } : undefined;
-}
-
-function escapeRe(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const name = source.slice(span.start, span.end);
+  return name ? { name, ...span } : undefined;
 }
 
 /*
@@ -923,36 +972,84 @@ function escapeRe(text: string): string {
 
 /** Where `WHEN '<name>'` handles the event - the offset of the literal. */
 export function whenBranchOf(source: string, name: string): number | undefined {
-  const m = new RegExp(`\\bWHEN\\s+(['\`])${escapeRe(name)}\\1`, "i").exec(
-    blankComments(source)
-  );
-  return m ? m.index : undefined;
+  return whenBranches(source).find(
+    (branch) => branch.name.toUpperCase() === name.toUpperCase()
+  )?.start;
 }
 
-/** Every `_event( … '<name>' … )` writing the event - the view-side ends. */
-export function eventUsagesOf(source: string, name: string): number[] {
-  const out: number[] = [];
-  const re = new RegExp(
-    `_event\\w*\\([^)]*?(['\`])${escapeRe(name)}\\1`,
-    "gi"
-  );
-  const code = blankComments(source);
+/**
+ * Every `_event…( )` call that names its event in a literal: the call's
+ * offset, the event name, and where the name stands.
+ *
+ * The event name is the `val` argument (or the positional first literal),
+ * found by walking the call's parentheses - `[^)]*?` used to stand in for
+ * that walk and stopped at the `)` of a nested `VALUE #( … )`, so a raise
+ * written `_event( t_arg = VALUE #( ( lv ) ) val = 'GO' )` was invisible:
+ * F2 renamed the WHEN branch and silently left this end of the wire behind.
+ */
+export function eventRaises(
+  source: string
+): Array<{ name: string; at: number; nameStart: number }> {
+  const code = blankNonCode(source);
+  const withLiterals = blankComments(source);
+  const out: Array<{ name: string; at: number; nameStart: number }> = [];
+  const re = /\b_event\w*\s*\(/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code))) {
-    out.push(m.index);
+    const open = m.index + m[0].length - 1;
+    let depth = 1;
+    let j = open + 1;
+    while (j < code.length && depth > 0) {
+      if (code[j] === "(") {
+        depth++;
+      } else if (code[j] === ")") {
+        depth--;
+      }
+      j++;
+    }
+    const args = withLiterals.slice(open + 1, depth === 0 ? j - 1 : j);
+    const lit =
+      /\bval\s*=\s*(['`])([\w-]+)\1/i.exec(args) ??
+      /^\s*(['`])([\w-]+)\1/.exec(args);
+    if (!lit) {
+      continue;
+    }
+    const nameStart = open + 1 + lit.index + lit[0].length - 1 - lit[2].length;
+    out.push({ name: lit[2], at: m.index, nameStart });
   }
   return out;
 }
 
-/** Every `WHEN '<name>'` of the source - what the usage lens hangs on. */
+/** Every `_event( … '<name>' … )` writing the event - the view-side ends. */
+export function eventUsagesOf(source: string, name: string): number[] {
+  return eventRaises(source)
+    .filter((raise) => raise.name.toUpperCase() === name.toUpperCase())
+    .map((raise) => raise.at);
+}
+
+/** Every `WHEN '<name>'` of the source - what the usage lens hangs on. Each
+ *  alternative of a `WHEN 'A' OR 'B'` is its own branch. */
 export function whenBranches(source: string): NamedSpan[] {
   const out: NamedSpan[] = [];
-  const re = /\bWHEN\s+(['`])([\w-]+)\1/gi;
   const code = blankComments(source);
+  const re = /\bWHEN\s+/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code))) {
-    const start = m.index + m[0].indexOf(m[1]) + 1;
-    out.push({ name: m[2], start, end: start + m[2].length });
+    let at = m.index + m[0].length;
+    for (;;) {
+      const lit = /^(['`])([\w-]+)\1/.exec(code.slice(at));
+      if (!lit) {
+        break;
+      }
+      out.push({ name: lit[2], start: at + 1, end: at + 1 + lit[2].length });
+      at += lit[0].length;
+      const or = /^\s+OR\s+/i.exec(code.slice(at));
+      if (!or) {
+        break;
+      }
+      at += or[0].length;
+    }
+    re.lastIndex = at;
   }
   return out;
 }
@@ -964,15 +1061,14 @@ export function whenBranches(source: string): NamedSpan[] {
  */
 export function eventNameSpans(source: string, name: string): NamedSpan[] {
   const out: NamedSpan[] = [];
-  const call = new RegExp(
-    `_event\\w*\\([^)]*?(['\`])(${escapeRe(name)})\\1`,
-    "gi"
-  );
-  const code = blankComments(source);
-  let m: RegExpExecArray | null;
-  while ((m = call.exec(code))) {
-    const start = m.index + m[0].lastIndexOf(m[1] + m[2] + m[1]) + 1;
-    out.push({ name, start, end: start + name.length });
+  for (const raise of eventRaises(source)) {
+    if (raise.name.toUpperCase() === name.toUpperCase()) {
+      out.push({
+        name: raise.name,
+        start: raise.nameStart,
+        end: raise.nameStart + raise.name.length,
+      });
+    }
   }
   for (const branch of whenBranches(source)) {
     if (branch.name.toUpperCase() === name.toUpperCase()) {
@@ -1072,6 +1168,26 @@ function unclosedQuote(attrs: string): '"' | "'" | undefined {
   return open;
 }
 
+/** The `>` actually ending the tag opened at `open` - one inside a quoted
+ *  attribute value (`tooltip="a > b"`) ends nothing, and taking it for the
+ *  tag end made everything after it in the tag a dead zone. */
+function xmlTagEnd(source: string, open: number): number {
+  let quote: '"' | "'" | undefined;
+  for (let i = open + 1; i < source.length; i++) {
+    const c = source[i];
+    if (quote) {
+      if (c === quote) {
+        quote = undefined;
+      }
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === ">") {
+      return i;
+    }
+  }
+  return -1;
+}
+
 /** The write position at `offset` in a view/fragment XML. */
 export function xmlContextAt(
   source: string,
@@ -1082,7 +1198,7 @@ export function xmlContextAt(
   if (open < 0) {
     return undefined;
   }
-  const closed = source.indexOf(">", open);
+  const closed = xmlTagEnd(source, open);
   if (closed >= 0 && closed < offset) {
     return undefined; // between tags — nothing to complete
   }

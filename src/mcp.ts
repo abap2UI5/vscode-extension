@@ -40,16 +40,19 @@ function config() {
   return vscode.workspace.getConfiguration(CONFIG_SECTION);
 }
 
+/** Where the stdio server's command came from - part of the status report. */
+export type StdioSource = "setting" | "local checkout" | "npx";
+
 /** The command that starts the server: an explicit setting wins; a local
  *  checkout under the repos root is preferred; npx from the npm registry is
  *  the fallback. */
-function serverCommand(): string[] {
+function resolveServerCommand(): { command: string[]; source: StdioSource } {
   const explicit = config().get<string>("mcp.command", "").trim();
   if (explicit) {
     // quotes honoured: a program path with a space in it (the normal shape
     // on Windows, and under "Application Support" on macOS) used to be split
     // into pieces that spawn could only fail on
-    return splitCommandLine(explicit);
+    return { command: splitCommandLine(explicit), source: "setting" };
   }
   const root = config().get<string>("mcp.reposRoot", "").trim();
   if (root) {
@@ -61,7 +64,7 @@ function serverCommand(): string[] {
     for (const dir of SERVER_DIRS) {
       const server = path.join(root, dir, "server.mjs");
       if (fs.existsSync(server)) {
-        return ["node", server];
+        return { command: ["node", server], source: "local checkout" };
       }
     }
   }
@@ -74,7 +77,34 @@ function serverCommand(): string[] {
    * coupling that does not exist - and would then need a bump workflow and an
    * extension release to follow every server release. `latest` is also no
    * looser than what this line did before. */
-  return ["npx", "--yes", "@abap2ui5/mcp-server"];
+  return { command: ["npx", "--yes", "@abap2ui5/mcp-server"], source: "npx" };
+}
+
+function serverCommand(): string[] {
+  return resolveServerCommand().command;
+}
+
+/**
+ * What the provider would resolve right now - the answer behind
+ * "abap2UI5: Show MCP Status". Reads the same settings the provider reads,
+ * so the report cannot drift from what a client actually gets.
+ */
+export function mcpStatus(): {
+  stdioEnabled: boolean;
+  stdioCommand: string[];
+  stdioSource: StdioSource;
+  /** The *_HOME variables handed to the stdio server. */
+  env: Record<string, string>;
+  systemEnabled: boolean;
+} {
+  const { command, source } = resolveServerCommand();
+  return {
+    stdioEnabled: config().get<boolean>("mcp.enabled", true),
+    stdioCommand: command,
+    stdioSource: source,
+    env: serverEnv(),
+    systemEnabled: config().get<boolean>("mcp.system", true),
+  };
 }
 
 function serverEnv(): Record<string, string> {
@@ -98,7 +128,7 @@ export function registerMcp(
   context: vscode.ExtensionContext,
   log: (m: string) => void,
   /** The in-extension system server (mcpsystem.ts), when the host has one. */
-  system?: { url(): Promise<string> }
+  system?: { url(): Promise<string>; stop?(): void }
 ): void {
   // The MCP API arrived in VS Code 1.101 - keep working (minus MCP) on older
   // builds instead of failing activation.
@@ -112,6 +142,13 @@ export function registerMcp(
     changed,
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(`${CONFIG_SECTION}.mcp`)) {
+        // "off" has to close the listener, not merely stop advertising it: a
+        // client that already holds the URL could otherwise keep calling the
+        // credential-backed tools until the window closes.
+        if (system?.stop && !config().get<boolean>("mcp.system", true)) {
+          system.stop();
+          log("mcp: system server stopped (abap2ui5.mcp.system is off)");
+        }
         changed.fire();
       }
     }),

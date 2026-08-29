@@ -22,10 +22,25 @@ test("shellSafe quotes the program as well as the arguments", () => {
   assert.deepEqual(args, ['"C:\\Users\\John Smith\\cli.mjs"', "--json"]);
 });
 
-test("shellSafe leaves posix alone - the shell is only used on Windows", () => {
-  const { cmd, args } = shellSafe("/usr/bin/node", ["/tmp/a b/cli.mjs"], "linux");
+test("shellSafe quotes for posix shells too - it used to be a no-op there", () => {
+  const { cmd, args } = shellSafe(
+    "/usr/bin/node",
+    ["/tmp/a b/cli.mjs", "--json", "a$(b)`c`"],
+    "linux"
+  );
   assert.equal(cmd, "/usr/bin/node");
-  assert.deepEqual(args, ["/tmp/a b/cli.mjs"]);
+  assert.deepEqual(args, ["'/tmp/a b/cli.mjs'", "--json", "'a$(b)`c`'"]);
+});
+
+test("a posix shell run hands hostile arguments through verbatim", { skip: process.platform === "win32" }, async () => {
+  const hostile = "a b'$HOME`whoami`;rm";
+  const outcome = await run("printf", ["%s", hostile], { shell: true });
+  assert.equal(outcome.kind, "closed");
+  if (outcome.kind !== "closed") {
+    return;
+  }
+  assert.equal(outcome.code, 0);
+  assert.equal(outcome.stdout, hostile);
 });
 
 test("a command that finishes reports its code and both streams", async () => {
@@ -84,4 +99,52 @@ test("a child that ends normally is not reported as abandoned afterwards", async
     timeoutMs: 5000,
   });
   assert.equal(outcome.kind, "closed");
+});
+
+test("killing the child kills its grandchildren too", { skip: process.platform === "win32" }, async () => {
+  // npx spawns the checker, the checker spawns Chromium - signalling only the
+  // direct child left the browser running with nothing holding it. The child
+  // prints its grandchild's pid, then both hang until the timeout kills the
+  // process GROUP.
+  const parent =
+    'const cp = require("child_process");' +
+    'const c = cp.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);' +
+    "console.log(c.pid);" +
+    "setInterval(() => {}, 1000);";
+  const outcome = await run(process.execPath, ["-e", parent], {
+    timeoutMs: 3000,
+  });
+  assert.equal(outcome.kind, "timeout");
+  if (outcome.kind !== "timeout") {
+    return;
+  }
+  const grandchild = Number(outcome.stdout.trim());
+  assert.ok(Number.isInteger(grandchild) && grandchild > 0, outcome.stdout);
+  // give init a moment to reap it, then it must be gone
+  const deadline = Date.now() + 3000;
+  let alive = true;
+  while (alive && Date.now() < deadline) {
+    try {
+      process.kill(grandchild, 0);
+      await new Promise((r) => setTimeout(r, 100));
+    } catch {
+      alive = false;
+    }
+  }
+  assert.equal(alive, false, `grandchild ${grandchild} survived the kill`);
+});
+
+test("multibyte output is decoded whole, not per 64 KiB chunk", async () => {
+  // String(chunk) cut a UTF-8 character at the pipe boundary into two
+  // replacement characters - a three-byte one cannot line up with 65536
+  const outcome = await run(process.execPath, [
+    "-e",
+    "process.stdout.write('\\u20ac'.repeat(60000))",
+  ]);
+  assert.equal(outcome.kind, "closed");
+  if (outcome.kind !== "closed") {
+    return;
+  }
+  assert.ok(!outcome.stdout.includes("�"), "replacement character found");
+  assert.equal(outcome.stdout, "€".repeat(60000));
 });

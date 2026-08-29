@@ -77,16 +77,29 @@ export function matchOutline(
     if (idMatch || (!!type && type === target.type)) {
       let score = idMatch ? 1000 : 0;
       // Outline ancestors innermost-first against the runtime parents,
-      // consumed monotonically - a subsequence match.
+      // consumed monotonically - a subsequence match. An ancestor that is
+      // not in the runtime chain at all (an aggregation element like
+      // `content` or `items`, which the runtime never reports as a parent)
+      // is skipped WITHOUT moving the cursor: exhausting it on the first
+      // miss denied every outer ancestor its credit, all candidates scored
+      // zero, and the first control of the clicked type won in document
+      // order - the wrong builder call for every cloned row item.
       let ri = 0;
       for (let ai = ancestors.length - 1; ai >= 0; ai--) {
         const ancestorType = qualifiedType(ancestors[ai].label, ns);
-        while (ri < runtimeAncestors.length && runtimeAncestors[ri] !== ancestorType) {
-          ri++;
+        if (!ancestorType) {
+          continue;
         }
-        if (ri < runtimeAncestors.length) {
+        let probe = ri;
+        while (
+          probe < runtimeAncestors.length &&
+          runtimeAncestors[probe] !== ancestorType
+        ) {
+          probe++;
+        }
+        if (probe < runtimeAncestors.length) {
           score++;
-          ri++;
+          ri = probe + 1;
         }
       }
       if (score > bestScore) {

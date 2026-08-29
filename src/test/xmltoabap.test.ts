@@ -154,3 +154,68 @@ test("a childless root converts as a single tag", () => {
   assert.match(abap, /view->tag\( `Text`/);
   assert.match(abap, /\)->a\( n = `text` v = `hi` \)\./);
 });
+
+test("a DOCTYPE with an internal subset is skipped whole", () => {
+  // the subset's own `>`s used to cut the declaration short and leak `]>`
+  // into the dropped-text warnings
+  const { roots, droppedText, warnings } = parseXml(
+    `<!DOCTYPE root [ <!ENTITY x "y"> ]>\n<Page title="t"/>`
+  );
+  assert.deepEqual(roots.map((r) => r.name), ["Page"]);
+  assert.deepEqual(droppedText, []);
+  assert.deepEqual(warnings, []);
+});
+
+test("a dropped multi-line text node warns on ONE line", () => {
+  // the warning becomes a `" TODO:` comment - a newline inside it would put
+  // the second half outside the comment, as stray code
+  const { warnings } = xmlToAbap("<VBox><Text>line1\n   line2</Text></VBox>");
+  assert.equal(warnings.length, 1);
+  assert.ok(!warnings[0].includes("\n"));
+  assert.ok(warnings[0].includes("line1 line2"));
+});
+
+test("a value too long for one line is split into && literals", () => {
+  const long = "x".repeat(300);
+  const { abap, warnings } = xmlToAbap(`<Text text="${long}"/>`, "    ");
+  assert.deepEqual(warnings, []);
+  for (const line of abap.split("\n")) {
+    assert.ok(line.length <= 255, `line stays within ABAP's limit: ${line.length}`);
+  }
+  assert.match(abap, /&& `x+`/);
+  // nothing of the value is lost
+  const pieces = [...abap.matchAll(/`(x+)`/g)].map((m) => m[1]).join("");
+  assert.equal(pieces, long);
+});
+
+test("a long value splits mid-chain too, and the chain goes on", () => {
+  const long = "y".repeat(300);
+  const { abap } = xmlToAbap(`<Page title="${long}"><Text text="hi"/></Page>`, "    ");
+  for (const line of abap.split("\n")) {
+    assert.ok(line.length <= 255);
+  }
+  const pieces = [...abap.matchAll(/`(y+)`/g)].map((m) => m[1]).join("");
+  assert.equal(pieces, long);
+  assert.match(abap, /\)->tag\( `Text`/);
+});
+
+test("an event-handler attribute is wired, not literalised", () => {
+  const { abap, warnings } = xmlToAbap(
+    `<Button text="Go" press=".onPress"/>`
+  );
+  assert.match(abap, /\)->a\( n = `press` v = client->_event\( `ON_PRESS` \)/);
+  assert.match(abap, /\)->a\( n = `text` v = `Go`/);
+  assert.ok(warnings.some((w) => w.includes("ON_PRESS") && w.includes("WHEN")));
+});
+
+test("a bare handler on a known event attribute is wired too", () => {
+  const { abap } = xmlToAbap(`<Button press="onSave"/>`);
+  assert.match(abap, /v = client->_event\( `ON_SAVE` \)/);
+});
+
+test("a binding or plain value on an event-named attribute stays a literal", () => {
+  const bound = xmlToAbap(`<Button press="{/HANDLER}"/>`);
+  assert.match(bound.abap, /v = `\{\/HANDLER\}`/);
+  const text = xmlToAbap(`<Text text="onPress"/>`);
+  assert.match(text.abap, /v = `onPress`/);
+});

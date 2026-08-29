@@ -207,6 +207,14 @@ export async function pickSystem(
     if (!template) {
       return undefined;
     }
+    // The name is how the active system is resolved, so a duplicate would
+    // activate its TWIN instead of the system just added - numbered here,
+    // the same way withUniqueNames presents two configured twins.
+    const taken = new Set(allSystems().map((system) => system.name));
+    let unique = name;
+    for (let i = 2; taken.has(unique); i++) {
+      unique = `${name} (${i})`;
+    }
     // Adding a second system turns the single setting into the first entry of
     // the list, so both end up in the same place.
     const cfg = config();
@@ -218,9 +226,9 @@ export async function pickSystem(
         existing.push({ name: single.name, url: single.template });
       }
     }
-    existing.push({ name, url: template });
+    existing.push({ name: unique, url: template });
     await cfg.update(SYSTEMS_KEY, existing, vscode.ConfigurationTarget.Global);
-    const added = { name, template };
+    const added = { name: unique, template };
     await setActive(context, added);
     return added;
   }
@@ -269,6 +277,10 @@ export async function ensureCredentials(
       await secrets.store(keys.pass, legacyPass);
       await secrets.delete(LEGACY_USER);
       await secrets.delete(LEGACY_PASS);
+      // the migrated origin has to be findable for "Reset Credentials" too -
+      // without this, credentials of a system later removed from the settings
+      // were out of every deletion path's reach
+      await rememberOrigin(context, origin);
       user = legacyUser;
       pass = legacyPass;
     }

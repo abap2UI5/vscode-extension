@@ -107,7 +107,17 @@ export function parseXml(text: string): ParsedXml {
       continue;
     }
     if (text.startsWith("<?", lt) || text.startsWith("<!", lt)) {
-      const end = text.indexOf(">", lt);
+      let end = text.indexOf(">", lt);
+      // a DOCTYPE may carry an internal subset - `[ … ]` holding its own `>`s
+      const bracket = text.indexOf("[", lt);
+      if (
+        text.startsWith("<!", lt) &&
+        bracket >= 0 &&
+        bracket < (end < 0 ? text.length : end)
+      ) {
+        const close = text.indexOf("]", bracket);
+        end = text.indexOf(">", close < 0 ? bracket : close);
+      }
       i = end < 0 ? text.length : end + 1;
       continue;
     }
@@ -174,16 +184,57 @@ export function parseXml(text: string): ParsedXml {
 /** 4 spaces per level, the step the chain formatter enforces. */
 const STEP = "    ";
 
+/** ABAP's hard line limit - a longer line fails abapGit import/activation. */
+const MAX_LINE = 255;
+
 /** An ABAP backtick literal: the backtick escapes by doubling. */
 function lit(value: string): string {
   return "`" + value.replace(/`/g, "``").replace(/\r?\n/g, " ") + "`";
 }
 
+/** Attribute names that are events on the controls people paste, for the
+ *  case where the handler value is a bare identifier (`press="onPress"`) -
+ *  a `.handler` value needs no list, its shape already says event. */
+const EVENT_ATTRS = new Set([
+  "press",
+  "change",
+  "select",
+  "selectionchange",
+  "livechange",
+  "submit",
+  "search",
+  "confirm",
+  "cancel",
+  "close",
+  "afterclose",
+  "beforeopen",
+  "afteropen",
+  "itempress",
+  "navbuttonpress",
+  "updatefinished",
+  "valuehelprequest",
+  "selectionfinish",
+  "toggle",
+]);
+
+/** A controller-handler reference: `.onPress`, `.nav.toDetail($event)`. */
+const HANDLER_VALUE = /^\.[A-Za-z_][\w.]*(?:\(\s*[^)]*\))?$/;
+
+/** The abap2UI5 event name a handler reference maps to: the last dotted
+ *  segment, camelCase folded to UPPER_SNAKE (`onPress` -> `ON_PRESS`). */
+function eventNameFor(value: string): string {
+  const bare = value.replace(/^\./, "").replace(/\(.*\)$/, "");
+  const local = bare.split(".").filter(Boolean).pop() ?? bare;
+  return local.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
+}
 
 interface Op {
   verb: "ele" | "tag" | "a" | "end";
   args: string;
   level: number;
+  /** For an `a` op with a plain literal value - what 255-char splitting
+   *  needs to rebuild the call across lines. */
+  attr?: { name: string; value: string };
 }
 
 /** The call arguments of an ele/tag: positional when only the name is
@@ -194,21 +245,77 @@ function elementArgs(name: string): string {
   return prefix ? `n = ${lit(local)} ns = ${lit(prefix)}` : lit(name);
 }
 
-function emitElement(el: XmlElement, level: number, out: Op[]): void {
+function emitElement(
+  el: XmlElement,
+  level: number,
+  out: Op[],
+  warnings: string[]
+): void {
   if (el.children.length === 0) {
     out.push({ verb: "tag", args: elementArgs(el.name), level });
   } else {
     out.push({ verb: "ele", args: elementArgs(el.name), level });
   }
   for (const [name, value] of el.attrs) {
-    out.push({ verb: "a", args: `n = ${lit(name)} v = ${lit(value)}`, level: level + 1 });
+    const isEvent =
+      HANDLER_VALUE.test(value) ||
+      (EVENT_ATTRS.has(name.toLowerCase()) && /^[A-Za-z_]\w*$/.test(value));
+    if (isEvent) {
+      const event = eventNameFor(value);
+      out.push({
+        verb: "a",
+        args: `n = ${lit(name)} v = client->_event( ${lit(event)} )`,
+        level: level + 1,
+      });
+      warnings.push(
+        `event '${name}' (was: ${value}) is wired to ` +
+          `client->_event( \`${event}\` ) - handle it in a WHEN branch`
+      );
+      continue;
+    }
+    out.push({
+      verb: "a",
+      args: `n = ${lit(name)} v = ${lit(value)}`,
+      level: level + 1,
+      attr: { name, value },
+    });
   }
   for (const child of el.children) {
-    emitElement(child, level + 1, out);
+    emitElement(child, level + 1, out, warnings);
   }
   if (el.children.length) {
     out.push({ verb: "end", args: "", level });
   }
+}
+
+/** `value` in chunks whose emitted literals keep each line within the given
+ *  widths - escaped length is the measure, a backtick costs two. Undefined
+ *  when the widths leave no room to make progress. */
+function chunkValue(
+  value: string,
+  firstAvail: number,
+  restAvail: number
+): string[] | undefined {
+  if (firstAvail < 8 || restAvail < 8) {
+    return undefined;
+  }
+  const chunks: string[] = [];
+  let current = "";
+  let used = 0;
+  let avail = firstAvail;
+  for (const ch of value) {
+    const cost = ch === "`" ? 2 : 1;
+    if (used + cost > avail && current) {
+      chunks.push(current);
+      current = "";
+      used = 0;
+      avail = restAvail;
+    }
+    current += ch;
+    used += cost;
+  }
+  chunks.push(current);
+  return chunks;
 }
 
 export interface ConvertedXml {
@@ -238,14 +345,17 @@ export function xmlToAbap(text: string, baseIndent = ""): ConvertedXml {
     );
   }
   for (const dropped of droppedText) {
+    // one line, whatever the text node looked like - these warnings end up
+    // in single-line `" TODO:` comments
+    const flat = dropped.replace(/\s+/g, " ");
     warnings.push(
       `text content has no builder equivalent and was dropped: ` +
-        `"${dropped.slice(0, 60)}${dropped.length > 60 ? "…" : ""}"`
+        `"${flat.slice(0, 60)}${flat.length > 60 ? "…" : ""}"`
     );
   }
 
   const ops: Op[] = [];
-  emitElement(roots[0], 0, ops);
+  emitElement(roots[0], 0, ops, warnings);
   // Trailing ends only walk the cursor back to the root - the render closes
   // every still-open tag structurally, so the corpus leaves them off.
   while (ops.length && ops[ops.length - 1].verb === "end") {
@@ -274,10 +384,35 @@ export function xmlToAbap(text: string, baseIndent = ""): ConvertedXml {
       : `${indent})->${op.verb}(`;
     const body = op.args ? ` ${op.args}` : "";
     const tail = last ? " )." : "";
-    lines.push(`${head}${body}${tail}`);
+    const line = `${head}${body}${tail}`;
+    if (line.length > MAX_LINE && op.attr) {
+      // a value too long for one line is split into `&&`-joined literals
+      const contIndent = indent + STEP;
+      const firstHead = `${head} n = ${lit(op.attr.name)} v = `;
+      const chunks = chunkValue(
+        op.attr.value,
+        MAX_LINE - firstHead.length - 2,
+        MAX_LINE - contIndent.length - 5 - tail.length
+      );
+      if (chunks && chunks.length > 1) {
+        lines.push(`${firstHead}${lit(chunks[0])}`);
+        chunks.slice(1).forEach((chunk, cx) => {
+          const end = cx === chunks.length - 2 ? tail : "";
+          lines.push(`${contIndent}&& ${lit(chunk)}${end}`);
+        });
+        return;
+      }
+    }
+    lines.push(line);
   });
   lines.push("");
   lines.push(`${baseIndent}client->view_display( view->stringify( ) ).`);
 
+  if (lines.some((line) => line.length > MAX_LINE)) {
+    warnings.push(
+      "a line exceeds ABAP's 255-character limit - shorten the value or " +
+        "split it by hand"
+    );
+  }
   return { abap: lines.join("\n"), warnings };
 }

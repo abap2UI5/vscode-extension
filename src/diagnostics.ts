@@ -31,6 +31,53 @@ export function ruleOf(diagnostic: vscode.Diagnostic): string | undefined {
   return undefined;
 }
 
+/** The slice of `vscode.TextDocument` the ranges are computed from - so a
+ *  workspace sweep can place findings in a file it already read, without
+ *  opening every clean file as a document. */
+export interface FindingSource {
+  lineCount: number;
+  getText(): string;
+  lineAt(line: number): { text: string; range: vscode.Range };
+  positionAt(offset: number): vscode.Position;
+}
+
+/** A `FindingSource` over plain text - line starts computed once, positions
+ *  by binary search, exactly as a `TextDocument` would answer. */
+export function textSource(text: string): FindingSource {
+  const starts: number[] = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n") {
+      starts.push(i + 1);
+    }
+  }
+  const lineText = (line: number): string => {
+    const end = line + 1 < starts.length ? starts[line + 1] : text.length;
+    return text.slice(starts[line], end).replace(/\r?\n$/, "");
+  };
+  return {
+    lineCount: starts.length,
+    getText: () => text,
+    lineAt: (line) => {
+      const t = lineText(line);
+      return { text: t, range: new vscode.Range(line, 0, line, t.length) };
+    },
+    positionAt: (offset) => {
+      const at = Math.max(0, Math.min(offset, text.length));
+      let lo = 0;
+      let hi = starts.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (starts[mid] <= at) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return new vscode.Position(lo, at - starts[lo]);
+    },
+  };
+}
+
 /** What to underline: the member name, the control's local name, or - for
  *  the findings that are about a value rather than a member - that value. */
 function needleOf(f: PropertyFinding): string {
@@ -47,7 +94,7 @@ function needleOf(f: PropertyFinding): string {
  *  the linter could not place (a view part inlined from a helper method)
  *  keep the old best-effort search: the first textual match in the file. */
 export function findingRange(
-  doc: vscode.TextDocument,
+  doc: FindingSource,
   f: PropertyFinding
 ): vscode.Range {
   const needle = needleOf(f);
@@ -103,7 +150,7 @@ function diagnosticCode(
 }
 
 export function toDiagnostics(
-  doc: vscode.TextDocument,
+  doc: FindingSource,
   findings: PropertyFinding[],
   renderErrors: string[]
 ): vscode.Diagnostic[] {

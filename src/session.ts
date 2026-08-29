@@ -1,7 +1,13 @@
 import * as vscode from "vscode";
 import { SapProxy } from "./proxy";
 import { ActivationWatch } from "./activationwatch";
-import { AppTarget, resolveReloadTrigger, ReloadTrigger, nextRecentApps } from "./previewcore";
+import {
+  AppTarget,
+  resolveReloadTrigger,
+  ReloadTrigger,
+  nextRecentApps,
+  staleMessage,
+} from "./previewcore";
 import { OpenMode } from "./webview";
 import { expandTemplate, sapClientOf, withParams } from "./urls";
 import { allSystems, SystemProfile } from "./systems";
@@ -74,6 +80,10 @@ export class Session implements vscode.Disposable {
    *  activation watch fires it. */
   reloadShown: (reason?: string) => void = () => {};
 
+  /** Posts into whichever preview is showing - wired during activation, the
+   *  activation watch's give-up goes through it. */
+  notifyShown: (message: unknown) => void = () => {};
+
   // Editor position the focus should return to after F9.
   sourceDoc: vscode.TextDocument | undefined;
   sourceSelection: vscode.Selection | undefined;
@@ -94,7 +104,7 @@ export class Session implements vscode.Disposable {
       50
     );
     this.statusItem.name = "abap2UI5";
-    this.statusItem.command = "abap2ui5.reload";
+    this.statusItem.command = "abap2ui5.previewMenu";
     this.applyProxySettings();
     this.watch = new ActivationWatch({
       source: this.proxy,
@@ -105,6 +115,7 @@ export class Session implements vscode.Disposable {
         },
       log: (m) => this.log(m),
       reload: (reason) => this.reloadShown(reason),
+      gaveUp: (reason) => this.notifyShown(staleMessage(reason, true)),
     });
   }
 
@@ -227,7 +238,7 @@ export class Session implements vscode.Disposable {
     this.statusItem.text = `$(play-circle) ${this.currentTarget.className}`;
     this.statusItem.tooltip = new vscode.MarkdownString(
       `**abap2UI5 preview** — ${this.currentTarget.system}\n\n` +
-        `${this.currentTarget.externalUrl}\n\nClick to reload.`
+        `${this.currentTarget.externalUrl}\n\nClick for preview actions.`
     );
     this.statusItem.show();
   }

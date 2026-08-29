@@ -40,6 +40,9 @@ export interface ActivationWatchDeps {
   log: (message: string) => void;
   /** Called when the activation was observed - reloads the preview. */
   reload: (reason: string) => void;
+  /** Called when the watch times out without seeing an activation - the
+   *  preview UI says so instead of leaving only a log line. */
+  gaveUp?: (reason: string) => void;
 }
 
 /** Poll timing, injectable so the tests do not wait wall-clock seconds. */
@@ -47,6 +50,10 @@ export interface ActivationWatchTiming {
   firstMs: number;
   pollMs: number;
   timeoutMs: number;
+  /** After this long the poll backs off to `slowPollMs` - the fast cadence
+   *  serves the save-activate loop, not a watch left running for minutes. */
+  slowAfterMs?: number;
+  slowPollMs?: number;
 }
 
 // The first look happens right after the save: the saved source is already
@@ -60,6 +67,8 @@ export const DEFAULT_TIMING: ActivationWatchTiming = {
   firstMs: 250,
   pollMs: 1500,
   timeoutMs: 10 * 60 * 1000,
+  slowAfterMs: 60 * 1000,
+  slowPollMs: 6000,
 };
 
 export class ActivationWatch {
@@ -160,7 +169,8 @@ export class ActivationWatch {
     }
     const gen = this.generation;
     const className = target.className;
-    const deadline = Date.now() + this.timing.timeoutMs;
+    const startedAt = Date.now();
+    const deadline = startedAt + this.timing.timeoutMs;
     const sapClient = target.sapClient;
     log(
       `activation watch: started for ${className}` +
@@ -247,12 +257,23 @@ export class ActivationWatch {
         }
         lastSeen = version;
       }
-      if (Date.now() < deadline) {
-        this.timer = setTimeout(() => void tick(), this.timing.pollMs);
+      const now = Date.now();
+      if (now < deadline) {
+        const { slowAfterMs, slowPollMs } = this.timing;
+        const pollMs =
+          slowAfterMs !== undefined &&
+          slowPollMs !== undefined &&
+          now - startedAt >= slowAfterMs
+            ? slowPollMs
+            : this.timing.pollMs;
+        this.timer = setTimeout(() => void tick(), pollMs);
       } else {
+        const minutes = Math.max(1, Math.round(this.timing.timeoutMs / 60_000));
         log(
-          "activation watch: no activation within 10 minutes - giving up, reload manually"
+          `activation watch: no activation within ${minutes} minute` +
+            `${minutes === 1 ? "" : "s"} - giving up, reload manually`
         );
+        this.deps.gaveUp?.("No activation seen - the watch gave up, reload manually");
       }
     };
     this.timer = setTimeout(() => void tick(), this.timing.firstMs);
