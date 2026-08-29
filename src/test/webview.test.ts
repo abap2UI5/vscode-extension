@@ -86,6 +86,30 @@ test("an unknown stored theme still shows as the selected value", () => {
   assert.ok(html.includes('<option value="custom_house_theme" selected>'));
 });
 
+test("themes and languages the host merged in reach their pickers", () => {
+  // the previewThemes/previewLanguages settings arrive as the optional
+  // entry lists - the built-in lists alone would silently drop them
+  const html = previewHtml({
+    frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
+    externalUrl: "https://host:44300/sap/bc/z2ui5?app_start=ZCL_X",
+    className: "ZCL_X",
+    theme: "",
+    language: "",
+    modelRoots: [],
+    themes: [
+      ["", "System theme"],
+      ["z_house_theme", "House Theme"],
+    ],
+    languages: [
+      ["", "Logon language"],
+      ["CS", "Czech"],
+    ],
+    nonce: "n0nce",
+  });
+  assert.ok(html.includes('<option value="z_house_theme">House Theme</option>'));
+  assert.ok(html.includes('<option value="CS">Czech</option>'));
+});
+
 test("the stale badge offers the activation, and the give-up toast is forced", () => {
   const html = previewHtml({
     frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
@@ -289,6 +313,21 @@ test("the caption says which data the picture shows", () => {
   assert.ok(mocked.includes("zcl_travel.mock.json"));
 });
 
+test("a first render with no picture yet says it is working", () => {
+  // the very first run downloads nothing but still launches a browser -
+  // an empty panel with no explanation reads as broken
+  const html = viewPreviewHtml({ ...SHOT, shots: [], errors: [], busy: true });
+  assert.ok(html.includes("Rendering the view in headless Chromium"));
+  // once a (stale) picture exists it stays up instead of the loading line
+  const rerender = viewPreviewHtml({
+    ...SHOT,
+    shots: [{ uri: "u", label: "1280x900" }],
+    errors: [],
+    busy: true,
+  });
+  assert.ok(!rerender.includes("Rendering the view in headless Chromium"));
+});
+
 test("several pictures are laid out to be seen at once", () => {
   // a device matrix and a before/after comparison are both about comparing,
   // and stacked they would be a scroll apart
@@ -388,4 +427,22 @@ test("the nav map wires clicks on nodes and on edges", () => {
   // both handlers post the same 'open' message shape the host reads
   assert.ok(html.includes("{ type: 'open', file: node.dataset.file }"));
   assert.ok(html.includes("type: 'open'"));
+  // the map's own refresh button posts the message navview.ts re-renders on
+  assert.ok(html.includes('<button id="refresh">Refresh</button>'));
+  assert.ok(html.includes("{ type: 'refresh' }"));
+  // a full scan carries no cap note
+  assert.ok(!html.includes("stopped at its file cap"));
+});
+
+test("a capped scan says the map may be incomplete", () => {
+  const html = navMapHtml({
+    nonce: "n0nce",
+    svg: "<svg></svg>",
+    appCount: 2,
+    edgeCount: 1,
+    truncated: true,
+  });
+  assert.ok(
+    html.includes("The scan stopped at its file cap - apps beyond it may be missing.")
+  );
 });

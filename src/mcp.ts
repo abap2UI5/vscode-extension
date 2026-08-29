@@ -80,10 +80,6 @@ function resolveServerCommand(): { command: string[]; source: StdioSource } {
   return { command: ["npx", "--yes", "@abap2ui5/mcp-server"], source: "npx" };
 }
 
-function serverCommand(): string[] {
-  return resolveServerCommand().command;
-}
-
 /**
  * What the provider would resolve right now - the answer behind
  * "abap2UI5: Show MCP Status". Reads the same settings the provider reads,
@@ -157,7 +153,8 @@ export function registerMcp(
       provideMcpServerDefinitions: async () => {
         const definitions: vscode.McpServerDefinition[] = [];
         if (config().get<boolean>("mcp.enabled", true)) {
-          const [command, ...args] = serverCommand();
+          const resolved = resolveServerCommand();
+          const [command, ...args] = resolved.command;
           definitions.push(
             new vscode.McpStdioServerDefinition(
               "abap2UI5",
@@ -166,7 +163,12 @@ export function registerMcp(
               serverEnv()
             )
           );
-          log(`mcp: providing server definition - ${command} ${args.join(" ")}`);
+          // the source too: a reposRoot without a server checkout falls back
+          // to npx, and this line is where that becomes visible
+          log(
+            `mcp: providing server definition (${resolved.source}) - ` +
+              `${command} ${args.join(" ")}`
+          );
         }
         // The system server: real-system tools, hosted by the extension
         // itself over HTTP (see mcpsystem.ts).

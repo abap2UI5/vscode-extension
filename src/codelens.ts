@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { classDefinitionOffset, usesBuilder } from "./abap";
+import { CONFIG_SECTION } from "./settings";
 import { isAppSource } from "./appclasses";
 import { eventRaises, whenBranches } from "./context";
 import { fixableCount } from "./quickfix";
@@ -27,7 +28,11 @@ class AppCodeLens implements vscode.CodeLensProvider {
   }
 
   provideCodeLenses(doc: vscode.TextDocument): vscode.CodeLens[] {
-    if (!vscode.workspace.getConfiguration("abap2ui5").get<boolean>("codeLens", true)) {
+    if (
+      !vscode.workspace
+        .getConfiguration(CONFIG_SECTION)
+        .get<boolean>("codeLens", true)
+    ) {
       return [];
     }
     const text = doc.getText();
@@ -36,10 +41,8 @@ class AppCodeLens implements vscode.CodeLensProvider {
     if (!app && !builder) {
       return [];
     }
-    const range = new vscode.Range(
-      doc.positionAt(classDefinitionOffset(text)),
-      doc.positionAt(classDefinitionOffset(text))
-    );
+    const anchor = doc.positionAt(classDefinitionOffset(text));
+    const range = new vscode.Range(anchor, anchor);
     const lenses: vscode.CodeLens[] = [];
     if (app) {
       lenses.push(
@@ -137,7 +140,9 @@ function whenLenses(doc: vscode.TextDocument, text: string): vscode.CodeLens[] {
     lenses.push(
       new vscode.CodeLens(new vscode.Range(at, at), {
         title: `$(zap) raised ${usages.length}× in the view`,
-        tooltip: "Peek the _event( ) call(s) raising this event",
+        tooltip: `Peek the _event( ) ${
+          usages.length === 1 ? "call" : "calls"
+        } raising this event`,
         command: "editor.action.showReferences",
         arguments: [doc.uri, at, locations],
       })

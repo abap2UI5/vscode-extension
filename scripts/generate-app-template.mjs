@@ -76,11 +76,17 @@ export function frameworkPin(abaplintConfig) {
 /** Where the mirrored app-building guide starts inside AGENTS.md. */
 export const GUIDE_MARKER = "> **Provenance:**";
 
+/** A stalled fetch fails the weekly run promptly instead of hanging to the
+ *  job's cap. Per file - the snapshot is fetched one file at a time. */
+const FETCH_TIMEOUT_MS = 30000;
+
 async function read(file, local) {
   if (local) {
     return fs.readFileSync(path.join(local, file), "utf8");
   }
-  const res = await fetch(RAW(file));
+  const res = await fetch(RAW(file), {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) {
     console.error(`generate-app-template: ${RAW(file)} -> HTTP ${res.status}`);
     process.exit(2);
@@ -113,38 +119,53 @@ if (invokedDirectly) {
   /* Fail loudly rather than write a snapshot the scaffold silently cannot use:
    * each of these is something scaffold.ts reads OUT of the copied text. */
   const missing = [];
-  if (!files["AGENTS.md"].includes(GUIDE_MARKER)) {
-    missing.push(`AGENTS.md no longer contains "${GUIDE_MARKER}" - the guide half cannot be located`);
-  }
-  if (!frameworkPin(files["abaplint.jsonc"])) {
-    missing.push('abaplint.jsonc has no "branch" pin - a scaffolded project would resolve the framework\'s default branch');
-  }
-  if (!/"chain-house-layout"/.test(files["abap2ui5lint.jsonc"])) {
-    missing.push("abap2ui5lint.jsonc no longer names chain-house-layout");
-  }
-  if (!linterActionLine(files[".github/workflows/check.yml"])) {
-    missing.push("check.yml no longer uses the abap2UI5/linter action - the scaffold takes its pin from there");
-  }
-  if (!JSON.parse(files["package.json"]).devDependencies?.["@abap2ui5/linter"]) {
-    missing.push("package.json no longer depends on @abap2ui5/linter");
-  }
-  /* The scaffold drops every template script that runs files out of the
-   * template's own scripts/ directory (a scaffolded project does not get
-   * one). `check` moving there would silently take `npm run check` away from
-   * every new project - the one command its README and AGENTS.md tell the
-   * reader to run. */
-  const checkScript = JSON.parse(files["package.json"]).scripts?.check;
-  if (!checkScript || checkScript.includes("scripts/")) {
-    missing.push(
-      'package.json\'s "check" script is missing or runs files under scripts/ - the scaffold drops such scripts, so a new project would lose `npm run check`'
-    );
-  }
-  /* The scaffold reads values out of these two and copies the rest; a shared
-   * list that stopped naming them is a scaffold that would silently write a
-   * project without a manifest or without CI. */
-  for (const required of ["AGENTS.md", "package.json", ".github/workflows/check.yml"]) {
+  /* Presence FIRST: every probe below reads one of these out of `files`, so a
+   * files.shared that stopped listing one used to crash the probe with a
+   * TypeError instead of reaching the "template changed shape" report. */
+  const PROBED = [
+    "AGENTS.md",
+    "abaplint.jsonc",
+    "abap2ui5lint.jsonc",
+    ".github/workflows/check.yml",
+    "package.json",
+  ];
+  for (const required of PROBED) {
     if (!FILES.includes(required)) {
       missing.push(`${SPEC_FILE} files.shared no longer lists ${required}, which the scaffold reads`);
+    }
+  }
+  if (!missing.length) {
+    if (!files["AGENTS.md"].includes(GUIDE_MARKER)) {
+      missing.push(`AGENTS.md no longer contains "${GUIDE_MARKER}" - the guide half cannot be located`);
+    }
+    if (!frameworkPin(files["abaplint.jsonc"])) {
+      missing.push('abaplint.jsonc has no "branch" pin - a scaffolded project would resolve the framework\'s default branch');
+    }
+    if (!/"chain-house-layout"/.test(files["abap2ui5lint.jsonc"])) {
+      missing.push("abap2ui5lint.jsonc no longer names chain-house-layout");
+    }
+    if (!linterActionLine(files[".github/workflows/check.yml"])) {
+      missing.push("check.yml no longer uses the abap2UI5/linter action - the scaffold takes its pin from there");
+    }
+    let pkg;
+    try {
+      pkg = JSON.parse(files["package.json"]);
+    } catch {
+      missing.push("package.json is not valid JSON");
+    }
+    if (pkg && !pkg.devDependencies?.["@abap2ui5/linter"]) {
+      missing.push("package.json no longer depends on @abap2ui5/linter");
+    }
+    /* The scaffold drops every template script that runs files out of the
+     * template's own scripts/ directory (a scaffolded project does not get
+     * one). `check` moving there would silently take `npm run check` away from
+     * every new project - the one command its README and AGENTS.md tell the
+     * reader to run. */
+    const checkScript = pkg?.scripts?.check;
+    if (pkg && (!checkScript || checkScript.includes("scripts/"))) {
+      missing.push(
+        'package.json\'s "check" script is missing or runs files under scripts/ - the scaffold drops such scripts, so a new project would lose `npm run check`'
+      );
     }
   }
   if (missing.length) {

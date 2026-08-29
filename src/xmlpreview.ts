@@ -291,9 +291,16 @@ export function registerXmlPreview(
     vscode.commands.registerCommand("abap2ui5.showReconstructedXml", async () => {
       const doc = vscode.window.activeTextEditor?.document;
       if (!doc || !isFollowable(doc)) {
+        // an ABAP class without builder calls is a different situation from
+        // no ABAP at all - say which one this is
+        const isAbap =
+          !!doc && (doc.languageId === "abap" || /\.abap$/i.test(doc.fileName));
         vscode.window.showInformationMessage(
-          "abap2UI5: open an ABAP class that builds views with " +
-            "z2ui5_cl_ui5_view_builder to see its reconstructed XML."
+          isAbap
+            ? "abap2UI5: this class builds no views with " +
+                "z2ui5_cl_ui5_view_builder - there is nothing to reconstruct."
+            : "abap2UI5: open an ABAP class that builds views with " +
+                "z2ui5_cl_ui5_view_builder to see its reconstructed XML."
         );
         return;
       }

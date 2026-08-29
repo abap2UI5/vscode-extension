@@ -323,6 +323,13 @@ export function describeMember(
   if (info.multiple) {
     facts.push("0..n");
   }
+  if (
+    info.section === "aggregations" &&
+    controlInfo(data, control)?.defaultAggregation === member
+  ) {
+    // the completion detail says so too - the hover must not know less
+    facts.push("default aggregation");
+  }
   if (info.since) {
     facts.push(`since UI5 ${info.since}`);
   }

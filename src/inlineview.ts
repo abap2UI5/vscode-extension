@@ -14,6 +14,7 @@ import {
   sinceAnnotations,
 } from "./annotations";
 import { usesBuilder } from "./abap";
+import { VIEW_XML_RE } from "./languagecore";
 import { preparedAbapOf } from "./language";
 
 /*
@@ -60,13 +61,17 @@ export function registerInlineAnnotations(
   context: vscode.ExtensionContext,
   log: (m: string) => void
 ): void {
+  /* One decoration type per COLOUR, not one per source: warning-severity
+   * findings and warn-worthy annotations render identically and share a type
+   * (and one setDecorations call). Information/Hint findings get the editor's
+   * own info colour - the colour of the squiggle they explain - while the
+   * quiet annotations keep CodeLens grey: a version or a size is
+   * information, not a problem. */
   const styles = {
     error: decoration("editorError.foreground"),
     warning: decoration("editorWarning.foreground"),
-    hint: decoration("editorCodeLens.foreground"),
-    // the quiet one: a version or a size is information, not a problem
-    info: decoration("editorCodeLens.foreground"),
-    warn: decoration("editorWarning.foreground"),
+    info: decoration("editorInfo.foreground"),
+    meta: decoration("editorCodeLens.foreground"),
   };
 
   const config = () => vscode.workspace.getConfiguration(CONFIG_SECTION);
@@ -165,7 +170,7 @@ export function registerInlineAnnotations(
         editor.setDecorations(style, []);
       }
     };
-    if (doc.languageId !== "abap" && !/\.(view|fragment)\.xml$/i.test(doc.fileName)) {
+    if (doc.languageId !== "abap" && !VIEW_XML_RE.test(doc.fileName)) {
       clear();
       return;
     }
@@ -175,11 +180,7 @@ export function registerInlineAnnotations(
       styles.error,
       findings.get(vscode.DiagnosticSeverity.Error) ?? []
     );
-    editor.setDecorations(
-      styles.warning,
-      findings.get(vscode.DiagnosticSeverity.Warning) ?? []
-    );
-    editor.setDecorations(styles.hint, [
+    editor.setDecorations(styles.info, [
       ...(findings.get(vscode.DiagnosticSeverity.Information) ?? []),
       ...(findings.get(vscode.DiagnosticSeverity.Hint) ?? []),
     ]);
@@ -201,7 +202,7 @@ export function registerInlineAnnotations(
     } else {
       painted.delete(doc.uri.toString());
     }
-    const info: vscode.DecorationOptions[] = [];
+    const meta: vscode.DecorationOptions[] = [];
     const warn: vscode.DecorationOptions[] = [];
     for (const annotation of metadataLines(doc)) {
       const line = doc.positionAt(annotation.offset).line;
@@ -209,14 +210,17 @@ export function registerInlineAnnotations(
         continue;
       }
       taken.add(line);
-      (annotation.warn ? warn : info).push({
+      (annotation.warn ? warn : meta).push({
         range: doc.lineAt(line).range,
         hoverMessage: annotation.tooltip,
         renderOptions: { after: { contentText: trim(annotation.text) } },
       });
     }
-    editor.setDecorations(styles.info, info);
-    editor.setDecorations(styles.warn, warn);
+    editor.setDecorations(styles.warning, [
+      ...(findings.get(vscode.DiagnosticSeverity.Warning) ?? []),
+      ...warn,
+    ]);
+    editor.setDecorations(styles.meta, meta);
   };
 
   /** Documents whose visible annotations came from our findings. */
@@ -288,6 +292,16 @@ export function registerInlineAnnotations(
   log("inline annotations: findings, @since and roundtrip cost registered");
 }
 
+/** Parsed mock files by path, keyed on mtime and size - the paint runs every
+ *  300 ms while typing, and re-reading and re-parsing an unchanged JSON each
+ *  time was the one cost in the pass that a stat can replace. Bounded by the
+ *  mock files the window touches; a broken file stays uncached and is the
+ *  preview's to report. */
+const mockCache = new Map<
+  string,
+  { mtimeMs: number; size: number; model: Record<string, unknown> }
+>();
+
 /** The preview data next to a class, when there is some - the same file the
  *  systemless preview renders with, so both say the same thing about size. */
 function mockModel(doc: vscode.TextDocument): Record<string, unknown> | undefined {
@@ -299,8 +313,18 @@ function mockModel(doc: vscode.TextDocument): Record<string, unknown> | undefine
     return undefined;
   }
   try {
-    return JSON.parse(fs.readFileSync(candidate, "utf8")) as Record<string, unknown>;
+    const stat = fs.statSync(candidate);
+    const cached = mockCache.get(candidate);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      return cached.model;
+    }
+    const model = JSON.parse(
+      fs.readFileSync(candidate, "utf8")
+    ) as Record<string, unknown>;
+    mockCache.set(candidate, { mtimeMs: stat.mtimeMs, size: stat.size, model });
+    return model;
   } catch {
+    mockCache.delete(candidate);
     return undefined; // a broken mock file is the preview's to report
   }
 }

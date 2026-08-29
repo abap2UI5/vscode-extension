@@ -5,6 +5,7 @@ import {
   apiReferenceAnchor,
   apiReferenceUrl,
   clientCallAt,
+  clientCallSpanAt,
   clientMethod,
   clientMethods,
   clientSignatureContext,
@@ -51,6 +52,33 @@ test("me->client-> and upper case count too", () => {
     clientCallAt(line, line.indexOf("MESSAGE") + 2),
     "MESSAGE_TOAST_DISPLAY"
   );
+});
+
+test("another *_client-> is not the z2ui5 client", () => {
+  // `client` must stand as its own word - lo_http_client calls something
+  // else entirely, and offering the z2ui5 API on it would mislead
+  const line = "    lo_http_client->execute( ).";
+  assert.equal(clientCallAt(line, line.indexOf("execute") + 2), undefined);
+  assert.equal(isClientCompletion("    lo_http_client->"), false);
+  assert.equal(isClientCompletion("    lo_http_client->send"), false);
+  assert.equal(
+    clientSignatureContext("    lo_http_client->_event( "),
+    undefined
+  );
+  // the real one, bare or behind me->, still counts everywhere
+  assert.ok(isClientCompletion("    client->"));
+  assert.equal(
+    clientSignatureContext("me->client->_event( ")?.method.name,
+    "_event"
+  );
+});
+
+test("the call span covers exactly the method name - the hover's range", () => {
+  const line = "  client->view_display( client->_bind( x ) ).";
+  const span = clientCallSpanAt(line, line.indexOf("view") + 1);
+  assert.ok(span);
+  assert.equal(line.slice(span.start, span.end), "view_display");
+  assert.equal(span.name, "view_display");
 });
 
 test("completion opens right after the arrow and inside a partial name", () => {

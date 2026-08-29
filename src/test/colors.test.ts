@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   abapColorSpans,
+  cssColorPresentations,
   formatCssColor,
   parseCssColor,
   xmlColorSpans,
@@ -125,4 +126,17 @@ test("xmlColorSpans resolves the tag's control and filters by member", () => {
   });
   assert.equal(spans.length, 1);
   assert.equal(XML.slice(spans[0].start, spans[0].end), "rgb(24, 115, 180)");
+});
+
+test("the picker gets a second spelling to cycle to", () => {
+  // formatCssColor's form first - that is what accepting writes
+  assert.deepEqual(
+    cssColorPresentations({ red: 1, green: 0, blue: 0, alpha: 1 }),
+    ["#ff0000", "rgb(255,0,0)"]
+  );
+  // with an alpha the alternative is the 8-digit hex
+  assert.deepEqual(
+    cssColorPresentations({ red: 0, green: 0, blue: 1, alpha: 0.5 }),
+    ["rgba(0,0,255,0.5)", "#0000ff80"]
+  );
 });

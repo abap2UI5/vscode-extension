@@ -207,11 +207,13 @@ test("the scaffolded configs are ones the tools accept", () => {
         assert.match(abaplint, new RegExp(`"${rule}"`), `${template.id}: ${rule} is in the core`);
       }
 
-      for (const jsonc of ["abaplint.jsonc"]) {
-        const raw = files.find((f) => f.path === jsonc)!.content;
-        const stripped = raw.replace(/^\s*\/\/.*$/gm, "");
-        assert.doesNotThrow(() => JSON.parse(stripped), `${template.id}: ${jsonc} parses`);
-      }
+      // abap2ui5lint.jsonc already went through loadConfig above - abaplint's
+      // config only needs to parse
+      const stripped = abaplint.replace(/^\s*\/\/.*$/gm, "");
+      assert.doesNotThrow(
+        () => JSON.parse(stripped),
+        `${template.id}: abaplint.jsonc parses`
+      );
 
       const workflow = files.find((f) => f.path === ".github/workflows/check.yml")!.content;
       assert.match(workflow, /npm ci/, `${template.id}: CI installs before it checks`);

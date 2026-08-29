@@ -340,8 +340,13 @@ export function xmlToAbap(text: string, baseIndent = ""): ConvertedXml {
     };
   }
   if (roots.length > 1) {
+    const skipped = roots
+      .slice(1)
+      .map((root) => `<${root.name}>`)
+      .join(", ");
     warnings.push(
-      `${roots.length} root elements found - only the first is converted`
+      `${roots.length} root elements found - only the first is converted ` +
+        `(skipped: ${skipped})`
     );
   }
   for (const dropped of droppedText) {
@@ -406,7 +411,13 @@ export function xmlToAbap(text: string, baseIndent = ""): ConvertedXml {
     lines.push(line);
   });
   lines.push("");
-  lines.push(`${baseIndent}client->view_display( view->stringify( ) ).`);
+  /* A Dialog is not a view: the corpus (and the POPUP template) hands it to
+   * popup_display, and a converted dialog sent through view_display renders
+   * nothing anyone can close. The variable stays `view` on purpose - the
+   * abbreviation expander slices this statement apart by that name. */
+  const display =
+    splitName(roots[0].name).local === "Dialog" ? "popup_display" : "view_display";
+  lines.push(`${baseIndent}client->${display}( view->stringify( ) ).`);
 
   if (lines.some((line) => line.length > MAX_LINE)) {
     warnings.push(

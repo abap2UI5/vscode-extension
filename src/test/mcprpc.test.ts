@@ -89,6 +89,16 @@ test("a throwing tool becomes an isError result, not a protocol error", async ()
   assert.equal(res.result.content[0].text, "kaputt");
 });
 
+test("a tools/call without a name says so, not 'unknown tool: undefined'", async () => {
+  const res = (await handleMcpMessage(
+    { jsonrpc: "2.0", id: 7, method: "tools/call", params: { arguments: {} } },
+    TOOLS,
+    INFO
+  )) as { error: { code: number; message: string } };
+  assert.equal(res.error.code, -32602);
+  assert.equal(res.error.message, "tool name is required");
+});
+
 test("unknown tools and methods answer JSON-RPC errors", async () => {
   const unknownTool = (await handleMcpMessage(
     { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "nope" } },

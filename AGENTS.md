@@ -97,6 +97,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
 | `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
+| `src/text.ts` | `plural(count, noun)` — the one pluralizer behind every counted string users read (dependency-free) |
 | `src/abap.ts`, `src/urls.ts`, `src/context.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
 | `src/test/` | `node --test` suite over exactly those modules |
 | `snippets/` | ABAP snippets contributed to the editor |
@@ -113,7 +114,7 @@ not committed.
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `catalogue.ts`,
-`abapscan.ts`, `settings.ts`,
+`abapscan.ts`, `settings.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`,

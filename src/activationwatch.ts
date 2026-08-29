@@ -95,17 +95,17 @@ export class ActivationWatch {
     private readonly timing: ActivationWatchTiming = DEFAULT_TIMING
   ) {}
 
-  /**
-   * Remembers the server's change timestamp of the class the preview shows
-   * right now. Fire-and-forget: without a baseline the watch still reloads on
-   * an observed inactive→active flip, just not on a too-fast-to-see one.
-   */
   /** Whether this system has already refused the ADT lookup. */
   private refused(): boolean {
     const origin = this.deps.source.systemOrigin;
     return origin !== undefined && this.adtUnavailable.has(origin);
   }
 
+  /**
+   * Remembers the server's change timestamp of the class the preview shows
+   * right now. Fire-and-forget: without a baseline the watch still reloads on
+   * an observed inactive→active flip, just not on a too-fast-to-see one.
+   */
   captureBaseline(): void {
     const { source, current, log } = this.deps;
     const target = current();

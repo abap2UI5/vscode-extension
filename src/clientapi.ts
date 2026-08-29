@@ -35,25 +35,42 @@ export function clientMethod(name: string): ClientMethod | undefined {
   return BY_NAME.get(name.toLowerCase());
 }
 
-/** The method name when the cursor sits on `client-><name>` (anywhere within
- *  the name), undefined otherwise. `me->client->x` counts too. */
-export function clientCallAt(line: string, character: number): string | undefined {
-  const re = /client->(\w+)/gi;
+/*
+ * `client` must stand as its own word: `lo_http_client->execute( )` calls some
+ * other client entirely, and offering the z2ui5 API on it would mislead.
+ * `me->client->x` still counts - the `>` in front of `client` is not a word
+ * character. Spelled as an alternation rather than a lookbehind so the web
+ * bundle does not depend on regex lookbehind support.
+ */
+
+/** The method name with its span when the cursor sits on `client-><name>`
+ *  (anywhere within the name), undefined otherwise. */
+export function clientCallSpanAt(
+  line: string,
+  character: number
+): { name: string; start: number; end: number } | undefined {
+  const re = /(?:^|[^\w])client->(\w+)/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(line)) !== null) {
-    const start = m.index + "client->".length;
+    const start = m.index + m[0].length - m[1].length;
     const end = start + m[1].length;
     if (character >= start && character <= end) {
-      return m[1];
+      return { name: m[1], start, end };
     }
   }
   return undefined;
 }
 
+/** The method name when the cursor sits on `client-><name>` (anywhere within
+ *  the name), undefined otherwise. `me->client->x` counts too. */
+export function clientCallAt(line: string, character: number): string | undefined {
+  return clientCallSpanAt(line, character)?.name;
+}
+
 /** True when the cursor is completing a `client->` member (right after the
  *  arrow, or inside the partial name being typed). */
 export function isClientCompletion(lineUpToCursor: string): boolean {
-  return /client->\w*$/i.test(lineUpToCursor);
+  return /(?:^|[^\w])client->\w*$/i.test(lineUpToCursor);
 }
 
 /** The first line of the signature, for the completion detail column. */
@@ -94,7 +111,9 @@ export function clientSignatureContext(
       depth++;
     } else if (c === "(") {
       if (depth === 0) {
-        const m = /client->(\w+)\s*$/i.exec(lineUpToCursor.slice(0, i));
+        const m = /(?:^|[^\w])client->(\w+)\s*$/i.exec(
+          lineUpToCursor.slice(0, i)
+        );
         const method = m && clientMethod(m[1]);
         if (!method) {
           return undefined;

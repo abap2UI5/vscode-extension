@@ -40,11 +40,15 @@ const RAW = `https://raw.githubusercontent.com/${REPO}/main/${SOURCE_FILE}`;
  *  editor session. */
 export const REQUIRED_KEYS = ["corpus", "samples", "samplesStack", "viewCheck", "server"];
 
+/** A stalled fetch fails the weekly run promptly instead of hanging to the
+ *  job's cap. */
+const FETCH_TIMEOUT_MS = 30000;
+
 async function read(local) {
   if (local) {
     return fs.readFileSync(path.join(local, SOURCE_FILE), "utf8");
   }
-  const res = await fetch(RAW);
+  const res = await fetch(RAW, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) {
     console.error(`generate-repo-dirs: ${RAW} -> HTTP ${res.status}`);
     process.exit(2);

@@ -114,9 +114,13 @@ export async function handleMcpMessage(
   }
   if (method === "tools/call") {
     const name = msg.params?.name;
+    if (typeof name !== "string" || !name) {
+      // its own message - "unknown tool: undefined" reads like a lookup bug
+      return rpcError(id, -32602, "tool name is required");
+    }
     const tool = tools.find((t) => t.name === name);
     if (!tool) {
-      return rpcError(id, -32602, `unknown tool: ${String(name)}`);
+      return rpcError(id, -32602, `unknown tool: ${name}`);
     }
     try {
       const args = (msg.params?.arguments ?? {}) as Record<string, unknown>;

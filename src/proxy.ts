@@ -425,11 +425,6 @@ export function parseAdtClassRefs(xml: string): AdtClassRef[] {
   return refs;
 }
 
-/** The names alone - what the MCP tools hand on. */
-export function parseAdtClassNames(xml: string): string[] {
-  return parseAdtClassRefs(xml).map((ref) => ref.name);
-}
-
 /** First segment of every url the proxy hands out, so the token that follows
  *  cannot be mistaken for a path on the system. */
 const TOKEN_SEGMENT = "__abap2ui5";
@@ -716,11 +711,14 @@ export class SapProxy {
    * prompt - a probe against the wrong client would otherwise break a
    * launch whose own credentials are fine. `signal` aborts the request, for
    * callers that supersede their own lookups while the user types.
+   * `timeoutMs` widens the default deadline, for a caller that would rather
+   * wait than misread a slow answer as an unreachable host - the connection
+   * check, against an ICF service compiling on its first request.
    */
   fetchFromSystem(
     path: string,
     accept = "application/xml, application/json, */*",
-    options: { background?: boolean; signal?: AbortSignal } = {}
+    options: { background?: boolean; signal?: AbortSignal; timeoutMs?: number } = {}
   ): Promise<{ status: number; body: string; authenticate?: string }> {
     const target = this.target;
     const auth = this.authHeader;
@@ -802,7 +800,7 @@ export class SapProxy {
       );
       const deadline = setTimeout(
         () => req.destroy(new Error("request to the system timed out")),
-        FETCH_TIMEOUT_MS
+        options.timeoutMs ?? FETCH_TIMEOUT_MS
       );
       req.on("close", () => clearTimeout(deadline));
       req.on("error", reject);

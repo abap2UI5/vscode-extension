@@ -36,6 +36,10 @@ export interface AbapSource {
 const APP_GLOB = "**/*.clas.abap";
 const EXCLUDE = "**/{node_modules,.git,dist,out}/**";
 
+/** One decoder for every read - the sweep runs per picker keystroke over up
+ *  to `limit` files, and a fresh TextDecoder per file was pure overhead. */
+const DECODER = new TextDecoder();
+
 /** Whether a document is ABAP at all - by language id first, because an ADT
  *  document's path may carry no extension worth testing. */
 export function isAbapDocument(doc: vscode.TextDocument): boolean {
@@ -61,7 +65,7 @@ export async function abapSources(limit = 2000): Promise<AbapSource[]> {
       seen.add(key);
       out.push({
         uri,
-        text: new TextDecoder().decode(bytes),
+        text: DECODER.decode(bytes),
         fromEditor: false,
       });
     } catch {

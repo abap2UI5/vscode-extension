@@ -1,5 +1,5 @@
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
-import { shortUrl } from "./webview";
+import { shortUrl } from "./urls";
 
 /*
  * The `vscode`-free core of the preview: what a launched app IS (the

@@ -39,11 +39,17 @@ export const VIEW_XML_RE = /\.(view|fragment)\.xml$/i;
  *  pins this list to `checkAbapSource`'s answer. */
 const FROZEN_BUILDERS = ["z2ui5_cl_xml_view", "z2ui5_cl_xml_view_cc"];
 
+/** Compiled once: `frozenBuilderOf` runs inside `isCheckableSource`, i.e. on
+ *  every keystroke, code-action request and sweep file - not the place to
+ *  build regexes. No `g` flag, so `test` and `search` stay stateless. */
+const FROZEN_FACTORY_RES = FROZEN_BUILDERS.map((name) => ({
+  name,
+  re: new RegExp(`\\b${name}\\s*=>\\s*factory`, "i"),
+}));
+
 /** The frozen builder a source builds its view with, or undefined. */
 export function frozenBuilderOf(text: string): string | undefined {
-  return FROZEN_BUILDERS.find((c) =>
-    new RegExp(`\\b${c}\\s*=>\\s*factory`, "i").test(text)
-  );
+  return FROZEN_FACTORY_RES.find((f) => f.re.test(text))?.name;
 }
 
 /**
@@ -130,12 +136,12 @@ export function runGate(
        * gives it and nothing else - the other rules are written for the
        * current dialect. Answering "nothing to check" here while CI reported
        * `frozen-view-builder` was an editor/CI divergence. */
-      const frozen = frozenBuilderOf(text);
+      const frozen = FROZEN_FACTORY_RES.find((f) => f.re.test(text));
       if (frozen) {
-        const at = text.search(new RegExp(`\\b${frozen}\\s*=>\\s*factory`, "i"));
+        const at = text.search(frozen.re);
         return {
           findings: settled([
-            { type: "frozen-view-builder", value: frozen, offset: at < 0 ? 0 : at },
+            { type: "frozen-view-builder", value: frozen.name, offset: at < 0 ? 0 : at },
           ]),
           renderable: false,
           helperNote: "",

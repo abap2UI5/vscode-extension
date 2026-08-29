@@ -312,12 +312,26 @@ test("only the severities that occur take up room", () => {
 test("the tooltip spells out the counts and whether a fix exists", () => {
   assert.equal(
     findingsBarTooltip({ errors: 1, warnings: 2, hints: 0, fixable: 1 }),
-    "abap2UI5 view check: 1 error, 2 warnings. 1 of them can be corrected mechanically."
+    "abap2UI5 view check: 1 error, 2 warnings. 1 of them can be corrected " +
+      "mechanically. Click to open the abap2UI5 Findings view."
   );
   assert.match(
     findingsBarTooltip({ errors: 0, warnings: 1, hints: 0, fixable: 0 }),
     /None of them can be corrected/
   );
+});
+
+test("the tooltip always says what a click does", () => {
+  // the counts never say it, so every variant of the sentence has to
+  for (const counts of [
+    { errors: 0, warnings: 0, hints: 0, fixable: 0 },
+    { errors: 1, warnings: 0, hints: 0, fixable: 1 },
+  ]) {
+    assert.match(
+      findingsBarTooltip(counts),
+      /Click to open the abap2UI5 Findings view\.$/
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------

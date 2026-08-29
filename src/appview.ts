@@ -63,7 +63,9 @@ class AppTree implements vscode.TreeDataProvider<AppNode> {
       ? "open in the editor"
       : vscode.workspace.asRelativePath(node.uri);
     item.description = where;
-    item.iconPath = new vscode.ThemeIcon("window");
+    // a view-building app gets the window, a nav-only app the link - the
+    // same distinction the context menu (contextValue) already draws
+    item.iconPath = new vscode.ThemeIcon(node.buildsViews ? "window" : "link");
     item.contextValue = node.buildsViews ? "abap2ui5.app.view" : "abap2ui5.app";
     item.tooltip = new vscode.MarkdownString(
       `**${node.className}**\n\n${where}` +

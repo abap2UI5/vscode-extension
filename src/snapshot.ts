@@ -11,7 +11,6 @@
  * makes that visible in the output channel instead.
  */
 
-import * as fs from "fs";
 import * as path from "path";
 import { loadSnapshot } from "@abap2ui5/linter/properties";
 import type { Snapshot } from "./metadata";
@@ -69,20 +68,11 @@ export function snapshotError(): string | undefined {
   return failure;
 }
 
-let ui5Version: { value: string | undefined } | undefined;
-
-/** The UI5 version the snapshot was generated from — read straight from the
- *  file, so an older snapshot without the field is fine. Read once: the file
- *  is several MB and does not change while the extension runs. */
+/** The UI5 version the snapshot was generated from — undefined for an older
+ *  snapshot without the field. `loadSnapshot( )` (and `setSnapshotText( )`)
+ *  already ride it along non-enumerably, so this costs no second read of a
+ *  several-MB file — and it answers in the web host too, where there is no
+ *  `fs` to re-read it with. */
 export function snapshotUi5Version(): string | undefined {
-  if (!ui5Version) {
-    let value: string | undefined;
-    try {
-      value = JSON.parse(fs.readFileSync(FILE, "utf8")).ui5Version;
-    } catch {
-      value = undefined;
-    }
-    ui5Version = { value };
-  }
-  return ui5Version.value;
+  return snapshot().__ui5Version ?? undefined;
 }

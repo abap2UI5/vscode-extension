@@ -108,9 +108,11 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
           );
         }
         const names = await searchClasses(deps.proxy, query, connection.sapClient);
+        // the count up front, so a capped answer is tellable from a full one
         return textResult(
           names.length
-            ? names.join("\n")
+            ? `${names.length} class${names.length === 1 ? "" : "es"} ` +
+                `matching "${query}":\n${names.join("\n")}`
             : `no class matching "${query}" on the system`
         );
       },
@@ -175,8 +177,16 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
           tablet: { width: 834, height: 1112 },
           phone: { width: 414, height: 896 },
         };
-        const viewport =
-          viewports[String(args.viewport ?? "desktop")] ?? viewports.desktop;
+        const viewportKey = String(args.viewport ?? "desktop");
+        const viewport = viewports[viewportKey];
+        if (!viewport) {
+          // refused, not silently rendered at desktop - the schema says enum,
+          // and an answer at the wrong width reads as the app's fault
+          return textResult(
+            `unknown viewport "${viewportKey}" - use desktop, tablet or phone`,
+            true
+          );
+        }
         const file = await deps.screenshot(className, url, viewport);
         if (!file) {
           return textResult(
@@ -248,7 +258,25 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
         if (!gate.findings.length) {
           return textResult(`no findings${gate.helperNote}`);
         }
-        return textResult(gate.findings.map(findingLine).join("\n"));
+        // a summary line first, so the caller can branch on the counts
+        // without parsing every finding
+        const counts = new Map<string, number>();
+        for (const f of gate.findings) {
+          const severity = f.severity ?? severityOf(f);
+          counts.set(severity, (counts.get(severity) ?? 0) + 1);
+        }
+        const breakdown = ["error", "warning", "hint"]
+          .filter((severity) => counts.has(severity))
+          .map((severity) => {
+            const n = counts.get(severity)!;
+            return `${n} ${severity}${n === 1 ? "" : "s"}`;
+          })
+          .join(", ");
+        const total = gate.findings.length;
+        return textResult(
+          `${total} finding${total === 1 ? "" : "s"} (${breakdown})\n` +
+            gate.findings.map(findingLine).join("\n")
+        );
       },
     },
   ];

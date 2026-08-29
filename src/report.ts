@@ -89,6 +89,18 @@ export function redact(text: string): string {
       )
       // sap-user / sap-password style query parameters
       .replace(/([?&](?:sap-user|sap-password|password|user)=)[^&\s]*/gi, "$1<redacted>")
+      /*
+       * HTTP auth headers, should a log line ever quote one. Anchored on the
+       * header NAME on purpose: a bare "Basic <word>" pattern would redact
+       * ordinary prose ("Basic authentication failed"), while a quoted header
+       * is unmistakable. The scheme survives - "Basic vs Bearer" is
+       * frequently the diagnostic part; the credential never does.
+       */
+      .replace(
+        /\b((?:proxy-)?authorization)(\s*[:=]\s*)(?:(basic|bearer|negotiate|digest)\s+)?\S+/gi,
+        (_all, header: string, sep: string, scheme?: string) =>
+          `${header}${sep}${scheme ? `${scheme} ` : ""}<redacted>`
+      )
   );
 }
 

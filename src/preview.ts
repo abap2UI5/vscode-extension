@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { createNonce, previewHtml, THEMES, welcomeHtml } from "./webview";
+import { createNonce, LANGUAGES, previewHtml, THEMES, welcomeHtml } from "./webview";
 import { AppTarget, loadMessage, modelRootsOfSource } from "./previewcore";
 import { classNameOf, errorTokens } from "./abap";
 import { proxiedUrl } from "./urls";
@@ -59,10 +59,28 @@ export function modelRootsOf(className: string): string[] {
  * is skipped rather than rendered as "undefined".
  */
 export function mergedThemes(): ReadonlyArray<[string, string]> {
+  return mergedEntries(THEMES, "previewThemes");
+}
+
+/**
+ * The language picker's entries: the built-in list plus whatever
+ * `abap2ui5.previewLanguages` adds - the theme story again (`mergedThemes`),
+ * for a logon language the built-in list does not carry.
+ */
+export function mergedLanguages(): ReadonlyArray<[string, string]> {
+  return mergedEntries(LANGUAGES, "previewLanguages");
+}
+
+/** The `built-in ++ setting` merge `mergedThemes` and `mergedLanguages`
+ *  share: trimmed, de-duplicated, a missing label falls back to the value. */
+function mergedEntries(
+  base: ReadonlyArray<[string, string]>,
+  settingKey: string
+): ReadonlyArray<[string, string]> {
   const extras = vscode.workspace
     .getConfiguration(CONFIG_SECTION)
-    .get<Array<{ value?: unknown; label?: unknown }>>("previewThemes", []);
-  const merged: Array<[string, string]> = [...THEMES];
+    .get<Array<{ value?: unknown; label?: unknown }>>(settingKey, []);
+  const merged: Array<[string, string]> = [...base];
   const known = new Set(merged.map(([value]) => value));
   for (const entry of extras) {
     const value = typeof entry?.value === "string" ? entry.value.trim() : "";
@@ -152,6 +170,7 @@ export class PreviewViewProvider
   async show(target: AppTarget, reason?: string): Promise<void> {
     this.session.currentTarget = target;
     this.showsApp = true;
+    lastErrorLocation = undefined; // the incoming app's errors are its own
     const renderedBefore = this.previewRendered;
     await vscode.commands.executeCommand(`${PreviewViewProvider.viewId}.focus`);
     // Focusing an unresolved view resolves it, and resolving renders the app -
@@ -172,6 +191,12 @@ export class PreviewViewProvider
 
   get isShowing(): boolean {
     return !!this.view && this.previewRendered;
+  }
+
+  /** Brings the panel into view without taking the focus - the counterpart
+   *  of the tab's `reveal(column, true)`, for the reload command. */
+  reveal(): void {
+    this.view?.show(true);
   }
 
   /**
@@ -220,6 +245,8 @@ export class PreviewViewProvider
         language: session.language(),
         modelRoots: modelRootsOf(target.className),
         themes: mergedThemes(),
+        languages: mergedLanguages(),
+        device: session.device(),
         nonce: createNonce(),
       });
       this.previewRendered = true;
@@ -393,6 +420,15 @@ export function handleWebviewMessage(
     session.trafficOutput.show(true);
     return;
   }
+  // The device pick, remembered beyond the webview's own state - which dies
+  // with the webview, so a relaunched tab used to reset to desktop.
+  if (message?.type === "device") {
+    const device = message.value;
+    if (device === "desktop" || device === "tablet" || device === "phone") {
+      void session.setDevice(device);
+    }
+    return;
+  }
   if (message?.type === "screenshot") {
     void vscode.commands.executeCommand(
       "abap2ui5.screenshot",
@@ -507,6 +543,7 @@ function revealInspectedControl(session: Session, chain: RuntimeControl[]): void
 
 export function showInTab(session: Session, target: AppTarget): void {
   const title = `${target.className} · abap2UI5`;
+  lastErrorLocation = undefined; // the incoming app's errors are its own
   if (session.appPanel) {
     // Existing tab: just reload (or switch to the new class).
     session.appPanel.title = title;
@@ -547,6 +584,8 @@ export function showInTab(session: Session, target: AppTarget): void {
     language: session.language(),
     modelRoots: modelRootsOf(target.className),
     themes: mergedThemes(),
+    languages: mergedLanguages(),
+    device: session.device(),
     nonce: createNonce(),
   });
 }

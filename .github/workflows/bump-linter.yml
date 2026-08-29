@@ -20,6 +20,9 @@ permissions:
 jobs:
   bump:
     runs-on: ubuntu-latest
+    # more than the other bump workflows: this one re-resolves the linter's
+    # full tree (all @openui5/* packages plus playwright) and builds the vsix
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

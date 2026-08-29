@@ -180,21 +180,28 @@ export function completionAt(
     // silent wire breaks the rename exists for.
     const when = whenLiteralAt(text, offset);
     if (when) {
-      const seen = new Map<string, string>();
+      const seen = new Map<string, { name: string; count: number }>();
       for (const raise of eventRaises(text)) {
         const key = raise.name.toUpperCase();
-        if (!seen.has(key)) {
-          seen.set(key, raise.name);
+        const entry = seen.get(key);
+        if (entry) {
+          entry.count++;
+        } else {
+          seen.set(key, { name: raise.name, count: 1 });
         }
       }
       return {
         start: when.start,
         end: when.end,
-        entries: [...seen.values()].sort().map((name) => ({
-          label: name,
-          kind: "events" as const,
-          detail: "raised in the view",
-        })),
+        entries: [...seen.values()]
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(({ name, count }) => ({
+            label: name,
+            kind: "events" as const,
+            // the count says which wire is being picked up - the same
+            // number the CodeLens words this way on the branch itself
+            detail: `raised ${count}× in the view`,
+          })),
       };
     }
   }
@@ -210,12 +217,15 @@ export function completionAt(
       ...span,
       entries: controlsIn(data, context.library).map((local) => {
         const full = `${context.library}.${local}`;
+        const deprecated = !!deprecationText(data[full]?.deprecated);
         return withLazyDocumentation(
           {
             label: local,
             kind: "control" as const,
             detail: context.library,
-            deprecated: !!deprecationText(data[full]?.deprecated),
+            // struck through AND last - the list steers to the living API
+            sortText: `${deprecated ? "1" : "0"}${local}`,
+            deprecated,
           },
           () => describeControl(data, full)
         );
@@ -231,8 +241,10 @@ export function completionAt(
     return {
       ...span,
       entries: membersOf(data, context.control).map((member) => {
-        // Own members before inherited ones, properties before the rest.
+        // Own members before inherited ones, properties before the rest,
+        // deprecated ones after their current siblings.
         const inherited = member.declaredOn === context.control ? "0" : "1";
+        const deprecated = !!deprecationText(member.deprecated);
         const isDefault =
           member.section === "aggregations" &&
           member.name === defaultAggregation;
@@ -243,8 +255,10 @@ export function completionAt(
             detail: isDefault
               ? `${member.type ?? member.section} · default aggregation`
               : member.type ?? member.section,
-            sortText: `${SECTION_ORDER[member.section]}${inherited}${member.name}`,
-            deprecated: !!deprecationText(member.deprecated),
+            sortText: `${SECTION_ORDER[member.section]}${inherited}${
+              deprecated ? "1" : "0"
+            }${member.name}`,
+            deprecated,
           },
           () => describeMember(data, context.control!, member.name)
         );
@@ -266,11 +280,16 @@ export function completionAt(
       };
     }
     const values = valuesFor(data, context.control, context.member);
+    const type = memberInfo(data, context.control, context.member)?.type;
     return {
       ...span,
-      entries: (values ?? []).map((value) => ({
+      // The sortText keeps the snapshot's declaration order - `Default`
+      // first for sap.m.ButtonType - instead of an alphabetical shuffle.
+      entries: (values ?? []).map((value, ix) => ({
         label: value,
         kind: "value" as const,
+        ...(type ? { detail: type } : {}),
+        sortText: String(ix).padStart(3, "0"),
       })),
     };
   }

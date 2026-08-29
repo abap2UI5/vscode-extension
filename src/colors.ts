@@ -11,7 +11,7 @@
  * covered by the test suite. The provider plumbing lives in language.ts.
  */
 
-import { abapNsMap, splitName, xmlNsMap } from "./context";
+import { abapNsMap, DEFAULT_LIBRARY, splitName, xmlNsMap } from "./context";
 import { blankComments } from "./abapscan";
 
 /** Channels 0..1, the way VS Code's Color wants them. */
@@ -183,17 +183,32 @@ function parseCssColorUnclamped(value: string): RgbaColor | undefined {
   return named ? fromHex(named) : undefined;
 }
 
+const to255 = (c: number) => Math.round(clamp01(c) * 255);
+const hexByte = (c: number) => to255(c).toString(16).padStart(2, "0");
+
 /** The colour written back when the picker chooses one: hex while opaque,
  *  rgba() once an alpha rides along. */
 export function formatCssColor(color: RgbaColor): string {
-  const to255 = (c: number) => Math.round(clamp01(c) * 255);
   if (color.alpha >= 1) {
-    const hex = (c: number) => to255(c).toString(16).padStart(2, "0");
-    return `#${hex(color.red)}${hex(color.green)}${hex(color.blue)}`;
+    return `#${hexByte(color.red)}${hexByte(color.green)}${hexByte(color.blue)}`;
   }
   // alpha is clamped like the other three - it is written verbatim into the
   // source, so a negative one would emit `rgba(…,-1)`
   return `rgba(${to255(color.red)},${to255(color.green)},${to255(color.blue)},${Number(clamp01(color.alpha).toFixed(2))})`;
+}
+
+/**
+ * The spellings the colour picker offers, `formatCssColor`'s first - that is
+ * what accepting writes. The second is the same colour in the other notation
+ * (`rgb( )` while opaque, `#rrggbbaa` with an alpha), which is what makes the
+ * picker's format label cycle the way it does in a CSS file.
+ */
+export function cssColorPresentations(color: RgbaColor): string[] {
+  const alternate =
+    color.alpha >= 1
+      ? `rgb(${to255(color.red)},${to255(color.green)},${to255(color.blue)})`
+      : `#${hexByte(color.red)}${hexByte(color.green)}${hexByte(color.blue)}${hexByte(color.alpha)}`;
+  return [formatCssColor(color), alternate];
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +237,8 @@ export function abapColorSpans(
   const controls: Array<{ at: number; control: string }> = [];
   for (const m of code.matchAll(ABAP_CONTROL_RE)) {
     const { prefix, local } = splitName(m[2]);
-    const library = ns[prefix || m[4] || ""] ?? (prefix || m[4] ? undefined : "sap.m");
+    const library =
+      ns[prefix || m[4] || ""] ?? (prefix || m[4] ? undefined : DEFAULT_LIBRARY);
     if (library) {
       controls.push({ at: m.index, control: `${library}.${local}` });
     }
@@ -267,7 +283,7 @@ export function xmlColorSpans(
   const out: ColorSpan[] = [];
   for (const tag of source.matchAll(XML_TAG_RE)) {
     const { prefix, local } = splitName(tag[1]);
-    const library = ns[prefix] ?? (prefix ? undefined : "sap.m");
+    const library = ns[prefix] ?? (prefix ? undefined : DEFAULT_LIBRARY);
     if (!library) {
       continue;
     }

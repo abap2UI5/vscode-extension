@@ -99,6 +99,11 @@ test("the SVG carries clickable app nodes and escapes names", () => {
   assert.ok(svg.includes(">ZCL_HOME</text>"));
   assert.ok(svg.includes('class="node ext"')); // the unresolved target
   assert.ok(svg.includes('marker-end="url(#arrow)"'));
+  // native SVG tooltips: nodes say what a click does, edges which
+  // navigation they are
+  assert.ok(svg.includes("<title>ZCL_HOME (click to open the class)</title>"));
+  assert.ok(svg.includes("<title>ZCL_DETAIL (source not in this workspace)</title>"));
+  assert.ok(svg.includes("<title>ZCL_HOME -&gt; ZCL_DETAIL</title>"));
 });
 
 test("a namespaced class is a nav target", () => {

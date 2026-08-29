@@ -22,6 +22,7 @@ import type { ViewNode } from "@abap2ui5/linter/reconstruct";
  */
 
 import { abapStatements, declaredNames } from "./abapscan";
+import { formatBytes } from "./traffic";
 
 export interface Annotation {
   /** Character offset the annotation belongs to - the caller turns it into a
@@ -274,8 +275,4 @@ export function costAnnotations(
         "fill it here.",
     };
   });
-}
-
-export function formatBytes(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} kB`;
 }

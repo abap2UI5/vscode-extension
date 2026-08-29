@@ -154,9 +154,12 @@ export function resolveOptions(
   const options = optionsFromConfig(loaded, file, settings);
   return {
     ...options,
-    baseline: loaded.baseline
-      ? path.resolve(path.dirname(file), loaded.baseline as string)
-      : undefined,
+    // only a real path: `"baseline": true` (a typo) fed to path.resolve
+    // would throw out of every check that resolves options
+    baseline:
+      typeof loaded.baseline === "string" && loaded.baseline
+        ? path.resolve(path.dirname(file), loaded.baseline)
+        : undefined,
   };
 }
 
@@ -234,7 +237,15 @@ export function applyBaselineTo(
 /** One line for the output channel describing where the check's settings came
  *  from — the first question when the editor and CI disagree. */
 export function describeOptions(options: CheckOptions): string {
-  const dist = options.distribution === "openui5" ? "OpenUI5" : "SAPUI5";
+  // an unrecognised distribution is echoed as written - this line exists for
+  // diagnosing editor/CI disagreement, and a typo mapped to "SAPUI5" hides
+  // exactly the mistake being looked for
+  const dist =
+    options.distribution === "openui5"
+      ? "OpenUI5"
+      : options.distribution === "sapui5"
+        ? "SAPUI5"
+        : options.distribution;
   const from = options.configFile
     ? options.error
       ? `${options.configFile} (unreadable: ${options.error}) - using the VS Code settings`

@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.25.1
+
+A dedicated polish pass: 138 small improvements, none of them a new
+subsystem, all of them the kind of detail you notice daily.
+
+- **Messages act, not just inform.** "Show Log", "Show Problems", "Open
+  Baseline", "Open abap2ui5lint.jsonc" and "Set Launch URL" buttons appear on
+  the messages that used to just point somewhere; the invalid-launch-URL
+  message quotes the offending template; the screenshot toast names the file;
+  proper pluralization everywhere ("1 finding", "3 findings" - never
+  "1 fix(es)"); button labels, picker titles and command titles follow one
+  consistent style, and every command now carries the `abap2UI5` category
+  instead of a hand-written title prefix.
+- **The preview remembers more.** The device width survives closing the
+  preview, "Save As…" starts in the folder you last picked, screenshots are
+  pruned to the newest 20 instead of accumulating forever, and additional
+  logon languages can be added to the language picker
+  (`abap2ui5.previewLanguages`, the counterpart of `previewThemes`).
+- **Waiting has an exit.** The connection check runs as a cancellable
+  notification with a 30-second probe deadline (a cold ICF service is no
+  longer misdiagnosed as a network problem), the render-gate install can be
+  cancelled during the Chromium download and no longer freezes the window
+  while deleting an old install, and a failed system search says so in the
+  picker instead of looking like "no matches".
+- **Completion got opinionated.** Deprecated controls and members sort below
+  their living siblings, enum values keep their declaration order (Default
+  first) and show their type, WHEN completion shows how often each event is
+  raised, typing `(` accepts the highlighted client method and opens
+  signature help, and `lo_http_client-&gt;` no longer gets abap2UI5 hover -
+  only the real `client-&gt;` does. Signature help works on continuation
+  lines and highlights the right parameter even when names overlap.
+- **Findings read better.** All obsolete-API rules render strikethrough,
+  "does nothing" findings render faded, quick-fix titles name what they
+  change ("fix obsolete-binder on _bind_edit"), the findings tree shows
+  per-finding severity icons and opens at the exact column, and the web
+  check sweeps `fragment.xml` files, names the file in its progress and
+  says when it hit its file cap.
+- **The tools speak up.** The wizard preselects the name part of
+  `zcl_my_app`, names every conflicting file and the exact invalid
+  character, and opens the starter class instead of reloading the window;
+  converting a `Dialog` emits `popup_display`; the navigation map has hover
+  tooltips, a Refresh button and a truncation note; the MCP tools return
+  count/summary lines an agent can branch on; a new Popup-Close snippet
+  completes the popup round trip.
+- **Housekeeping:** CI cancels superseded runs and every workflow has a
+  timeout; the generator scripts fail fast on stalled fetches; `test:grep`
+  runs one slice of the suite; the walkthrough no longer references a 🎯
+  button that doesn't exist; log redaction also covers Authorization
+  headers.
+
 ## 0.25.0
 
 The result of a full adversarial review of the extension: over sixty bugs
