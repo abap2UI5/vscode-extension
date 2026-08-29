@@ -111,3 +111,38 @@ test("the whole report goes through the redaction, not just the log", () => {
   });
   assert.ok(!report.includes("acme.corp"), "no hostname anywhere in the report");
 });
+
+/** Split a markdown table row the way a renderer does: a backslash escapes
+ *  the character after it, so only an UNESCAPED pipe ends a cell. */
+function cellsOf(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === "\\") {
+      cur += line[++i] ?? "";
+      continue;
+    }
+    if (c === "|") {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  out.push(cur);
+  return out.slice(1, -1).map((c) => c.trim());
+}
+
+test("a backslash in a cell cannot open a column of its own", () => {
+  // A workspace folder is whatever the user named a directory, and it ends up
+  // in a table cell. Escaping only the pipe turns \| into \\| - an escaped
+  // backslash followed by a LIVE column separator - so the row the escaping
+  // exists to keep intact is the one it breaks.
+  const report = buildReport({ ...INPUT, workspaceFolders: ["weird\\|name"] });
+  const line = report
+    .split("\n")
+    .find((l) => l.startsWith("| workspace folders"));
+  assert.ok(line, report);
+  assert.deepEqual(cellsOf(line), ["workspace folders", "weird\\|name"]);
+});

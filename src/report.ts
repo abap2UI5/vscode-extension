@@ -92,9 +92,16 @@ export function redact(text: string): string {
   );
 }
 
-/** One markdown table row, with the cells escaped enough for a table. */
+/**
+ * One markdown table row, with the cells escaped enough for a table.
+ *
+ * The backslash goes first: escaping only the pipe turns a cell that already
+ * ends in a backslash into `\\|`, an escaped backslash followed by a LIVE
+ * column separator, so the row the escaping exists to keep intact is the row
+ * it breaks. A Windows path in a diagnostic cell is exactly that input.
+ */
 function row(cells: string[]): string {
-  return `| ${cells.map((c) => c.replace(/\|/g, "\\|")).join(" | ")} |`;
+  return `| ${cells.map((c) => c.replace(/\\/g, "\\\\").replace(/\|/g, "\\|")).join(" | ")} |`;
 }
 
 function yesNo(value: boolean): string {

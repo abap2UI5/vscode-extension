@@ -873,3 +873,25 @@ test("an app page served through the proxy comes out framable", async () => {
     server.close();
   }
 });
+
+test("a script whose end tag carries a space is still removed", () => {
+  // </script > closes a script exactly as </script> does. A pattern that
+  // insists on the bare form leaves the element in, the general tag strip
+  // below then removes only its tags, and the script BODY is what reaches the
+  // output channel - and from there a pasted bug report.
+  const page =
+    `<!DOCTYPE html><html><body>` +
+    `<script >var sid = "SAP_SESSIONID_DEV_100";</script >` +
+    `<h1>User is locked</h1></body></html>`;
+  const reason = describeRejection(page);
+  assert.equal(reason, "User is locked");
+  assert.ok(!reason?.includes("SAP_SESSIONID"), reason);
+});
+
+test("a style whose end tag carries a space does not reach the log either", () => {
+  const page =
+    `<!DOCTYPE html><html><body>` +
+    `<style\n>.x { color: red }</style\n>` +
+    `<h1>Password must be changed</h1></body></html>`;
+  assert.equal(describeRejection(page), "Password must be changed");
+});

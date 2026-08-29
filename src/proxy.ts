@@ -56,11 +56,21 @@ export interface ProxyResponse {
  */
 const REJECTION_SNIFF_BYTES = 4096;
 
-/** Tags out, entities and runs of whitespace collapsed. */
+/**
+ * Tags out, entities and runs of whitespace collapsed.
+ *
+ * The end tags allow whitespace before the `>` - `</script >` closes a
+ * script exactly as `</script>` does, and a pattern that insists on the
+ * bare form does not match it, leaves the element unremoved, and then has
+ * its tags stripped by the general rule below. What is left is the script
+ * BODY, in the one line that goes to the output channel and from there into
+ * a pasted bug report - which is the opposite of what the redaction in this
+ * file is for.
+ */
 function flatten(html: string): string {
   return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script\s*>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style\s*>/gi, " ")
     .replace(/<[^>]*>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
