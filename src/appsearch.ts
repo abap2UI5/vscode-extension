@@ -74,7 +74,7 @@ export function registerAppSearch(
         failed?: boolean;
       };
       const picker = vscode.window.createQuickPick<SearchItem>();
-      picker.title = "abap2UI5: run an app on the system";
+      picker.title = "abap2UI5: Run an App from the System";
       picker.placeholder =
         "Type part of the class name - searched on the system (ADT quick search)";
       const recentItems = () =>

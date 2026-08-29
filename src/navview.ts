@@ -106,6 +106,7 @@ export function registerNavMap(
       svg: navMapSvg(layout),
       appCount,
       edgeCount: graph.edges.length,
+      truncated,
     });
   };
 

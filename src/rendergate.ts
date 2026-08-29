@@ -426,7 +426,7 @@ export async function offerInstall(
   const pick = await vscode.window.showInformationMessage(
     `abap2UI5: ${reason}`,
     "Install Render Gate",
-    "Not now"
+    "Not Now"
   );
   if (pick === "Install Render Gate") {
     await installRenderGate(context, log, showLog);

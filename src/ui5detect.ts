@@ -190,7 +190,7 @@ export async function suggestSystemUi5(
       `, but the view check is set to ${setMin} (${setDist}). ` +
       "Check against what the system runs?",
     "Adopt",
-    "Keep settings"
+    "Keep Settings"
   );
   if (!pick) {
     return; // dismissed - ask again another session

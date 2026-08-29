@@ -55,7 +55,7 @@ async function pickTemplate(
  *  default is preselected, so typing replaces it straight away. */
 async function askClassName(): Promise<string | undefined> {
   const value = await vscode.window.showInputBox({
-    title: "abap2UI5: class name",
+    title: "abap2UI5: Class Name",
     value: "zcl_my_app",
     valueSelection: [4, 10],
     prompt: "Name of the app class (customer namespace, up to 30 characters)",
@@ -66,7 +66,7 @@ async function askClassName(): Promise<string | undefined> {
 }
 
 export async function newAppWizard(): Promise<void> {
-  const template = await pickTemplate("abap2UI5: new app");
+  const template = await pickTemplate("abap2UI5: New App from Template");
   if (!template) {
     return;
   }
@@ -109,7 +109,7 @@ export async function newProjectWizard(): Promise<void> {
     canSelectFolders: true,
     canSelectMany: false,
     openLabel: "Create project here",
-    title: "abap2UI5: new project - pick an empty folder",
+    title: "abap2UI5: New Project - Pick an Empty Folder",
   });
   if (!folders?.length) {
     return;
@@ -150,7 +150,7 @@ export async function newProjectWizard(): Promise<void> {
     return;
   }
 
-  const template = await pickTemplate("abap2UI5: new project");
+  const template = await pickTemplate("abap2UI5: New Project from Template");
   if (!template) {
     return;
   }
@@ -196,11 +196,11 @@ export async function newProjectWizard(): Promise<void> {
     return;
   }
 
-  const open = "Open project";
+  const open = "Open Project";
   const choice = await vscode.window.showInformationMessage(
     created,
     open,
-    "Not now"
+    "Not Now"
   );
   if (choice === open) {
     await vscode.commands.executeCommand("vscode.openFolder", root, {

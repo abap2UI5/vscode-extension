@@ -140,7 +140,9 @@ function whenLenses(doc: vscode.TextDocument, text: string): vscode.CodeLens[] {
     lenses.push(
       new vscode.CodeLens(new vscode.Range(at, at), {
         title: `$(zap) raised ${usages.length}× in the view`,
-        tooltip: "Peek the _event( ) call(s) raising this event",
+        tooltip: `Peek the _event( ) ${
+          usages.length === 1 ? "call" : "calls"
+        } raising this event`,
         command: "editor.action.showReferences",
         arguments: [doc.uri, at, locations],
       })

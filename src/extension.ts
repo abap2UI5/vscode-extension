@@ -187,7 +187,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       const pick = await vscode.window.showQuickPick(recent, {
-        title: "abap2UI5: run an app",
+        title: "abap2UI5: Run a Recently Launched App",
         placeHolder: "Recently launched in this window",
       });
       if (pick) {
@@ -542,7 +542,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerConvert(context, log);
   registerNavMap(context, log);
   registerPropertyEditor(context, log);
-  registerViewCheck(context, log);
+  registerViewCheck(context, log, showLog);
   registerXmlPreview(context, log, findingsNow);
   registerViewPreview(context, log);
   registerQuickFix(context, log);

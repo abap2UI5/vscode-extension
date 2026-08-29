@@ -75,6 +75,10 @@ let lastVersionLine = "";
  *  storage to find a self-installed render gate. */
 let extContext: vscode.ExtensionContext | undefined;
 
+/** Set by registerViewCheck - what a failed install's "Show Log" button
+ *  reveals, the same channel extension.ts hands to installRenderGate. */
+let showLogFn: (() => void) | undefined;
+
 function config() {
   return vscode.workspace.getConfiguration(CONFIG_SECTION);
 }
@@ -258,7 +262,7 @@ async function runRenderGate(
           )
           .then(async (pick) => {
             if (pick === "Install Render Gate" && extContext) {
-              if (await installRenderGate(extContext, log)) {
+              if (await installRenderGate(extContext, log, showLogFn)) {
                 spawnFailed = false;
               }
             }
@@ -1071,9 +1075,11 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
 
 export function registerViewCheck(
   context: vscode.ExtensionContext,
-  log: (m: string) => void
+  log: (m: string) => void,
+  showLog?: () => void
 ): void {
   extContext = context;
+  showLogFn = showLog;
   const diagnostics =
     vscode.languages.createDiagnosticCollection("abap2ui5-view-check");
 

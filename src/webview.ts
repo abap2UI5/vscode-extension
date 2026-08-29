@@ -1092,6 +1092,7 @@ ${BASE_CSS}
   .errors ul { margin: 4px 0 0; padding-left: 18px; }
   .errors code { font-family: var(--vscode-editor-font-family, monospace); }
   .busy { opacity: 0.5; }
+  .loading { color: var(--vscode-descriptionForeground); text-align: center; padding: 2em 0; }
 </style>
 </head>
 <body>
@@ -1105,6 +1106,11 @@ ${BASE_CSS}
         }</strong> - the picture shows what came up regardless:<ul>${errors
           .map((e) => `<li><code>${escapeHtml(e)}</code></li>`)
           .join("")}</ul></div>`
+      : ""
+  }
+  ${
+    busy && !shots.length
+      ? `<p class="loading">Rendering the view in headless Chromium - the first run may take a few seconds…</p>`
       : ""
   }
   <div class="shots ${busy ? "busy" : ""}">
@@ -1132,8 +1138,11 @@ export function navMapHtml(options: {
   svg: string;
   appCount: number;
   edgeCount: number;
+  /** True when the workspace scan stopped at its file cap - the map may
+   *  then be missing apps, and says so instead of posing as complete. */
+  truncated?: boolean;
 }): string {
-  const { nonce, svg, appCount, edgeCount } = options;
+  const { nonce, svg, appCount, edgeCount, truncated } = options;
   const empty = appCount === 0;
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1171,6 +1180,16 @@ ${BASE_CSS}
   }
   .node.ext rect { stroke-dasharray: 4 3; opacity: 0.7; }
   .node.ext text { opacity: 0.7; }
+  #refresh {
+    padding: 3px 10px;
+    margin: 0 0 14px;
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    background: var(--vscode-button-secondaryBackground, transparent);
+    border-color: var(--vscode-panel-border, rgba(128,128,128,0.35));
+  }
+  #refresh:hover {
+    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
+  }
 </style>
 </head>
 <body>
@@ -1180,7 +1199,8 @@ ${BASE_CSS}
       : `${appCount} app${appCount === 1 ? "" : "s"}, ${edgeCount} navigation${
           edgeCount === 1 ? "" : "s"
         } - dashed nodes are nav targets whose source is not in this workspace. Click a node to open its class, an arrow to jump to its <code>nav_app_call( )</code>.`
-  }</p>
+  }${truncated ? " The scan stopped at its file cap - apps beyond it may be missing." : ""}</p>
+  <button id="refresh">Refresh</button>
   ${svg}
 <script nonce="${nonce}">
 (function () {
@@ -1201,6 +1221,9 @@ ${BASE_CSS}
       });
     });
   }
+  document.getElementById('refresh')?.addEventListener('click', () => {
+    vscodeApi.postMessage({ type: 'refresh' });
+  });
 })();
 </script>
 </body>

@@ -938,7 +938,7 @@ async function extractViewMethod(
     return;
   }
   const name = await vscode.window.showInputBox({
-    title: "abap2UI5: extract to view method",
+    title: "abap2UI5: Extract to View Method",
     prompt: "Name for the new method - it takes the builder and returns it",
     value: "render_section",
     validateInput: (value) =>

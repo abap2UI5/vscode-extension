@@ -111,7 +111,7 @@ async function setActive(
 export async function askForTemplate(current: string): Promise<string | undefined> {
   const answer = (
     (await vscode.window.showInputBox({
-      title: "abap2UI5: Set launch URL",
+      title: "abap2UI5: Set Launch URL",
       prompt: "URL template with {class} as the placeholder",
       value:
         current ||
@@ -187,7 +187,7 @@ export async function pickSystem(
   });
 
   const pick = await vscode.window.showQuickPick(items, {
-    title: "abap2UI5: system to launch against",
+    title: "abap2UI5: Select System",
     placeHolder: active ? `Currently: ${active.name}` : "No system configured yet",
     // the host under the name is just as recognisable as the name itself,
     // especially when the profiles are "DEV" and "DEV (2)"
@@ -199,7 +199,7 @@ export async function pickSystem(
   if (pick.add) {
     const name = (
       (await vscode.window.showInputBox({
-        title: "abap2UI5: name of the system",
+        title: "abap2UI5: Name of the New System",
         prompt: "Shown in the picker and the status bar, e.g. DEV or Sandbox",
         ignoreFocusOut: true,
       })) ?? ""
@@ -292,7 +292,7 @@ export async function ensureCredentials(
 
   if (!user) {
     user = await vscode.window.showInputBox({
-      title: `abap2UI5: SAP user for ${originOf(origin) ?? origin}`,
+      title: `abap2UI5: SAP User for ${originOf(origin) ?? origin}`,
       prompt: "User for logging on to the SAP system (same as in ADT)",
       ignoreFocusOut: true,
     });
@@ -305,7 +305,7 @@ export async function ensureCredentials(
 
   if (!pass) {
     pass = await vscode.window.showInputBox({
-      title: `abap2UI5: SAP password for ${originOf(origin) ?? origin}`,
+      title: `abap2UI5: SAP Password for ${originOf(origin) ?? origin}`,
       prompt: "Password (stored securely in the VS Code SecretStorage)",
       password: true,
       ignoreFocusOut: true,

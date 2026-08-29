@@ -3,6 +3,7 @@ import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as path from "path";
 import { controlCallAt } from "./context";
+import { plural } from "./text";
 import { ExampleHit, findControlUses, rankExamples } from "./examples";
 import { CatalogueEntry, CatalogueHit, catalogueUrl, matchCatalogue, parseCatalogue, rawUrl } from "./catalogue";
 import { CORPUS_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
@@ -206,7 +207,7 @@ async function askControl(
   }
   const last = context.globalState.get<string>(LAST_CONTROL_KEY, "");
   const typed = await vscode.window.showInputBox({
-    title: "abap2UI5: examples for which control?",
+    title: "abap2UI5: Show Examples for a Control",
     prompt: "A UI5 control name, e.g. sap.m.Table or Table",
     placeHolder: "sap.m.Table",
     // the previous answer, preselected - Enter repeats it, typing replaces it
@@ -403,17 +404,17 @@ export function registerExamples(
                 "fetched. Clone samples, samples-controls or samples-stack next " +
                 "to each other and point the setting at the folder holding them, " +
                 "or retry the download.",
-              "Open setting",
-              "Retry fetch"
+              "Open Setting",
+              "Retry Fetch"
             );
-            if (pick === "Open setting") {
+            if (pick === "Open Setting") {
               await vscode.commands.executeCommand(
                 "workbench.action.openSettings",
                 "abap2ui5.mcp.reposRoot"
               );
               return;
             }
-            if (pick === "Retry fetch") {
+            if (pick === "Retry Fetch") {
               force = true;
               continue;
             }
@@ -433,7 +434,7 @@ export function registerExamples(
           return;
         }
         const picked = (await vscode.window.showQuickPick(quickPickItems(hits, remote), {
-          title: `${hits.length + remote.length} example(s) of ${control}`,
+          title: `${plural(hits.length + remote.length, "example")} of ${control}`,
           matchOnDetail: true,
           // the description names the catalogue - typing `stack` or
           // `controls` filters by source

@@ -84,7 +84,7 @@ export function registerConvert(
       );
       if (warnings.length) {
         vscode.window.showWarningMessage(
-          `abap2UI5: converted with ${warnings.length} caveat(s) - see the ` +
+          `abap2UI5: converted with ${plural(warnings.length, "caveat")} - see the ` +
             "TODO comments at the top of the result."
         );
       }

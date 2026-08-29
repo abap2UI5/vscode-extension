@@ -482,10 +482,10 @@ export function watchProxyStatus(session: Session): void {
           (reason ? `: ${reason}` : "") +
           ". The stored user or password may be wrong, or this system does " +
           'not accept basic auth - in which case set abap2ui5.openMode to "external".',
-        "Re-enter credentials"
+        "Re-enter Credentials"
       )
       .then(async (pick) => {
-        if (pick !== "Re-enter credentials" || !origin) {
+        if (pick !== "Re-enter Credentials" || !origin) {
           return;
         }
         try {
