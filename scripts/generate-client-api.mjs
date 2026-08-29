@@ -109,7 +109,8 @@ if (invokedDirectly) {
   if (local) {
     source = fs.readFileSync(path.join(local, INTF_PATH), "utf8");
   } else {
-    const res = await fetch(RAW_URL);
+    // a stalled fetch fails the weekly run promptly, not at the job's cap
+    const res = await fetch(RAW_URL, { signal: AbortSignal.timeout(30000) });
     if (!res.ok) {
       console.error(`generate-client-api: ${RAW_URL} -> HTTP ${res.status}`);
       process.exit(2);

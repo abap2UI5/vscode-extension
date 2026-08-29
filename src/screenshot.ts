@@ -53,11 +53,17 @@ export function findChromium(browsersDir: string): string | undefined {
 
 const SHOT_TIMEOUT_MS = 45_000;
 
+/** How many screenshots stay in global storage. Every shot lands there and
+ *  nothing else ever deletes one - unbounded, that directory only grows. */
+const KEEP_SHOTS = 20;
+
+/** Resolves with Chromium's stderr - the only witness when it exits cleanly
+ *  but writes no PNG. */
 async function runChromium(
   chromium: string,
   args: string[],
   log: (m: string) => void
-): Promise<void> {
+): Promise<string> {
   // Through the shared runner for the kill: a headless Chromium is a process
   // TREE (zygote, GPU, renderers), and the plain SIGTERM this used to send to
   // the parent left the rest of it running after a timeout.
@@ -75,6 +81,28 @@ async function runChromium(
     log(`screenshot: chromium stderr: ${outcome.stderr.slice(0, 400)}`);
     throw new Error(`Chromium exited with code ${outcome.code}`);
   }
+  return outcome.kind === "closed" ? outcome.stderr : "";
+}
+
+/** Keeps the newest `keep` PNGs and deletes the rest. Best effort - a
+ *  leftover screenshot is not worth failing the fresh one over. */
+function pruneScreenshots(dir: string, keep: number): void {
+  try {
+    const stale = fs
+      .readdirSync(dir)
+      .filter((name) => name.endsWith(".png"))
+      .map((name) => {
+        const full = path.join(dir, name);
+        return { full, mtime: fs.statSync(full).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(keep);
+    for (const each of stale) {
+      fs.rmSync(each.full, { force: true });
+    }
+  } catch {
+    // unreadable entry mid-prune - the next screenshot tries again
+  }
 }
 
 /**
@@ -84,7 +112,8 @@ async function runChromium(
 export async function takeScreenshot(
   context: vscode.ExtensionContext,
   options: { url: string; className: string; width?: number; height?: number },
-  log: (m: string) => void
+  log: (m: string) => void,
+  showLog?: () => void
 ): Promise<string | undefined> {
   const chromium = findChromium(renderGateBrowsers(context));
   if (!chromium) {
@@ -92,7 +121,8 @@ export async function takeScreenshot(
       context,
       log,
       "taking a screenshot renders the app in headless Chromium, which the " +
-        "render gate installs - install it once?"
+        "render gate installs - install it once?",
+      showLog
     );
     return undefined;
   }
@@ -139,13 +169,16 @@ export async function takeScreenshot(
     args.unshift("--no-sandbox");
   }
 
+  let stderr = "";
   try {
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Window,
         title: `abap2UI5: screenshotting ${options.className}`,
       },
-      () => runChromium(chromium, args, log)
+      async () => {
+        stderr = await runChromium(chromium, args, log);
+      }
     );
   } catch (err) {
     vscode.window.showErrorMessage(
@@ -155,11 +188,28 @@ export async function takeScreenshot(
     return undefined;
   }
   if (!fs.existsSync(file)) {
-    vscode.window.showErrorMessage(
-      "abap2UI5: Chromium finished but wrote no PNG - see the output channel."
+    // a clean exit without a PNG says why only on stderr, which the
+    // success path otherwise discards - logged here, or the channel the
+    // message points at holds nothing about this failure
+    log(
+      `screenshot: chromium wrote no PNG${
+        stderr ? ` - stderr: ${stderr.slice(0, 400)}` : " and said nothing on stderr"
+      }`
     );
+    const buttons = showLog ? ["Show Log"] : [];
+    void vscode.window
+      .showErrorMessage(
+        "abap2UI5: Chromium finished but wrote no PNG - see the output channel.",
+        ...buttons
+      )
+      .then((pick) => {
+        if (pick === "Show Log") {
+          showLog?.();
+        }
+      });
     return undefined;
   }
   log(`screenshot: ${file}`);
+  pruneScreenshots(dir, KEEP_SHOTS);
   return file;
 }

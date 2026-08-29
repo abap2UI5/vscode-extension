@@ -96,7 +96,10 @@ export function optionsFromConfig(
   configFile: string,
   settings: SettingsOptions
 ): CheckOptions {
-  const baseline = raw.baseline as string | undefined;
+  // only a real path may become one: `"baseline": true` is a typo, and
+  // string work on it would throw out of every check that resolves options
+  const baseline =
+    typeof raw.baseline === "string" && raw.baseline ? raw.baseline : undefined;
   return {
     minUi5: (raw.minUi5 as string) ?? (raw.ui5 as string) ?? settings.minUi5,
     distribution: (raw.distribution as string) ?? settings.distribution,

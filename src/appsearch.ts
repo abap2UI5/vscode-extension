@@ -68,7 +68,12 @@ export function registerAppSearch(
       if (!connection) {
         return;
       }
-      const picker = vscode.window.createQuickPick();
+      type SearchItem = vscode.QuickPickItem & {
+        /** Marks the row that reports a failed search - a notice, never a
+         *  class name the accept handler may launch. */
+        failed?: boolean;
+      };
+      const picker = vscode.window.createQuickPick<SearchItem>();
       picker.title = "abap2UI5: run an app on the system";
       picker.placeholder =
         "Type part of the class name - searched on the system (ADT quick search)";
@@ -119,9 +124,18 @@ export function registerAppSearch(
             }));
           } catch (err) {
             if (mine === generation) {
-              deps.log(
-                `app-search: ${err instanceof Error ? err.message : String(err)}`
-              );
+              const reason = err instanceof Error ? err.message : String(err);
+              deps.log(`app-search: ${reason}`);
+              // said in the picker itself: a silent stale list after a failed
+              // search reads exactly like "no matches"
+              picker.items = [
+                {
+                  label: "$(warning) search failed",
+                  description: reason,
+                  alwaysShow: true,
+                  failed: true,
+                },
+              ];
             }
           } finally {
             if (mine === generation) {
@@ -132,6 +146,9 @@ export function registerAppSearch(
       });
 
       picker.onDidAccept(() => {
+        if (picker.selectedItems[0]?.failed) {
+          return; // the failure notice is not launchable - keep the picker up
+        }
         const pick = picker.selectedItems[0]?.label ?? picker.value.trim();
         picker.hide();
         if (pick) {

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { xmlToAbap } from "./xmltoabap";
+import { plural } from "./text";
 
 /*
  * "Convert XML View to Builder Chain" - the reverse direction of the
@@ -50,13 +51,21 @@ export function registerConvert(
         );
         return;
       }
-      const { abap, warnings } = xmlToAbap(source.text, "    ");
+      const { abap, warnings: rawWarnings } = xmlToAbap(source.text, "    ");
       if (!abap) {
         vscode.window.showWarningMessage(
-          `abap2UI5: could not convert ${source.from} - ${warnings.join("; ")}`
+          `abap2UI5: could not convert ${source.from} - ${rawWarnings.join("; ")}`
         );
         return;
       }
+      // Deduplicated (the same dropped text node can warn more than once),
+      // and structural caveats before the routine per-event wirings - the
+      // TODO list starts with what actually needs a decision.
+      const unique = [...new Set(rawWarnings)];
+      const warnings = [
+        ...unique.filter((w) => !w.startsWith("event '")),
+        ...unique.filter((w) => w.startsWith("event '")),
+      ];
       const header =
         `" Converted from XML (${source.from}) by abap2UI5: ` +
         `Convert XML View to Builder Chain.\n` +

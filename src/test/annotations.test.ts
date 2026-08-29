@@ -4,7 +4,6 @@ import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import {
   costAnnotations,
   deprecationAnnotations,
-  formatBytes,
   publicAttributes,
   sinceAnnotations,
   versionAbove,
@@ -202,7 +201,4 @@ test("a model measured in kilobytes is worth a warning", () => {
   assert.match(annotation.tooltip ?? "", /the class's own seeds/);
 });
 
-test("bytes are readable at both ends of the scale", () => {
-  assert.equal(formatBytes(12), "12 B");
-  assert.equal(formatBytes(2048), "2.0 kB");
-});
+// byte formatting is `traffic.ts`'s `formatBytes`, pinned in traffic.test.ts

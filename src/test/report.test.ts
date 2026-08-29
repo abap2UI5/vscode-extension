@@ -45,6 +45,24 @@ test("credentials in query parameters go too", () => {
   );
 });
 
+test("a quoted auth header loses its credential, not its scheme", () => {
+  assert.equal(
+    redact("request had Authorization: Basic ZGV2ZWxvcGVyOmh1bnRlcjI="),
+    "request had Authorization: Basic <redacted>"
+  );
+  assert.equal(
+    redact("authorization: bearer eyJhbGciOiJIUzI1NiJ9.e30.x"),
+    "authorization: bearer <redacted>"
+  );
+});
+
+test("prose about basic authentication is not a header", () => {
+  // a bare "Basic <word>" rule would redact this sentence - the rule is
+  // anchored on the header name so ordinary log prose survives
+  const line = "view-check: Basic authentication failed for the system";
+  assert.equal(redact(line), line);
+});
+
 // ---------------------------------------------------------------------------
 // The report itself
 // ---------------------------------------------------------------------------

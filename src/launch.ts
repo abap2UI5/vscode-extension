@@ -3,8 +3,13 @@ import { classNameOf } from "./abap";
 import { isAppSource } from "./appclasses";
 import { originOf, proxiedUrl, sapClientOf, shortUrl, withParams } from "./urls";
 import { suggestSystemUi5 } from "./ui5detect";
-import { clearCredentials, ensureCredentials, ensureSystem } from "./systems";
-import { PreviewSurface, Session } from "./session";
+import {
+  clearCredentials,
+  ensureCredentials,
+  ensureSystem,
+  SystemProfile,
+} from "./systems";
+import { FOCUS_BOUNCE_MS, PreviewSurface, Session } from "./session";
 import { reloadShownApp, showInTab } from "./preview";
 import { describeRejection } from "./proxy";
 import {
@@ -25,6 +30,25 @@ import {
  * proxy-status watch that turns a rejected logon into an actionable offer,
  * and the connection check that turns a white preview into a diagnosis.
  */
+
+/**
+ * A launch URL that does not expand to a URL, reported with the value that
+ * failed and the command that fixes it - "not a valid URL" alone left the
+ * user to find both.
+ */
+function reportBadLaunchUrl(system: SystemProfile): void {
+  void vscode.window
+    .showErrorMessage(
+      `abap2UI5: the launch URL of ${system.name} is not a valid URL: ` +
+        `${system.template}`,
+      "Set Launch URL"
+    )
+    .then((pick) => {
+      if (pick === "Set Launch URL") {
+        void vscode.commands.executeCommand("abap2ui5.setLaunchUrl");
+      }
+    });
+}
 
 /**
  * Launches one app. Without a class name it takes the one in the active
@@ -59,13 +83,14 @@ export async function runApp(
   const externalUrl = session.urlFor(system, className);
   const origin = originOf(externalUrl);
   if (!origin) {
-    vscode.window.showErrorMessage(
-      `abap2UI5: the launch URL of ${system.name} is not a valid URL.`
-    );
+    reportBadLaunchUrl(system);
     return;
   }
 
   const mode = session.openMode();
+  // The first line of every launch story the log tells - which app, where,
+  // into which surface.
+  session.log(`run: ${className} on ${system.name} (${mode})`);
 
   if (mode === "external") {
     await vscode.env.openExternal(vscode.Uri.parse(externalUrl));
@@ -90,9 +115,12 @@ export async function runApp(
     );
     frameUrl = proxiedUrl(externalUrl, session.proxy.origin) ?? externalUrl;
   } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    // into the log too - the error toast is gone by the time the recent log
+    // is pasted into a bug report
+    session.log(`run: could not start the proxy - ${reason}`);
     vscode.window.showErrorMessage(
-      "abap2UI5: could not start the proxy - " +
-        (err instanceof Error ? err.message : String(err))
+      `abap2UI5: could not start the proxy - ${reason}`
     );
     return;
   }
@@ -115,7 +143,7 @@ export async function runApp(
   if (editor) {
     session.rememberSource(editor);
   }
-  session.bounceFocusUntil = Date.now() + 2500;
+  session.bounceFocusUntil = Date.now() + FOCUS_BOUNCE_MS;
 
   // Remember for auto-reload on save and for the status bar.
   session.watch.stop();
@@ -218,7 +246,7 @@ export async function activateAndReload(session: Session): Promise<void> {
   // Keep focus in the code in case the reloading app tries to grab it. The
   // window starts here: activating can take a moment.
   if (editor && isAbap) {
-    session.bounceFocusUntil = Date.now() + 2500;
+    session.bounceFocusUntil = Date.now() + FOCUS_BOUNCE_MS;
   }
   reloadShownApp(session, "Reloaded after activation");
 }
@@ -226,6 +254,12 @@ export async function activateAndReload(session: Session): Promise<void> {
 // ---------------------------------------------------------------------------
 // The connection check - a white preview, diagnosed
 // ---------------------------------------------------------------------------
+
+/** The check waits longer than a routine lookup: the first request to an ICF
+ *  service can sit behind a server-side compile, and a probe that gives up at
+ *  the default deadline reports "timed out - check the VPN" about a system
+ *  that was merely warming up. */
+const CHECK_TIMEOUT_MS = 30_000;
 
 /**
  * "abap2UI5: Check System Connection" - probes the active system's launch URL
@@ -279,19 +313,30 @@ export async function checkConnection(session: Session): Promise<void> {
       if (!creds) {
         return;
       }
+      // A notification with a Cancel button rather than a silent window
+      // spinner: against a host that hangs, the check is the one command
+      // that deliberately keeps waiting (CHECK_TIMEOUT_MS).
+      let cancelled = false;
       try {
         await vscode.window.withProgress(
           {
-            location: vscode.ProgressLocation.Window,
+            location: vscode.ProgressLocation.Notification,
             title: `abap2UI5: checking ${system.name}`,
+            cancellable: true,
           },
-          async () => {
+          async (_progress, token) => {
+            const aborter = new AbortController();
+            token.onCancellationRequested(() => {
+              cancelled = true;
+              aborter.abort(new Error("connection check cancelled"));
+            });
             // The same start( ) a launch goes through: it clears a previous
             // rejection and holds the credentials the fetch injects.
             await session.proxy.start(origin, creds.user, creds.pass);
             const answer = await session.proxy.fetchFromSystem(
               probePath,
-              "text/html, */*"
+              "text/html, */*",
+              { signal: aborter.signal, timeoutMs: CHECK_TIMEOUT_MS }
             );
             steps.push(reachedStep(origin));
             const statusStep = classifyStatus({
@@ -323,7 +368,7 @@ export async function checkConnection(session: Session): Promise<void> {
                   const withoutClient = await session.proxy.fetchFromSystem(
                     strippedPath,
                     "text/html, */*",
-                    { background: true }
+                    { background: true, signal: aborter.signal }
                   );
                   const clientStep = classifyClientProbe({
                     sapClient,
@@ -342,6 +387,10 @@ export async function checkConnection(session: Session): Promise<void> {
           }
         );
       } catch (err) {
+        if (cancelled) {
+          session.log(`connection check: cancelled (${system.name})`);
+          return;
+        }
         const failure = err as { code?: unknown; message?: unknown };
         steps.push(
           describeConnectFailure({
@@ -432,8 +481,7 @@ export function watchProxyStatus(session: Session): void {
           // different afternoon than "wrong password", and only it knows
           (reason ? `: ${reason}` : "") +
           ". The stored user or password may be wrong, or this system does " +
-          "not accept basic auth - in which case set `abap2ui5.openMode` to " +
-          "`external`.",
+          'not accept basic auth - in which case set abap2ui5.openMode to "external".',
         "Re-enter credentials"
       )
       .then(async (pick) => {
@@ -476,9 +524,7 @@ export function makeConnectSystem(
     const expanded = session.urlFor(system, "PROBE");
     const origin = originOf(expanded);
     if (!origin) {
-      vscode.window.showErrorMessage(
-        `abap2UI5: the launch URL of ${system.name} is not a valid URL.`
-      );
+      reportBadLaunchUrl(system);
       return undefined;
     }
     const creds = await ensureCredentials(session.ctx, origin);

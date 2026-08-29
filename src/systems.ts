@@ -132,9 +132,10 @@ export async function askForTemplate(current: string): Promise<string | undefine
   return answer || undefined;
 }
 
-/** Stores a launch URL: into the profile list when one is already in use,
- *  into the single setting otherwise - so the simple case stays simple. */
-async function storeTemplate(name: string, template: string): Promise<void> {
+/** Stores a launch URL: into the profile list when one is already in use
+ *  (replacing the entry of the given name), into the single setting
+ *  otherwise - so the simple case stays simple. */
+export async function storeTemplate(name: string, template: string): Promise<void> {
   const cfg = config();
   const list = cfg.get<Array<{ name?: string; url?: string }>>(SYSTEMS_KEY, []) ?? [];
   if (list.length) {
@@ -188,6 +189,9 @@ export async function pickSystem(
   const pick = await vscode.window.showQuickPick(items, {
     title: "abap2UI5: system to launch against",
     placeHolder: active ? `Currently: ${active.name}` : "No system configured yet",
+    // the host under the name is just as recognisable as the name itself,
+    // especially when the profiles are "DEV" and "DEV (2)"
+    matchOnDescription: true,
   });
   if (!pick) {
     return undefined;

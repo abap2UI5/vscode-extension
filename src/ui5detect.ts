@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { SapProxy } from "./proxy";
+import { CONFIG_SECTION } from "./settings";
 import { snapshotUi5Version } from "./snapshot";
 
 /*
@@ -164,7 +165,7 @@ export async function suggestSystemUi5(
     );
   }
 
-  const cfg = vscode.workspace.getConfiguration("abap2ui5");
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const setMin = cfg.get<string>("viewCheck.minUi5", "1.71");
   const setDist = cfg.get<string>("viewCheck.distribution", "sapui5");
   const mismatches: string[] = [];

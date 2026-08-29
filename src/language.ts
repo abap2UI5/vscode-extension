@@ -17,6 +17,7 @@ import { declarationSpan, methodImplementations, usesBuilder } from "./abap";
 import {
   apiReferenceUrl,
   clientCallAt,
+  clientCallSpanAt,
   clientMethod,
   clientMethods,
   clientSignatureContext,
@@ -34,8 +35,9 @@ import {
   isColorMember,
   isXmlView,
 } from "./languagecore";
-import { abapColorSpans, formatCssColor, xmlColorSpans } from "./colors";
+import { abapColorSpans, cssColorPresentations, xmlColorSpans } from "./colors";
 import { snapshot } from "./snapshot";
+import { CONFIG_SECTION } from "./settings";
 import { VIEW_SELECTOR } from "./selector";
 import { attributeAt, attributeSpans, idAt, idSpans } from "./renamewires";
 import { planExtract } from "./extractview";
@@ -231,15 +233,18 @@ class ViewColors implements vscode.DocumentColorProvider {
     color: vscode.Color,
     context: { range: vscode.Range }
   ): vscode.ColorPresentation[] {
-    const label = formatCssColor({
+    // More than one spelling, so clicking the picker's label cycles formats
+    // the way it does in a CSS file. The first is what accepting writes.
+    return cssColorPresentations({
       red: color.red,
       green: color.green,
       blue: color.blue,
       alpha: color.alpha,
+    }).map((label) => {
+      const presentation = new vscode.ColorPresentation(label);
+      presentation.textEdit = vscode.TextEdit.replace(context.range, label);
+      return presentation;
     });
-    const presentation = new vscode.ColorPresentation(label);
-    presentation.textEdit = vscode.TextEdit.replace(context.range, label);
-    return [presentation];
   }
 }
 
@@ -346,18 +351,26 @@ class ClientApiHover implements vscode.HoverProvider {
     if (!clientCallAt(line, position.character)) {
       return undefined;
     }
-    const name = clientCallAt(blankedLineOf(doc, position), position.character);
-    if (!name) {
+    const span = clientCallSpanAt(
+      blankedLineOf(doc, position),
+      position.character
+    );
+    if (!span) {
       return undefined; // a comment or a literal quoting the call
     }
-    const method = clientMethod(name);
+    const method = clientMethod(span.name);
     if (!method) {
       return undefined;
     }
     const md = new vscode.MarkdownString();
     md.isTrusted = false;
     if (method.obsolete) {
-      md.appendMarkdown(`⚠ **obsolete** — see the note below.\n\n`);
+      // "see the note below" only when the abapdoc actually carries one
+      md.appendMarkdown(
+        method.doc
+          ? `⚠ **obsolete** — see the note below.\n\n`
+          : `⚠ **obsolete**\n\n`
+      );
     }
     md.appendCodeblock(method.signature, "abap");
     if (method.doc) {
@@ -366,7 +379,12 @@ class ClientApiHover implements vscode.HoverProvider {
     md.appendMarkdown(
       `\n\n[Client API Reference](${apiReferenceUrl(method.name)})`
     );
-    return new vscode.Hover(md);
+    // the exact name span, so the editor highlights the method rather than
+    // guessing a word around the cursor
+    return new vscode.Hover(
+      md,
+      new vscode.Range(position.line, span.start, position.line, span.end)
+    );
   }
 }
 
@@ -389,14 +407,26 @@ class ClientApiCompletion implements vscode.CompletionItemProvider {
       return []; // the arrow stands in a comment or a literal
     }
     // replace the partial member already typed, so accepting an item never
-    // doubles what stands there
+    // doubles what stands there - and with the cursor mid-word, the tail of
+    // the word too, or `view_di‸splay` would keep its `splay`
     const typed = /(\w*)$/.exec(upToCursor)![1];
-    const range = new vscode.Range(
-      position.line,
-      position.character - typed.length,
-      position.line,
-      position.character
-    );
+    const trailing = /^\w*/.exec(
+      doc.lineAt(position.line).text.slice(position.character)
+    )![0];
+    const range = {
+      inserting: new vscode.Range(
+        position.line,
+        position.character - typed.length,
+        position.line,
+        position.character
+      ),
+      replacing: new vscode.Range(
+        position.line,
+        position.character - typed.length,
+        position.line,
+        position.character + trailing.length
+      ),
+    };
     return clientMethods().map((method) => {
       const item = new vscode.CompletionItem(
         method.name,
@@ -407,6 +437,9 @@ class ClientApiCompletion implements vscode.CompletionItemProvider {
         item.documentation = markdown(method.doc);
       }
       item.range = range;
+      // typing the opening paren accepts the method and flows straight into
+      // the signature help that `(` triggers
+      item.commitCharacters = ["("];
       // the interface's abapdoc says obsolete -> struck through and last,
       // so the list itself steers to the current API
       if (method.obsolete) {
@@ -418,10 +451,16 @@ class ClientApiCompletion implements vscode.CompletionItemProvider {
   }
 }
 
+/** How far back signature help reads for the open `client->…(` - the corpus
+ *  writes one argument per line, so the call the cursor is in regularly
+ *  opened lines above, and a single-line prefix went silent on every
+ *  continuation line. A client call longer than this is not a real one. */
+const SIGNATURE_LOOKBACK = 500;
+
 /**
  * Signature help inside a `client->…( )` call: the parameters from the
  * bundled interface, the one being written highlighted. The context comes
- * from the blanked line, so an `=` inside a literal argument does not pass
+ * from blanked source, so an `=` inside a literal argument does not pass
  * for a parameter assignment and a call quoted in a comment offers nothing.
  */
 class ClientApiSignatureHelp implements vscode.SignatureHelpProvider {
@@ -429,7 +468,11 @@ class ClientApiSignatureHelp implements vscode.SignatureHelpProvider {
     doc: vscode.TextDocument,
     position: vscode.Position
   ): vscode.SignatureHelp | undefined {
-    const prefix = blankedLineOf(doc, position).slice(0, position.character);
+    const offset = doc.offsetAt(position);
+    const prefix = blankNonCode(doc.getText()).slice(
+      Math.max(0, offset - SIGNATURE_LOOKBACK),
+      offset
+    );
     const context = clientSignatureContext(prefix);
     if (!context) {
       return undefined;
@@ -437,12 +480,21 @@ class ClientApiSignatureHelp implements vscode.SignatureHelpProvider {
     const { method, parameter } = context;
     const params = signatureParameters(method);
     const labels = params.map((name) => `${name} = …`);
+    const head = `${method.name}( `;
     const signature = new vscode.SignatureInformation(
-      `${method.name}( ${labels.join("  ")} )`
+      `${head}${labels.join("  ")} )`
     );
+    // each label as its offsets into the signature string - a substring
+    // match would bold `val = …` inside a longer `check_val = …` label
+    const spans: Array<[number, number]> = [];
+    let cursor = head.length;
+    for (const label of labels) {
+      spans.push([cursor, cursor + label.length]);
+      cursor += label.length + 2; // the join's two spaces
+    }
     const lines = method.signature.split("\n");
     signature.parameters = params.map((name, ix) => {
-      const info = new vscode.ParameterInformation(labels[ix]);
+      const info = new vscode.ParameterInformation(spans[ix]);
       const declared = lines.find((line) =>
         new RegExp(`^\\s+${name}\\s+TYPE\\b`).test(line)
       );
@@ -460,7 +512,9 @@ class ClientApiSignatureHelp implements vscode.SignatureHelpProvider {
     const active = parameter
       ? params.findIndex((name) => name.toLowerCase() === parameter)
       : -1;
-    help.activeParameter = active >= 0 ? active : 0;
+    // a written name that matches nothing (a typo) highlights NO parameter
+    // rather than implying the first one is being filled
+    help.activeParameter = active >= 0 ? active : parameter ? params.length : 0;
     return help;
   }
 }
@@ -726,7 +780,7 @@ class WireRename implements vscode.RenameProvider {
        * the labels below are what it reads). */
       edit.replace(doc.uri, range, newName, {
         needsConfirmation: vscode.workspace
-          .getConfiguration("abap2ui5")
+          .getConfiguration(CONFIG_SECTION)
           .get<boolean>("renamePreview", true),
         label:
           index === 0
@@ -791,14 +845,17 @@ export function registerLanguageFeatures(
       new ViewCompletion(),
       // The quotes are where a control, a member or a value starts in the
       // builder; `<` and the space are the same positions in raw XML. `{`
-      // and `/` are where a binding path starts and descends.
+      // and `/` are where a binding path starts and descends. `:` finishes
+      // a namespace prefix (`f:` in either syntax), and re-querying there is
+      // what swaps the list from sap.m to the prefixed library.
       "`",
       "'",
       '"',
       "<",
       " ",
       "{",
-      "/"
+      "/",
+      ":"
     ),
     vscode.languages.registerHoverProvider(VIEW_SELECTOR, new ViewHover()),
     vscode.languages.registerColorProvider(VIEW_SELECTOR, new ViewColors()),

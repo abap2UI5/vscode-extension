@@ -4,6 +4,7 @@ import {
   classNameOf,
   isAppClass,
   isAppClassDeep,
+  methodImplementations,
   superclassOf,
   usesBuilder,
 } from "../abap";
@@ -257,4 +258,25 @@ test("an inheritance cycle in a half-written buffer terminates", () => {
   const a = "CLASS zcl_a DEFINITION PUBLIC INHERITING FROM zcl_b.\nENDCLASS.";
   const b = "CLASS zcl_b DEFINITION PUBLIC INHERITING FROM zcl_a.\nENDCLASS.";
   assert.equal(isAppClassDeep(a, resolver({ ZCL_A: a, ZCL_B: b })), false);
+});
+
+test("a METHOD line inside a string template is not an implementation", () => {
+  // an app generating ABAP writes method lines into a template - reading the
+  // source raw handed Ctrl+T a phantom symbol for the generated text
+  const source =
+    "METHOD real_one.\n" +
+    "  DATA(gen) = |first line\n" +
+    "METHOD phantom.\n" +
+    "|.\n" +
+    "ENDMETHOD.\n";
+  const methods = methodImplementations(source);
+  assert.deepEqual(
+    methods.map((m) => m.name),
+    ["real_one"]
+  );
+  // the offsets still point into the original source
+  assert.equal(
+    source.slice(methods[0].start, methods[0].end),
+    "real_one"
+  );
 });

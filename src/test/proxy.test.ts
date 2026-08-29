@@ -192,14 +192,36 @@ test("flipping allowUnauthorized applies to the next request", async () => {
 });
 
 test("ADT search answers reduce to unique class names", () => {
-  const { parseAdtClassNames } = require("../proxy") as typeof import("../proxy");
+  const { parseAdtClassRefs } = require("../proxy") as typeof import("../proxy");
   const xml = `<?xml version="1.0"?><adtcore:objectReferences xmlns:adtcore="x">
     <adtcore:objectReference adtcore:type="CLAS/OC" adtcore:name="ZCL_APP_ONE" adtcore:description="d"/>
     <adtcore:objectReference adtcore:name="ZCL_APP_TWO" adtcore:type="CLAS/OC"/>
     <adtcore:objectReference adtcore:type="PROG/P" adtcore:name="ZREPORT"/>
     <adtcore:objectReference adtcore:type="CLAS/OC" adtcore:name="ZCL_APP_ONE"/>
   </adtcore:objectReferences>`;
-  assert.deepEqual(parseAdtClassNames(xml), ["ZCL_APP_ONE", "ZCL_APP_TWO"]);
+  assert.deepEqual(
+    parseAdtClassRefs(xml).map((ref) => ref.name),
+    ["ZCL_APP_ONE", "ZCL_APP_TWO"]
+  );
+});
+
+test("only a loopback Host passes the shared listener gate", () => {
+  const { isLoopbackHost } = require("../proxy") as typeof import("../proxy");
+  // the names a browser can legitimately have connected through
+  assert.ok(isLoopbackHost("127.0.0.1"));
+  assert.ok(isLoopbackHost("127.0.0.1:8080"));
+  assert.ok(isLoopbackHost("[::1]"));
+  assert.ok(isLoopbackHost("[::1]:8080"));
+  assert.ok(isLoopbackHost("localhost"));
+  assert.ok(isLoopbackHost("LOCALHOST:3000"));
+  // anything else is a name that resolves here without being ours - the
+  // DNS-rebinding shape the gate exists to refuse
+  assert.ok(!isLoopbackHost("evil.example"));
+  assert.ok(!isLoopbackHost("127.0.0.1.evil.example"));
+  assert.ok(!isLoopbackHost("localhost.evil.example"));
+  assert.ok(!isLoopbackHost("127.0.0.2"));
+  assert.ok(!isLoopbackHost(""));
+  assert.ok(!isLoopbackHost(undefined));
 });
 
 test("ADT search answers keep the short text and the package", () => {

@@ -43,7 +43,7 @@ export interface ExampleHit {
  * module never got. The positional form is not an exotic spelling: it is what
  * this extension's own XML converter emits (a lone `n =` trips abaplint's
  * omit_parameter_name) and it outnumbers the named one in the sample
- * catalogues, so "Show Examples for this Control" quietly reported a fraction
+ * catalogues, so "Show Examples for This Control" quietly reported a fraction
  * of the hits - none at all for the common sap.m controls - and then ranked
  * that fraction by attribute count as if it were the corpus.
  */

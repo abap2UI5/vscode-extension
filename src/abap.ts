@@ -196,7 +196,12 @@ export function methodImplementations(
   source: string
 ): Array<{ name: string; start: number; end: number }> {
   const out: Array<{ name: string; start: number; end: number }> = [];
-  for (const m of source.matchAll(/^[ \t]*METHOD\s+([\w~/]+)\s*[.\n]/gim)) {
+  // over blanked source: a line-start `METHOD x.` inside a multi-line string
+  // template (an app generating ABAP) is text, not a method - reading it raw
+  // handed Ctrl+T a phantom symbol. Offsets are preserved, and a real METHOD
+  // line is code, so its name survives the blanking untouched.
+  const code = blankNonCode(source);
+  for (const m of code.matchAll(/^[ \t]*METHOD\s+([\w~/]+)\s*[.\n]/gim)) {
     const start = m.index + m[0].indexOf(m[1]);
     out.push({ name: m[1], start, end: start + m[1].length });
   }

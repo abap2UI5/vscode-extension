@@ -15,7 +15,7 @@ const ROOT = path.join(__dirname, "..");
 
 interface Manifest {
   contributes: {
-    commands: Array<{ command: string; title: string }>;
+    commands: Array<{ command: string; title: string; category?: string }>;
     /** An entry is a command OR a nested submenu, never both. */
     menus?: Record<string, Array<{ command?: string; submenu?: string }>>;
     submenus?: Array<{ id: string; label: string }>;
@@ -187,13 +187,19 @@ test("the welcome text of an empty view links only to real commands", () => {
   }
 });
 
-test("every command carries the abap2ui5 prefix and an English title", () => {
+test("every command carries the abap2ui5 prefix and the shared category", () => {
   for (const entry of manifest.contributes.commands) {
     assert.match(entry.command, /^abap2ui5\./);
-    assert.match(
-      entry.title,
-      /^abap2UI5: /,
-      `${entry.command} - palette entries all start with "abap2UI5: "`
+    // The palette prefix comes from the category, once - a title that
+    // repeats it would render as "abap2UI5: abap2UI5: …".
+    assert.equal(
+      entry.category,
+      "abap2UI5",
+      `${entry.command} - every command carries category "abap2UI5"`
+    );
+    assert.ok(
+      !entry.title.startsWith("abap2UI5"),
+      `${entry.command} - the title must not repeat the category prefix`
     );
   }
 });

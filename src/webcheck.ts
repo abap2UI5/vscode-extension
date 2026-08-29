@@ -2,7 +2,8 @@ import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { frozenBuilderOf, runGate, VIEW_XML_RE } from "./gate";
-import { textSource, toDiagnostics } from "./diagnostics";
+import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
+import { plural } from "./text";
 import { usesBuilder } from "./abap";
 import type { CheckOptions, SettingsOptions } from "./lintconfig";
 import {
@@ -161,13 +162,13 @@ function applyBaselineFor(
 
 /*
  * The web build's workspace sweep. Deliberately more modest than the desktop
- * one (viewcheck.ts): only the two file shapes that are checkable by name -
- * `*.clas.abap` classes and `*.view.xml` views - capped like the other web
+ * one (viewcheck.ts): only the file shapes that are checkable by name -
+ * `*.clas.abap` classes and view/fragment XML - capped like the other web
  * scans, read through `workspace.fs`, no render gate and no fix/baseline
  * rebuild. It answers the same question though: "will the linter gate pass
  * before I push?", from a browser host that cannot run the CLI.
  */
-const SWEEP_GLOB = "**/*.{clas.abap,view.xml}";
+const SWEEP_GLOB = "**/*.{clas.abap,view.xml,fragment.xml}";
 /** Same cap as the nav map's workspace scan - beyond this, a real index. */
 const SWEEP_FILE_CAP = 500;
 
@@ -187,6 +188,9 @@ async function sweepWorkspaceWeb(
         "**/node_modules/**",
         SWEEP_FILE_CAP
       );
+      // at the cap the sweep is partial, and "nothing found" must not read
+      // as "everything checked"
+      const capped = found.length >= SWEEP_FILE_CAP;
       // An open document wins over the file of the same name - it is what
       // the user is looking at, and it may hold unsaved changes.
       const open = new Map<string, vscode.TextDocument>();
@@ -209,11 +213,13 @@ async function sweepWorkspaceWeb(
         if (token.isCancellationRequested) {
           break;
         }
+        const uri = target.uri;
         progress.report({
-          message: `${index + 1}/${targets.length}`,
+          // the file's name too, like the desktop sweep - a bare counter says
+          // nothing about where a slow scan is stuck
+          message: `${index + 1}/${targets.length} - ${uri.path.split("/").pop() || uri.path}`,
           increment: 100 / targets.length,
         });
-        const uri = target.uri;
         let text: string;
         if (target.open) {
           text = target.open.getText();
@@ -258,19 +264,28 @@ async function sweepWorkspaceWeb(
       for (const [uri, diags] of results) {
         diagnostics.set(uri, diags);
       }
+      const capNote = capped
+        ? ` Only the first ${SWEEP_FILE_CAP} files were searched - the browser host caps the scan.`
+        : "";
       log(
         `web: workspace sweep - ${checked} file(s) checked, ` +
-          `${problems} problem(s)${cancelled ? " (cancelled)" : ""}`
+          `${problems} problem(s)${cancelled ? " (cancelled)" : ""}` +
+          (capped ? ` (capped at ${SWEEP_FILE_CAP} files)` : "")
       );
-      vscode.window.showInformationMessage(
-        cancelled
-          ? `abap2UI5: cancelled after ${checked} file(s) - ${problems} problem(s) so far.`
-          : !checked
-            ? "abap2UI5: no checkable *.clas.abap or *.view.xml files found in this workspace."
-            : problems
-              ? `abap2UI5: ${problems} problem(s) in ${checked} file(s) - see the Problems panel.`
-              : `abap2UI5: ${checked} file(s) checked, nothing found.`
-      );
+      const summary = cancelled
+        ? `abap2UI5: cancelled after ${plural(checked, "file")} - ${plural(problems, "problem")} so far.`
+        : !checked
+          ? "abap2UI5: no checkable *.clas.abap or view/fragment XML files found in this workspace." +
+            capNote
+          : problems
+            ? `abap2UI5: ${plural(problems, "problem")} in ${plural(checked, "file")} - see the Problems panel.` +
+              capNote
+            : `abap2UI5: ${plural(checked, "file")} checked, nothing found.${capNote}`;
+      if (problems) {
+        showProblemsMessage(summary, false);
+      } else {
+        vscode.window.showInformationMessage(summary);
+      }
     }
   );
 }
@@ -339,6 +354,15 @@ export function registerWebCheck(
     const text = doc.getText();
     const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
     const opts = options(doc);
+    // the same warning the desktop check shows: a broken repo config means
+    // the editor checks against something CI does not, and only logging it
+    // is how nobody finds out
+    if (opts.error && announce) {
+      vscode.window.showWarningMessage(
+        `abap2UI5: ${opts.configFile?.split("/").pop() ?? "abap2ui5lint.jsonc"} ` +
+          `could not be read (${opts.error}) - checking with the VS Code settings instead.`
+      );
+    }
     let gate;
     try {
       gate = runGate(text, doc.fileName, isXml, opts);
@@ -369,11 +393,16 @@ export function registerWebCheck(
             (waived ? ` - ${waived} finding(s) waived by the baseline` : "")
         );
       }
-      vscode.window.showInformationMessage(
-        diags.length
-          ? `abap2UI5: view check found ${diags.length} problem(s) - see the Problems panel.`
-          : "abap2UI5: view check passed."
-      );
+      // a warning, as on desktop - the same result must not read one
+      // severity in the browser and another in the editor
+      if (diags.length) {
+        showProblemsMessage(
+          `abap2UI5: view check found ${plural(diags.length, "problem")} - see the Problems panel.`,
+          true
+        );
+      } else {
+        vscode.window.showInformationMessage("abap2UI5: view check passed.");
+      }
     }
   };
 

@@ -46,9 +46,14 @@ export function registerNavMap(
     const graph = navGraph(sources);
     const layout = layoutGraph(graph);
     const appCount = graph.nodes.filter((n) => n.isApp).length;
+    // at the cap the scan stopped, not the workspace - say so instead of
+    // presenting a partial map as the whole picture
+    const truncated = sources.length >= NAV_FILE_CAP;
     log(
       `nav-map: ${appCount} apps, ${graph.edges.length} navigations ` +
-        `(${sources.length} files scanned)`
+        `(${sources.length} files scanned${
+          truncated ? " - cap reached, apps beyond it are missing" : ""
+        })`
     );
 
     if (!panel) {
@@ -67,6 +72,11 @@ export function registerNavMap(
       });
       panel.webview.onDidReceiveMessage(
         async (msg: { type?: string; file?: string; offset?: number }) => {
+          // the map's own refresh button - a rescan without the palette
+          if (msg?.type === "refresh") {
+            void render();
+            return;
+          }
           if (msg?.type !== "open" || !msg.file) {
             return;
           }

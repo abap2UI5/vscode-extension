@@ -200,7 +200,12 @@ export function planExtract(
   builderClass = "z2ui5_cl_ui5_view_builder"
 ): ExtractPlan | ExtractRefusal {
   if (!NAME_RE.test(methodName)) {
-    return { error: "A method name starts with a letter and holds letters, digits and _." };
+    return {
+      error:
+        methodName.length > 30
+          ? `A method name has at most 30 characters - this one has ${methodName.length}.`
+          : "A method name starts with a letter and holds letters, digits and _.",
+    };
   }
   // the statement and the cut are decided on code alone - a period or a `->`
   // inside a literal or a comment is neither a statement end nor a boundary

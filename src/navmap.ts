@@ -297,16 +297,24 @@ export function navMapSvg(layout: NavLayout): string {
       edge.file && typeof edge.offset === "number"
         ? ` data-file="${escapeXml(edge.file)}" data-offset="${edge.offset}"`
         : "";
+    // a <title> child is SVG's native tooltip - where edges cross, hovering
+    // says which navigation this one is
+    const label = `${edge.from} -> ${edge.to}`;
     parts.push(
       `<path class="edge"${jump} d="M${edge.x1} ${edge.y1} C ${midX} ${edge.y1}, ` +
-        `${midX} ${edge.y2}, ${edge.x2 - 2} ${edge.y2}" marker-end="url(#arrow)"/>`
+        `${midX} ${edge.y2}, ${edge.x2 - 2} ${edge.y2}" marker-end="url(#arrow)">` +
+        `<title>${escapeXml(label)}</title></path>`
     );
   }
   for (const node of layout.nodes) {
     const cls = node.isApp ? "node" : "node ext";
     const file = node.fileName ? ` data-file="${escapeXml(node.fileName)}"` : "";
+    const hint = node.fileName
+      ? `${node.className} (click to open the class)`
+      : `${node.className} (source not in this workspace)`;
     parts.push(
-      `<g class="${cls}"${file}><rect x="${node.x}" y="${node.y}" rx="6" ` +
+      `<g class="${cls}"${file}><title>${escapeXml(hint)}</title>` +
+        `<rect x="${node.x}" y="${node.y}" rx="6" ` +
         `width="${node.width}" height="${node.height}"/>` +
         `<text x="${node.x + node.width / 2}" y="${node.y + node.height / 2 + 4}" ` +
         `text-anchor="middle">${escapeXml(node.className)}</text></g>`

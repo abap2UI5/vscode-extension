@@ -3,7 +3,7 @@
 VS Code extension for developing **abap2UI5** apps: launch an app with **F9**,
 see it right next to the source, and have it reload automatically when you
 activate the class — without the context switch to the browser. The whole
-[abap2UI5 linter](https://github.com/abap2UI5/linter) runs in the editor while
+[abap2UI5-linter](https://github.com/abap2UI5/linter) runs in the editor while
 you type, so a broken view is a squiggle rather than a blank screen.
 
 Works with any system running abap2UI5 (on-premise or cloud). The only thing
@@ -112,7 +112,7 @@ npm install
 npm run vsix
 ```
 
-The result is a file such as `abap2ui5-0.9.3.vsix`.
+The result is a file such as `abap2ui5-<version>.vsix`.
 
 > `vsce` is included as a devDependency, so `npm run vsix` uses the local
 > version. Alternatively install it globally: `npm install -g @vscode/vsce`.
@@ -131,8 +131,8 @@ either
 - tag the commit yourself:
 
   ```bash
-  git tag v0.9.3
-  git push origin v0.9.3
+  git tag v<version>
+  git push origin v<version>
   ```
 
 Either way the workflow builds the `.vsix`, creates the GitHub release and

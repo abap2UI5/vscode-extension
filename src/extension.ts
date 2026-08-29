@@ -21,7 +21,7 @@ import { registerAppView } from "./appview";
 import { registerDiagnosticsReport } from "./diagnosticsreport";
 import { classNameOf } from "./abap";
 import { isAppSource, registerAppClasses } from "./appclasses";
-import { proxiedUrl } from "./urls";
+import { proxiedUrl, shortUrl } from "./urls";
 import { registerAppSearch } from "./appsearch";
 import { registerNewApp, registerNewProject } from "./wizard";
 import { registerConvert } from "./convert";
@@ -30,11 +30,12 @@ import { registerPropertyEditor } from "./propview";
 import { takeScreenshot } from "./screenshot";
 import { formatTrafficLine, isRoundtrip } from "./traffic";
 import { registerModelView } from "./modelview";
-import { shortUrl } from "./webview";
+import { DEVICE_WIDTHS } from "./webview";
 import { staleMessage } from "./previewcore";
 import {
   ALLOW_UNAUTHORIZED_KEY,
   CONFIG_SECTION,
+  FOCUS_BOUNCE_MS,
   OPEN_MODE_KEY,
   Session,
   TEMPLATE_KEY,
@@ -58,7 +59,11 @@ import {
   askForTemplate,
   clearCredentials,
   pickSystem,
+  storeTemplate,
 } from "./systems";
+
+/** Where the screenshot Save As dialog last saved to, per window. */
+const SHOT_DIR_STATE = "abap2ui5.screenshotSaveDir";
 
 /*
  * Desktop activation: builds the session (all mutable state, one dispose),
@@ -75,6 +80,9 @@ export function activate(context: vscode.ExtensionContext): void {
   session.reloadShown = (reason) => reloadShownApp(session, reason);
   session.notifyShown = (message) => postToShownApp(session, message);
   const log = (message: string) => session.log(message);
+  // What a "Show Log" button on a message does - the channel the message's
+  // "see the output channel" points at, one click away.
+  const showLog = () => session.output.show(true);
 
   // The session is the dispose chain: channels, status bar, proxy,
   // activation watch and the app tab all end with the extension.
@@ -134,7 +142,13 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      session.appPanel?.reveal(vscode.ViewColumn.Beside, true);
+      // both surfaces, not just the tab - an app reloading in a hidden
+      // panel looked like the command doing nothing at all
+      if (session.appPanel) {
+        session.appPanel.reveal(vscode.ViewColumn.Beside, true);
+      } else {
+        provider.reveal();
+      }
       reloadShownApp(session);
     }),
     vscode.commands.registerCommand("abap2ui5.activate", () =>
@@ -198,17 +212,21 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand("abap2ui5.setLaunchUrl", async () => {
-      const current = vscode.workspace
-        .getConfiguration(CONFIG_SECTION)
-        .get<string>(TEMPLATE_KEY, "");
+      // Edit the ACTIVE system, wherever it is stored. Writing the single
+      // `launchUrlTemplate` while a profile list is configured did not edit
+      // anything - it grew an extra system next to the one on screen.
+      const active = activeSystem(context);
+      const current =
+        active?.template ??
+        vscode.workspace.getConfiguration(CONFIG_SECTION).get<string>(TEMPLATE_KEY, "");
       const template = await askForTemplate(current);
       if (!template) {
         return;
       }
-      await vscode.workspace
-        .getConfiguration(CONFIG_SECTION)
-        .update(TEMPLATE_KEY, template, vscode.ConfigurationTarget.Global);
-      vscode.window.showInformationMessage("abap2UI5: launch URL saved.");
+      await storeTemplate(active?.name ?? shortUrl(template), template);
+      vscode.window.showInformationMessage(
+        `abap2UI5: launch URL of ${active?.name ?? shortUrl(template)} saved.`
+      );
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (
@@ -261,7 +279,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const ed = vscode.window.activeTextEditor;
       if (ed && ed.document === doc) {
         session.rememberSource(ed);
-        session.bounceFocusUntil = Date.now() + 2500;
+        session.bounceFocusUntil = Date.now() + FOCUS_BOUNCE_MS;
       }
       reloadShownApp(session, "Reloaded after save");
     }),
@@ -289,7 +307,8 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      const widths: Record<string, number> = { tablet: 834, phone: 414 };
+      // the same numbers the preview stage frames the app with
+      const widths: Record<string, number | undefined> = DEVICE_WIDTHS;
       const width = typeof device === "string" ? widths[device] : undefined;
       const file = await takeScreenshot(
         context,
@@ -298,7 +317,8 @@ export function activate(context: vscode.ExtensionContext): void {
           className: session.currentTarget.className,
           width,
         },
-        log
+        log,
+        showLog
       );
       if (!file) {
         return;
@@ -308,22 +328,31 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.Uri.file(file),
         vscode.ViewColumn.Beside
       );
+      const fileName = file.split(/[\\/]/).pop()!;
       const pick = await vscode.window.showInformationMessage(
-        "abap2UI5: screenshot taken.",
+        `abap2UI5: screenshot saved as ${fileName}.`,
         "Save As…"
       );
       if (pick === "Save As…") {
-        const base =
-          vscode.workspace.workspaceFolders?.[0]?.uri ??
-          vscode.Uri.file(os.homedir());
+        // the dialog starts where the last screenshot was saved to - the
+        // second save of a session is usually to the same place as the first
+        const remembered = context.workspaceState.get<string>(SHOT_DIR_STATE);
+        const base = remembered
+          ? vscode.Uri.file(remembered)
+          : (vscode.workspace.workspaceFolders?.[0]?.uri ??
+            vscode.Uri.file(os.homedir()));
         const target = await vscode.window.showSaveDialog({
-          defaultUri: vscode.Uri.joinPath(base, file.split(/[\\/]/).pop()!),
+          defaultUri: vscode.Uri.joinPath(base, fileName),
           filters: { Images: ["png"] },
         });
         if (target) {
           await vscode.workspace.fs.copy(vscode.Uri.file(file), target, {
             overwrite: true,
           });
+          await context.workspaceState.update(
+            SHOT_DIR_STATE,
+            vscode.Uri.joinPath(target, "..").fsPath
+          );
         }
       }
     }),
@@ -377,6 +406,8 @@ export function activate(context: vscode.ExtensionContext): void {
         placeHolder: target
           ? `${target.className} on ${target.system}`
           : "No app is running - press F9 in an app class to start one",
+        // typing the class name or the host finds its action too
+        matchOnDescription: true,
       });
       await pick?.run();
     }),
@@ -396,7 +427,7 @@ export function activate(context: vscode.ExtensionContext): void {
           }`
       );
       log(`render-gate: bundle URL ${status.bundleUrl}`);
-      const installed = await installRenderGate(context, log);
+      const installed = await installRenderGate(context, log, showLog);
       // success and failure already speak for themselves (installRenderGate
       // shows both); the log ties the outcome to the digests above
       log(
@@ -442,7 +473,8 @@ export function activate(context: vscode.ExtensionContext): void {
         takeScreenshot(
           context,
           { url, className, width: viewport?.width, height: viewport?.height },
-          log
+          log,
+          showLog
         ),
       recentTraffic: () => [...trafficRing],
       log,
@@ -487,10 +519,17 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       }
       log(`mcp: status - system server: ${system}`);
-      vscode.window.showInformationMessage(
-        `abap2UI5 MCP - stdio server: ${stdio}; system server: ${system}. ` +
-          "Details in the abap2UI5 output channel."
-      );
+      void vscode.window
+        .showInformationMessage(
+          `abap2UI5 MCP - stdio server: ${stdio}; system server: ${system}. ` +
+            "Details in the abap2UI5 output channel.",
+          "Show Log"
+        )
+        .then((pick) => {
+          if (pick === "Show Log") {
+            showLog();
+          }
+        });
     })
   );
 
@@ -515,7 +554,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerInlineAnnotations(context, log);
   registerAppView(context);
   registerDiagnosticsReport(context, session);
-  registerRenderGate(context, log);
+  registerRenderGate(context, log, showLog);
   registerMcp(context, log, systemMcp);
 }
 

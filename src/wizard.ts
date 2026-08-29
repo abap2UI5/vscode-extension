@@ -15,36 +15,66 @@ import { projectNameFrom, scaffoldFiles, scaffoldText } from "./scaffold";
  * a socket.
  */
 
-const CLASS_NAME_RE = /^[zy][a-z0-9_]{0,29}$/i;
+/** Why `value` is not a class name - specific enough to act on - or
+ *  undefined when it is one. The rule is ABAP's: starts in the customer
+ *  namespace, at most 30 characters, word characters only. */
+export function classNameError(value: string): string | undefined {
+  const name = value.trim();
+  if (!name) {
+    return "Enter a class name, e.g. zcl_my_app.";
+  }
+  if (!/^[zy]/i.test(name)) {
+    return `A class name starts with Z (or Y) - the customer namespace - not "${name[0]}".`;
+  }
+  if (name.length > 30) {
+    return `Too long: ${name.length} characters - ABAP allows up to 30.`;
+  }
+  const bad = /[^a-z0-9_]/i.exec(name);
+  if (bad) {
+    return `"${bad[0]}" cannot appear in a class name - use letters, digits and _ only.`;
+  }
+  return undefined;
+}
 
-export async function newAppWizard(): Promise<void> {
+/** The template gallery pick both wizards share. */
+async function pickTemplate(
+  title: string
+): Promise<(typeof APP_TEMPLATES)[number] | undefined> {
   const pick = await vscode.window.showQuickPick(
     APP_TEMPLATES.map((template) => ({
       label: template.label,
       description: template.description,
       template,
     })),
-    {
-      title: "abap2UI5: new app",
-      placeHolder: "Which kind of app to start from",
-    }
+    { title, placeHolder: "Which kind of app to start from" }
   );
-  if (!pick) {
-    return;
-  }
-  const className = await vscode.window.showInputBox({
+  return pick?.template;
+}
+
+/** The class-name prompt both wizards share. The `my_app` half of the
+ *  default is preselected, so typing replaces it straight away. */
+async function askClassName(): Promise<string | undefined> {
+  const value = await vscode.window.showInputBox({
     title: "abap2UI5: class name",
     value: "zcl_my_app",
+    valueSelection: [4, 10],
     prompt: "Name of the app class (customer namespace, up to 30 characters)",
-    validateInput: (value) =>
-      CLASS_NAME_RE.test(value.trim())
-        ? undefined
-        : "A class name starts with Z (or Y) and uses letters, digits and _ only.",
+    validateInput: classNameError,
   });
+  const name = value?.trim();
+  return name || undefined;
+}
+
+export async function newAppWizard(): Promise<void> {
+  const template = await pickTemplate("abap2UI5: new app");
+  if (!template) {
+    return;
+  }
+  const className = await askClassName();
   if (!className) {
     return;
   }
-  const source = templateSource(pick.template, className.trim());
+  const source = templateSource(template, className);
 
   const editor = vscode.window.activeTextEditor;
   if (editor && editor.document.languageId === "abap") {
@@ -100,38 +130,31 @@ export async function newProjectWizard(): Promise<void> {
       ).map((file) => file.path.split("/")[0])
     ),
   ];
+  const conflicts: string[] = [];
   for (const name of guarded) {
     try {
       await vscode.workspace.fs.stat(vscode.Uri.joinPath(root, name));
-      void vscode.window.showErrorMessage(
-        `That folder already has a ${name}. Pick an empty folder - this would overwrite it.`
-      );
-      return;
+      conflicts.push(name);
     } catch {
       /* not there, which is what we want */
     }
   }
-
-  const pick = await vscode.window.showQuickPick(
-    APP_TEMPLATES.map((template) => ({
-      label: template.label,
-      description: template.description,
-      template,
-    })),
-    { title: "abap2UI5: new project", placeHolder: "Which kind of app to start from" }
-  );
-  if (!pick) {
+  if (conflicts.length) {
+    // all of them at once - fixing one conflict per attempt is a bad loop
+    void vscode.window.showErrorMessage(
+      `abap2UI5: that folder already has ${conflicts.join(", ")}. Pick an ` +
+        `empty folder - this would overwrite ${
+          conflicts.length === 1 ? "it" : "them"
+        }.`
+    );
     return;
   }
-  const className = await vscode.window.showInputBox({
-    title: "abap2UI5: class name",
-    value: "zcl_my_app",
-    prompt: "Name of the app class (customer namespace, up to 30 characters)",
-    validateInput: (value) =>
-      CLASS_NAME_RE.test(value.trim())
-        ? undefined
-        : "A class name starts with Z (or Y) and uses letters, digits and _ only.",
-  });
+
+  const template = await pickTemplate("abap2UI5: new project");
+  if (!template) {
+    return;
+  }
+  const className = await askClassName();
   if (!className) {
     return;
   }
@@ -139,8 +162,8 @@ export async function newProjectWizard(): Promise<void> {
   const folderName = root.path.split("/").filter(Boolean).pop() ?? "abap2ui5-app";
   const files = scaffoldFiles(
     projectNameFrom(folderName),
-    className.trim().toLowerCase(),
-    pick.template
+    className.toLowerCase(),
+    template
   );
   for (const file of files) {
     const target = vscode.Uri.joinPath(root, ...file.path.split("/"));
@@ -152,12 +175,30 @@ export async function newProjectWizard(): Promise<void> {
     );
   }
 
+  // `npm install`, not `npm ci`: a brand-new project has no lockfile yet,
+  // and `npm ci` refuses without one. The install writes it - AGENTS.md and
+  // the README tell the reader to commit it.
+  const created =
+    `abap2UI5: created ${files.length} files. Run "npm install" there, ` +
+    `then "npm run check" - the same gates CI runs.`;
+
+  // A folder this window already shows needs no openFolder (which reloads
+  // the window) - the project is right there, so open its starter class.
+  if (vscode.workspace.getWorkspaceFolder(root)) {
+    void vscode.window.showInformationMessage(created);
+    const cls = files.find((f) => f.path.endsWith(".clas.abap"));
+    if (cls) {
+      const doc = await vscode.workspace.openTextDocument(
+        vscode.Uri.joinPath(root, ...cls.path.split("/"))
+      );
+      await vscode.window.showTextDocument(doc, { preview: false });
+    }
+    return;
+  }
+
   const open = "Open project";
   const choice = await vscode.window.showInformationMessage(
-    // `npm install`, not `npm ci`: a brand-new project has no lockfile yet,
-    // and `npm ci` refuses without one. The install writes it - AGENTS.md and
-    // the README tell the reader to commit it.
-    `Created ${files.length} files. Run "npm install" there, then "npm run check" - the same gates CI runs.`,
+    created,
     open,
     "Not now"
   );

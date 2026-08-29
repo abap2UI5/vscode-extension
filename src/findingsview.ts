@@ -4,6 +4,7 @@ import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { DIAG_SOURCE, RULES_PAGE, ruleOf } from "./diagnostics";
 
 import { labelOf } from "./abapsources";
+import { plural } from "./text";
 import { addToBaseline } from "./baselinefile";
 import { clearBaselineCache } from "./lintconfig";
 import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
@@ -100,13 +101,29 @@ class FindingsTree implements vscode.TreeDataProvider<Node> {
       vscode.TreeItemCollapsibleState.None
     );
     item.description = node.message;
-    item.tooltip = node.message;
+    // an entry's own severity, not the group's worst - a warning under a
+    // mixed-severity rule should look like one
+    item.iconPath = ICON[node.severity];
+    // the parts the truncated label cannot show: the rule, and the full
+    // path of a source that lives deep in an ADT service tree
+    item.tooltip =
+      `${node.rule}: ${node.message}\n` +
+      `${uri.scheme === "file" ? uri.fsPath : uri.toString()}:${node.line + 1}`;
+    // land on the finding itself, not at column 0 of its line
+    const character = node.character ?? 0;
     item.command = {
       title: "Open the finding",
       command: "vscode.open",
       arguments: [
         uri,
-        { selection: new vscode.Range(node.line, 0, node.line, 0) },
+        {
+          selection: new vscode.Range(
+            node.line,
+            character,
+            node.line,
+            character
+          ),
+        },
       ],
     };
     return item;
@@ -130,6 +147,7 @@ function collect(): RuleEntry[] {
         // straight against a system
         file: uri.toString(),
         line: diagnostic.range.start.line,
+        character: diagnostic.range.start.character,
         message: diagnostic.message,
       });
     }
@@ -149,7 +167,7 @@ export function registerFindingsView(context: vscode.ExtensionContext): void {
     provider.setEntries(entries);
     lastTotal = entries.length;
     view.badge = entries.length
-      ? { value: entries.length, tooltip: `${entries.length} abap2UI5 finding(s)` }
+      ? { value: entries.length, tooltip: plural(entries.length, "abap2UI5 finding") }
       : undefined;
   };
   /*
@@ -273,9 +291,10 @@ export function registerFindingsView(context: vscode.ExtensionContext): void {
           .join(", ");
         vscode.window.showInformationMessage(
           added
-            ? `abap2UI5: added ${added} ${rule} finding(s) to ${names}.` +
+            ? `abap2UI5: added ${plural(added, `${rule} finding`)} to ${names}.` +
                 (noBaseline
-                  ? ` ${noBaseline} file(s) skipped - no baseline is configured for them.`
+                  ? ` ${plural(noBaseline, "file")} skipped - no baseline is configured ` +
+                    `for ${noBaseline === 1 ? "it" : "them"}.`
                   : "")
             : noBaseline
               ? "abap2UI5: nothing baselined - no abap2ui5lint.jsonc names a " +

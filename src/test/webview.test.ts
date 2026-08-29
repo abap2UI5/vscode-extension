@@ -86,6 +86,30 @@ test("an unknown stored theme still shows as the selected value", () => {
   assert.ok(html.includes('<option value="custom_house_theme" selected>'));
 });
 
+test("themes and languages the host merged in reach their pickers", () => {
+  // the previewThemes/previewLanguages settings arrive as the optional
+  // entry lists - the built-in lists alone would silently drop them
+  const html = previewHtml({
+    frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
+    externalUrl: "https://host:44300/sap/bc/z2ui5?app_start=ZCL_X",
+    className: "ZCL_X",
+    theme: "",
+    language: "",
+    modelRoots: [],
+    themes: [
+      ["", "System theme"],
+      ["z_house_theme", "House Theme"],
+    ],
+    languages: [
+      ["", "Logon language"],
+      ["CS", "Czech"],
+    ],
+    nonce: "n0nce",
+  });
+  assert.ok(html.includes('<option value="z_house_theme">House Theme</option>'));
+  assert.ok(html.includes('<option value="CS">Czech</option>'));
+});
+
 test("the stale badge offers the activation, and the give-up toast is forced", () => {
   const html = previewHtml({
     frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",

@@ -33,8 +33,14 @@ export const ALLOW_UNAUTHORIZED_KEY = "allowUnauthorizedCerts";
  *  state: two windows may well look at two systems in two themes. */
 const THEME_STATE = "abap2ui5.theme";
 const LANGUAGE_STATE = "abap2ui5.language";
+const DEVICE_STATE = "abap2ui5.device";
 const RECENT_STATE = "abap2ui5.recentApps";
 const RECENT_MAX = 10;
+
+/** How long after F9 (and after a reload-on-save) a focus grab by the
+ *  loading app counts as automatic and is bounced back to the code - the
+ *  content loads asynchronously, so the window starts at the launch. */
+export const FOCUS_BOUNCE_MS = 2500;
 
 /** What the session knows about the preview surface in the bottom panel -
  *  the concrete `PreviewViewProvider` lives in `preview.ts`. */
@@ -158,6 +164,17 @@ export class Session implements vscode.Disposable {
       name === "theme" ? THEME_STATE : LANGUAGE_STATE,
       value
     );
+  }
+
+  /** Device width of the preview stage. The webview keeps its own copy while
+   *  it lives; this one seeds the next webview, so closing the app tab does
+   *  not reset a phone-width session to desktop. */
+  device(): string {
+    return this.ctx.workspaceState.get<string>(DEVICE_STATE, "") ?? "";
+  }
+
+  setDevice(value: string): Thenable<void> {
+    return this.ctx.workspaceState.update(DEVICE_STATE, value);
   }
 
   /** The launch URL of one class on one system, with the preview's theme and

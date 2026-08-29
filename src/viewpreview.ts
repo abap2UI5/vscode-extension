@@ -70,6 +70,11 @@ let running = false;
  *  up while the new one is taken. A preview that blanks on every save is
  *  worse than one that is a few seconds old. */
 let shown: { shots: Shot[]; errors: string[] } = { shots: [], errors: [] };
+/** The mode the panel was opened in - a save after "Preview Diff" must
+ *  re-render the comparison, not silently fall back to a plain preview. */
+let lastMode: { compare?: boolean } = {};
+/** Set by registerViewPreview - where the panel's tab icons live. */
+let extensionUri: vscode.Uri | undefined;
 
 function config() {
   return vscode.workspace.getConfiguration(CONFIG_SECTION);
@@ -459,6 +464,7 @@ function openPanel(doc: vscode.TextDocument): void {
   // the wrong app
   if (previewed?.toString() !== doc.uri.toString()) {
     shown = { shots: [], errors: [] };
+    lastMode = {};
   }
   previewed = doc.uri;
   if (!workDir) {
@@ -476,6 +482,13 @@ function openPanel(doc: vscode.TextDocument): void {
         localResourceRoots: [vscode.Uri.file(workDir)],
       }
     );
+    if (extensionUri) {
+      // the preview tab's own icon pair, like the app preview tab
+      panel.iconPath = {
+        light: vscode.Uri.joinPath(extensionUri, "media", "icon-light.svg"),
+        dark: vscode.Uri.joinPath(extensionUri, "media", "icon-dark.svg"),
+      };
+    }
     panel.onDidDispose(() => {
       panel = undefined;
       previewed = undefined;
@@ -488,6 +501,9 @@ function openPanel(doc: vscode.TextDocument): void {
       }
     });
   }
+  // the tab says WHICH view it shows - two classes previewed in turn are
+  // otherwise indistinguishable until the panel is read
+  panel.title = `Preview: ${titleOf(doc)}`;
   panel.reveal(vscode.ViewColumn.Beside, true);
 }
 
@@ -495,6 +511,7 @@ export function registerViewPreview(
   context: vscode.ExtensionContext,
   log: (m: string) => void
 ): void {
+  extensionUri = context.extensionUri;
   context.subscriptions.push(
     { dispose: disposeWorkDir },
 
@@ -508,6 +525,7 @@ export function registerViewPreview(
         return;
       }
       openPanel(doc);
+      lastMode = {};
       await refresh(doc, log);
     }),
 
@@ -521,14 +539,17 @@ export function registerViewPreview(
         return;
       }
       openPanel(doc);
-      await refresh(doc, log, { compare: true });
+      lastMode = { compare: true };
+      await refresh(doc, log, lastMode);
     }),
 
     /* A save is the moment the author is done with a thought, and the render
-     * costs a browser launch - so it is the trigger, not every keystroke. */
+     * costs a browser launch - so it is the trigger, not every keystroke.
+     * In the mode the panel was opened in: a save after "Preview Diff" must
+     * re-render the comparison, not quietly drop it. */
     vscode.workspace.onDidSaveTextDocument(async (doc) => {
       if (panel && previewed && doc.uri.toString() === previewed.toString()) {
-        await refresh(doc, log);
+        await refresh(doc, log, lastMode);
       }
     }),
 
@@ -542,7 +563,7 @@ export function registerViewPreview(
           (d) => d.uri.toString() === previewed?.toString()
         );
         if (doc) {
-          await refresh(doc, log);
+          await refresh(doc, log, lastMode);
         }
       }
     })

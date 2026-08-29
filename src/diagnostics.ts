@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
-import { describe, RULES, severityOf } from "@abap2ui5/linter/findings";
+import { describe, RENDER_RULE, RULES, severityOf } from "@abap2ui5/linter/findings";
 import { renderErrorOffset } from "./renderloc";
 
 /*
@@ -132,9 +132,26 @@ export const DIAGNOSTIC_SEVERITY = {
   hint: vscode.DiagnosticSeverity.Information,
 } as const;
 
-/** The rules whose subject really is a deprecation - VS Code strikes the
- *  underlined text through for them, which says it better than any wording. */
-const DEPRECATION_RULES = new Set(["control-deprecated", "member-deprecated"]);
+/** The rules whose subject really is deprecated or removed API - VS Code
+ *  strikes the underlined text through for them, which says "stop using
+ *  this" better than any wording. Presentation only: which rules exist and
+ *  what they mean stays the linter's. */
+const DEPRECATION_RULES = new Set([
+  "control-deprecated",
+  "member-deprecated",
+  "obsolete-binder",
+  "obsolete-model-update",
+  "obsolete-frontend-event",
+  "icon-removed",
+  "get-viewname-removed",
+]);
+
+/** The rules whose subject does nothing - VS Code fades the range for them,
+ *  which is exactly what "this has no effect" looks like. */
+const UNNECESSARY_RULES = new Set([
+  "unused-public-attribute",
+  "trailing-empty-event-arg",
+]);
 
 /** The diagnostic code: the rule id, linked to its section on the published
  *  rule reference. Ctrl+click in the Problems panel then explains what the
@@ -165,6 +182,8 @@ export function toDiagnostics(
     d.code = diagnosticCode(f.type);
     if (DEPRECATION_RULES.has(f.type)) {
       d.tags = [vscode.DiagnosticTag.Deprecated];
+    } else if (UNNECESSARY_RULES.has(f.type)) {
+      d.tags = [vscode.DiagnosticTag.Unnecessary];
     }
     diagnostics.push(d);
   }
@@ -183,8 +202,25 @@ export function toDiagnostics(
       vscode.DiagnosticSeverity.Error
     );
     d.source = DIAG_SOURCE;
-    d.code = "render-error";
+    d.code = RENDER_RULE;
     diagnostics.push(d);
   }
   return diagnostics;
+}
+
+/**
+ * A message that says "see the Problems panel", with the button that opens
+ * it - the reader should not have to find the panel the message points at.
+ * Shared by the desktop and web checks, which show the same messages.
+ */
+export function showProblemsMessage(message: string, warn: boolean): void {
+  const open = "Show Problems";
+  const shown = warn
+    ? vscode.window.showWarningMessage(message, open)
+    : vscode.window.showInformationMessage(message, open);
+  void shown.then((pick) => {
+    if (pick === open) {
+      void vscode.commands.executeCommand("workbench.actions.view.problems");
+    }
+  });
 }

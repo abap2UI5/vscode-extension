@@ -256,10 +256,12 @@ export function findingsBarText(counts: FindingCounts): string {
 
 /** The sentence under it - the counts spelled out, plus what a click does. */
 export function findingsBarTooltip(counts: FindingCounts): string {
+  // the counts never say what a click does, so the tooltip has to
+  const CLICK = " Click to open the abap2UI5 Findings view.";
   const { errors, warnings, hints, fixable } = counts;
   const total = errors + warnings + hints;
   if (!total) {
-    return "abap2UI5 view check: nothing found in this file.";
+    return `abap2UI5 view check: nothing found in this file.${CLICK}`;
   }
   const spelled = [
     errors ? `${errors} error${errors === 1 ? "" : "s"}` : "",
@@ -270,7 +272,8 @@ export function findingsBarTooltip(counts: FindingCounts): string {
     `abap2UI5 view check: ${spelled.join(", ")}.` +
     (fixable
       ? ` ${fixable} of them can be corrected mechanically.`
-      : " None of them can be corrected mechanically.")
+      : " None of them can be corrected mechanically.") +
+    CLICK
   );
 }
 
@@ -483,6 +486,9 @@ export interface RuleEntry {
   file: string;
   /** 0-based line, as VS Code counts them. */
   line: number;
+  /** 0-based column of the finding on that line, when the collector has one -
+   *  where opening the entry places the cursor. */
+  character?: number;
   message: string;
 }
 

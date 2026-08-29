@@ -55,6 +55,19 @@ test("a baseline is resolved against the config file, not the workspace root", (
   );
 });
 
+test("a baseline that is not a path is a typo, not a crash", () => {
+  // `"baseline": true` fed to the path work would throw out of every check
+  // that resolves options - once per keystroke on the live path
+  for (const typo of [true, 1, {}, ""]) {
+    const options = optionsFromConfig(
+      { baseline: typo },
+      "/repo/abap2ui5lint.jsonc",
+      SETTINGS
+    );
+    assert.equal(options.baseline, undefined);
+  }
+});
+
 test("JSONC comments parse, and a broken config names the file", () => {
   const raw = parseLintConfig(
     `{

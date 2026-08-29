@@ -9,6 +9,7 @@ import {
   eventUsagesOf,
   whenBranches,
   whenBranchOf,
+  whenLiteralAt,
   xmlContextAt,
   xmlNsMap,
 } from "../context";
@@ -609,4 +610,20 @@ test("a > inside a quoted attribute value does not end the XML tag", () => {
   assert.equal(context?.kind, "member");
   assert.equal(context?.control, "sap.m.Button");
   assert.equal(context?.prefix, "te");
+});
+
+test("a WHEN alternative chain longer than 200 characters still counts", () => {
+  // twelve long alternatives push the last literal well past the old
+  // 200-character lookback, which silently lost completion and rename there
+  const names = Array.from(
+    { length: 12 },
+    (_, i) => `EVENT_WITH_A_VERY_LONG_NAME_${i}`
+  );
+  const chain = names.map((name) => `'${name}'`).join(" OR ");
+  const source = `CASE ev.\n  WHEN ${chain} OR 'LAST'.\nENDCASE.`;
+  assert.ok(chain.length > 200, "the fixture must exceed the old window");
+  const inLast = source.indexOf("LAST") + 2;
+  const span = whenLiteralAt(source, inLast);
+  assert.ok(span, "the last alternative is still a WHEN literal");
+  assert.equal(source.slice(span.start, span.end), "LAST");
 });

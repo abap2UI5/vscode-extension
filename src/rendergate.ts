@@ -6,6 +6,7 @@ import { createHash } from "crypto";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import * as tar from "tar";
+import { CONFIG_SECTION } from "./settings";
 
 /*
  * Self-installing render gate: downloads the self-contained checker bundle
@@ -64,11 +65,15 @@ export function renderGateBrowsers(context: vscode.ExtensionContext): string {
 function runWithVsCodeNode(
   args: string[],
   extraEnv: Record<string, string>,
-  log: (m: string) => void
+  log: (m: string) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    // the signal is what makes Cancel work DURING the Chromium download -
+    // without it the button only took effect once playwright was through
     const child = spawn(process.execPath, args, {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", ...extraEnv },
+      signal,
     });
     let stderr = "";
     child.stdout.on("data", (c) => {
@@ -200,10 +205,13 @@ async function verifyBundle(
 }
 
 /** Download the checker bundle and Chromium into global storage. Returns
- *  true when the gate is ready afterwards. */
+ *  true when the gate is ready afterwards. `showLog` reveals the output
+ *  channel the failure message points at - one click instead of a hunt
+ *  through View → Output. */
 export async function installRenderGate(
   context: vscode.ExtensionContext,
-  log: (m: string) => void
+  log: (m: string) => void,
+  showLog?: () => void
 ): Promise<boolean> {
   if (installing) {
     log("render-gate: an install is already running - not starting a second one");
@@ -235,11 +243,13 @@ export async function installRenderGate(
         );
         progress.report({ message: "downloading the checker bundle (~30 MB)..." });
         log(`render-gate: installing to ${dir}`);
-        fs.rmSync(staging, { recursive: true, force: true });
+        // rm/promises: the leftovers can be a third of a gigabyte (Chromium
+        // included), and a sync removal blocks the whole extension host
+        await fs.promises.rm(staging, { recursive: true, force: true });
         fs.mkdirSync(staging, { recursive: true });
         const tgz = path.join(staging, "bundle.tgz");
         const allowRolling = vscode.workspace
-          .getConfiguration("abap2ui5")
+          .getConfiguration(CONFIG_SECTION)
           .get<boolean>("viewCheck.rollingBundle", false);
 
         let bundleUrl: string;
@@ -276,10 +286,13 @@ export async function installRenderGate(
         // before anything out of the archive is unpacked, let alone run
         progress.report({ message: "verifying the download..." });
         await verifyBundle(context, bundleUrl, digest, log);
+        // the downloads the deadline guards are through - disarmed here so
+        // it cannot fire a pointless abort into a long Chromium install
+        clearTimeout(timeout);
 
         progress.report({ message: "extracting..." });
         await tar.x({ file: tgz, cwd: staging });
-        fs.rmSync(tgz, { force: true });
+        await fs.promises.rm(tgz, { force: true });
         if (!fs.existsSync(path.join(staging, "cli.mjs"))) {
           throw new Error("bundle did not contain cli.mjs");
         }
@@ -297,7 +310,8 @@ export async function installRenderGate(
             "chromium",
           ],
           { PLAYWRIGHT_BROWSERS_PATH: path.join(staging, "browsers") },
-          log
+          log,
+          aborter.signal
         );
         if (token.isCancellationRequested) {
           throw new Error("install cancelled");
@@ -305,7 +319,7 @@ export async function installRenderGate(
 
         // the download is through and the bundle is complete - only now does
         // the installation that was there make way
-        fs.rmSync(previous, { recursive: true, force: true });
+        await fs.promises.rm(previous, { recursive: true, force: true });
         if (fs.existsSync(dir)) {
           fs.renameSync(dir, previous);
         }
@@ -317,11 +331,11 @@ export async function installRenderGate(
           }
           throw err;
         }
-        fs.rmSync(previous, { recursive: true, force: true });
+        await fs.promises.rm(previous, { recursive: true, force: true });
 
         log("render-gate: installed");
         await vscode.workspace
-          .getConfiguration("abap2ui5")
+          .getConfiguration(CONFIG_SECTION)
           .update("viewCheck.render", true, vscode.ConfigurationTarget.Global);
         vscode.window.showInformationMessage(
           "abap2UI5: render gate installed - from now on view checks also " +
@@ -331,7 +345,14 @@ export async function installRenderGate(
       }
     );
   } catch (err) {
-    log(`render-gate: install failed - ${String(err)}`);
+    // an aborted spawn reports a generic AbortError - the reason the abort
+    // was requested with ("install cancelled", "download timed out") is the
+    // message worth showing
+    const cause =
+      aborter.signal.aborted && aborter.signal.reason instanceof Error
+        ? aborter.signal.reason
+        : err;
+    log(`render-gate: install failed - ${String(cause)}`);
     /*
      * Only the half-built one goes - whatever was installed before is still
      * where it was, and still works.
@@ -342,14 +363,22 @@ export async function installRenderGate(
      * (Chromium included) sitting in global storage for someone who just
      * decided not to try again.
      */
-    fs.rmSync(staging, { recursive: true, force: true });
+    await fs.promises.rm(staging, { recursive: true, force: true });
     if (fs.existsSync(dir)) {
-      fs.rmSync(previous, { recursive: true, force: true });
+      await fs.promises.rm(previous, { recursive: true, force: true });
     }
-    vscode.window.showErrorMessage(
-      `abap2UI5: render gate install failed (${String(err).slice(0, 120)}). ` +
-        "Details in the abap2UI5 output channel."
-    );
+    const buttons = showLog ? ["Show Log"] : [];
+    void vscode.window
+      .showErrorMessage(
+        `abap2UI5: render gate install failed (${String(cause).slice(0, 120)}). ` +
+          "Details in the abap2UI5 output channel.",
+        ...buttons
+      )
+      .then((pick) => {
+        if (pick === "Show Log") {
+          showLog?.();
+        }
+      });
     return false;
   } finally {
     clearTimeout(timeout);
@@ -374,7 +403,7 @@ export function renderGateStatus(context: vscode.ExtensionContext): {
   storedDigest?: string;
 } {
   const allowRolling = vscode.workspace
-    .getConfiguration("abap2ui5")
+    .getConfiguration(CONFIG_SECTION)
     .get<boolean>("viewCheck.rollingBundle", false);
   const bundleUrl =
     PINNED_BUNDLE_URL && !allowRolling ? PINNED_BUNDLE_URL : ROLLING_BUNDLE_URL;
@@ -391,25 +420,27 @@ export function renderGateStatus(context: vscode.ExtensionContext): {
 export async function offerInstall(
   context: vscode.ExtensionContext,
   log: (m: string) => void,
-  reason: string
+  reason: string,
+  showLog?: () => void
 ): Promise<void> {
   const pick = await vscode.window.showInformationMessage(
     `abap2UI5: ${reason}`,
-    "Install render gate",
+    "Install Render Gate",
     "Not now"
   );
-  if (pick === "Install render gate") {
-    await installRenderGate(context, log);
+  if (pick === "Install Render Gate") {
+    await installRenderGate(context, log, showLog);
   }
 }
 
 export function registerRenderGate(
   context: vscode.ExtensionContext,
-  log: (m: string) => void
+  log: (m: string) => void,
+  showLog?: () => void
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("abap2ui5.installRenderGate", () =>
-      installRenderGate(context, log)
+      installRenderGate(context, log, showLog)
     )
   );
 }

@@ -47,7 +47,7 @@
   },
   "abap2UI5 Button": {
     "prefix": "z2ui5button",
-    "description": "abap2UI5 button with an event",
+    "description": "A Button raising an event",
     "body": [
       "tag( n = `Button`",
       "    )->a( n = `text`  v = `${1:Press me}`",
@@ -143,6 +143,11 @@
       "client->popup_display( popup->stringify( ) ).",
       "$0"
     ]
+  },
+  "abap2UI5 Popup Close": {
+    "prefix": "z2ui5popupclose",
+    "description": "Close the open popup - the handler side of its close event",
+    "body": ["client->popup_destroy( ).$0"]
   },
   "abap2UI5 Popover": {
     "prefix": "z2ui5popover",

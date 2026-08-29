@@ -203,6 +203,13 @@ function controlMessage(data: Snapshot, call: ControlCall): unknown {
             !written.has(m.name.toLowerCase()) &&
             !deprecationText(m.deprecated)
         )
+        // properties before associations, each alphabetical - the snapshot's
+        // own order interleaves inherited members, which nobody can scan
+        .sort(
+          (a, b) =>
+            (a.section === b.section ? 0 : a.section === "properties" ? -1 : 1) ||
+            a.name.localeCompare(b.name)
+        )
         .map((m) => ({
           name: m.name,
           type: m.type,

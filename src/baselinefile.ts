@@ -50,6 +50,28 @@ export function readBaseline(baselineFile: string): Baseline {
   }
 }
 
+/** The one way a baseline is written: keys sorted for a stable diff, the
+ *  stored note preserved, one trailing newline - shared by the append and
+ *  the rebuild so the file format cannot fork. */
+function writeBaseline(
+  baselineFile: string,
+  note: string | undefined,
+  findings: Record<string, number>
+): { entries: number; findings: number } {
+  const sorted: Record<string, number> = {};
+  for (const k of Object.keys(findings).sort()) {
+    sorted[k] = findings[k];
+  }
+  fs.writeFileSync(
+    baselineFile,
+    `${JSON.stringify({ note: note ?? NOTE, findings: sorted }, null, 2)}\n`
+  );
+  return {
+    entries: Object.keys(sorted).length,
+    findings: Object.values(sorted).reduce((a, b) => a + b, 0),
+  };
+}
+
 /** The keys one file's findings contribute, with their counts - what both the
  *  single-finding append and the whole-file rebuild are made of. */
 export function baselineKeys(
@@ -85,18 +107,7 @@ export function rebuildBaseline(
       counted[key] = (counted[key] ?? 0) + 1;
     }
   }
-  const sorted: Record<string, number> = {};
-  for (const k of Object.keys(counted).sort()) {
-    sorted[k] = counted[k];
-  }
-  fs.writeFileSync(
-    baselineFile,
-    `${JSON.stringify({ note: raw.note ?? NOTE, findings: sorted }, null, 2)}\n`
-  );
-  return {
-    entries: Object.keys(sorted).length,
-    findings: Object.values(sorted).reduce((a, b) => a + b, 0),
-  };
+  return writeBaseline(baselineFile, raw.note, counted);
 }
 
 /**
@@ -113,13 +124,6 @@ export function addToBaseline(
   const findings: Record<string, number> = raw.findings ?? {};
   const key = baselineKeys(baselineFile, sourceFile, [finding])[0];
   findings[key] = (findings[key] ?? 0) + 1;
-  const sorted: Record<string, number> = {};
-  for (const k of Object.keys(findings).sort()) {
-    sorted[k] = findings[k];
-  }
-  fs.writeFileSync(
-    baselineFile,
-    `${JSON.stringify({ note: raw.note ?? NOTE, findings: sorted }, null, 2)}\n`
-  );
+  writeBaseline(baselineFile, raw.note, findings);
   return key;
 }

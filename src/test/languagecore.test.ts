@@ -82,6 +82,27 @@ test("a deprecated control is marked, a current one is not", () => {
   assert.ok(deprecated.length > 0, "sap.m ships deprecated controls");
   const button = offer.entries.find((e) => e.label === "Button");
   assert.equal(button?.deprecated, false);
+  // struck through AND sorted behind the living API
+  for (const entry of deprecated) {
+    assert.ok(
+      entry.sortText! > button!.sortText!,
+      `${entry.label} should sort after Button`
+    );
+  }
+});
+
+test("a deprecated member is marked and sorts after its current siblings", () => {
+  const offer = completeAbap(HEAD + "    )->tag( n = `Button` )->a( n = `‸` )");
+  assert.ok(offer);
+  // sap.m.Button's own events: `tap` is deprecated, `press` is not
+  const tap = offer.entries.find((e) => e.label === "tap");
+  const press = offer.entries.find((e) => e.label === "press");
+  assert.equal(tap?.deprecated, true);
+  assert.equal(press?.deprecated, false);
+  assert.ok(
+    press!.sortText! < tap!.sortText!,
+    "the deprecated event sorts after the current one"
+  );
 });
 
 test("members come with section kinds and properties-first sort", () => {
@@ -107,6 +128,15 @@ test("an enum member offers its values", () => {
   const labels = offer.entries.map((e) => e.label);
   assert.ok(labels.includes("Emphasized"));
   assert.ok(offer.entries.every((e) => e.kind === "value"));
+  // each value says which enum it belongs to
+  assert.ok(offer.entries.every((e) => e.detail === "sap.m.ButtonType"));
+  // and the sort keeps the declaration order - `Default` first, not an
+  // alphabetical shuffle that would bury it under `Accept`
+  assert.equal(offer.entries[0]?.label, "Default");
+  const sorted = [...offer.entries].sort((a, b) =>
+    a.sortText! < b.sortText! ? -1 : 1
+  );
+  assert.deepEqual(sorted.map((e) => e.label), labels);
 });
 
 test("the ns argument completes to the declared prefixes", () => {
@@ -124,9 +154,10 @@ test("outside anything completable there is no offer", () => {
   assert.equal(completeAbap(HEAD + "    )->tag( n = `Button` )‸ "), undefined);
 });
 
-test("inside a WHEN literal the raised events are offered", () => {
+test("inside a WHEN literal the raised events are offered, with counts", () => {
   const offer = completeAbap(
     HEAD +
+      "    )->tag( n = `Button` )->a( n = `press` v = client->_event( `GO` ) ).\n" +
       "    )->tag( n = `Button` )->a( n = `press` v = client->_event( `GO` ) ).\n" +
       "    )->tag( n = `Button` )->a( n = `press` v = client->_event( val = `STOP` ) ).\n" +
       "CASE client->get( )-event.\n" +
@@ -139,6 +170,12 @@ test("inside a WHEN literal the raised events are offered", () => {
     ["GO", "STOP"]
   );
   assert.ok(offer.entries.every((e) => e.kind === "events"));
+  // the detail carries how often the view raises each - the same number the
+  // CodeLens shows on the branch
+  assert.deepEqual(
+    offer.entries.map((e) => e.detail),
+    ["raised 2× in the view", "raised 1× in the view"]
+  );
 });
 
 test("the xmlns value completes to the snapshot's libraries", () => {
@@ -220,6 +257,16 @@ test("hovering a member shows its type", () => {
   const info = hoverAbap(HEAD + "    )->tag( n = `Button` )->a( n = `te‸xt` )");
   assert.ok(info);
   assert.ok(info.text.includes("string"));
+});
+
+test("hovering the default aggregation says so, like the completion does", () => {
+  const info = hoverAbap(HEAD + "    )->ele( n = `Page` )->a( n = `cont‸ent` )");
+  assert.ok(info);
+  assert.ok(info.text.includes("default aggregation"));
+  // a member that is not one stays unmarked
+  const title = hoverAbap(HEAD + "    )->ele( n = `Page` )->a( n = `tit‸le` )");
+  assert.ok(title);
+  assert.ok(!title.text.includes("default aggregation"));
 });
 
 test("hovering an enum value explains the member it belongs to", () => {

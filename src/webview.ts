@@ -10,7 +10,6 @@
 
 import { randomBytes } from "crypto";
 
-export { shortUrl } from "./urls";
 import { shortUrl } from "./urls";
 
 /** Random nonce so the webview CSP can allow exactly our own script/style.
@@ -52,6 +51,11 @@ export const THEMES: ReadonlyArray<[value: string, label: string]> = [
   ["sap_fiori_3_dark", "Quartz Dark"],
   ["sap_belize", "Belize"],
 ];
+
+/** Viewport widths of the preview's device buttons. The stage CSS, the
+ *  button tooltips and the screenshot command all render the same numbers -
+ *  one constant, so they cannot drift apart. */
+export const DEVICE_WIDTHS = { tablet: 834, phone: 414 } as const;
 
 export const LANGUAGES: ReadonlyArray<[value: string, label: string]> = [
   ["", "Logon language"],
@@ -179,6 +183,12 @@ export interface PreviewOptions {
   /** The theme picker's entries - `THEMES` plus whatever the host merged in
    *  (the `abap2ui5.previewThemes` setting). Defaults to `THEMES`. */
   themes?: ReadonlyArray<[value: string, label: string]>;
+  /** The language picker's entries - `LANGUAGES` plus whatever the host
+   *  merged in (the `abap2ui5.previewLanguages` setting). */
+  languages?: ReadonlyArray<[value: string, label: string]>;
+  /** Device width the last preview showed - the webview's own saved state
+   *  wins while it lives, this seeds a freshly created one. */
+  device?: string;
   nonce: string;
 }
 
@@ -344,8 +354,8 @@ ${BASE_CSS}
     height: 100%;
     transition: width 160ms ease;
   }
-  .stage[data-device="tablet"] .viewport { width: 834px; max-width: 100%; }
-  .stage[data-device="phone"] .viewport { width: 414px; max-width: 100%; }
+  .stage[data-device="tablet"] .viewport { width: ${DEVICE_WIDTHS.tablet}px; max-width: 100%; }
+  .stage[data-device="phone"] .viewport { width: ${DEVICE_WIDTHS.phone}px; max-width: 100%; }
   .stage[data-device="tablet"] .viewport,
   .stage[data-device="phone"] .viewport {
     border-left: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));
@@ -420,15 +430,15 @@ ${BASE_CSS}
     <span class="url" id="url" title="${externalUrl}">${urlLabel}</span>
     <div class="seg" role="group" aria-label="Preview size">
       <button id="d-desktop" data-device="desktop" aria-pressed="true" title="Desktop width">${icon("desktop")}</button>
-      <button id="d-tablet" data-device="tablet" aria-pressed="false" title="Tablet width (834px)">${icon("tablet")}</button>
-      <button id="d-phone" data-device="phone" aria-pressed="false" title="Phone width (414px)">${icon("phone")}</button>
+      <button id="d-tablet" data-device="tablet" aria-pressed="false" title="Tablet width (${DEVICE_WIDTHS.tablet}px)">${icon("tablet")}</button>
+      <button id="d-phone" data-device="phone" aria-pressed="false" title="Phone width (${DEVICE_WIDTHS.phone}px)">${icon("phone")}</button>
     </div>
     <select id="theme" title="UI5 theme (sap-ui-theme)" aria-label="UI5 theme">${optionList(
       options.themes ?? THEMES,
       options.theme
     )}</select>
     <select id="language" title="Logon language (sap-language)" aria-label="Logon language">${optionList(
-      LANGUAGES,
+      options.languages ?? LANGUAGES,
       options.language
     )}</select>
     <button class="act" id="inspect" aria-pressed="false" title="Inspect: click a control in the app to jump to its builder call (Esc cancels)">${icon("inspect")}</button>
@@ -557,8 +567,10 @@ ${BASE_CSS}
   }
 
   // Device width and the pin survive a webview being hidden and restored.
+  // The webview's own state dies with the webview, so a freshly created one
+  // is seeded with the device the host remembered for this window.
   const saved = vscodeApi.getState() || {};
-  setDevice(saved.device || 'desktop', false);
+  setDevice(saved.device || ${scriptJson(options.device || "desktop")}, false);
   markPin(!!saved.pin);
   function persistState() {
     vscodeApi.setState({ device: stage.dataset.device, pin: pinOn });
@@ -569,7 +581,10 @@ ${BASE_CSS}
     for (const btn of document.querySelectorAll('.seg button')) {
       btn.setAttribute('aria-pressed', String(btn.dataset.device === device));
     }
-    if (persist !== false) { persistState(); }
+    if (persist !== false) {
+      persistState();
+      vscodeApi.postMessage({ type: 'device', value: device });
+    }
   }
 
   function showToast(text) {
@@ -1358,7 +1373,7 @@ ${BASE_CSS}
 </head>
 <body>
   <div class="card">
-    <h1>abap2UI5 preview</h1>
+    <h1>abap2UI5 Preview</h1>
     <p class="sub">${subtitle}</p>
     ${running && !here ? away : steps}
     <div class="actions">
@@ -1369,7 +1384,7 @@ ${BASE_CSS}
           ? ""
           : `<button class="secondary" data-command="abap2ui5.newApp">${icon(
               "code"
-            )}Insert app template</button>`
+            )}New app from template</button>`
       }
       <button class="secondary" data-command="abap2ui5.openHomepage">${icon("book")}Project on GitHub</button>
     </div>

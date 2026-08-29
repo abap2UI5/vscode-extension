@@ -70,6 +70,23 @@ test("a baseline path resolves against the config file, like the CLI", () => {
   assert.equal(options.baseline, path.join(dir, "lint", "baseline.json"));
 });
 
+test("a baseline that is not a path is a typo, not a crash", () => {
+  // `"baseline": true` fed to path.resolve would throw out of resolveOptions,
+  // which the live check calls on every keystroke with nothing to catch it
+  const dir = workspace('{ "baseline": true }');
+  const options = resolveOptions(dir, SETTINGS);
+  assert.equal(options.baseline, undefined);
+});
+
+test("an unrecognised distribution is echoed as written", () => {
+  // this line exists for diagnosing editor/CI disagreement - a typo mapped
+  // to "SAPUI5" hides exactly the mistake being looked for
+  assert.match(
+    describeOptions({ minUi5: "1.71", distribution: "openui", allow: [] }),
+    /target openui 1\.71/
+  );
+});
+
 test("baselined findings are dropped, new ones stay", () => {
   const dir = workspace();
   const source = path.join(dir, "zcl_app.clas.abap");

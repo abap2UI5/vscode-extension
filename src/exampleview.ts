@@ -8,7 +8,7 @@ import { CatalogueEntry, CatalogueHit, catalogueUrl, matchCatalogue, parseCatalo
 import { CORPUS_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS } from "./repolayout";
 
 /*
- * "Show abap2UI5 Examples for this Control" - the sample catalogues, read for
+ * "Show Examples for This Control" - the sample catalogues, read for
  * the person rather than for an agent.
  *
  * The MCP server already searches these three repositories; that answer goes
@@ -187,9 +187,16 @@ async function classFiles(dir: string, budget: { left: number }): Promise<string
   return out;
 }
 
+/** Where the last hand-typed control name is remembered - re-searching the
+ *  same control after reading one sample is the common loop. */
+const LAST_CONTROL_KEY = "examples.lastControl";
+
 /** The control the command is about: the one under the cursor, or whatever
  *  the user types when the cursor is not on a builder call. */
-async function askControl(editor: vscode.TextEditor | undefined): Promise<string | undefined> {
+async function askControl(
+  context: vscode.ExtensionContext,
+  editor: vscode.TextEditor | undefined
+): Promise<string | undefined> {
   const call =
     editor && editor.document.languageId === "abap"
       ? controlCallAt(editor.document.getText(), editor.document.offsetAt(editor.selection.active))
@@ -197,11 +204,20 @@ async function askControl(editor: vscode.TextEditor | undefined): Promise<string
   if (call) {
     return call.control ?? call.label;
   }
-  return vscode.window.showInputBox({
+  const last = context.globalState.get<string>(LAST_CONTROL_KEY, "");
+  const typed = await vscode.window.showInputBox({
     title: "abap2UI5: examples for which control?",
     prompt: "A UI5 control name, e.g. sap.m.Table or Table",
     placeHolder: "sap.m.Table",
+    // the previous answer, preselected - Enter repeats it, typing replaces it
+    value: last,
+    valueSelection: last ? [0, last.length] : undefined,
   });
+  const control = typed?.trim();
+  if (control) {
+    await context.globalState.update(LAST_CONTROL_KEY, control);
+  }
+  return control || undefined;
 }
 
 /** Reads and searches the checkouts without blocking the extension host - a
@@ -337,7 +353,7 @@ export function registerExamples(
       provideTextDocumentContent: (uri) => fetchSampleText(uri),
     }),
     vscode.commands.registerCommand("abap2ui5.showExamples", async () => {
-      const control = await askControl(vscode.window.activeTextEditor);
+      const control = await askControl(context, vscode.window.activeTextEditor);
       if (!control) {
         return;
       }
@@ -419,6 +435,9 @@ export function registerExamples(
         const picked = (await vscode.window.showQuickPick(quickPickItems(hits, remote), {
           title: `${hits.length + remote.length} example(s) of ${control}`,
           matchOnDetail: true,
+          // the description names the catalogue - typing `stack` or
+          // `controls` filters by source
+          matchOnDescription: true,
           placeHolder: "Richest example first - pick one to open it at the line",
         })) as ExampleItem | undefined;
         if (!picked) {

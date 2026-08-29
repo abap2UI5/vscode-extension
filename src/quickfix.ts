@@ -3,8 +3,10 @@ import { DIAG_SOURCE, ruleOf } from "./diagnostics";
 
 import * as path from "path";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
+import { RENDER_RULE } from "@abap2ui5/linter/findings";
 import { addToBaseline } from "./baselinefile";
 import { directiveLine, plannedFixes } from "./checkcore";
+import { plural } from "./text";
 import { clearBaselineCache } from "./lintconfig";
 import { CONFIG_SECTION } from "./settings";
 import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
@@ -146,8 +148,14 @@ class ViewCheckActions implements vscode.CodeActionProvider {
       if (!edits.length || !touchesLines(range, spanOf(edits))) {
         continue;
       }
+      // Named after what changes, not only which rule fired: "fix
+      // obsolete-binder on _bind_edit" reads in the lightbulb menu without
+      // looking at the squiggle first.
+      const subject = finding.member ?? finding.value;
       const action = new vscode.CodeAction(
-        `abap2UI5: fix ${finding.type}`,
+        subject
+          ? `abap2UI5: fix ${finding.type} on ${subject}`
+          : `abap2UI5: fix ${finding.type}`,
         vscode.CodeActionKind.QuickFix
       );
       action.edit = new vscode.WorkspaceEdit();
@@ -167,21 +175,30 @@ class ViewCheckActions implements vscode.CodeActionProvider {
     const all = applyAll(doc, fixable);
     if (all) {
       const action = new vscode.CodeAction(
-        `abap2UI5: fix all ${all.findings} finding(s) in this file`,
+        `abap2UI5: fix all ${plural(all.findings, "finding")} in this file`,
         FIX_ALL
       );
       action.edit = all.edit;
+      // ours, not the whole panel's - the action is associated with exactly
+      // the diagnostics it resolves
+      action.diagnostics = context.diagnostics.filter(
+        (d) => d.source === DIAG_SOURCE
+      );
       actions.push(action);
     }
 
     // --- waive one line, the way the CLI understands it -------------------
     const baselineFile = baselineFileFor(doc);
+    /* The turn-off action is scoped to the RULE, not to a line - two
+     * diagnostics of one rule at the cursor would offer two identical
+     * entries, so it is offered once per rule. */
+    const offOffered = new Set<string>();
     for (const diagnostic of context.diagnostics) {
       if (diagnostic.source !== DIAG_SOURCE) {
         continue;
       }
       const rule = ruleOf(diagnostic);
-      if (!rule || rule === "render-error") {
+      if (!rule || rule === RENDER_RULE) {
         continue; // the render gate is switched off wholesale, not per line
       }
       const action = new vscode.CodeAction(
@@ -215,17 +232,20 @@ class ViewCheckActions implements vscode.CodeActionProvider {
        * looking at one of its findings. This writes the id into
        * `viewCheck.rules` for you, at workspace scope: the project this rule
        * is noisy in, not every project you open. */
-      const offAction = new vscode.CodeAction(
-        `abap2UI5: turn off ${rule} in this workspace`,
-        vscode.CodeActionKind.QuickFix
-      );
-      offAction.command = {
-        command: "abap2ui5.disableRule",
-        title: "Turn the rule off",
-        arguments: [rule],
-      };
-      offAction.diagnostics = [diagnostic];
-      actions.push(offAction);
+      if (!offOffered.has(rule)) {
+        offOffered.add(rule);
+        const offAction = new vscode.CodeAction(
+          `abap2UI5: turn off ${rule} in this workspace`,
+          vscode.CodeActionKind.QuickFix
+        );
+        offAction.command = {
+          command: "abap2ui5.disableRule",
+          title: "Turn the rule off",
+          arguments: [rule],
+        };
+        offAction.diagnostics = [diagnostic];
+        actions.push(offAction);
+      }
 
       // --- adopt into the baseline, when the repo config names one --------
       // Only the finding on the diagnostic's own line: falling back to the
@@ -268,7 +288,9 @@ class ViewCheckActions implements vscode.CodeActionProvider {
 function applyAll(
   doc: vscode.TextDocument,
   findings: PropertyFinding[]
-): { edit: vscode.WorkspaceEdit; count: number; findings: number } | undefined {
+):
+  | { edit: vscode.WorkspaceEdit; count: number; findings: number; deferred: number }
+  | undefined {
   const planned = plannedFixes(findings);
   const edits = planned.map(
     (fix) =>
@@ -289,7 +311,11 @@ function applyAll(
   ).length;
   const edit = new vscode.WorkspaceEdit();
   edit.set(doc.uri, edits);
-  return { edit, count: edits.length, findings: covered };
+  // overlapping spans are left for the next run, here as everywhere - the
+  // count lets the caller say so instead of the fixes just not happening
+  const deferred =
+    findings.reduce((n, f) => n + (f.fixes?.length ?? 0), 0) - planned.length;
+  return { edit, count: edits.length, findings: covered, deferred };
 }
 
 /**
@@ -401,8 +427,11 @@ export function registerQuickFix(
       }
       await vscode.workspace.applyEdit(all.edit);
       log(`quick-fix: applied ${all.count} fix(es) to ${editor.document.fileName}`);
+      /* Same rule as the workspace fix: overlapping fixes are left for the
+       * next run, and saying so is what tells someone to run it again. */
       vscode.window.showInformationMessage(
-        `abap2UI5: applied ${all.count} fix(es).`
+        `abap2UI5: applied ${plural(all.count, "fix")}.` +
+          (all.deferred ? " Run it again - overlapping fixes were left for the next pass." : "")
       );
     })
   );

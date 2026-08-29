@@ -59,205 +59,248 @@
     "commands": [
       {
         "command": "abap2ui5.run",
-        "title": "abap2UI5: Run App (F9)",
+        "category": "abap2UI5",
+        "title": "Run App (F9)",
         "icon": "$(play)"
       },
       {
         "command": "abap2ui5.reload",
-        "title": "abap2UI5: Reload Preview",
+        "category": "abap2UI5",
+        "title": "Reload Preview",
         "icon": "$(refresh)"
       },
       {
         "command": "abap2ui5.activate",
-        "title": "abap2UI5: Activate and Reload Preview (Ctrl+F3)",
+        "category": "abap2UI5",
+        "title": "Activate and Reload Preview (Ctrl+F3)",
         "icon": "$(zap)"
       },
       {
         "command": "abap2ui5.runRecent",
-        "title": "abap2UI5: Run a Recently Launched App",
+        "category": "abap2UI5",
+        "title": "Run a Recently Launched App",
         "icon": "$(history)"
       },
       {
         "command": "abap2ui5.runFromSystem",
-        "title": "abap2UI5: Run an App from the System",
+        "category": "abap2UI5",
+        "title": "Run an App from the System",
         "icon": "$(search)"
       },
       {
         "command": "abap2ui5.previewInPanel",
-        "title": "abap2UI5: Show the Preview in the Panel",
+        "category": "abap2UI5",
+        "title": "Show the Preview in the Panel",
         "icon": "$(layout-panel)"
       },
       {
         "command": "abap2ui5.previewInTab",
-        "title": "abap2UI5: Show the Preview in an Editor Tab",
+        "category": "abap2UI5",
+        "title": "Show the Preview in an Editor Tab",
         "icon": "$(window)"
       },
       {
         "command": "abap2ui5.revealApp",
-        "title": "abap2UI5: Go to the Running App",
+        "category": "abap2UI5",
+        "title": "Go to the Running App",
         "icon": "$(eye)"
       },
       {
         "command": "abap2ui5.setLaunchUrl",
-        "title": "abap2UI5: Set Launch URL",
+        "category": "abap2UI5",
+        "title": "Set Launch URL",
         "icon": "$(link)"
       },
       {
         "command": "abap2ui5.selectSystem",
-        "title": "abap2UI5: Select System",
+        "category": "abap2UI5",
+        "title": "Select System",
         "icon": "$(server-environment)"
       },
       {
         "command": "abap2ui5.checkConnection",
-        "title": "abap2UI5: Check System Connection",
+        "category": "abap2UI5",
+        "title": "Check System Connection",
         "icon": "$(plug)"
       },
       {
         "command": "abap2ui5.resetCredentials",
-        "title": "abap2UI5: Clear Stored SAP Credentials"
+        "category": "abap2UI5",
+        "title": "Clear Stored SAP Credentials"
       },
       {
         "command": "abap2ui5.newApp",
-        "title": "abap2UI5: New App from Template"
+        "category": "abap2UI5",
+        "title": "New App from Template"
       },
       {
         "command": "abap2ui5.newProject",
-        "title": "abap2UI5: New Project from Template"
+        "category": "abap2UI5",
+        "title": "New Project from Template"
       },
       {
         "command": "abap2ui5.screenshot",
-        "title": "abap2UI5: Take App Screenshot",
+        "category": "abap2UI5",
+        "title": "Take App Screenshot",
         "icon": "$(device-camera)"
       },
       {
         "command": "abap2ui5.showTraffic",
-        "title": "abap2UI5: Show Traffic Log",
+        "category": "abap2UI5",
+        "title": "Show Traffic Log",
         "icon": "$(pulse)"
       },
       {
         "command": "abap2ui5.convertXml",
-        "title": "abap2UI5: Convert XML View to Builder Chain",
+        "category": "abap2UI5",
+        "title": "Convert XML View to Builder Chain",
         "icon": "$(arrow-swap)"
       },
       {
         "command": "abap2ui5.showNavMap",
-        "title": "abap2UI5: Show App Navigation Map",
+        "category": "abap2UI5",
+        "title": "Show App Navigation Map",
         "icon": "$(type-hierarchy-sub)"
       },
       {
         "command": "abap2ui5.openHomepage",
-        "title": "abap2UI5: Open Project on GitHub"
+        "category": "abap2UI5",
+        "title": "Open Project on GitHub"
       },
       {
         "command": "abap2ui5.checkViews",
-        "title": "abap2UI5: Check Views (Static)",
+        "category": "abap2UI5",
+        "title": "Check Views (Static)",
         "icon": "$(checklist)"
       },
       {
         "command": "abap2ui5.checkWorkspace",
-        "title": "abap2UI5: Check All Views in the Workspace"
+        "category": "abap2UI5",
+        "title": "Check All Views in the Workspace"
       },
       {
         "command": "abap2ui5.openRuleDocs",
-        "title": "abap2UI5: Open the Rule Documentation",
+        "category": "abap2UI5",
+        "title": "Open the Rule Documentation",
         "icon": "$(book)"
       },
       {
         "command": "abap2ui5.expandAbbreviation",
-        "title": "abap2UI5: Expand Abbreviation to a Chain",
+        "category": "abap2UI5",
+        "title": "Expand Abbreviation to a Chain",
         "icon": "$(zap)"
       },
       {
         "command": "abap2ui5.extractViewMethod",
-        "title": "abap2UI5: Extract to View Method",
+        "category": "abap2UI5",
+        "title": "Extract to View Method",
         "icon": "$(symbol-method)"
       },
       {
         "command": "abap2ui5.showExamples",
-        "title": "abap2UI5: Show Examples for this Control",
+        "category": "abap2UI5",
+        "title": "Show Examples for This Control",
         "icon": "$(library)"
       },
       {
         "command": "abap2ui5.fixWorkspace",
-        "title": "abap2UI5: Fix All View Findings in the Workspace"
+        "category": "abap2UI5",
+        "title": "Fix All View Findings in the Workspace"
       },
       {
         "command": "abap2ui5.updateBaseline",
-        "title": "abap2UI5: Rebuild the View-Check Baseline"
+        "category": "abap2UI5",
+        "title": "Rebuild the View-Check Baseline"
       },
       {
         "command": "abap2ui5.previewView",
-        "title": "abap2UI5: Preview View (No System)",
+        "category": "abap2UI5",
+        "title": "Preview View (No System)",
         "icon": "$(device-camera)"
       },
       {
         "command": "abap2ui5.previewDiff",
-        "title": "abap2UI5: Preview View - Compare with HEAD",
+        "category": "abap2UI5",
+        "title": "Compare View Preview with HEAD",
         "icon": "$(git-compare)"
       },
       {
         "command": "abap2ui5.showReconstructedXml",
-        "title": "abap2UI5: Show Reconstructed XML View",
+        "category": "abap2UI5",
+        "title": "Show Reconstructed XML View",
         "icon": "$(file-code)"
       },
       {
         "command": "abap2ui5.fixAll",
-        "title": "abap2UI5: Fix All View Findings in This File"
+        "category": "abap2UI5",
+        "title": "Fix All View Findings in This File"
       },
       {
         "command": "abap2ui5.installRenderGate",
-        "title": "abap2UI5: Install Render Gate"
+        "category": "abap2UI5",
+        "title": "Install Render Gate"
       },
       {
         "command": "abap2ui5.refreshApps",
-        "title": "abap2UI5: Refresh the App List",
+        "category": "abap2UI5",
+        "title": "Refresh the App List",
         "icon": "$(refresh)"
       },
       {
         "command": "abap2ui5.runApp",
-        "title": "abap2UI5: Run this App",
+        "category": "abap2UI5",
+        "title": "Run This App",
         "icon": "$(play)"
       },
       {
         "command": "abap2ui5.previewApp",
-        "title": "abap2UI5: Preview this App's View",
+        "category": "abap2UI5",
+        "title": "Preview This App's View",
         "icon": "$(device-camera)"
       },
       {
         "command": "abap2ui5.checkApp",
-        "title": "abap2UI5: Check this App's Views",
+        "category": "abap2UI5",
+        "title": "Check This App's Views",
         "icon": "$(checklist)"
       },
       {
         "command": "abap2ui5.copyAppName",
-        "title": "abap2UI5: Copy the App's Class Name",
+        "category": "abap2UI5",
+        "title": "Copy the App's Class Name",
         "icon": "$(copy)"
       },
       {
         "command": "abap2ui5.disableRule",
-        "title": "abap2UI5: Turn a View-Check Rule Off"
+        "category": "abap2UI5",
+        "title": "Turn a View-Check Rule Off"
       },
       {
         "command": "abap2ui5.copyDiagnostics",
-        "title": "abap2UI5: Copy Diagnostics for a Bug Report",
+        "category": "abap2UI5",
+        "title": "Copy Diagnostics for a Bug Report",
         "icon": "$(clippy)"
       },
       {
         "command": "abap2ui5.previewMenu",
-        "title": "abap2UI5: Preview Actions",
+        "category": "abap2UI5",
+        "title": "Preview Actions",
         "icon": "$(play-circle)"
       },
       {
         "command": "abap2ui5.updateRenderGate",
-        "title": "abap2UI5: Update Render Gate"
+        "category": "abap2UI5",
+        "title": "Update Render Gate"
       },
       {
         "command": "abap2ui5.showMcpStatus",
-        "title": "abap2UI5: Show MCP Status"
+        "category": "abap2UI5",
+        "title": "Show MCP Status"
       },
       {
         "command": "abap2ui5.baselineRule",
-        "title": "abap2UI5: Add All Findings of This Rule to the Baseline"
+        "category": "abap2UI5",
+        "title": "Add All Findings of This Rule to the Baseline"
       }
     ],
     "mcpServerDefinitionProviders": [
@@ -555,7 +598,7 @@
       "panel": [
         {
           "id": "abap2ui5Panel",
-          "title": "abap2UI5 Control View",
+          "title": "abap2UI5 Preview",
           "icon": "media/icon.svg"
         }
       ]
@@ -645,7 +688,7 @@
             "Open in the default browser (reuses your existing SAP session/SSO)."
           ],
           "default": "tab",
-          "markdownDescription": "How F9 opens the app.\n\n- `tab`: embedded in an editor tab. Runs through a **local auth proxy** that injects your SAP credentials (asked for once) - no 401.\n- `panel`: the same, but in the bottom panel area - the **abap2UI5 Control View** tab next to Terminal and Output.\n- `external`: in the normal browser (reuses your existing login, no proxy needed).\n\nThe commands **\"abap2UI5: Show the Preview in the Panel\"** and **\"abap2UI5: Show the Preview in an Editor Tab\"** switch this setting and take a running app along, so the choice does not have to be made up front.\n\nTo reset the credentials, run the command **\"abap2UI5: Clear Stored SAP Credentials\"**."
+          "markdownDescription": "How F9 opens the app.\n\n- `tab`: embedded in an editor tab. Runs through a **local auth proxy** that injects your SAP credentials (asked for once) - no 401.\n- `panel`: the same, but in the bottom panel area - the **abap2UI5 Preview** tab next to Terminal and Output.\n- `external`: in the normal browser (reuses your existing login, no proxy needed).\n\nThe commands **\"abap2UI5: Show the Preview in the Panel\"** and **\"abap2UI5: Show the Preview in an Editor Tab\"** switch this setting and take a running app along, so the choice does not have to be made up front.\n\nTo reset the credentials, run the command **\"abap2UI5: Clear Stored SAP Credentials\"**."
         },
         "abap2ui5.reloadOn": {
           "type": "string",
@@ -820,6 +863,28 @@
           },
           "markdownDescription": "Additional UI5 themes the preview's theme picker offers, merged after the built-in list - for a custom theme deployed on your system.\n\n```json\n[\n  { \"value\": \"my_company_theme\", \"label\": \"Company Theme\" }\n]\n```"
         },
+        "abap2ui5.previewLanguages": {
+          "type": "array",
+          "default": [],
+          "scope": "window",
+          "items": {
+            "type": "object",
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "The language key as it goes into the URL (sap-language), e.g. CS."
+              },
+              "label": {
+                "type": "string",
+                "description": "What the picker shows for it; the value itself when omitted."
+              }
+            }
+          },
+          "markdownDescription": "Additional logon languages the preview's language picker offers, merged after the built-in list - passed to the app as `sap-language`.\n\n```json\n[\n  { \"value\": \"CS\", \"label\": \"Czech\" }\n]\n```"
+        },
         "abap2ui5.viewPreview.theme": {
           "type": "string",
           "default": "sap_horizon",
@@ -829,6 +894,7 @@
           "type": "string",
           "default": "1280x900",
           "pattern": "^\\d{2,5}x\\d{2,5}(?:\\s*,\\s*\\d{2,5}x\\d{2,5})*$",
+          "patternErrorMessage": "Must be <width>x<height> in CSS pixels, like 1280x900 - or a comma-separated list such as 390x844,1280x900 for a device matrix.",
           "markdownDescription": "The viewport(s) the systemless preview renders at, `<width>x<height>` in CSS pixels - e.g. `390x844` to see the view the way a phone lays it out. **Several, comma-separated, become a device matrix**: `390x844,1280x900` renders both in one browser session and shows them side by side. The picture is taken full-page, so a view taller than the viewport is shown whole."
         },
         "abap2ui5.mcp.enabled": {
@@ -913,7 +979,7 @@
           {
             "id": "viewcheck",
             "title": "Let the view check catch problems",
-            "description": "Typos, too-new controls and dead bindings land in the Problems panel while you type.\n[Check Current File](command:abap2ui5.checkViews)",
+            "description": "Typos, too-new controls and dead bindings land in the Problems panel while you type.\n[Check Views (Static)](command:abap2ui5.checkViews)",
             "media": {
               "markdown": "media/walkthrough/viewcheck.md"
             },
@@ -935,10 +1001,13 @@
           {
             "id": "mcp",
             "title": "Give your AI agent the dev loop",
-            "description": "The bundled MCP server lets Copilot agent mode and friends build and run abap2UI5 apps without an SAP system.",
+            "description": "The bundled MCP server lets Copilot agent mode and friends build and run abap2UI5 apps without an SAP system.\n[Show MCP Status](command:abap2ui5.showMcpStatus)",
             "media": {
               "markdown": "media/walkthrough/mcp.md"
-            }
+            },
+            "completionEvents": [
+              "onCommand:abap2ui5.showMcpStatus"
+            ]
           }
         ]
       }
@@ -952,7 +1021,7 @@
     "viewsWelcome": [
       {
         "view": "abap2ui5.apps",
-        "contents": "No abap2UI5 app found yet.\n\nThis list holds every class that implements `z2ui5_if_app` - the ones in your open folders, plus the ones you have open in the editor. Working straight against a system through ADT, a class appears here once you open it.\n\n[New App from Template](command:abap2ui5.newApp)\n[Refresh the list](command:abap2ui5.refreshApps)",
+        "contents": "No abap2UI5 app found yet.\n\nThis list holds every class that implements `z2ui5_if_app` - the ones in your open folders, plus the ones you have open in the editor. Working straight against a system through ADT, a class appears here once you open it.\n\n[New App from Template](command:abap2ui5.newApp)\n[Refresh the List](command:abap2ui5.refreshApps)",
         "when": "!isWeb"
       },
       {
@@ -971,6 +1040,7 @@
     "vsix": "vsce package",
     "lint": "tsc --noEmit && eslint .",
     "test": "node esbuild.js --tests && node --test dist-test/*.test.cjs",
+    "test:grep": "node esbuild.js --tests && node --test --test-name-pattern",
     "test:web": "node esbuild.js && node esbuild.js --webtest && vscode-test-web --browserType=chromium --headless --extensionDevelopmentPath=. --extensionTestsPath=dist/web/test.js",
     "client-api": "node scripts/generate-client-api.mjs",
     "client-api:check": "node scripts/generate-client-api.mjs --check",

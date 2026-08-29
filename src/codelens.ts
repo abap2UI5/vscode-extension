@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { classDefinitionOffset, usesBuilder } from "./abap";
+import { CONFIG_SECTION } from "./settings";
 import { isAppSource } from "./appclasses";
 import { eventRaises, whenBranches } from "./context";
 import { fixableCount } from "./quickfix";
@@ -27,7 +28,11 @@ class AppCodeLens implements vscode.CodeLensProvider {
   }
 
   provideCodeLenses(doc: vscode.TextDocument): vscode.CodeLens[] {
-    if (!vscode.workspace.getConfiguration("abap2ui5").get<boolean>("codeLens", true)) {
+    if (
+      !vscode.workspace
+        .getConfiguration(CONFIG_SECTION)
+        .get<boolean>("codeLens", true)
+    ) {
       return [];
     }
     const text = doc.getText();
@@ -36,10 +41,8 @@ class AppCodeLens implements vscode.CodeLensProvider {
     if (!app && !builder) {
       return [];
     }
-    const range = new vscode.Range(
-      doc.positionAt(classDefinitionOffset(text)),
-      doc.positionAt(classDefinitionOffset(text))
-    );
+    const anchor = doc.positionAt(classDefinitionOffset(text));
+    const range = new vscode.Range(anchor, anchor);
     const lenses: vscode.CodeLens[] = [];
     if (app) {
       lenses.push(

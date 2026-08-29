@@ -149,6 +149,26 @@ test("dropped text and mismatched tags are reported, not swallowed", () => {
   assert.ok(bad.warnings.some((w) => w.includes("does not match")));
 });
 
+test("a Dialog root goes to popup_display, a view to view_display", () => {
+  // the corpus (and the POPUP template) hands a dialog to popup_display -
+  // a converted dialog sent through view_display renders nothing closable
+  const dialog = xmlToAbap(
+    `<Dialog xmlns="sap.m" title="D"><content><Text text="hi"/></content></Dialog>`
+  );
+  assert.match(dialog.abap, /client->popup_display\( view->stringify\( \) \)\./);
+  assert.ok(!dialog.abap.includes("view_display"));
+  const view = xmlToAbap(`<Page title="P"><Text text="hi"/></Page>`);
+  assert.match(view.abap, /client->view_display\( view->stringify\( \) \)\./);
+});
+
+test("skipped extra roots are named in the warning", () => {
+  const { warnings } = xmlToAbap(`<Page title="P"/><Button text="B"/><Toolbar/>`);
+  const warning = warnings.find((w) => w.includes("only the first"));
+  assert.ok(warning, "the multi-root case warns");
+  assert.ok(warning.includes("<Button>"), "names the first skipped root");
+  assert.ok(warning.includes("<Toolbar>"), "names the second skipped root");
+});
+
 test("a childless root converts as a single tag", () => {
   const { abap } = xmlToAbap(`<Text text="hi"/>`);
   assert.match(abap, /view->tag\( `Text`/);

@@ -929,6 +929,12 @@ export function eventNameAt(
   return name ? { name, start: literal.start, end: literal.end } : undefined;
 }
 
+/** How far back the WHEN test reads. Wide enough for any real alternative
+ *  chain (`WHEN 'A' OR 'B' OR …` across lines) - the old 200 silently lost
+ *  completion and rename on the last literals of a long one - and bounded so
+ *  the anchored regex below never scans a whole class. */
+const WHEN_LOOKBACK = 2000;
+
 /** The literal the cursor sits in when it is a `WHEN '…'` alternative -
  *  `WHEN 'A' OR 'B'` puts every alternative in play, not only the first. */
 export function whenLiteralAt(
@@ -939,7 +945,10 @@ export function whenLiteralAt(
   if (!literal) {
     return undefined;
   }
-  const before = source.slice(Math.max(0, literal.start - 200), literal.start);
+  const before = source.slice(
+    Math.max(0, literal.start - WHEN_LOOKBACK),
+    literal.start
+  );
   if (!/\bWHEN\s*(?:(['`])[\w-]+\1\s+OR\s+)*['`]$/i.test(before)) {
     return undefined;
   }

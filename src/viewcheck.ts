@@ -22,7 +22,8 @@ import {
   resolveCheckerCommand,
   scratchFileName,
 } from "./checkcore";
-import { textSource, toDiagnostics } from "./diagnostics";
+import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
+import { plural } from "./text";
 import { rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
@@ -253,10 +254,10 @@ async function runRenderGate(
               `be started (${checker.cmd} not found). Install it once - ` +
               "everything runs with VS Code's own runtime. The property " +
               "gate keeps working either way.",
-            "Install render gate"
+            "Install Render Gate"
           )
           .then(async (pick) => {
-            if (pick === "Install render gate" && extContext) {
+            if (pick === "Install Render Gate" && extContext) {
               if (await installRenderGate(extContext, log)) {
                 spawnFailed = false;
               }
@@ -434,7 +435,9 @@ async function checkDocument(
   }
 
   const text = doc.getText();
-  const name = path.basename(doc.fileName);
+  // labelOf, not path.basename: an ADT document's last path segment is often
+  // the generic "main" or "source", which names nothing in a message
+  const name = labelOf(doc.uri);
   const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
   // An unparsable buffer mid-edit throws out of the gate - on the live path
   // that was one unhandled rejection per keystroke, and in a workspace sweep
@@ -478,16 +481,21 @@ async function checkDocument(
   if (
     request.render &&
     config().get<boolean>("viewCheck.render", false) &&
-    gate.renderable &&
-    !spawnFailed
+    gate.renderable
   ) {
-    const render = await runRenderGate(doc, log, superseded);
-    if (superseded()) {
-      return; // the document moved on while Chromium was busy
-    }
-    renderErrors = render?.renderErrors ?? [];
-    if (render?.skippedRender) {
-      helperNote = " (render gate skipped - view built in helper methods)";
+    if (spawnFailed) {
+      // the gate is enabled but its checker could not be started - a "view
+      // check passed" that silently left it out would claim more than ran
+      helperNote = " (render gate skipped - its checker could not be started)";
+    } else {
+      const render = await runRenderGate(doc, log, superseded);
+      if (superseded()) {
+        return; // the document moved on while Chromium was busy
+      }
+      renderErrors = render?.renderErrors ?? [];
+      if (render?.skippedRender) {
+        helperNote = " (render gate skipped - view built in helper methods)";
+      }
     }
   }
 
@@ -511,9 +519,10 @@ async function checkDocument(
         `abap2UI5: view check passed for ${name}${helperNote}.`
       );
     } else {
-      vscode.window.showWarningMessage(
-        `abap2UI5: view check found ${diags.length} problem(s) in ` +
-          `${name} - see the Problems panel.`
+      showProblemsMessage(
+        `abap2UI5: view check found ${plural(diags.length, "problem")} in ` +
+          `${name} - see the Problems panel.`,
+        true
       );
     }
   }
@@ -527,7 +536,6 @@ async function checkDocument(
  *  collects. */
 const WORKSPACE_GLOB = "**/*.{abap,view.xml,fragment.xml}";
 
-/** One checkable file of the workspace, with what the gate says about it. */
 /** What a sweep found, and whether it got to the end. A cancelled sweep has
  *  looked at part of the workspace, which is not the same answer - reporting
  *  "nothing found" for it, or applying its fixes as if they were the
@@ -769,20 +777,23 @@ async function checkWorkspace(
           `view-check: workspace sweep - ${swept.files.length} file(s), ` +
             `${problems} problem(s)${swept.cancelled ? " (cancelled)" : ""}`
         );
-        vscode.window.showInformationMessage(
-          swept.cancelled
-            ? `abap2UI5: cancelled after ${swept.files.length} file(s) - ` +
-                `${problems} problem(s) so far.`
-            : !swept.files.length
-              ? noWorkspaceFolders()
-                ? "abap2UI5: nothing checkable is open. Without a folder in " +
-                  "the workspace there is nothing to search, so the check " +
-                  "covers the classes you have open - open one and run it again."
-                : "abap2UI5: no checkable ABAP or view files found in this workspace."
-              : problems
-                ? `abap2UI5: ${problems} problem(s) in ${swept.files.length} file(s) - see the Problems panel.`
-                : `abap2UI5: ${swept.files.length} file(s) checked, nothing found.`
-        );
+        const summary = swept.cancelled
+          ? `abap2UI5: cancelled after ${plural(swept.files.length, "file")} - ` +
+            `${plural(problems, "problem")} so far.`
+          : !swept.files.length
+            ? noWorkspaceFolders()
+              ? "abap2UI5: nothing checkable is open. Without a folder in " +
+                "the workspace there is nothing to search, so the check " +
+                "covers the classes you have open - open one and run it again."
+              : "abap2UI5: no checkable ABAP or view files found in this workspace."
+            : problems
+              ? `abap2UI5: ${plural(problems, "problem")} in ${plural(swept.files.length, "file")} - see the Problems panel.`
+              : `abap2UI5: ${plural(swept.files.length, "file")} checked, nothing found.`;
+        if (problems) {
+          showProblemsMessage(summary, false);
+        } else {
+          vscode.window.showInformationMessage(summary);
+        }
       } finally {
         sweeping = false;
       }
@@ -861,11 +872,12 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
           );
         }
         const skipped = moved
-          ? ` ${moved} file(s) were edited while the sweep ran and were left alone.`
+          ? ` ${plural(moved, "file")} edited while the sweep ran ` +
+            `${moved === 1 ? "was" : "were"} left alone.`
           : "";
         if (!fixes) {
           vscode.window.showInformationMessage(
-            `abap2UI5: nothing in ${swept.files.length} file(s) can be corrected mechanically.` +
+            `abap2UI5: nothing in ${plural(swept.files.length, "file")} can be corrected mechanically.` +
               skipped
           );
           return;
@@ -881,7 +893,7 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
          * so the count is what was applied, not what remains, and saying so is
          * what tells someone to run it again. */
         vscode.window.showInformationMessage(
-          `abap2UI5: applied ${fixes} fix(es) in ${files} file(s). ` +
+          `abap2UI5: applied ${plural(fixes, "fix")} in ${plural(files, "file")}. ` +
             "Run it again if fixes overlapped; the files are edited, not saved." +
             skipped
         );
@@ -903,11 +915,22 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
  * and until now writing it meant leaving the editor for the command line.
  */
 async function updateBaseline(log: (m: string) => void): Promise<void> {
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  if (!folder) {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (!folders.length) {
     vscode.window.showInformationMessage(
       "abap2UI5: no folder is open - a baseline belongs to a repository."
     );
+    return;
+  }
+  // in a multi-root window the baseline of the INTENDED repository is
+  // rebuilt, not silently the first folder's
+  const folder =
+    folders.length === 1
+      ? folders[0]
+      : await vscode.window.showWorkspaceFolderPick({
+          placeHolder: "Which repository's baseline should be rebuilt?",
+        });
+  if (!folder) {
     return;
   }
   const rootOptions = resolveOptions(folder.uri.fsPath, {
@@ -918,11 +941,23 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
   });
   const baselineFile = rootOptions.baseline;
   if (!baselineFile) {
-    vscode.window.showWarningMessage(
-      'abap2UI5: this repository names no baseline. Add "baseline": ' +
-        '"abap2ui5lint-baseline.json" to abap2ui5lint.jsonc first - the file ' +
-        "is only honoured by the CLI when the config points at it."
-    );
+    // the config path is known here, so the message can open the file the
+    // line has to be added to
+    const openConfig = rootOptions.configFile ? "Open abap2ui5lint.jsonc" : undefined;
+    void vscode.window
+      .showWarningMessage(
+        'abap2UI5: this repository names no baseline. Add "baseline": ' +
+          '"abap2ui5lint-baseline.json" to abap2ui5lint.jsonc first - the file ' +
+          "is only honoured by the CLI when the config points at it.",
+        ...(openConfig ? [openConfig] : [])
+      )
+      .then((pick) => {
+        if (pick && rootOptions.configFile) {
+          void vscode.window.showTextDocument(
+            vscode.Uri.file(rootOptions.configFile)
+          );
+        }
+      });
     return;
   }
   const confirmed = await vscode.window.showWarningMessage(
@@ -1004,14 +1039,23 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
           `view-check: baseline rebuilt - ${written.findings} finding(s) in ` +
             `${written.entries} entries -> ${baselineFile}`
         );
-        vscode.window.showInformationMessage(
-          `abap2UI5: ${path.basename(baselineFile)} now waives ` +
-            `${written.findings} finding(s) from ${mine.length} file(s).` +
-            (foreign
-              ? ` ${foreign} file(s) outside the repository or governed by ` +
-                "another config were not included."
-              : "")
-        );
+        // the natural next step after a rewrite is looking at what was written
+        const openBaseline = "Open Baseline";
+        void vscode.window
+          .showInformationMessage(
+            `abap2UI5: ${path.basename(baselineFile)} now waives ` +
+              `${plural(written.findings, "finding")} from ${plural(mine.length, "file")}.` +
+              (foreign
+                ? ` ${plural(foreign, "file")} outside the repository or governed by ` +
+                  `another config ${foreign === 1 ? "was" : "were"} not included.`
+                : ""),
+            openBaseline
+          )
+          .then((pick) => {
+            if (pick === openBaseline) {
+              void vscode.window.showTextDocument(vscode.Uri.file(baselineFile));
+            }
+          });
       } catch (err) {
         vscode.window.showWarningMessage(
           `abap2UI5: could not write ${baselineFile} - ${String(err)}`
@@ -1052,7 +1096,13 @@ export function registerViewCheck(
   const configWatcher = vscode.workspace.createFileSystemWatcher(
     "**/abap2ui5lint.{json,jsonc}"
   );
-  const configChanged = () => {
+  const configChanged = (uri: vscode.Uri) => {
+    // same guard as the baseline watcher below: a dependency's config file
+    // (an npm install touching node_modules) must not flush every cache and
+    // re-check the window
+    if (uri.path.includes("/node_modules/")) {
+      return;
+    }
     clearConfigCache();
     clearSweepCache();
     lastVersionLine = "";
@@ -1096,7 +1146,7 @@ export function registerViewCheck(
       if (!doc || !isCheckable(doc)) {
         log(
           doc
-            ? `view-check: ${path.basename(doc.fileName)} is not checkable - ` +
+            ? `view-check: ${labelOf(doc.uri)} is not checkable - ` +
                 "not an ABAP source calling z2ui5_cl_ui5_view_builder=>factory and " +
                 "not a *.view.xml"
             : "view-check: no text editor open"
