@@ -121,9 +121,34 @@ export class PropertyEditorProvider implements vscode.WebviewViewProvider {
       type?: string;
       name?: string;
       value?: string;
+      tokenStart?: number;
     };
     const shown = this.shown;
     if (!shown) {
+      return;
+    }
+    /*
+     * The form names an attribute, not a control - so a message that left the
+     * webview while a debounced refresh( ) repointed `shown` at a DIFFERENT
+     * control (the cursor moved, or a queued render was still showing the old
+     * one) used to be applied to the new one: the tokenStart guard below then
+     * validated the NEW control and happily appended the attribute there.
+     * The control message carries its own tokenStart and the webview echoes
+     * it back, so a stale message is refused and the form re-rendered.
+     *
+     * A message WITHOUT one is not refused: the host and the webview markup
+     * are released together but not necessarily edited together, and an older
+     * webview must keep working rather than go silently read-only.
+     */
+    if (
+      typeof message.tokenStart === "number" &&
+      message.tokenStart !== shown.tokenStart
+    ) {
+      this.log(
+        `properties: ignoring a ${message.type ?? "?"} for a control that is ` +
+          "no longer shown"
+      );
+      this.refresh();
       return;
     }
     const doc = vscode.workspace.textDocuments.find(
@@ -218,6 +243,10 @@ function controlMessage(data: Snapshot, call: ControlCall): unknown {
     : [];
   return {
     type: "control",
+    // the anchor of the control this form is OF - echoed back with every
+    // set/remove/reveal, so a message from a form the host has since
+    // repointed can be told from a current one
+    tokenStart: call.tokenStart,
     label: call.label,
     control,
     canAppend: call.appendAt >= 0,

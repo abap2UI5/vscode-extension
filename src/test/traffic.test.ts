@@ -29,6 +29,41 @@ test("isRoundtrip counts successful POSTs only", () => {
   assert.ok(!isRoundtrip({ ...base, method: "POST", status: 302 }));
 });
 
+/*
+ * The traffic line is the one formatter behind BOTH the "abap2UI5 Traffic"
+ * channel and the ring the MCP `get_traffic` tool hands an agent - so a
+ * launch URL carrying credentials must not survive it. See the repository's
+ * "never log credentials" convention.
+ */
+test("a password in the launch URL never reaches the traffic line", () => {
+  const line = formatTrafficLine({
+    method: "GET",
+    path: "/sap/bc/z2ui5?sap-user=DEVELOPER&sap-password=hunter2&sap-client=100",
+    status: 200,
+    durationMs: 12,
+    bytes: 0,
+  });
+  assert.ok(!line.includes("hunter2"), "the password reached the traffic log");
+  assert.ok(!line.includes("DEVELOPER"), "the user reached the traffic log");
+  assert.ok(line.includes("sap-password=<redacted>"));
+  assert.ok(line.includes("sap-user=<redacted>"));
+  // the diagnostic part survives - which client, which path
+  assert.ok(line.includes("/sap/bc/z2ui5"));
+  assert.ok(line.includes("sap-client=100"));
+});
+
+test("a pathless launch URL's credentials are redacted too", () => {
+  // the proxy forwards `?a=b` behind the prefix as `/?a=b`
+  const line = formatTrafficLine({
+    method: "GET",
+    path: "/?sap-password=hunter2",
+    status: 200,
+    durationMs: 1,
+    bytes: 0,
+  });
+  assert.ok(!line.includes("hunter2"));
+});
+
 test("a request that got no answer renders a dash, not a zero", () => {
   const line = formatTrafficLine({
     method: "GET",

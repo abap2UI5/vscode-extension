@@ -642,16 +642,25 @@ ${BASE_CSS}
     }
   });
 
+  /*
+   * Every reload goes through the HOST, which owns what a reload entails
+   * (the activation watch, the located runtime error, the focus bounce) and
+   * cannot own it for a reload it never hears about. It answers with the
+   * usual 'load' message, so the pin, the badges and the loading line below
+   * behave exactly as on a reload the host started itself.
+   */
+  function askHostToReload() {
+    vscodeApi.postMessage({ type: 'reload' });
+  }
+
   reloadBtn.addEventListener('click', () => {
     reloadBtn.classList.remove('spin');
     void reloadBtn.offsetWidth; // restart the animation
     reloadBtn.classList.add('spin');
-    load(frameUrl, 'Reloading ' + nameEl.textContent + '\\u2026');
+    askHostToReload();
   });
 
-  document.getElementById('stale').addEventListener('click', () => {
-    load(frameUrl, 'Reloading ' + nameEl.textContent + '\\u2026');
-  });
+  document.getElementById('stale').addEventListener('click', askHostToReload);
 
   // Activating is what actually updates the server - the reload alone would
   // show the old version again.
@@ -661,9 +670,7 @@ ${BASE_CSS}
 
   document.getElementById('ext').addEventListener('click', openExternal);
   document.getElementById('hint-ext').addEventListener('click', openExternal);
-  document.getElementById('hint-reload').addEventListener('click', () => {
-    load(frameUrl, 'Reloading ' + nameEl.textContent + '\\u2026');
-  });
+  document.getElementById('hint-reload').addEventListener('click', askHostToReload);
   // An app frame that never loads is exactly what the connection check
   // diagnoses - offer it right where the wall is hit.
   document.getElementById('hint-check').addEventListener('click', () => {
@@ -938,6 +945,12 @@ ${BASE_CSS}
       root.innerHTML = '<p class="empty">' + esc(state.reason || 'No builder control under the cursor.') + '</p>';
       return;
     }
+    // Pinned in a local rather than read from the state object when a message
+    // is sent: a refresh may repoint the form at a different control between
+    // the click and its handler, and the host refuses an edit whose tokenStart
+    // is not the one it is showing. Capturing it here binds every message to
+    // the form the user actually clicked.
+    const tokenStart = state.tokenStart;
     let html = '<h2 id="title" title="Go to the builder call">' + esc(state.label) + '</h2>';
     html += '<p class="qname">' + esc(state.control || 'unknown control - is the namespace declared?') + '</p>';
     html += '<div class="rows">';
@@ -968,16 +981,16 @@ ${BASE_CSS}
     root.innerHTML = html;
 
     document.getElementById('title').addEventListener('click', () => {
-      vscodeApi.postMessage({ type: 'reveal' });
+      vscodeApi.postMessage({ type: 'reveal', tokenStart: tokenStart });
     });
     for (const el of root.querySelectorAll('[data-name]')) {
       el.addEventListener('change', () => {
-        vscodeApi.postMessage({ type: 'set', name: el.dataset.name, value: el.value });
+        vscodeApi.postMessage({ type: 'set', name: el.dataset.name, value: el.value, tokenStart: tokenStart });
       });
     }
     for (const el of root.querySelectorAll('[data-remove]')) {
       el.addEventListener('click', () => {
-        vscodeApi.postMessage({ type: 'remove', name: el.dataset.remove });
+        vscodeApi.postMessage({ type: 'remove', name: el.dataset.remove, tokenStart: tokenStart });
       });
     }
     const addName = document.getElementById('add-name');
@@ -993,7 +1006,7 @@ ${BASE_CSS}
         const name = addName.value.trim();
         const value = document.getElementById('add-value').value;
         if (name) {
-          vscodeApi.postMessage({ type: 'set', name: name, value: value });
+          vscodeApi.postMessage({ type: 'set', name: name, value: value, tokenStart: tokenStart });
         }
       });
     }

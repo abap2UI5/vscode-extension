@@ -51,6 +51,23 @@ export interface ReportInput {
 }
 
 /**
+ * The credential-bearing query parameters of a launch URL, blanked in place.
+ *
+ * Exported on its own because the report is not the only place these end up:
+ * a launch URL may carry `sap-user`/`sap-password`, and every request the
+ * preview makes then passes through the proxy - into the traffic channel,
+ * into what the MCP `get_traffic` tool hands an agent, and into the
+ * proxy-status log lines. "Never log credentials" has to hold for those too,
+ * and a second copy of this rule is how one of them would drift.
+ */
+export function redactQueryCredentials(text: string): string {
+  return text.replace(
+    /([?&](?:sap-user|sap-password|password|user)=)[^&\s]*/gi,
+    "$1<redacted>"
+  );
+}
+
+/**
  * Anything that could carry a credential, a token or an internal hostname.
  *
  * Deliberately blunt: a report is pasted into a public issue, and a redaction
@@ -60,7 +77,9 @@ export interface ReportInput {
  */
 export function redact(text: string): string {
   return (
-    text
+    // sap-user / sap-password style query parameters - the same rule the
+    // traffic log and the proxy-status lines apply on their own
+    redactQueryCredentials(text)
       // the proxy's own capability token, which authorizes a session
       .replace(/__abap2ui5\/[A-Za-z0-9_-]+/g, "__abap2ui5/<token>")
       /*
@@ -87,8 +106,6 @@ export function redact(text: string): string {
           return `${scheme}${credentials}<host>${port ? `:${port}` : ""}`;
         }
       )
-      // sap-user / sap-password style query parameters
-      .replace(/([?&](?:sap-user|sap-password|password|user)=)[^&\s]*/gi, "$1<redacted>")
       /*
        * HTTP auth headers, should a log line ever quote one. Anchored on the
        * header NAME on purpose: a bare "Basic <word>" pattern would redact

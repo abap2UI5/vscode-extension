@@ -12,6 +12,7 @@ import {
 import { FOCUS_BOUNCE_MS, PreviewSurface, Session } from "./session";
 import { reloadShownApp, showInTab } from "./preview";
 import { describeRejection } from "./proxy";
+import { redactQueryCredentials } from "./report";
 import {
   CheckStep,
   checkTemplate,
@@ -245,10 +246,9 @@ export async function activateAndReload(session: Session): Promise<void> {
   }
   // Keep focus in the code in case the reloading app tries to grab it. The
   // window starts here: activating can take a moment.
-  if (editor && isAbap) {
-    session.bounceFocusUntil = Date.now() + FOCUS_BOUNCE_MS;
-  }
-  reloadShownApp(session, "Reloaded after activation");
+  reloadShownApp(session, "Reloaded after activation", {
+    bounceFocus: !!editor && isAbap,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -333,10 +333,21 @@ export async function checkConnection(session: Session): Promise<void> {
             // The same start( ) a launch goes through: it clears a previous
             // rejection and holds the credentials the fetch injects.
             await session.proxy.start(origin, creds.user, creds.pass);
+            // `background`: the check owns its own messaging. Everything it
+            // needs - status, WWW-Authenticate, body - comes back in the
+            // answer, so letting this probe run through `onResponse` bought
+            // nothing and cost two side effects: a second, differently
+            // worded logon toast next to the check's own report, and a
+            // tripped `authRejected`, which flips a running preview to the
+            // local 401 page as a side effect of a diagnosis.
             const answer = await session.proxy.fetchFromSystem(
               probePath,
               "text/html, */*",
-              { signal: aborter.signal, timeoutMs: CHECK_TIMEOUT_MS }
+              {
+                background: true,
+                signal: aborter.signal,
+                timeoutMs: CHECK_TIMEOUT_MS,
+              }
             );
             steps.push(reachedStep(origin));
             const statusStep = classifyStatus({
@@ -443,13 +454,16 @@ export async function checkConnection(session: Session): Promise<void> {
  */
 export function watchProxyStatus(session: Session): void {
   session.proxy.onResponse = ({ status, path, authenticate, reason }) => {
+    // A launch URL may carry sap-user/sap-password, and the path is logged
+    // verbatim below - the same rule the traffic log applies (report.ts).
+    const safePath = redactQueryCredentials(path);
     if (status !== 401 && status !== 403) {
       if (status >= 500) {
-        session.log(`proxy: the system answered ${status} for ${path}`);
+        session.log(`proxy: the system answered ${status} for ${safePath}`);
       }
       return;
     }
-    session.log(`proxy: the system answered ${status} for ${path}`);
+    session.log(`proxy: the system answered ${status} for ${safePath}`);
     // Which is where the log used to stop - and "401" on its own fits a wrong
     // password, a locked user, an expired one, a client that refuses logons
     // and a system that does not do basic auth at all. These two lines are

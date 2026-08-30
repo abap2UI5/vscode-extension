@@ -11,6 +11,7 @@ import {
   groupByRule,
   ruleSummary,
   parseRenderReport,
+  renderGateNote,
   parseScreenshotErrors,
   parseScreenshotOutput,
   plannedFixes,
@@ -189,6 +190,40 @@ test("no JSON at all is told apart from broken JSON", () => {
   assert.ok(!broken.ok);
   assert.equal(broken.reason, "broken-json");
   assert.ok(broken.detail);
+});
+
+// ---------------------------------------------------------------------------
+// renderGateNote - what the check may claim about its render half
+// ---------------------------------------------------------------------------
+
+test("a render gate that reported qualifies nothing", () => {
+  assert.equal(renderGateNote("ok"), "");
+});
+
+test("every way the render half did not run says so", () => {
+  // the whole point: a timeout, an unreadable report and a checker that
+  // could not be started used to end in an empty renderErrors array, which
+  // is indistinguishable from a clean render - and the on-demand command
+  // then announced "view check passed" for a check that ran half
+  for (const outcome of [
+    "skipped-helpers",
+    "skipped-not-started",
+    "skipped-busy",
+    "timeout",
+    "spawn-failed",
+    "no-report",
+    "abandoned",
+  ] as const) {
+    const note = renderGateNote(outcome);
+    assert.match(note, /^ \(render gate skipped - .+\)$/, outcome);
+  }
+});
+
+test("the timeout and the unreadable report are told apart", () => {
+  assert.notEqual(renderGateNote("timeout"), renderGateNote("no-report"));
+  assert.match(renderGateNote("timeout"), /timed out/);
+  assert.match(renderGateNote("no-report"), /no report/);
+  assert.match(renderGateNote("skipped-helpers"), /helper methods/);
 });
 
 // ---------------------------------------------------------------------------
@@ -467,6 +502,13 @@ test("cmd.exe metacharacters force the quotes, % and ! included", () => {
   assert.equal(quoteForShell("a%PATH%b", "win32"), '"a%PATH%b"');
   assert.equal(quoteForShell("say!", "win32"), '"say!"');
   assert.equal(quoteForShell('he said "hi"', "win32"), '"he said ""hi"""');
+});
+
+test("an empty Windows argument survives the shell", () => {
+  // returned bare it disappears between two spaces, and cmd.exe hands the
+  // program one argument fewer than it was given - every later argument
+  // moves up one position
+  assert.equal(quoteForShell("", "win32"), '""');
 });
 
 test("posix arguments are single-quoted, so shell:true is safe there too", () => {

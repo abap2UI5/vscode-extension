@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { layoutGraph, navGraph, navMapSvg, NavSource } from "./navmap";
-import { abapSources } from "./abapsources";
+import { scanAbapSources } from "./abapsources";
 import { createNonce, navMapHtml } from "./webview";
 
 /*
@@ -13,20 +13,29 @@ import { createNonce, navMapHtml } from "./webview";
 /** Same cap as the workspace symbol search - beyond this, a real index. */
 const NAV_FILE_CAP = 500;
 
+/**
+ * The window's ABAP, as the graph builder wants it.
+ *
+ * The token goes INTO the scan: it used to be checked only in the loop that
+ * copied the finished result, i.e. after the whole sweep had run, so it could
+ * not save any work even in principle. (It still never fires here -
+ * `ProgressLocation.Window` is not user-cancellable - but the scan is the
+ * place where a token that did fire would mean something.)
+ */
 async function workspaceSources(
   token: vscode.CancellationToken
-): Promise<NavSource[]> {
+): Promise<{ sources: NavSource[]; cappedFiles: boolean }> {
   // Files and open documents alike - a map drawn only from a folder is empty
   // for anyone working straight against a system through ADT, where the apps
   // that exist are the ones somebody opened.
-  const sources: NavSource[] = [];
-  for (const source of await abapSources(NAV_FILE_CAP)) {
-    if (token.isCancellationRequested) {
-      break;
-    }
-    sources.push({ fileName: source.uri.toString(), source: source.text });
-  }
-  return sources;
+  const scan = await scanAbapSources(NAV_FILE_CAP, token);
+  return {
+    sources: scan.sources.map((source) => ({
+      fileName: source.uri.toString(),
+      source: source.text,
+    })),
+    cappedFiles: scan.cappedFiles,
+  };
 }
 
 export function registerNavMap(
@@ -36,7 +45,7 @@ export function registerNavMap(
   let panel: vscode.WebviewPanel | undefined;
 
   const render = async () => {
-    const sources = await vscode.window.withProgress(
+    const { sources, cappedFiles } = await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Window,
         title: "abap2UI5: scanning the workspace for apps",
@@ -46,9 +55,12 @@ export function registerNavMap(
     const graph = navGraph(sources);
     const layout = layoutGraph(graph);
     const appCount = graph.nodes.filter((n) => n.isApp).length;
-    // at the cap the scan stopped, not the workspace - say so instead of
-    // presenting a partial map as the whole picture
-    const truncated = sources.length >= NAV_FILE_CAP;
+    // At the cap the FILE glob stopped, not the workspace - say so instead of
+    // presenting a partial map as the whole picture. The open documents are
+    // added on top of the cap and must not count against it: 490 files plus
+    // 15 open ADT documents used to report "cap reached" over a workspace
+    // that had been scanned whole.
+    const truncated = cappedFiles;
     log(
       `nav-map: ${appCount} apps, ${graph.edges.length} navigations ` +
         `(${sources.length} files scanned${

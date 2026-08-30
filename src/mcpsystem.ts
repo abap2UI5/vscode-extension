@@ -1,10 +1,15 @@
 import * as fs from "fs";
 import * as http from "http";
 import * as vscode from "vscode";
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { randomBytes } from "crypto";
 import { describe, severityOf } from "@abap2ui5/linter/findings";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
-import { handleMcpMessage, McpTool, textResult } from "./mcprpc";
+import {
+  authorizeMcpRequest,
+  handleMcpBatch,
+  McpTool,
+  textResult,
+} from "./mcprpc";
 import { searchClasses } from "./appsearch";
 import { isLoopbackHost, type SapProxy } from "./proxy";
 import { runGate, VIEW_XML_RE } from "./gate";
@@ -53,7 +58,44 @@ const findingLine = (f: PropertyFinding): string =>
   (typeof f.line === "number" ? ` line ${f.line}` : "") +
   `: ${f.message ?? describe(f)}`;
 
+/**
+ * One interactive connect at a time, shared by every caller.
+ *
+ * Tool calls run concurrently - a batch is dispatched with `Promise.all`, and
+ * separate POSTs are served in parallel anyway - so two `search_apps` calls
+ * arriving together each ran `deps.connect( )`, and each of those may open a
+ * QuickPick or a credential prompt. VS Code dismisses the first prompt when
+ * the second opens, so BOTH calls came back with "the user cancelled the
+ * system/credential picker" while the user cancelled nothing.
+ *
+ * The memoization lives here rather than in `makeConnectSystem` (launch.ts):
+ * this is the only caller that can have two flows in flight at once, and the
+ * F9 path must keep its own semantics.
+ */
+function shareConnect(
+  connect: SystemMcpDeps["connect"]
+): SystemMcpDeps["connect"] {
+  let inFlight: ReturnType<SystemMcpDeps["connect"]> | undefined;
+  return () => {
+    if (!inFlight) {
+      // cleared on settle, not kept: the next call must be able to prompt
+      // again after the user backed out or the credentials changed
+      const shared: ReturnType<SystemMcpDeps["connect"]> = connect().finally(
+        () => {
+          if (inFlight === shared) {
+            inFlight = undefined;
+          }
+        }
+      );
+      inFlight = shared;
+    }
+    return inFlight;
+  };
+}
+
 function buildTools(deps: SystemMcpDeps): McpTool[] {
+  // every tool that may prompt goes through the shared flow, not deps.connect
+  const connect = shareConnect(() => deps.connect());
   const tools: McpTool[] = [
     {
       name: "list_systems",
@@ -96,11 +138,13 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
         required: ["query"],
       },
       handler: async (args) => {
-        const query = String(args.query ?? "").trim();
+        // required + `type: string` are the schema's, and the core validates
+        // them before this runs; the length floor is this tool's own
+        const query = String(args.query).trim();
         if (query.length < 2) {
           return textResult("query needs at least 2 characters", true);
         }
-        const connection = await deps.connect();
+        const connection = await connect();
         if (!connection) {
           return textResult(
             "the user cancelled the system/credential picker",
@@ -153,12 +197,12 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
         required: ["class"],
       },
       handler: async (args) => {
-        const className = String(args.class ?? "").trim().toUpperCase();
+        const className = String(args.class).trim().toUpperCase();
         if (!className) {
           return textResult("class is required", true);
         }
         const theme = String(args.theme ?? "").trim();
-        const connection = await deps.connect();
+        const connection = await connect();
         if (!connection) {
           return textResult(
             "the user cancelled the system/credential picker",
@@ -180,8 +224,10 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
         const viewportKey = String(args.viewport ?? "desktop");
         const viewport = viewports[viewportKey];
         if (!viewport) {
-          // refused, not silently rendered at desktop - the schema says enum,
-          // and an answer at the wrong width reads as the app's fault
+          // Unreachable while the schema's enum and this map agree - the core
+          // refuses anything else with -32602 first. Kept as the last resort
+          // for an enum entry added without a size: rendering at the wrong
+          // width silently reads as the app's fault.
           return textResult(
             `unknown viewport "${viewportKey}" - use desktop, tablet or phone`,
             true
@@ -238,7 +284,7 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
         required: ["source"],
       },
       handler: async (args) => {
-        const source = String(args.source ?? "");
+        const source = String(args.source);
         if (!source.trim()) {
           return textResult("source is required", true);
         }
@@ -305,16 +351,6 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
 
 const BODY_CAP = 1024 * 1024;
 
-/** Both sides hashed before comparing, so the comparison touches every byte
- *  of the secret whatever the request sent - a plain `===` returns on the
- *  first differing character, which is a timing oracle on the one value that
- *  authorizes acting with the system credentials. */
-function pathAuthorized(url: string | undefined, expected: string): boolean {
-  const got = createHash("sha256").update(String(url ?? "")).digest();
-  const want = createHash("sha256").update(expected).digest();
-  return timingSafeEqual(got, want);
-}
-
 export interface SystemMcpServer {
   /** Starts (once) and resolves the server's URL, token path included. */
   url(): Promise<string>;
@@ -344,29 +380,23 @@ export function createSystemMcpServer(
     req: http.IncomingMessage,
     res: http.ServerResponse
   ): Promise<void> => {
-    /*
-     * Both halves of the rule every local listener here follows: the secret
-     * in the path, AND a `Host` that is loopback. This server acts with the
-     * system credentials exactly as the auth proxy does - `run_app_on_system`
-     * and `search_apps` go out authenticated - so it owes callers the same
-     * refusal of a request that arrived under a name merely RESOLVING to
-     * 127.0.0.1, which is what DNS rebinding looks like from this side. The
-     * proxy has enforced this since it was written; this one only had the
-     * token, which is one half of the invariant and reads as the whole of it.
-     */
-    if (!isLoopbackHost(req.headers.host)) {
+    /* The token in the path AND a loopback `Host`, both of them - the rule
+     * every local listener here follows, decided in `authorizeMcpRequest`
+     * (mcprpc.ts) where the negative cases are unit-tested. */
+    const verdict = authorizeMcpRequest(
+      { method: req.method, url: req.url, host: req.headers.host },
+      `/${token}`,
+      isLoopbackHost
+    );
+    if (verdict === "not-found") {
       res.writeHead(404).end();
       return;
     }
-    if (!pathAuthorized(req.url, `/${token}`)) {
-      res.writeHead(404).end();
-      return;
-    }
-    if (req.method === "DELETE") {
+    if (verdict === "teardown") {
       res.writeHead(200).end(); // stateless - a session teardown is a no-op
       return;
     }
-    if (req.method !== "POST") {
+    if (verdict === "method-not-allowed") {
       res.writeHead(405, { allow: "POST, DELETE" }).end();
       return;
     }
@@ -394,11 +424,9 @@ export function createSystemMcpServer(
       return;
     }
     const messages = Array.isArray(parsed) ? parsed : [parsed];
-    const answers = (
-      await Promise.all(
-        messages.map((m) => handleMcpMessage(m, tools, info))
-      )
-    ).filter((a): a is object => a !== undefined);
+    // one message per answer, and one failing message answered on its own -
+    // never the whole request (see handleMcpBatch)
+    const answers = await handleMcpBatch(messages, tools, info, deps.log);
     if (!answers.length) {
       res.writeHead(202).end();
       return;
@@ -410,10 +438,21 @@ export function createSystemMcpServer(
   let disposed = false;
 
   const stop = (): void => {
-    server?.close();
+    const srv = server;
     server = undefined;
     starting = undefined;
     listeningUrl = undefined;
+    if (!srv) {
+      return;
+    }
+    srv.close();
+    /* close( ) only stops NEW connections: an established keep-alive socket
+     * survives it, and a request already in flight on one still completes -
+     * so a client holding the URL could go on calling the credential-backed
+     * tools after `abap2ui5.mcp.system` was turned off, which is exactly what
+     * mcp.ts promises it cannot. closeAllConnections( ) severs them (Node
+     * >= 18.2; the guard is for a host older than the extension's floor). */
+    srv.closeAllConnections?.();
   };
 
   return {

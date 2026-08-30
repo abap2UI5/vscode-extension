@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
-import { AbapSource, abapSources } from "./abapsources";
+import { AbapSource, abapSources, watchAbapSources } from "./abapsources";
 import { blankNonCode } from "./abapscan";
 import {
   abapBindingContextAt,
@@ -39,7 +39,15 @@ import { abapColorSpans, cssColorPresentations, xmlColorSpans } from "./colors";
 import { snapshot } from "./snapshot";
 import { CONFIG_SECTION } from "./settings";
 import { VIEW_SELECTOR } from "./selector";
-import { attributeAt, attributeSpans, idAt, idSpans } from "./renamewires";
+import {
+  attributeAt,
+  attributeSpans,
+  idAt,
+  idCompletionAt,
+  idSpans,
+  renameNameError,
+  type RenameKind,
+} from "./renamewires";
 import { planExtract } from "./extractview";
 import { expandAbbreviation } from "./abbreviation";
 
@@ -469,10 +477,18 @@ class ClientApiSignatureHelp implements vscode.SignatureHelpProvider {
     position: vscode.Position
   ): vscode.SignatureHelp | undefined {
     const offset = doc.offsetAt(position);
-    const prefix = blankNonCode(doc.getText()).slice(
-      Math.max(0, offset - SIGNATURE_LOOKBACK),
-      offset
-    );
+    const text = doc.getText();
+    const from = Math.max(0, offset - SIGNATURE_LOOKBACK);
+    // The raw window first - the same pattern `blankedLineOf` documents. `(`
+    // and `,` are trigger characters, so this ran on every one of them typed
+    // anywhere in any ABAP file and blanked the whole class to read the last
+    // 500 characters of it. Blanking only ever replaces characters with
+    // spaces, so a window with no `client->` in the raw text has none in the
+    // blanked one either, and the context below would answer nothing.
+    if (!/client->/i.test(text.slice(from, offset))) {
+      return undefined;
+    }
+    const prefix = blankNonCode(text).slice(from, offset);
     const context = clientSignatureContext(prefix);
     if (!context) {
       return undefined;
@@ -596,7 +612,14 @@ const SYMBOL_FILE_CAP = 500;
  */
 const SYMBOL_CACHE_MS = 5000;
 const SYMBOL_CACHE_DROP_MS = 30000;
-let symbolSources: { at: number; sources: AbapSource[] } | undefined;
+/** The RUN, not its result: the cache used to be filled only once the sweep
+ *  had resolved, so the three or four keystrokes typed while the first one was
+ *  still reading each started a full sweep of their own and none of them saw
+ *  the others. Remembering the promise makes overlapping callers await the
+ *  same one. */
+let symbolSources:
+  | { at: number; promise: Promise<AbapSource[]> }
+  | undefined;
 let symbolCacheDrop: NodeJS.Timeout | undefined;
 const methodMemo = new Map<
   string,
@@ -616,21 +639,42 @@ function scheduleSymbolCacheDrop(): void {
   }, SYMBOL_CACHE_DROP_MS);
 }
 
+/*
+ * Deliberately NOT threaded with the caller's CancellationToken: the sweep is
+ * shared between the overlapping calls one typed word produces, and VS Code
+ * cancels the previous call on every keystroke. A token honoured inside the
+ * scan would let a cancelled caller leave a HALF-READ workspace in the cache
+ * for the keystroke that replaced it, which is a wrong answer rather than a
+ * slow one. The reads themselves are served from `abapsources`' shared cache
+ * now, so the sweep this guards is a glob plus the files that changed.
+ */
 async function symbolSourcesCached(): Promise<AbapSource[]> {
   scheduleSymbolCacheDrop();
   const now = Date.now();
   if (symbolSources && now - symbolSources.at < SYMBOL_CACHE_MS) {
-    return symbolSources.sources;
+    return symbolSources.promise;
   }
-  const sources = await abapSources(SYMBOL_FILE_CAP);
-  symbolSources = { at: now, sources };
-  const known = new Set(sources.map((source) => source.uri.toString()));
-  for (const key of [...methodMemo.keys()]) {
-    if (!known.has(key)) {
-      methodMemo.delete(key);
+  const promise = abapSources(SYMBOL_FILE_CAP).then((sources) => {
+    const known = new Set(sources.map((source) => source.uri.toString()));
+    for (const key of [...methodMemo.keys()]) {
+      if (!known.has(key)) {
+        methodMemo.delete(key);
+      }
     }
+    return sources;
+  });
+  const entry = { at: now, promise };
+  symbolSources = entry;
+  try {
+    return await promise;
+  } catch (err) {
+    // a failed sweep must not be served to the next keystroke as if it were
+    // an answer
+    if (symbolSources === entry) {
+      symbolSources = undefined;
+    }
+    throw err;
   }
-  return sources;
 }
 
 function methodsOf(uri: vscode.Uri, text: string) {
@@ -655,21 +699,40 @@ class MethodWorkspaceSymbols implements vscode.WorkspaceSymbolProvider {
     // files and open documents, so the methods of a class opened through ADT
     // are reachable from Ctrl+T like any other
     const sources = await symbolSourcesCached();
+    if (token.isCancellationRequested) {
+      return [];
+    }
     const needle = query.toLowerCase();
     const symbols: vscode.SymbolInformation[] = [];
     for (const { uri, text } of sources) {
       if (token.isCancellationRequested) {
         break;
       }
+      /*
+       * line/character from the offset without opening a TextDocument -
+       * opening hundreds of documents is what would make this slow.
+       *
+       * Counted forward with the matches, which come out in ascending offset
+       * order: it used to slice the whole prefix of the file per hit and run
+       * a `/\n/g` match over it, so a query matching thirty methods in a
+       * 100 KB class copied and scanned three megabytes - per keystroke, per
+       * file. Same pattern as `examples.findControlUses`.
+       */
+      let line = 0;
+      let lineStart = 0;
+      let counted = 0;
       for (const m of methodsOf(uri, text)) {
         if (!m.name.toLowerCase().includes(needle)) {
           continue;
         }
-        // line/character from the offset without opening a TextDocument -
-        // opening hundreds of documents is what would make this slow
-        const before = text.slice(0, m.start);
-        const line = (before.match(/\n/g) ?? []).length;
-        const col = m.start - (before.lastIndexOf("\n") + 1);
+        for (let i = counted; i < m.start; i++) {
+          if (text.charCodeAt(i) === 10) {
+            line++;
+            lineStart = i + 1;
+          }
+        }
+        counted = m.start;
+        const col = m.start - lineStart;
         symbols.push(
           new vscode.SymbolInformation(
             m.name,
@@ -692,27 +755,40 @@ class MethodWorkspaceSymbols implements vscode.WorkspaceSymbolProvider {
 // appears - an event, a control id, a bound attribute
 // ---------------------------------------------------------------------------
 
+interface RenameTarget {
+  kind: RenameKind;
+  span: NamedSpan;
+}
+
 /**
  * What the cursor is on, in the order the three can be told apart: an event
  * name (a literal in `_event( )` or `WHEN`), a control id (a literal in an
  * `id` attribute or an id-taking wire), or an attribute the class declares.
  */
-function renameTargetAt(text: string, offset: number): NamedSpan | undefined {
-  return (
-    eventNameAt(text, offset) ??
-    whenNameAt(text, offset) ??
-    idAt(text, offset) ??
-    attributeAt(text, offset)
-  );
+function renameTargetAt(text: string, offset: number): RenameTarget | undefined {
+  const event = eventNameAt(text, offset) ?? whenNameAt(text, offset);
+  if (event) {
+    return { kind: "event", span: event };
+  }
+  const id = idAt(text, offset);
+  if (id) {
+    return { kind: "id", span: id };
+  }
+  const attribute = attributeAt(text, offset);
+  return attribute ? { kind: "attribute", span: attribute } : undefined;
 }
 
-/** Everywhere that name is written - resolved by the same order, so the kind
- *  of thing decided in prepareRename is the kind of thing replaced. */
-function renameSpans(text: string, offset: number, name: string): NamedSpan[] {
-  if (eventNameAt(text, offset) ?? whenNameAt(text, offset)) {
+/** Everywhere that name is written - by the kind already resolved, so the
+ *  thing decided in prepareRename is the thing replaced. */
+function renameSpans(
+  text: string,
+  target: RenameTarget,
+  name: string
+): NamedSpan[] {
+  if (target.kind === "event") {
     return eventNameSpans(text, name);
   }
-  if (idAt(text, offset)) {
+  if (target.kind === "id") {
     return idSpans(text, name);
   }
   return attributeSpans(text, name);
@@ -726,18 +802,18 @@ class WireRename implements vscode.RenameProvider {
     position: vscode.Position
   ): { range: vscode.Range; placeholder: string } {
     const text = doc.getText();
-    const span = renameTargetAt(text, doc.offsetAt(position));
-    if (!span) {
+    const target = renameTargetAt(text, doc.offsetAt(position));
+    if (!target) {
       throw new Error(
         "Only event names, control ids and bound attributes can be renamed here."
       );
     }
     return {
       range: new vscode.Range(
-        doc.positionAt(span.start),
-        doc.positionAt(span.end)
+        doc.positionAt(target.span.start),
+        doc.positionAt(target.span.end)
       ),
-      placeholder: span.name,
+      placeholder: target.span.name,
     };
   }
 
@@ -746,19 +822,22 @@ class WireRename implements vscode.RenameProvider {
     position: vscode.Position,
     newName: string
   ): vscode.WorkspaceEdit {
-    if (!/^[\w-]+$/.test(newName)) {
-      throw new Error(
-        "An event name, id or attribute may only contain letters, digits, _ and -."
-      );
-    }
     const text = doc.getText();
     const offset = doc.offsetAt(position);
-    const span = renameTargetAt(text, offset);
-    if (!span) {
+    // The KIND first: the three do not share a spelling rule, and one
+    // permissive test for all of them let an attribute be renamed to
+    // something that is not an ABAP identifier at all.
+    const target = renameTargetAt(text, offset);
+    if (!target) {
       throw new Error(
         "Only event names, control ids and bound attributes can be renamed here."
       );
     }
+    const invalid = renameNameError(target.kind, newName);
+    if (invalid) {
+      throw new Error(invalid);
+    }
+    const span = target.span;
     const edit = new vscode.WorkspaceEdit();
     /* Every place the class writes this name, whichever half of the app
      * writes it. The strings are what tie an abap2UI5 app together and
@@ -766,7 +845,7 @@ class WireRename implements vscode.RenameProvider {
      * missing the other is silent: a wire that addresses nothing does
      * nothing at runtime, and a binding path that resolves to nothing
      * renders empty. Neither reports a thing. */
-    const targets = renameSpans(text, offset, span.name);
+    const targets = renameSpans(text, target, span.name);
     for (const [index, target] of targets.entries()) {
       const range = new vscode.Range(
         doc.positionAt(target.start),
@@ -792,6 +871,84 @@ class WireRename implements vscode.RenameProvider {
       });
     }
     return edit;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The wiring loop: complete a control id where a wire addresses one, and light
+// up both ends of the wire the cursor is on
+// ---------------------------------------------------------------------------
+
+/**
+ * The ids the view declares, offered inside `set_focus( '…' )`,
+ * `by_id = '…'` and the other id-taking wires.
+ *
+ * The extension already knows every id both ends of a wire use - the rename
+ * and the CodeLens are built on it - and a typo in the ABAP end is exactly
+ * the defect that produces nothing at runtime: no error, no console line, the
+ * wire simply addresses nothing. Offering the declared names is the cheapest
+ * possible place to prevent it.
+ */
+class ControlIdCompletion implements vscode.CompletionItemProvider {
+  provideCompletionItems(
+    doc: vscode.TextDocument,
+    position: vscode.Position
+  ): vscode.CompletionItem[] {
+    const offer = idCompletionAt(doc.getText(), doc.offsetAt(position));
+    if (!offer) {
+      return [];
+    }
+    const range = new vscode.Range(
+      doc.positionAt(offer.start),
+      doc.positionAt(offer.end)
+    );
+    return offer.ids.map((id) => {
+      const item = new vscode.CompletionItem(
+        id,
+        vscode.CompletionItemKind.Value
+      );
+      item.detail = "declared in this view";
+      item.range = range;
+      return item;
+    });
+  }
+}
+
+/**
+ * The other ends of the wire the cursor is on: every `_event( )` and `WHEN`
+ * naming the same event, every place the same control id is written.
+ *
+ * Nothing in ABAP or UI5 connects those strings, so an editor that highlights
+ * them is the only thing in the window that shows a wire as one thing.
+ *
+ * Events and ids only. A bound attribute is renameable too, but finding its
+ * spans means a regex over the whole source per identifier, and a highlight
+ * provider runs on every cursor movement.
+ */
+class WireHighlights implements vscode.DocumentHighlightProvider {
+  provideDocumentHighlights(
+    doc: vscode.TextDocument,
+    position: vscode.Position
+  ): vscode.DocumentHighlight[] {
+    const text = doc.getText();
+    const offset = doc.offsetAt(position);
+    const event = eventNameAt(text, offset) ?? whenNameAt(text, offset);
+    const spans = event
+      ? eventNameSpans(text, event.name)
+      : (() => {
+          const id = idAt(text, offset);
+          return id ? idSpans(text, id.name) : [];
+        })();
+    return spans.map(
+      (span) =>
+        new vscode.DocumentHighlight(
+          new vscode.Range(
+            doc.positionAt(span.start),
+            doc.positionAt(span.end)
+          ),
+          vscode.DocumentHighlightKind.Text
+        )
+    );
   }
 }
 
@@ -833,6 +990,33 @@ export function registerLanguageFeatures(
   context: vscode.ExtensionContext,
   log: (m: string) => void
 ): void {
+  // The workspace symbol search reads the window's ABAP; the shared watcher is
+  // what keeps its cache honest. Idempotent - the apps tree and the app-class
+  // index ask for the same one, and in the web host this is the only caller.
+  watchAbapSources(context);
+
+  /*
+   * Warm the metadata snapshot.
+   *
+   * `snapshot( )` is lazy, and parsing the several-MB properties.json blocks
+   * the extension host. In a window where no view check has run yet, that bill
+   * was paid by whichever completion, hover or colour request came first -
+   * i.e. in the middle of typing. Doing it right after activation instead
+   * costs nothing anybody is waiting for.
+   *
+   * `setTimeout` rather than `setImmediate`: this module is in the WEB bundle
+   * too, and a browser extension host has no `setImmediate`. A missing or
+   * broken snapshot is not an error here - `snapshot( )` swallows it and
+   * `snapshotError( )` is what reports it, once, where it is read.
+   */
+  setTimeout(() => {
+    try {
+      snapshot();
+    } catch {
+      // snapshot() handles its own failure; this is belt and braces
+    }
+  }, 0);
+
   context.subscriptions.push(
     new vscode.Disposable(() => {
       if (symbolCacheDrop) {
@@ -887,6 +1071,19 @@ export function registerLanguageFeatures(
       ">"
     ),
     vscode.languages.registerHoverProvider(ABAP_SELECTOR, new ClientApiHover()),
+    // The ids a wire may address - the quotes are where one starts, in either
+    // spelling the corpus uses.
+    vscode.languages.registerCompletionItemProvider(
+      ABAP_SELECTOR,
+      new ControlIdCompletion(),
+      "`",
+      "'"
+    ),
+    // both ends of the wire under the cursor, lit up together
+    vscode.languages.registerDocumentHighlightProvider(
+      ABAP_SELECTOR,
+      new WireHighlights()
+    ),
     // the parameters of the call being written, from the same bundled
     // interface the hover reads
     vscode.languages.registerSignatureHelpProvider(
@@ -909,7 +1106,7 @@ export function registerLanguageFeatures(
   );
   log(
     "language: completion, hover, client API, chain formatting, " +
-      "method navigation and view outline registered"
+      "method navigation, wire completion and highlights, and view outline registered"
   );
 }
 

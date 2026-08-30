@@ -60,7 +60,11 @@ export const DEFAULT_LIBRARY = "sap.m";
 /** Same story as the scan memo below: both context calls of one completion ask
  *  for the namespace map of the same source. A few slots rather than one, so
  *  the colour pass and the outline of a second visible document do not evict
- *  the entry the completion is about to ask for again. */
+ *  the entry the completion is about to ask for again.
+ *
+ *  `abapscan.ts` memoises the LEX itself now, so what is left here is the two
+ *  regex sweeps over the blanked source - still worth keeping, still not the
+ *  expensive half. */
 const NS_MEMO_SLOTS = 4;
 const nsMemo: Array<{ source: string; map: Record<string, string> }> = [];
 
@@ -167,6 +171,11 @@ interface AbapScan {
  *
  * The scan's Call objects are read, never written, by the callers - so handing
  * the same ones out twice is safe.
+ *
+ * What this memo covers since `abapscan.ts` grew one of its own is the
+ * PARENTHESIS walk, not the lex: the spans come back shared now, but building
+ * the call list still means a pass over the whole source, and it is keyed on
+ * the offset as well, so a completion at a new cursor position misses it.
  */
 const SCAN_MEMO_SLOTS = 4;
 const scanMemo: Array<{ source: string; offset: number; scan: AbapScan }> = [];
@@ -487,14 +496,19 @@ function openContainersBefore(calls: Call[], before: number): Call[] {
   return stack;
 }
 
-/** The `a( )` calls chained to one control call: everything named `a` up to
- *  the next structural call. */
-function attributeCallsOf(calls: Call[], owner: Call): Call[] {
+/** The calls that end one control's attribute run - the builder's structure,
+ *  as opposed to the `a( )` calls hanging off it. One list, read by both
+ *  readers of an attribute run below; it used to be written out twice. */
+const STRUCTURAL = ["ele", "tag", "end", "factory", "stringify"];
+
+/** The `a( )` calls chained to the control call at `index`: everything named
+ *  `a` up to the next structural call. Index rather than the call itself, so
+ *  a caller already walking `calls` does not pay an `indexOf` per control. */
+function attributeCallsFrom(calls: Call[], index: number): Call[] {
   const out: Call[] = [];
-  const from = calls.indexOf(owner);
-  for (let i = from + 1; i < calls.length && i > 0; i++) {
+  for (let i = index + 1; i < calls.length && i > 0; i++) {
     const name = calls[i].name.toLowerCase();
-    if (["ele", "tag", "end", "factory", "stringify"].includes(name)) {
+    if (STRUCTURAL.includes(name)) {
       break;
     }
     if (name === "a") {
@@ -502,6 +516,13 @@ function attributeCallsOf(calls: Call[], owner: Call): Call[] {
     }
   }
   return out;
+}
+
+/** The `a( )` calls chained to one control call. */
+function attributeCallsOf(calls: Call[], owner: Call): Call[] {
+  // an owner that is not in the list leaves `indexOf` at -1, and the `i > 0`
+  // guard above then answers with nothing rather than with the whole chain
+  return attributeCallsFrom(calls, calls.indexOf(owner));
 }
 
 /**
@@ -774,8 +795,6 @@ function argExpressionSpan(
   return { start, end };
 }
 
-const STRUCTURAL = ["ele", "tag", "end", "factory", "stringify"];
-
 /**
  * The `ele( )` / `tag( )` whose block (the call plus its chained `a( )`
  * lines) contains `offset`, with every attribute's spans - or undefined when
@@ -801,16 +820,7 @@ export function controlCallAt(
       break;
     }
     // The attribute run: every `a( )` up to the next structural call.
-    const attrCalls: Call[] = [];
-    for (let j = i + 1; j < calls.length; j++) {
-      const next = calls[j].name.toLowerCase();
-      if (STRUCTURAL.includes(next)) {
-        break;
-      }
-      if (next === "a") {
-        attrCalls.push(calls[j]);
-      }
-    }
+    const attrCalls = attributeCallsFrom(calls, i);
     const last = attrCalls[attrCalls.length - 1] ?? call;
     const blockEnd = last.close ?? source.length;
     if (offset > blockEnd) {

@@ -32,9 +32,15 @@
  * - the first runs weekly, because a repository's own build must not go red
  * the moment somebody edits a different repository.
  */
-import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  emitSnapshot,
+  invokedDirectly,
+  parseArgs,
+  readUpstream,
+  requireShape,
+} from "./lib/snapshot.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 // under src/ so tsc (rootDir: src, resolveJsonModule) can import it; esbuild
@@ -76,44 +82,66 @@ export function frameworkPin(abaplintConfig) {
 /** Where the mirrored app-building guide starts inside AGENTS.md. */
 export const GUIDE_MARKER = "> **Provenance:**";
 
-/** A stalled fetch fails the weekly run promptly instead of hanging to the
- *  job's cap. Per file - the snapshot is fetched one file at a time. */
-const FETCH_TIMEOUT_MS = 30000;
+const TOOL = "generate-app-template";
 
-async function read(file, local) {
-  if (local) {
-    return fs.readFileSync(path.join(local, file), "utf8");
+/**
+ * Which template scripts a scaffolded project would be left with, and which
+ * `npm run` targets that leaves dangling.
+ *
+ * `src/scaffold.ts` drops every script whose body runs files out of the
+ * template's own `scripts/` directory - a scaffolded project does not get
+ * one. The gate used to check only that `check` itself is not such a script,
+ * which a KEPT script chaining to a DROPPED one walks straight past: a
+ * template edit to `"check": "… && npm run check:pin"` would pass here and
+ * every scaffolded project's `npm run check` would die with "missing
+ * script". So the references are resolved among the kept scripts - and
+ * transitively by construction, because every kept script is examined,
+ * including the ones only reached through another.
+ */
+export function danglingScriptRefs(scripts = {}) {
+  const kept = Object.fromEntries(
+    Object.entries(scripts).filter(([, body]) => !String(body).includes("scripts/"))
+  );
+  const dangling = [];
+  for (const [name, body] of Object.entries(kept)) {
+    for (const [, target] of String(body).matchAll(/\bnpm\s+run\s+([\w:.@/-]+)/g)) {
+      if (target in kept) {
+        continue;
+      }
+      dangling.push({
+        name,
+        target,
+        // a target the template does not have at all is upstream's own typo;
+        // one it has is a script this scaffold deliberately drops
+        reason: target in scripts ? "dropped" : "unknown",
+      });
+    }
   }
-  const res = await fetch(RAW(file), {
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-  if (!res.ok) {
-    console.error(`generate-app-template: ${RAW(file)} -> HTTP ${res.status}`);
-    process.exit(2);
-  }
-  return res.text();
+  return dangling;
 }
 
-const invokedDirectly =
-  process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
-if (invokedDirectly) {
-  const args = process.argv.slice(2);
-  const check = args.includes("--check");
-  const local = args.find((a) => !a.startsWith("--"));
+if (invokedDirectly(import.meta.url)) {
+  const { check, local } = parseArgs();
+  const read = (file) => readUpstream({ tool: TOOL, file, local, url: RAW(file) });
 
   /* The template's own description first - it says which files to take. */
-  const spec = JSON.parse((await read(SPEC_FILE, local)).replace(/\r\n/g, "\n"));
+  const spec = JSON.parse(await read(SPEC_FILE));
   const FILES = spec.files?.shared;
-  if (!Array.isArray(FILES) || FILES.length === 0) {
-    console.error(`generate-app-template: ${SPEC_FILE} has no files.shared[] - the template no longer says what a project takes from it`);
-    process.exit(1);
-  }
+  requireShape({
+    problems:
+      Array.isArray(FILES) && FILES.length
+        ? []
+        : [
+            `${TOOL}: ${SPEC_FILE} has no files.shared[] - the template no longer says what a project takes from it`,
+          ],
+  });
 
   const files = {};
   for (const file of FILES) {
-    // Line endings are normalised: the template commits LF (.gitattributes),
-    // and a CRLF checkout on Windows must not produce a different snapshot.
-    files[file] = (await read(file, local)).replace(/\r\n/g, "\n");
+    // readUpstream normalises the line endings: the template commits LF
+    // (.gitattributes), and a CRLF checkout on Windows must not produce a
+    // different snapshot.
+    files[file] = await read(file);
   }
 
   /* Fail loudly rather than write a snapshot the scaffold silently cannot use:
@@ -167,13 +195,23 @@ if (invokedDirectly) {
         'package.json\'s "check" script is missing or runs files under scripts/ - the scaffold drops such scripts, so a new project would lose `npm run check`'
       );
     }
+    /* And the same trap one hop further out: a KEPT script chaining via
+     * `npm run` into a DROPPED one is a script that exists and cannot run. */
+    for (const { name, target, reason } of danglingScriptRefs(pkg?.scripts)) {
+      missing.push(
+        `package.json's "${name}" script runs \`npm run ${target}\`, which ` +
+          (reason === "dropped"
+            ? "the scaffold drops (it runs files under scripts/)"
+            : "the template does not define") +
+          ` - a scaffolded project's \`npm run ${name}\` would die with "missing script"`
+      );
+    }
   }
-  if (missing.length) {
-    console.error("generate-app-template: the template changed shape:");
-    for (const m of missing) console.error(`  ${m}`);
-    console.error("Fix src/scaffold.ts (and this script) rather than committing a snapshot it cannot read.");
-    process.exit(1);
-  }
+  requireShape({
+    problems: missing,
+    header: `${TOOL}: the template changed shape:`,
+    hint: "Fix src/scaffold.ts (and this script) rather than committing a snapshot it cannot read.",
+  });
 
   const json = `${JSON.stringify(
     {
@@ -186,20 +224,13 @@ if (invokedDirectly) {
     2
   )}\n`;
 
-  if (check) {
-    const current = fs.existsSync(OUT) ? fs.readFileSync(OUT, "utf8") : "";
-    if (current !== json) {
-      console.error(
-        "app-template.json is STALE against abap2UI5/app-template - a project created from the IDE is not the project the template hands out. Run `npm run app-template` and commit."
-      );
-      process.exit(1);
-    }
-    console.log(`app-template.json: up to date (${FILES.length} files)`);
-  } else {
-    fs.mkdirSync(path.dirname(OUT), { recursive: true });
-    fs.writeFileSync(OUT, json);
-    console.log(
-      `app-template.json: ${FILES.length} files from ${local ? local : `${REPO}@main`}`
-    );
-  }
+  emitSnapshot({
+    out: OUT,
+    json,
+    check,
+    stale:
+      "app-template.json is STALE against abap2UI5/app-template - a project created from the IDE is not the project the template hands out. Run `npm run app-template` and commit.",
+    upToDate: `app-template.json: up to date (${FILES.length} files)`,
+    wrote: `app-template.json: ${FILES.length} files from ${local ? local : `${REPO}@main`}`,
+  });
 }

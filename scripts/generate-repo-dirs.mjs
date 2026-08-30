@@ -23,9 +23,15 @@
  *                                                  JSON is stale - what the
  *                                                  weekly workflow runs)
  */
-import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  emitSnapshot,
+  invokedDirectly,
+  parseArgs,
+  readUpstream,
+  requireShape,
+} from "./lib/snapshot.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 // under src/ so tsc (rootDir: src, resolveJsonModule) can import it; esbuild
@@ -40,42 +46,27 @@ const RAW = `https://raw.githubusercontent.com/${REPO}/main/${SOURCE_FILE}`;
  *  editor session. */
 export const REQUIRED_KEYS = ["corpus", "samples", "samplesStack", "viewCheck", "server"];
 
-/** A stalled fetch fails the weekly run promptly instead of hanging to the
- *  job's cap. */
-const FETCH_TIMEOUT_MS = 30000;
+const TOOL = "generate-repo-dirs";
 
-async function read(local) {
-  if (local) {
-    return fs.readFileSync(path.join(local, SOURCE_FILE), "utf8");
-  }
-  const res = await fetch(RAW, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  if (!res.ok) {
-    console.error(`generate-repo-dirs: ${RAW} -> HTTP ${res.status}`);
-    process.exit(2);
-  }
-  return res.text();
-}
+if (invokedDirectly(import.meta.url)) {
+  const { check, local } = parseArgs();
 
-const invokedDirectly =
-  process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
-if (invokedDirectly) {
-  const args = process.argv.slice(2);
-  const check = args.includes("--check");
-  const local = args.find((a) => !a.startsWith("--"));
-
-  const source = JSON.parse((await read(local)).replace(/\r\n/g, "\n"));
+  const source = JSON.parse(
+    await readUpstream({ tool: TOOL, file: SOURCE_FILE, local, url: RAW })
+  );
   const repos = source.repos || {};
 
   const missing = REQUIRED_KEYS.filter(
     (k) => !Array.isArray(repos[k]?.dirs) || repos[k].dirs.length === 0
   );
-  if (missing.length) {
-    console.error(
-      `generate-repo-dirs: ${SOURCE_FILE} no longer carries a non-empty dirs[] for: ${missing.join(", ")}`
-    );
-    console.error("Fix src/repolayout.ts (and this script) rather than committing a snapshot it cannot read.");
-    process.exit(1);
-  }
+  requireShape({
+    problems: missing.length
+      ? [
+          `${TOOL}: ${SOURCE_FILE} no longer carries a non-empty dirs[] for: ${missing.join(", ")}`,
+        ]
+      : [],
+    hint: "Fix src/repolayout.ts (and this script) rather than committing a snapshot it cannot read.",
+  });
 
   // Only what this extension consumes: the directory names. The env vars and
   // probe files are the server's business - it is the one that resolves.
@@ -91,20 +82,13 @@ if (invokedDirectly) {
     2
   )}\n`;
 
-  if (check) {
-    const current = fs.existsSync(OUT) ? fs.readFileSync(OUT, "utf8") : "";
-    if (current !== json) {
-      console.error(
-        "repo-dirs.json is STALE against abap2UI5/mcp-server - a checkout the MCP server finds is one this extension would not. Run `npm run repo-dirs` and commit."
-      );
-      process.exit(1);
-    }
-    console.log(`repo-dirs.json: up to date (${REQUIRED_KEYS.length} repos)`);
-  } else {
-    fs.mkdirSync(path.dirname(OUT), { recursive: true });
-    fs.writeFileSync(OUT, json);
-    console.log(
-      `repo-dirs.json: ${REQUIRED_KEYS.length} repos from ${local ? local : `${REPO}@main`}`
-    );
-  }
+  emitSnapshot({
+    out: OUT,
+    json,
+    check,
+    stale:
+      "repo-dirs.json is STALE against abap2UI5/mcp-server - a checkout the MCP server finds is one this extension would not. Run `npm run repo-dirs` and commit.",
+    upToDate: `repo-dirs.json: up to date (${REQUIRED_KEYS.length} repos)`,
+    wrote: `repo-dirs.json: ${REQUIRED_KEYS.length} repos from ${local ? local : `${REPO}@main`}`,
+  });
 }

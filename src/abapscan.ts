@@ -129,12 +129,99 @@ function scanTemplate(
   return { end: source.length, closed: false };
 }
 
+// ---------------------------------------------------------------------------
+// The memo
+// ---------------------------------------------------------------------------
+
+/*
+ * One lex per document version, for everybody.
+ *
+ * The primitives below are the hot path of the whole extension: a single
+ * keystroke in a builder class ran them six to eight times over the full
+ * source - completion (twice, at a new offset each time, so the context memo
+ * missed), the CodeLens refresh (`isAppSource`, `eventRaises`,
+ * `whenBranches`), the colour provider, the client-API hover and completion,
+ * signature help, and the 300 ms annotation paint. Three callers had each
+ * built a memo of their own one layer up, which helped only that caller.
+ *
+ * So the memo belongs here, where every reader already comes through.
+ *
+ * Keyed on the source string as handed in, which for the VS Code callers is
+ * the identical INSTANCE: `doc.getText( )` returns the same string object for
+ * a document version, and that is exactly what the upper-layer memos have
+ * always relied on. `===` on two strings starts with a pointer compare, so a
+ * hit costs nothing; two distinct instances with equal content are compared
+ * character by character once and then share the entry, which is correct as
+ * well - the lex depends on nothing but the text.
+ *
+ * A few slots rather than one: an editor group with two ABAP files open, or a
+ * paint of a second visible document, must not evict the entry the completion
+ * is about to ask for again.
+ *
+ * The results are handed out as they are and every reader here treats them as
+ * read-only - `abapLiterals` and the blanking build their own copies.
+ */
+const MEMO_SLOTS = 4;
+
+/**
+ * Below this a source is a FRAGMENT, not a document: `declaredNames` blanks
+ * one statement, `context.argsOf` blanks one call's arguments. Those run many
+ * times per document with a different string each time, and letting them into
+ * the memo would evict the document everybody else is asking about.
+ */
+const MEMO_MIN_LENGTH = 2000;
+
+interface LexMemo {
+  source: string;
+  spans?: AbapSpan[];
+  nonCode?: string;
+  comments?: string;
+}
+
+const memo: LexMemo[] = [];
+
+/** The memo entry for this source - moved to the front, created when the
+ *  source is big enough to be worth a slot, undefined for a fragment. */
+function memoFor(source: string): LexMemo | undefined {
+  if (source.length < MEMO_MIN_LENGTH) {
+    return undefined;
+  }
+  for (let i = 0; i < memo.length; i++) {
+    if (memo[i].source === source) {
+      const [entry] = memo.splice(i, 1);
+      memo.unshift(entry);
+      return entry;
+    }
+  }
+  const entry: LexMemo = { source };
+  memo.unshift(entry);
+  if (memo.length > MEMO_SLOTS) {
+    memo.pop();
+  }
+  return entry;
+}
+
 /**
  * Every literal, comment and string template in the source, in order and
  * without overlaps - the first opener wins, which is what makes a quote
  * inside a comment part of the comment rather than the start of a literal.
+ *
+ * Memoised per source - see above. The array is shared between callers, so
+ * treat it as read-only.
  */
 export function abapSpans(source: string): AbapSpan[] {
+  const entry = memoFor(source);
+  if (entry?.spans) {
+    return entry.spans;
+  }
+  const spans = abapSpansUncached(source);
+  if (entry) {
+    entry.spans = spans;
+  }
+  return spans;
+}
+
+function abapSpansUncached(source: string): AbapSpan[] {
   const spans: AbapSpan[] = [];
   let i = 0;
   while (i < source.length) {
@@ -203,7 +290,15 @@ export function abapLiterals(source: string): AbapSpan[] {
  * code, and every index it reports still points into the original.
  */
 export function blankNonCode(source: string): string {
-  return blank(source, () => true);
+  const entry = memoFor(source);
+  if (entry?.nonCode !== undefined) {
+    return entry.nonCode;
+  }
+  const blanked = blank(source, () => true);
+  if (entry) {
+    entry.nonCode = blanked;
+  }
+  return blanked;
 }
 
 /**
@@ -216,22 +311,51 @@ export function blankNonCode(source: string): string {
  * for them: it takes away the very text they match on.
  */
 export function blankComments(source: string): string {
-  return blank(source, (span) => span.kind === "comment");
+  const entry = memoFor(source);
+  if (entry?.comments !== undefined) {
+    return entry.comments;
+  }
+  const blanked = blank(source, (span) => span.kind === "comment");
+  if (entry) {
+    entry.comments = blanked;
+  }
+  return blanked;
 }
 
+/**
+ * The source with the wanted spans replaced by spaces, line breaks kept.
+ *
+ * Built from the SLICES between the spans rather than character by character:
+ * `split("")` allocated one single-character string per character of the
+ * class - a hundred thousand of them for a 100 KB class, several times per
+ * keystroke - only to join them back together. The spans come out of the
+ * lexer in order and without overlaps, so the result is the untouched text
+ * between them plus a run of spaces (and the newlines a template may span)
+ * for each one.
+ */
 function blank(source: string, wanted: (span: AbapSpan) => boolean): string {
-  const out = source.split("");
+  let out = "";
+  let prev = 0;
   for (const span of abapSpans(source)) {
     if (!wanted(span)) {
       continue;
     }
-    for (let i = span.from; i < span.to; i++) {
-      if (out[i] !== "\n") {
-        out[i] = " "; // a template may span lines, and those have to stay
+    out += source.slice(prev, span.from);
+    // a template may span lines, and those have to stay - everything else in
+    // the span becomes one run of spaces
+    let at = span.from;
+    for (;;) {
+      const nl = source.indexOf("\n", at);
+      if (nl < 0 || nl >= span.to) {
+        out += " ".repeat(span.to - at);
+        break;
       }
+      out += " ".repeat(nl - at) + "\n";
+      at = nl + 1;
     }
+    prev = span.to;
   }
-  return out.join("");
+  return prev === 0 ? source : out + source.slice(prev);
 }
 
 export interface AbapStatement {

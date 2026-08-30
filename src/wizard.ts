@@ -78,8 +78,20 @@ export async function newAppWizard(): Promise<void> {
 
   const editor = vscode.window.activeTextEditor;
   if (editor && editor.document.languageId === "abap") {
-    await editor.edit((b) => b.insert(editor.selection.active, source));
-    return;
+    const inserted = await editor.edit((b) =>
+      b.insert(editor.selection.active, source)
+    );
+    if (inserted) {
+      return;
+    }
+    // A read-only document refuses the insert and answers `false` - a diff
+    // view, a git: revision, an ADT source nobody checked out. Discarding
+    // that ended the command with no output and no message; the fresh
+    // untitled document below is the fallback the wizard already has.
+    void vscode.window.showInformationMessage(
+      "abap2UI5: the open document could not be edited (read-only) - the new " +
+        "app opens in a new file instead."
+    );
   }
   const doc = await vscode.workspace.openTextDocument({
     language: "abap",
@@ -130,23 +142,30 @@ export async function newProjectWizard(): Promise<void> {
       ).map((file) => file.path.split("/")[0])
     ),
   ];
-  const conflicts: string[] = [];
-  for (const name of guarded) {
-    try {
-      await vscode.workspace.fs.stat(vscode.Uri.joinPath(root, name));
-      conflicts.push(name);
-    } catch {
-      /* not there, which is what we want */
+  const conflicts = async (): Promise<string[]> => {
+    const found: string[] = [];
+    for (const name of guarded) {
+      try {
+        await vscode.workspace.fs.stat(vscode.Uri.joinPath(root, name));
+        found.push(name);
+      } catch {
+        /* not there, which is what we want */
+      }
     }
-  }
-  if (conflicts.length) {
+    return found;
+  };
+  const reportConflicts = (found: string[]): void => {
     // all of them at once - fixing one conflict per attempt is a bad loop
     void vscode.window.showErrorMessage(
-      `abap2UI5: that folder already has ${conflicts.join(", ")}. Pick an ` +
+      `abap2UI5: that folder already has ${found.join(", ")}. Pick an ` +
         `empty folder - this would overwrite ${
-          conflicts.length === 1 ? "it" : "them"
+          found.length === 1 ? "it" : "them"
         }.`
     );
+  };
+  const before = await conflicts();
+  if (before.length) {
+    reportConflicts(before);
     return;
   }
 
@@ -159,20 +178,44 @@ export async function newProjectWizard(): Promise<void> {
     return;
   }
 
+  // Again, right before writing: the probe above ran BEFORE the two prompts,
+  // and a folder can grow a package.json while a picker is open - the check
+  // is a handful of stats, and overwriting somebody's file is not undoable.
+  const now = await conflicts();
+  if (now.length) {
+    reportConflicts(now);
+    return;
+  }
+
   const folderName = root.path.split("/").filter(Boolean).pop() ?? "abap2ui5-app";
   const files = scaffoldFiles(
     projectNameFrom(folderName),
     className.toLowerCase(),
     template
   );
+  let written = 0;
   for (const file of files) {
     const target = vscode.Uri.joinPath(root, ...file.path.split("/"));
-    // scaffoldText adds the BOM abapGit expects on the XML - a BOM-less
-    // file comes back changed on the first pull, for everyone
-    await vscode.workspace.fs.writeFile(
-      target,
-      new TextEncoder().encode(scaffoldText(file))
-    );
+    try {
+      // scaffoldText adds the BOM abapGit expects on the XML - a BOM-less
+      // file comes back changed on the first pull, for everyone
+      await vscode.workspace.fs.writeFile(
+        target,
+        new TextEncoder().encode(scaffoldText(file))
+      );
+    } catch (err) {
+      // A write that fails mid-loop leaves a half-scaffolded folder, which
+      // the conflict guard above then refuses on the next attempt - so say
+      // which file failed and how much is already there, rather than ending
+      // in silence with a folder nobody can scaffold into again.
+      void vscode.window.showErrorMessage(
+        `abap2UI5: could not write ${file.path} - ${String(err)}. ` +
+          `${written} of ${files.length} files were created; delete them ` +
+          "before trying again."
+      );
+      return;
+    }
+    written++;
   }
 
   // `npm install`, not `npm ci`: a brand-new project has no lockfile yet,

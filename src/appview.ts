@@ -1,7 +1,13 @@
 import * as vscode from "vscode";
 import { classNameOf, usesBuilder } from "./abap";
 import { isAppSource } from "./appclasses";
-import { abapSources, isAbapDocument } from "./abapsources";
+import {
+  abapSources,
+  invalidateAbapSource,
+  isAbapDocument,
+  onDidChangeAbapSources,
+  watchAbapSources,
+} from "./abapsources";
 
 /*
  * The apps of this workspace, as a tree with the actions on them.
@@ -16,8 +22,6 @@ import { abapSources, isAbapDocument } from "./abapsources";
  * A class counts as an app when it implements `z2ui5_if_app` - the same test
  * the navigation map uses, so the two cannot disagree about what an app is.
  */
-
-const APP_GLOB = "**/*.clas.abap";
 
 interface AppNode {
   className: string;
@@ -113,13 +117,17 @@ async function withOpenClass(node: AppNode | undefined, command: string): Promis
 }
 
 /** How long event-driven refreshes are coalesced. A branch switch touches
- *  hundreds of files at once, and every refresh means a full rescan of the
+ *  hundreds of files at once, and every refresh means a rescan of the
  *  window's ABAP sources in getChildren. */
 const REFRESH_DEBOUNCE_MS = 300;
 
 export function registerAppView(context: vscode.ExtensionContext): void {
   const provider = new AppTree();
-  const watcher = vscode.workspace.createFileSystemWatcher(APP_GLOB);
+  // The shared watcher and source cache: a rescan now re-reads the files that
+  // actually changed instead of the whole workspace - which matters most for
+  // the event this tree fires at itself, the openTextDocument that a click on
+  // one of its own items performs.
+  watchAbapSources(context);
   let pending: NodeJS.Timeout | undefined;
   const refresh = () => {
     if (pending) {
@@ -132,7 +140,6 @@ export function registerAppView(context: vscode.ExtensionContext): void {
   };
   context.subscriptions.push(
     provider,
-    watcher,
     {
       dispose: () => {
         if (pending) {
@@ -141,14 +148,15 @@ export function registerAppView(context: vscode.ExtensionContext): void {
       },
     },
     vscode.window.createTreeView("abap2ui5.apps", { treeDataProvider: provider }),
-    watcher.onDidCreate(refresh),
-    // content changes from outside the editor too - a git pull can turn an
-    // existing, unopened class into an app without any create or save event
-    watcher.onDidChange(refresh),
-    watcher.onDidDelete(refresh),
-    // a saved class can BECOME an app (or stop being one) - the tree follows
+    // create / change / delete on disk, and a workspace folder coming or
+    // going - all of it through the one shared watcher
+    onDidChangeAbapSources(refresh),
+    // a saved class can BECOME an app (or stop being one) - the tree follows.
+    // The save may reach the cache before the watcher does, so the file's
+    // remembered text is dropped here as well.
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (isAbapDocument(doc)) {
+        invalidateAbapSource(doc.uri);
         refresh();
       }
     }),

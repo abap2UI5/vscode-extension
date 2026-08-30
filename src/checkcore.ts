@@ -109,6 +109,12 @@ export function splitCommandLine(line: string): string[] {
  */
 export function quoteForShell(arg: string, platform: NodeJS.Platform): string {
   if (platform === "win32") {
+    // an empty argument returned unquoted disappears entirely under a shell -
+    // cmd.exe sees nothing between two spaces, so every argument after it
+    // moves up one position
+    if (arg === "") {
+      return '""';
+    }
     if (!/[\s&|<>^()"%!]/.test(arg)) {
       return arg;
     }
@@ -421,6 +427,172 @@ export interface RenderResult {
 export type RenderReportParse =
   | { ok: true; result: RenderResult }
   | { ok: false; reason: "no-json" | "broken-json"; detail?: string };
+
+/**
+ * What became of the render half of one view check.
+ *
+ * The property gate always answers; the render gate may not - it can be
+ * missing, busy being installed, killed on a timeout, or return something
+ * that is not a report. Every one of those is a check that ran HALF, and the
+ * only honest way to announce it is to say so - which needs the outcome as a
+ * value rather than an empty `renderErrors` array indistinguishable from a
+ * clean render.
+ */
+export type RenderGateOutcome =
+  /** The gate ran and reported. */
+  | "ok"
+  /** The gate itself declined: the view is built in helper methods. */
+  | "skipped-helpers"
+  /** Not started: its checker could not be spawned earlier in this session. */
+  | "skipped-not-started"
+  /** Not started: an install of the gate is running right now. */
+  | "skipped-busy"
+  /** Started and killed after the deadline. */
+  | "timeout"
+  /** Started but could not be spawned at all. */
+  | "spawn-failed"
+  /** Ran, but produced no JSON or broken JSON. */
+  | "no-report"
+  /** Abandoned because the buffer moved on or a newer check superseded it. */
+  | "abandoned";
+
+/**
+ * The parenthesis appended to what the check says about itself, so a "view
+ * check passed" never covers a half that did not run. Empty when the render
+ * gate did report - there is nothing to qualify then.
+ */
+export function renderGateNote(outcome: RenderGateOutcome): string {
+  switch (outcome) {
+    case "ok":
+      return "";
+    case "skipped-helpers":
+      return " (render gate skipped - view built in helper methods)";
+    case "skipped-not-started":
+      return " (render gate skipped - its checker could not be started)";
+    case "skipped-busy":
+      return " (render gate skipped - it is being installed)";
+    case "timeout":
+      return " (render gate skipped - it timed out)";
+    case "spawn-failed":
+      return " (render gate skipped - its checker could not be started)";
+    case "no-report":
+      return " (render gate skipped - it produced no report)";
+    case "abandoned":
+      return " (render gate skipped - superseded by a newer check)";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// What may be executed out of a downloaded render-gate bundle
+// ---------------------------------------------------------------------------
+
+/** Everything the trust decision reads about one downloaded bundle. */
+export interface BundleTrustInput {
+  /** The url it came from - only reported, never fetched here. */
+  url: string;
+  /** SHA-256 of the bytes that were actually written, lower-case hex. */
+  actual: string;
+  /** The `<bundle>.sha256` sibling asset, when the publisher publishes one. */
+  published?: string;
+  /** The digest remembered for this url from an earlier verified install. */
+  remembered?: string;
+  /** True for the ROLLING tag, which is republished on every linter merge -
+   *  a changed digest there is expected, not an alarm. */
+  rolling: boolean;
+}
+
+export type BundleTrustDecision =
+  | {
+      accept: true;
+      reason: "published-match" | "first-install" | "unchanged" | "rolling-moved";
+      /** What the log says about the decision. */
+      log: string;
+    }
+  | {
+      accept: false;
+      reason: "published-mismatch" | "immutable-moved";
+      /** Why nothing was installed - shown to the user. */
+      message: string;
+    };
+
+const shortDigest = (hex: string): string => hex.slice(0, 12);
+
+/**
+ * What this build is willing to execute from a downloaded archive.
+ *
+ * The bundle is fetched over HTTPS and then extracted and run with VS Code's
+ * Node - so whoever can change that release asset chooses code that runs on
+ * every machine that installs the gate. Pinning the URL to a per-commit tag
+ * pins WHICH asset, not WHAT IS IN IT.
+ *
+ * Two checks, strongest first:
+ *
+ * 1. A `<bundle>.sha256` sibling asset, when the linter publishes one:
+ *    authoritative, and a mismatch is refused outright. (It does not publish
+ *    one today; this closes the gap the moment it does, with no release here.)
+ * 2. Otherwise trust-on-first-use, per url. A per-commit tag is supposed to be
+ *    IMMUTABLE, so the same url answering with different bytes than last time
+ *    is precisely the signal worth stopping on - it cannot happen by accident.
+ *
+ * Neither protects a first install against a bundle that was already
+ * tampered with; say so rather than implying otherwise.
+ *
+ * The decision is a pure function because it IS the security policy - the
+ * download, the global state and the progress notification around it are
+ * plumbing, and a policy nothing can call without a running editor is a policy
+ * nothing tests.
+ */
+export function bundleTrust(input: BundleTrustInput): BundleTrustDecision {
+  const { actual, published, remembered, rolling } = input;
+  if (published) {
+    if (published !== actual) {
+      return {
+        accept: false,
+        reason: "published-mismatch",
+        message:
+          `bundle checksum mismatch - the published sha256 is ${shortDigest(published)}… ` +
+          `but the download hashes to ${shortDigest(actual)}…. Nothing was installed.`,
+      };
+    }
+    return {
+      accept: true,
+      reason: "published-match",
+      log: `render-gate: bundle sha256 ${shortDigest(actual)}… matches the published checksum`,
+    };
+  }
+
+  if (remembered && remembered !== actual) {
+    if (!rolling) {
+      return {
+        accept: false,
+        reason: "immutable-moved",
+        message:
+          "bundle changed since it was last installed from the same URL. That URL " +
+          "names one immutable linter commit, so its content should never move. " +
+          `Expected ${shortDigest(remembered)}…, got ${shortDigest(actual)}…. ` +
+          "Nothing was installed.",
+      };
+    }
+    return {
+      accept: true,
+      reason: "rolling-moved",
+      log:
+        `render-gate: rolling bundle moved since the last install ` +
+        `(${shortDigest(remembered)}… -> ${shortDigest(actual)}…) - expected for a rolling tag; ` +
+        `bundle sha256 ${shortDigest(actual)}…`,
+    };
+  }
+
+  return {
+    accept: true,
+    reason: remembered ? "unchanged" : "first-install",
+    log:
+      `render-gate: bundle sha256 ${shortDigest(actual)}…` +
+      (remembered
+        ? " (unchanged since the last install)"
+        : " (first install from this URL)"),
+  };
+}
 
 /** Reads the render gate's stdout: the first `{` starts the JSON report
  *  (anything before it is npm/npx noise), `results[0]` carries the answer. */

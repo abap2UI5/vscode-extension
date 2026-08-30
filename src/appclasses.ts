@@ -1,6 +1,12 @@
 import * as vscode from "vscode";
 import { classNameOf, isAppClass, isAppClassDeep, superclassOf } from "./abap";
-import { abapSources, isAbapDocument } from "./abapsources";
+import {
+  abapSources,
+  invalidateAbapSource,
+  isAbapDocument,
+  onDidChangeAbapSources,
+  watchAbapSources,
+} from "./abapsources";
 
 /*
  * "Is this class an abap2UI5 app?" - answered for a class that INHERITS the
@@ -104,9 +110,22 @@ export async function refreshAppClasses(): Promise<void> {
 }
 
 /** One document's entry, updated in place - a save can only change that one
- *  class, so the whole workspace does not need to be re-read for it. */
+ *  class, so the whole workspace does not need to be re-read for it.
+ *
+ *  A renamed class leaves its OLD name behind: the index kept answering for a
+ *  name the window no longer has, so `isAppSource` still followed
+ *  `INHERITING FROM` to a base class that had been renamed away. The previous
+ *  entry is dropped when it is still the text this document put there. */
 function updateFromDocument(doc: vscode.TextDocument): void {
+  const previous = docNames.get(doc);
   const entry = docEntry(doc);
+  if (
+    previous &&
+    previous.name !== entry.name &&
+    index.get(previous.name) === previous.text
+  ) {
+    index.delete(previous.name);
+  }
   index.set(entry.name, entry.text);
 }
 
@@ -147,8 +166,17 @@ export function isAppSource(source: string): boolean {
  * Keeps the index roughly current. Deliberately coarse: a rebuild is cheap
  * next to a keystroke, and the only thing that can change the answer is a
  * class definition line.
+ *
+ * The editor's own events are not enough. A `git pull`, a branch switch or a
+ * class written by another tool adds or edits a base class carrying
+ * `z2ui5_if_app` without any save, open or close in this window - and the
+ * index then stayed stale indefinitely, so F9, the CodeLens and the apps tree
+ * went quiet on every subclass of it. That is exactly the issue #81 symptom
+ * this module exists to fix, so the shared file watcher schedules a rebuild
+ * too.
  */
 export function registerAppClasses(context: vscode.ExtensionContext): void {
+  watchAbapSources(context);
   const schedule = () => {
     if (scheduled) {
       clearTimeout(scheduled);
@@ -168,10 +196,14 @@ export function registerAppClasses(context: vscode.ExtensionContext): void {
         }
       },
     },
+    // a create / change / delete on disk that no editor event reports - the
+    // one shared watcher over `**/*.clas.abap`
+    onDidChangeAbapSources(() => schedule()),
     // a save or an open concerns one document, and its entry is updated in
     // place - the full rebuild is for what those events cannot see
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (isAbapDocument(doc)) {
+        invalidateAbapSource(doc.uri);
         updateFromDocument(doc);
       }
     }),

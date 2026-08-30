@@ -206,7 +206,16 @@ async function sweepWorkspaceWeb(
         }
       }
 
-      const results: Array<[vscode.Uri, vscode.Diagnostic[]]> = [];
+      /* Per file: what was published, and the version of the open document it
+       * was gated against. Findings carry offsets into the text they were
+       * computed from, so a buffer that was typed in while the sweep ran must
+       * not be given ranges describing its old lines - the desktop sweep
+       * refuses the same way. */
+      const results: Array<{
+        uri: vscode.Uri;
+        diags: vscode.Diagnostic[];
+        version?: number;
+      }> = [];
       let checked = 0;
       let problems = 0;
       for (const [index, target] of targets.entries()) {
@@ -221,6 +230,9 @@ async function sweepWorkspaceWeb(
           increment: 100 / targets.length,
         });
         let text: string;
+        // captured WITH the text: what is gated below describes this version
+        // of the buffer and no later one
+        const version = target.open?.version;
         if (target.open) {
           text = target.open.getText();
         } else {
@@ -249,20 +261,55 @@ async function sweepWorkspaceWeb(
           continue;
         }
         applyBaselineForPath(opts, uri.path, gate.findings);
-        const source = target.open ?? textSource(text);
+        // the captured text, never the buffer as it is now: `target.open` may
+        // have moved on since it was read a few awaits ago
+        const source = textSource(text);
         const diags = toDiagnostics(source, gate.findings, []);
-        results.push([uri, diags]);
+        results.push({ uri, diags, version });
         checked++;
-        problems += diags.length;
       }
       const cancelled = token.isCancellationRequested;
-      if (!cancelled) {
-        // what the sweep did not find is no longer a problem - a fixed or
-        // deleted file must not keep its squiggles forever
-        diagnostics.clear();
+      const published = new Set<string>();
+      const untouched = new Set<string>();
+      let moved = 0;
+      for (const result of results) {
+        if (result.version !== undefined) {
+          const doc = vscode.workspace.textDocuments.find(
+            (d) => d.uri.toString() === result.uri.toString()
+          );
+          if (!doc || doc.version !== result.version) {
+            // typed in while the sweep ran - its current diagnostics come
+            // from the live check and describe the text it actually has
+            moved++;
+            untouched.add(result.uri.toString());
+            continue;
+          }
+        }
+        diagnostics.set(result.uri, result.diags);
+        published.add(result.uri.toString());
+        problems += result.diags.length;
       }
-      for (const [uri, diags] of results) {
-        diagnostics.set(uri, diags);
+      if (!cancelled) {
+        /* What the sweep did not find is no longer a problem - a fixed or
+         * deleted file must not keep its squiggles forever. Reconciled rather
+         * than cleared: a clear also threw away the live diagnostics of the
+         * files skipped just above, leaving them looking clean. */
+        const stale: vscode.Uri[] = [];
+        diagnostics.forEach((uri) => {
+          const key = uri.toString();
+          if (!published.has(key) && !untouched.has(key)) {
+            stale.push(uri);
+          }
+        });
+        for (const uri of stale) {
+          diagnostics.delete(uri);
+        }
+      }
+      if (moved) {
+        log(
+          `web: workspace sweep - ${moved} file(s) not reported, ` +
+            "edited while the sweep ran"
+        );
       }
       const capNote = capped
         ? ` Only the first ${SWEEP_FILE_CAP} files were searched - the browser host caps the scan.`
@@ -321,7 +368,11 @@ export function webFindingsNow(doc: vscode.TextDocument): PropertyFinding[] {
   const opts = options(doc);
   let gate;
   try {
-    gate = runGate(text, doc.fileName, isXml, opts);
+    // `doc.uri.path`, the spelling the config lookup and the baseline use:
+    // on vscode.dev `doc.fileName` is `uri.fsPath`, which for an
+    // authority-carrying scheme (`vscode-vfs://github/owner/repo/...`) starts
+    // with `//github/` and matches no config-relative `exclude` pattern at all
+    gate = runGate(text, doc.uri.path, isXml, opts);
   } catch {
     return []; // an unparsable buffer mid-edit is not worth reporting
   }
@@ -365,7 +416,10 @@ export function registerWebCheck(
     }
     let gate;
     try {
-      gate = runGate(text, doc.fileName, isXml, opts);
+      // the same file identity the sweep hands the gate (`uri.path`) - see
+      // webFindingsNow: with `doc.fileName` the live check and the sweep
+      // disagreed about which `exclude` patterns apply
+      gate = runGate(text, doc.uri.path, isXml, opts);
     } catch (err) {
       // one keystroke's worth of unparsable buffer, not a reason to throw
       // out of a listener on every character
@@ -421,6 +475,21 @@ export function registerWebCheck(
     );
   };
 
+  /** Re-checks everything this window has open after the settings, a config
+   *  file or a baseline changed.
+   *
+   *  Every open DOCUMENT, not only the visible editors: a checked file in a
+   *  background tab otherwise keeps diagnostics computed under the old config
+   *  until it is edited, saved or closed - the editor/CI drift this module
+   *  exists to prevent. The gate is in-process and costs milliseconds. */
+  const recheckOpen = () => {
+    for (const doc of vscode.workspace.textDocuments) {
+      if (isCheckable(doc)) {
+        schedule(doc, 0);
+      }
+    }
+  };
+
   context.subscriptions.push(
     diagnostics,
     { dispose: () => timers.forEach((t) => clearTimeout(t)) },
@@ -472,9 +541,7 @@ export function registerWebCheck(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(`${CONFIG_SECTION}.viewCheck`)) {
         memos.clear();
-        for (const editor of vscode.window.visibleTextEditors) {
-          schedule(editor.document, 0);
-        }
+        recheckOpen();
       }
     })
   );
@@ -494,9 +561,7 @@ export function registerWebCheck(
   const reload = async () => {
     await readWorkspaceConfigs(log);
     memos.clear();
-    for (const editor of vscode.window.visibleTextEditors) {
-      schedule(editor.document, 0);
-    }
+    recheckOpen();
   };
   // the watcher glob cannot exclude, and a dependency's baseline-named file
   // must not re-read every config in the workspace

@@ -35,7 +35,6 @@ import { staleMessage } from "./previewcore";
 import {
   ALLOW_UNAUTHORIZED_KEY,
   CONFIG_SECTION,
-  FOCUS_BOUNCE_MS,
   OPEN_MODE_KEY,
   Session,
   TEMPLATE_KEY,
@@ -77,7 +76,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const session = new Session(context);
   const provider = new PreviewViewProvider(session);
   session.previewProvider = provider;
-  session.reloadShown = (reason) => reloadShownApp(session, reason);
+  // The activation watch's reload. `bounceFocus` like the save path and
+  // Ctrl+F3: the user is in the editor - they just activated a class - and a
+  // loading app grabbing focus would yank them out of it on exactly the
+  // reload this extension exists to automate.
+  session.reloadShown = (reason) =>
+    reloadShownApp(session, reason, { bounceFocus: true });
   session.notifyShown = (message) => postToShownApp(session, message);
   const log = (message: string) => session.log(message);
   // What a "Show Log" button on a message does - the channel the message's
@@ -277,11 +281,13 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       // Keep focus in the code in case the reloading app tries to grab it.
       const ed = vscode.window.activeTextEditor;
-      if (ed && ed.document === doc) {
+      const inSavedSource = !!ed && ed.document === doc;
+      if (inSavedSource) {
         session.rememberSource(ed);
-        session.bounceFocusUntil = Date.now() + FOCUS_BOUNCE_MS;
       }
-      reloadShownApp(session, "Reloaded after save");
+      reloadShownApp(session, "Reloaded after save", {
+        bounceFocus: inSavedSource,
+      });
     }),
     // The white-preview diagnosis: probes the configured launch URL the way
     // F9 would and says which step fails (URL, host, logon, ICF path, page).
@@ -313,7 +319,9 @@ export function activate(context: vscode.ExtensionContext): void {
       const file = await takeScreenshot(
         context,
         {
-          url: session.currentTarget.frameUrl,
+          // A one-shot url: Chromium takes the page only as a command line
+          // argument, which every process of this user can read.
+          url: session.proxy.singleUseUrl(session.currentTarget.frameUrl),
           className: session.currentTarget.className,
           width,
         },
@@ -472,7 +480,14 @@ export function activate(context: vscode.ExtensionContext): void {
       screenshot: (className, url, viewport) =>
         takeScreenshot(
           context,
-          { url, className, width: viewport?.width, height: viewport?.height },
+          {
+            // same one-shot url as the command above - the token must not
+            // stay valid in an argument vector
+            url: session.proxy.singleUseUrl(url),
+            className,
+            width: viewport?.width,
+            height: viewport?.height,
+          },
           log,
           showLog
         ),

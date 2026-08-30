@@ -2,11 +2,16 @@ import * as vscode from "vscode";
 import { createNonce, LANGUAGES, previewHtml, THEMES, welcomeHtml } from "./webview";
 import { AppTarget, loadMessage, modelRootsOfSource } from "./previewcore";
 import { classNameOf, errorTokens } from "./abap";
-import { proxiedUrl } from "./urls";
-import { allSystems } from "./systems";
+import { proxiedUrl, withParams } from "./urls";
 import { abapNsMap, viewOutline } from "./context";
 import { matchOutline, RuntimeControl } from "./inspect";
-import { CONFIG_SECTION, OPEN_MODE_KEY, PreviewSurface, Session } from "./session";
+import {
+  CONFIG_SECTION,
+  FOCUS_BOUNCE_MS,
+  OPEN_MODE_KEY,
+  PreviewSurface,
+  Session,
+} from "./session";
 
 /*
  * The preview surfaces: the panel view, the editor tab, and the messages
@@ -268,15 +273,59 @@ export function postToShownApp(session: Session, message: unknown): void {
   session.previewProvider?.post(message);
 }
 
-/** Reloads the app shown in tab or panel without moving the focus. */
-export function reloadShownApp(session: Session, reason?: string): void {
+/** What one reload does BESIDES loading the page - the part every caller used
+ *  to carry (or forget) on its own. */
+export interface ReloadOptions {
+  /**
+   * Open the window in which focus grabbed by the loading app is handed back
+   * to the code. Every reload the user did not start from inside the preview
+   * wants this: apps steal focus while they load, and the user is in the
+   * editor. F9, the save reload and Ctrl+F3 always armed it - the activation
+   * watch's reload, the one this extension exists to automate, did not.
+   */
+  bounceFocus?: boolean;
+  /**
+   * Leave the activation watch (and its baseline) alone.
+   *
+   * For a reload that does not change WHICH version the server has: the
+   * preview's own reload buttons, the "not activated" badge above all. The
+   * class there is still saved-but-not-activated, and stopping the watch
+   * would drop exactly the activation it is waiting for.
+   */
+  keepWatch?: boolean;
+}
+
+/**
+ * Reloads the app shown in tab or panel without moving the focus - the ONE
+ * host-side entry point for it.
+ *
+ * Five things start a reload (the palette command, the preview's buttons, the
+ * stale badge, the save handler and the activation watch) and they used to
+ * carry three different bundles of side effects; the buttons did not even
+ * reach the host, they reassigned `frame.src` themselves. So the host learned
+ * nothing about them and could not clear what a reload clears. Everything
+ * goes through here now, and what differs between callers is an option rather
+ * than a line one of them forgot.
+ */
+export function reloadShownApp(
+  session: Session,
+  reason?: string,
+  options: ReloadOptions = {}
+): void {
   if (!session.currentTarget) {
     return;
   }
-  session.watch.stop(); // whatever loads now is current, the badge clears
+  if (options.bounceFocus) {
+    session.bounceFocusUntil = Date.now() + FOCUS_BOUNCE_MS;
+  }
+  if (!options.keepWatch) {
+    session.watch.stop(); // whatever loads now is current, the badge clears
+  }
   lastErrorLocation = undefined; // the fresh page's errors are its own
   postToShownApp(session, loadMessageFor(session, session.currentTarget, reason));
-  session.watch.captureBaseline(); // remember which state is shown from now on
+  if (!options.keepWatch) {
+    session.watch.captureBaseline(); // which state is shown from now on
+  }
 }
 
 /**
@@ -293,11 +342,19 @@ export async function applyPreviewParam(
   if (!target) {
     return;
   }
-  const system = allSystems().find((s) => s.name === target.system);
-  if (!system) {
-    return;
-  }
-  const externalUrl = session.urlFor(system, target.className);
+  /*
+   * Built from the target's OWN url, not from the system profile it was
+   * launched against. Both parameters are plain URL parameters and
+   * `target.externalUrl` is already fully expanded, so the lookup by system
+   * NAME bought nothing - and it could stop resolving while an app runs (a
+   * renamed or removed system, or `withUniqueNames` numbering that shifted),
+   * after which the picker changed, the value was persisted, and the preview
+   * silently never reloaded.
+   */
+  const externalUrl = withParams(target.externalUrl, {
+    "sap-ui-theme": session.theme() || undefined,
+    "sap-language": session.language() || undefined,
+  });
   const frameUrl =
     (session.proxy.isRunning
       ? proxiedUrl(externalUrl, session.proxy.origin)
@@ -414,6 +471,22 @@ export function handleWebviewMessage(
         preserveFocus: false,
       });
     }
+    return;
+  }
+  /*
+   * A reload started inside the preview - the toolbar button, the "not
+   * activated" badge, the reload offered on the "nothing loaded" hint. They
+   * used to reassign `frame.src` themselves, which left the host unable to
+   * clear what a reload clears; now they ask for it, and the one host-side
+   * reload decides what it entails.
+   *
+   * `keepWatch` for all three: the user is looking at the preview and
+   * reloading the version the server already has. Nothing about the server's
+   * state changed, so an activation watch running behind the stale badge -
+   * the badge whose own button this is - keeps waiting for the activation.
+   */
+  if (message?.type === "reload") {
+    reloadShownApp(session, undefined, { keepWatch: true });
     return;
   }
   if (message?.type === "showTraffic") {

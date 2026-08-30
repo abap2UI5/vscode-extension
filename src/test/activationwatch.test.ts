@@ -130,6 +130,44 @@ test("a 4xx from ADT gives up for the session", async () => {
   assert.deepEqual(h.reloads, []);
 });
 
+/*
+ * 401 is the one 4xx that says nothing about this system's ADT: it says the
+ * credentials the proxy holds are wrong right now, which the user fixes by
+ * re-entering them. Latching it switched reload-on-activation off for the
+ * rest of the window after a single mistyped password.
+ */
+test("a 401 does not latch, a 403 does", async () => {
+  const transient = harness([
+    new AdtStatusError(401),
+    { version: "inactive" },
+    { version: "active" },
+  ]);
+  transient.watch.start();
+  await until(() => transient.reloads.length > 0);
+  transient.watch.dispose();
+  assert.deepEqual(
+    transient.reloads,
+    ["Reloaded after activation"],
+    "the watch bailed on a transient credential failure"
+  );
+  assert.ok(
+    !transient.logs.some((l) => l.includes("giving up")),
+    "the 401 was latched as a permanent ADT verdict"
+  );
+
+  // and a restart still works - nothing was remembered about this system
+  const permanent = harness([new AdtStatusError(403)]);
+  permanent.watch.start();
+  await until(() => permanent.logs.some((l) => l.includes("giving up")));
+  permanent.watch.start();
+  await until(() => permanent.logs.some((l) => l.includes("already refused on")));
+  permanent.watch.dispose();
+  assert.ok(
+    permanent.logs.some((l) => l.includes("already refused on")),
+    "403 stopped latching - ADT that is not exposed would be polled forever"
+  );
+});
+
 test("a network error is retried, not fatal", async () => {
   const h = harness([
     new Error("socket hang up"),

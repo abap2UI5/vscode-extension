@@ -519,6 +519,94 @@ test("re-entering the same system keeps the proxy usable", async () => {
   }
 });
 
+/*
+ * The one-shot token behind the screenshot: headless Chromium takes the page
+ * only as a command-line argument, and an argument vector is readable by
+ * every other process of this user - so what leaks there must be spent by
+ * the time anyone reads it.
+ */
+test("a one-shot url authorizes exactly one request", async () => {
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const url = proxy.singleUseUrl(`${proxy.origin}/sap/bc/z2ui5?app_start=zcl_x`);
+    assert.notEqual(url, `${proxy.origin}/sap/bc/z2ui5?app_start=zcl_x`);
+    const path = new URL(url).pathname + new URL(url).search;
+
+    const first = await rawGet(proxy, path);
+    assert.equal(first.status, 200, "the shot's own request was refused");
+    assert.equal(system.seen.length, 1);
+    // and the answer plants the cookie the page's follow-ups ride on
+    assert.ok(
+      first.setCookie.some((c) => c.startsWith("__abap2ui5_proxy_")),
+      "no cookie planted - the page could not load its resources"
+    );
+
+    const second = await rawGet(proxy, path);
+    assert.equal(second.status, 404, "the one-shot token outlived its request");
+    assert.equal(system.seen.length, 1, "a second request was forwarded");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a one-shot token is never accepted out of a cookie", async () => {
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const url = proxy.singleUseUrl(`${proxy.origin}/x`);
+    const oneShot = new URL(url).pathname.split("/")[2];
+    const port = new URL(proxy.origin).port;
+    const answer = await rawGet(proxy, "/sap/bc/z2ui5", {
+      cookie: `__abap2ui5_proxy_${port}=${oneShot}`,
+    });
+    assert.equal(answer.status, 404);
+    assert.deepEqual(system.seen, []);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("one-shot tokens do not outlive the proxy that minted them", async () => {
+  const one = await recordingSystem();
+  const two = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(one.origin, "user", "pass");
+    const url = proxy.singleUseUrl(`${proxy.origin}/x`);
+    const path = new URL(url).pathname;
+    await proxy.start(two.origin, "user", "pass");
+    const answer = await rawGet(proxy, path);
+    assert.equal(answer.status, 404, "a token from the old system still works");
+    assert.deepEqual(two.seen, []);
+  } finally {
+    await proxy.stop();
+    one.close();
+    two.close();
+  }
+});
+
+test("a url that is not this proxy's is handed back unchanged", async () => {
+  const proxy = new SapProxy();
+  // not running: nothing to mint against
+  assert.equal(proxy.singleUseUrl("https://host:44300/x"), "https://host:44300/x");
+  const system = await recordingSystem();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    assert.equal(
+      proxy.singleUseUrl("https://host:44300/x"),
+      "https://host:44300/x"
+    );
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
 test("a different system gets a different token", async () => {
   const one = await recordingSystem();
   const two = await recordingSystem();

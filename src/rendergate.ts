@@ -7,6 +7,7 @@ import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import * as tar from "tar";
 import { CONFIG_SECTION } from "./settings";
+import { bundleTrust } from "./checkcore";
 
 /*
  * Self-installing render gate: downloads the self-contained checker bundle
@@ -44,6 +45,63 @@ const PINNED_BUNDLE_URL = LINTER_PIN
   : undefined;
 
 let installing = false;
+
+/**
+ * Why the render gate could not be run, when it could not.
+ *
+ * It lives here, next to the install, rather than as a flag in `viewcheck.ts`,
+ * because the two things that CLEAR it are here: a finished install started
+ * from the palette command, and one started from "Update Render Gate" in
+ * `extension.ts`. A flag in the check could be set by the check and reset by
+ * nothing it can see - which is exactly how a successful install still left
+ * every save reporting "render gate skipped" until the window was reloaded.
+ */
+let failureReason: string | undefined;
+
+/** What the check may truthfully say about the render half before running it. */
+export type RenderGateState =
+  /** A checker is available - the gate can be started. */
+  | { kind: "installed" }
+  /** Nothing is installed; the check would fall back to npx. */
+  | { kind: "missing" }
+  /** An install is running right now - starting a checker from a directory
+   *  being swapped underneath it is not worth the race. */
+  | { kind: "busy" }
+  /** Its checker failed to start in this session, and nothing has changed
+   *  since that could have fixed it. */
+  | { kind: "failed"; reason: string };
+
+/**
+ * The one answer to "can the render half run right now, and if not why".
+ *
+ * `checkerInstalled` is the caller's half of it: which command would be run
+ * (an explicit setting, a self-installed gate, a local checkout, or the npx
+ * fallback) is resolved in `checkcore.ts` from the settings, and only the
+ * caller has them.
+ */
+export function renderGateState(checkerInstalled: boolean): RenderGateState {
+  if (installing) {
+    return { kind: "busy" };
+  }
+  if (failureReason) {
+    return { kind: "failed", reason: failureReason };
+  }
+  return checkerInstalled ? { kind: "installed" } : { kind: "missing" };
+}
+
+/** Record that the checker could not be started - the check calls this when
+ *  spawning failed, so later saves skip the gate instead of paying for the
+ *  same failure again. */
+export function noteRenderGateFailure(reason: string): void {
+  failureReason = reason;
+}
+
+/** Forget a recorded failure - whatever was wrong may have been fixed (a
+ *  setting changed, a gate installed). The next check pays for one spawn to
+ *  find out. */
+export function clearRenderGateFailure(): void {
+  failureReason = undefined;
+}
 
 function baseDir(context: vscode.ExtensionContext): string {
   return path.join(context.globalStorageUri.fsPath, "render-gate");
@@ -130,22 +188,12 @@ const digestKey = (url: string): string => `abap2ui5.bundleDigest:${url}`;
 /**
  * What this build is willing to execute from a downloaded archive.
  *
- * The bundle is fetched over HTTPS and then extracted and run with VS Code's
- * Node - so whoever can change that release asset chooses code that runs on
- * every machine that installs the gate. Pinning the URL to a per-commit tag
- * pins WHICH asset, not WHAT IS IN IT.
- *
- * Two checks, strongest first:
- *
- * 1. A `<bundle>.sha256` sibling asset, when the linter publishes one: authoritative,
- *    and a mismatch is refused outright. (It does not publish one today; this
- *    closes the gap the moment it does, with no release here.)
- * 2. Otherwise trust-on-first-use, per url. A per-commit tag is supposed to be
- *    IMMUTABLE, so the same url answering with different bytes than last time
- *    is precisely the signal worth stopping on - it cannot happen by accident.
- *
- * Neither protects a first install against a bundle that was already
- * tampered with; say so rather than implying otherwise.
+ * The DECISION is `bundleTrust` in `checkcore.ts` - it is the security policy
+ * behind a runtime code download, so it is a pure function with tests rather
+ * than a branch reachable only from a running install. What is left here is
+ * what needs an editor: fetching the published checksum, reading and writing
+ * the remembered digest, logging, and turning a rejection into a throw that
+ * aborts the install before anything is unpacked.
  */
 async function verifyBundle(
   context: vscode.ExtensionContext,
@@ -167,41 +215,20 @@ async function verifyBundle(
     // no checksum asset published, or offline mid-install - fall through to
     // the remembered digest, which is the check that does not need the network
   }
-  if (published) {
-    if (published !== actual) {
-      throw new Error(
-        `bundle checksum mismatch - the published sha256 is ${published.slice(0, 12)}… ` +
-          `but the download hashes to ${actual.slice(0, 12)}…. Nothing was installed.`
-      );
-    }
-    log(`render-gate: bundle sha256 ${actual.slice(0, 12)}… matches the published checksum`);
-    await context.globalState.update(digestKey(url), actual);
-    return;
-  }
-
-  const remembered = context.globalState.get<string>(digestKey(url));
-  if (remembered && remembered !== actual) {
+  const decision = bundleTrust({
+    url,
+    actual,
+    published,
+    remembered: context.globalState.get<string>(digestKey(url)),
     // The rolling tag is republished on every linter merge - a changed
     // digest there is the expected case, not the alarm.
-    if (url === ROLLING_BUNDLE_URL) {
-      log(
-        `render-gate: rolling bundle moved since the last install ` +
-          `(${remembered.slice(0, 12)}… -> ${actual.slice(0, 12)}…) - expected for a rolling tag`
-      );
-    } else {
-      throw new Error(
-        "bundle changed since it was last installed from the same URL. That URL " +
-          "names one immutable linter commit, so its content should never move. " +
-          `Expected ${remembered.slice(0, 12)}…, got ${actual.slice(0, 12)}…. ` +
-          "Nothing was installed."
-      );
-    }
+    rolling: url === ROLLING_BUNDLE_URL,
+  });
+  if (!decision.accept) {
+    throw new Error(decision.message);
   }
+  log(decision.log);
   await context.globalState.update(digestKey(url), actual);
-  log(
-    `render-gate: bundle sha256 ${actual.slice(0, 12)}…` +
-      (remembered ? " (unchanged since the last install)" : " (first install from this URL)")
-  );
 }
 
 /** Download the checker bundle and Chromium into global storage. Returns
@@ -334,6 +361,13 @@ export async function installRenderGate(
         await fs.promises.rm(previous, { recursive: true, force: true });
 
         log("render-gate: installed");
+        /* There is a working gate now, so whatever failed to start before is
+         * no longer what the check will run. Resetting it HERE covers every
+         * caller - the palette command, the one-time offer, "Update Render
+         * Gate" - and the config event the `update` below fires does not:
+         * when `viewCheck.render` was already true (the very state in which
+         * spawning failed) VS Code fires nothing at all. */
+        clearRenderGateFailure();
         await vscode.workspace
           .getConfiguration(CONFIG_SECTION)
           .update("viewCheck.render", true, vscode.ConfigurationTarget.Global);
