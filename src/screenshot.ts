@@ -111,7 +111,13 @@ function pruneScreenshots(dir: string, keep: number): void {
  */
 export async function takeScreenshot(
   context: vscode.ExtensionContext,
-  options: { url: string; className: string; width?: number; height?: number },
+  options: {
+    /** The proxied page - authorized by a ONE-SHOT token, see below. */
+    url: string;
+    className: string;
+    width?: number;
+    height?: number;
+  },
   log: (m: string) => void,
   showLog?: () => void
 ): Promise<string | undefined> {
@@ -147,20 +153,20 @@ export async function takeScreenshot(
     // roundtrip are through before the shot - deterministic, no sleep.
     "--virtual-time-budget=15000",
     /*
-     * KNOWN EXPOSURE, deliberately not worked around here: this is the
-     * proxied url, so it carries the proxy's path token, and a process
-     * argument vector is readable by other processes of this user (`ps`,
-     * /proc/<pid>/cmdline). `report.ts` redacts the same token out of the
-     * logs precisely because it authorizes an authenticated session against
-     * the system.
+     * The page to shoot, and the reason its url is a ONE-SHOT one.
      *
-     * Headless Chromium takes the page to shoot only as an argument - there
-     * is no stdin or file form of it - so removing this needs a different
-     * shape (a one-shot token the proxy retires after the shot, or a local
-     * redirect page). Both change security-critical code that cannot be
-     * verified against a real system from here, and a half-verified change
-     * to the credential path is worse than a documented one. The window is
-     * the lifetime of one screenshot process.
+     * Headless Chromium takes it only as an argument - there is no stdin or
+     * file form of it - and a process argument vector is readable by every
+     * other process of this user (`ps`, /proc/<pid>/cmdline). Carrying the
+     * proxy's long-lived capability token there handed any of them an
+     * authenticated session against the system for as long as the proxy ran,
+     * which is exactly why `report.ts` redacts that token out of the logs.
+     *
+     * So callers hand in a url authorized by `SapProxy.singleUseUrl`: the
+     * token in it is retired the moment Chromium's first request is
+     * authorized, and the page's follow-up requests ride on the HttpOnly
+     * cookie that first answer plants. What leaks into the argument vector
+     * is then a token that is already spent by the time the shot is taken.
      */
     options.url,
   ];

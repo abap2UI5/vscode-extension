@@ -192,7 +192,18 @@ export class ActivationWatch {
       try {
         state = await source.fetchClassState(className, sapClient);
       } catch (err) {
-        if (err instanceof AdtStatusError && err.status >= 400 && err.status < 500) {
+        if (
+          err instanceof AdtStatusError &&
+          err.status >= 400 &&
+          err.status < 500 &&
+          // 401 is NOT a statement about this system's ADT: it says the
+          // credentials in the proxy are (currently) wrong, which the user
+          // fixes by re-entering them. Latching it disabled reload-on-
+          // activation for the rest of the window - the extension's flagship
+          // loop, silently gone after one mistyped password. 403/404 are the
+          // permanent ones: ADT not exposed, or not authorized for this user.
+          err.status !== 401
+        ) {
           // Not authorized / not exposed: it will not start answering later.
           const origin = source.systemOrigin;
           if (origin) {

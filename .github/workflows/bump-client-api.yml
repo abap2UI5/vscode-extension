@@ -2,9 +2,11 @@
 # interface but lives in this repo - the one bundled artefact with no drift
 # gate until now (the UI5 snapshot moves with the linter pin, the snippets
 # are tested; the client API hover was synced by hand). This workflow closes
-# that gap the same way bump-linter does: weekly regenerate against the
-# core's main, full gate, PR. A red run here means hover/completion currently
-# describe an API the core no longer has.
+# that gap: weekly regenerate against the core's main, full gate, PR. A red
+# run here means hover/completion currently describe an API the core no
+# longer has.
+#
+# The mechanics live in bump-snapshot.yml, shared with the other three bumps.
 
 name: Bump client API
 
@@ -20,49 +22,17 @@ permissions:
 
 jobs:
   bump:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Regenerate from the core's main
-        run: node scripts/generate-client-api.mjs
-
-      - name: Check whether the interface knowledge moved
-        id: diff
-        run: |
-          if git diff --quiet src/data/client-api.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - if: steps.diff.outputs.changed == 'true'
-        run: npm ci
-      - if: steps.diff.outputs.changed == 'true'
-        run: npm run lint
-      - if: steps.diff.outputs.changed == 'true'
-        run: npm test
-
-      - if: steps.diff.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
-        with:
-          branch: bump-client-api
-          title: "chore: sync client-api.json with the core's z2ui5_if_client"
-          commit-message: "chore: sync client-api.json with the core's z2ui5_if_client"
-          body: |
-            Weekly regeneration of `src/data/client-api.json` from
-            `abap2UI5/abap2UI5` main - the `client->` hover and completion
-            describe the interface as it is documented upstream only when
-            this file moves with it.
-
-            Lint and tests ran on the regenerated data in the workflow that
-            opened this PR; CI repeats them here.
-          add-paths: |
-            src/data/client-api.json
-          delete-branch: true
+    uses: ./.github/workflows/bump-snapshot.yml
+    secrets: inherit
+    with:
+      label: src/data/client-api.json
+      timeout-minutes: 30
+      paths: src/data/client-api.json
+      regenerate: node scripts/generate-client-api.mjs
+      branch: bump-client-api
+      title: "chore: sync client-api.json with the core's z2ui5_if_client"
+      body: |
+        Weekly regeneration of `src/data/client-api.json` from
+        `abap2UI5/abap2UI5` main - the `client->` hover and completion
+        describe the interface as it is documented upstream only when
+        this file moves with it.

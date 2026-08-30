@@ -2,7 +2,7 @@
   "name": "abap2ui5",
   "displayName": "abap2UI5",
   "description": "Develop abap2UI5 apps in VS Code: F9 launches a z2ui5_if_app class in an embedded preview, reload on activation, static view checks, the abap2UI5 MCP server for AI agents, snippets.",
-  "version": "0.25.1",
+  "version": "0.26.0",
   "publisher": "abap2ui5",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -661,7 +661,8 @@
                 "type": "string",
                 "description": "Launch URL template with the {class} placeholder."
               }
-            }
+            },
+            "additionalProperties": false
           },
           "markdownDescription": "The systems F9 can launch against. The active one is picked with the command **\"abap2UI5: Select System\"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again.\n\n```json\n[\n  { \"name\": \"DEV\", \"url\": \"https://dev:44300/sap/bc/z2ui5?app_start={class}&sap-client=100\" },\n  { \"name\": \"Sandbox\", \"url\": \"https://box:44300/sap/bc/z2ui5?app_start={class}\" }\n]\n```"
         },
@@ -859,7 +860,8 @@
                 "type": "string",
                 "description": "What the picker shows for it; the value itself when omitted."
               }
-            }
+            },
+            "additionalProperties": false
           },
           "markdownDescription": "Additional UI5 themes the preview's theme picker offers, merged after the built-in list - for a custom theme deployed on your system.\n\n```json\n[\n  { \"value\": \"my_company_theme\", \"label\": \"Company Theme\" }\n]\n```"
         },
@@ -881,7 +883,8 @@
                 "type": "string",
                 "description": "What the picker shows for it; the value itself when omitted."
               }
-            }
+            },
+            "additionalProperties": false
           },
           "markdownDescription": "Additional logon languages the preview's language picker offers, merged after the built-in list - passed to the app as `sap-language`.\n\n```json\n[\n  { \"value\": \"CS\", \"label\": \"Czech\" }\n]\n```"
         },
@@ -1032,7 +1035,7 @@
     ]
   },
   "scripts": {
-    "check": "npm run lint && npm test && npm run package && npm run vsix",
+    "check": "npm run lint && npm test && npm run vsix",
     "vscode:prepublish": "npm run package",
     "compile": "node esbuild.js",
     "watch": "node esbuild.js --watch",
@@ -1042,6 +1045,7 @@
     "test": "node esbuild.js --tests && node --test dist-test/*.test.cjs",
     "test:grep": "node esbuild.js --tests && node --test --test-name-pattern",
     "test:web": "node esbuild.js && node esbuild.js --webtest && vscode-test-web --browserType=chromium --headless --extensionDevelopmentPath=. --extensionTestsPath=dist/web/test.js",
+    "test:desktop": "node esbuild.js && node esbuild.js --desktoptest && node src/test/desktop/runner.mjs",
     "client-api": "node scripts/generate-client-api.mjs",
     "client-api:check": "node scripts/generate-client-api.mjs --check",
     "app-template": "node scripts/generate-app-template.mjs",
@@ -1051,8 +1055,10 @@
   },
   "devDependencies": {
     "@abap2ui5/linter": "github:abap2UI5/linter#0f8182f900bab9425e853c5f678b29e8dcb885a2",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^26.2.0",
     "@types/vscode": "^1.101.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^3.9.0",
     "esbuild": "^0.28.0",

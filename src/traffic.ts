@@ -11,6 +11,7 @@
  */
 
 import type { TrafficEntry } from "./proxy";
+import { redactQueryCredentials } from "./report";
 
 /** `1.2 kB`, `340 B`, `4.0 MB` - coarse on purpose, it is a log line. */
 export function formatBytes(bytes: number): string {
@@ -28,6 +29,12 @@ export function formatBytes(bytes: number): string {
  * The columns are fixed so a scan down the duration column works. Status 0
  * is a request that got no answer at all (aborted, or the forward failed
  * before one arrived) and renders as `-`.
+ *
+ * The path is redacted on the way out. A launch URL is free to carry
+ * `sap-user`/`sap-password` - the proxy forwards the query as written, and
+ * from here the line goes into an output channel AND into the ring the MCP
+ * `get_traffic` tool hands any agent. "Never log credentials" is decided
+ * here, at the one formatter both of them share.
  */
 export function formatTrafficLine(entry: TrafficEntry): string {
   return [
@@ -35,7 +42,7 @@ export function formatTrafficLine(entry: TrafficEntry): string {
     (entry.status ? String(entry.status) : "-").padEnd(4),
     `${entry.durationMs} ms`.padStart(9),
     formatBytes(entry.bytes).padStart(9),
-    ` ${entry.path}`,
+    ` ${redactQueryCredentials(entry.path)}`,
   ].join(" ");
 }
 

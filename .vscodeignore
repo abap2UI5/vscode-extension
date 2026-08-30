@@ -17,3 +17,18 @@ tsconfig.json
 **/.gitignore
 .nvmrc
 .gitignore
+
+# Build output of the two in-host test suites, which lands INSIDE dist/ and
+# would otherwise be packaged with the extension it tests. `npm run package`
+# does not clean dist/, so whether a locally built .vsix carries the web test
+# bundle depended purely on whether `npm run test:web` had been run before it;
+# only CI's step order kept it out of a release.
+dist/web/test.js
+
+# The VS Code builds the two in-host runners download next to the checkout
+# (@vscode/test-web defaults to ./.vscode-test-web, @vscode/test-electron to
+# ./.vscode-test). Each is tens of megabytes of somebody else's product and is
+# now cached in CI, so it is far more likely to be sitting there at package
+# time than it used to be.
+.vscode-test-web/**
+.vscode-test/**

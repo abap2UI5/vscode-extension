@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { attributeAt, attributeSpans, idAt, idLiterals, idSpans } from "../renamewires";
+import {
+  attributeAt,
+  attributeSpans,
+  declaredIds,
+  idAt,
+  idCompletionAt,
+  idLiterals,
+  idSpans,
+  renameNameError,
+} from "../renamewires";
 
 /*
  * The two names an abap2UI5 app ties itself together with, and the rule that
@@ -295,4 +304,157 @@ test("a multi-line wire still reaches its id", () => {
     idLiterals(source).map((s) => s.name),
     ["TABLE"]
   );
+});
+
+// ---------------------------------------------------------------------------
+// What a renamed wire may be called
+// ---------------------------------------------------------------------------
+
+test("an attribute may not be renamed to something with a hyphen in it", () => {
+  // one permissive `[\w-]+` test used to serve all three kinds, so
+  // `mv_title` -> `mv-title` passed and the rename rewrote the DATA
+  // declaration and every use into a component selector that does not compile
+  const message = renameNameError("attribute", "mv-title");
+  assert.ok(message, "a hyphen in an attribute name has to be refused");
+  assert.match(message, /component selector/);
+});
+
+test("an attribute name is an ABAP identifier", () => {
+  assert.equal(renameNameError("attribute", "mv_title"), undefined);
+  assert.equal(renameNameError("attribute", "_hidden"), undefined);
+  assert.equal(renameNameError("attribute", "MV_TITLE2"), undefined);
+  for (const bad of ["1mv", "mv title", "mv.title", "", "mv#"]) {
+    assert.ok(
+      renameNameError("attribute", bad),
+      `${JSON.stringify(bad)} is not an ABAP identifier`
+    );
+  }
+  assert.equal(renameNameError("attribute", "m".repeat(30)), undefined);
+  assert.match(
+    renameNameError("attribute", "m".repeat(31)) ?? "",
+    /at most 30 characters/
+  );
+});
+
+test("an event name and a control id may carry a hyphen", () => {
+  // they are STRINGS - nothing but the framework's own comparison reads them
+  assert.equal(renameNameError("event", "SAVE-ALL"), undefined);
+  assert.equal(renameNameError("id", "TABLE-1"), undefined);
+  assert.match(renameNameError("event", "SAVE ALL") ?? "", /An event name/);
+  assert.match(renameNameError("id", "TABLE.1") ?? "", /A control id/);
+});
+
+// ---------------------------------------------------------------------------
+// attributeAt now delegates to attributeSpans - same answers, one walk
+// ---------------------------------------------------------------------------
+
+test("the attribute under the cursor is the one the spans agree on", () => {
+  const at = SOURCE.indexOf("mv_title = ");
+  const span = attributeAt(SOURCE, at + 2);
+  assert.equal(span?.name, "mv_title");
+  const spans = attributeSpans(SOURCE, "mv_title");
+  assert.ok(
+    spans.some((s) => s.start === span!.start && s.end === span!.end),
+    "attributeAt has to answer with one of attributeSpans' own spans"
+  );
+});
+
+test("a word the class does not declare is no attribute", () => {
+  // `string` in `DATA mv_title TYPE string` - F2 on it used to offer a rename
+  // that would have rewritten every TYPE clause in the class
+  const at = SOURCE.indexOf("TYPE string") + "TYPE ".length;
+  assert.equal(attributeAt(SOURCE, at + 1), undefined);
+  assert.deepEqual(attributeSpans(SOURCE, "string"), []);
+});
+
+// ---------------------------------------------------------------------------
+// Closing the wiring loop: which ids exist, and completing one where a wire
+// addresses it
+// ---------------------------------------------------------------------------
+
+test("an id literal knows which end of the wire it is", () => {
+  const roles = idLiterals(SOURCE).map((s) => [s.name, s.role]);
+  assert.deepEqual(roles, [
+    ["TABLE", "declaration"],
+    ["TABLE", "wire"],
+    ["TABLE", "wire"],
+  ]);
+});
+
+test("only the view's own a( n = `id` ) declares an id", () => {
+  assert.deepEqual(declaredIds(SOURCE), ["TABLE"]);
+  // a wire alone declares nothing - completing from it would offer the typo
+  const wireOnly = [
+    "METHOD z2ui5_if_app~main.",
+    "  client->set_focus( `INPUT1` ).",
+    "ENDMETHOD.",
+  ].join("\n");
+  assert.deepEqual(declaredIds(wireOnly), []);
+});
+
+test("every declared id is offered once, in source order", () => {
+  const source = [
+    "METHOD z2ui5_if_app~main.",
+    "  view->ele( n = `Page` )->tag( n = `Table` )->a( n = `id` v = `TABLE` )",
+    "      )->tag( n = `Input` )->a( n = `id` v = `INPUT1` )",
+    "      )->tag( n = `Other` )->a( n = `id` v = `TABLE` ).",
+    "  client->set_focus( `` ).",
+    "ENDMETHOD.",
+  ].join("\n");
+  const at = source.indexOf("set_focus( `") + "set_focus( `".length;
+  const offer = idCompletionAt(source, at);
+  assert.deepEqual(offer?.ids, ["TABLE", "INPUT1"]);
+  // an empty literal is where somebody is about to type an id, so the span to
+  // replace is empty and starts right where the cursor is
+  assert.equal(offer?.prefix, "");
+  assert.equal(offer?.start, at);
+  assert.equal(offer?.end, at);
+});
+
+test("a half-typed id in a wire is replaced whole", () => {
+  const source = [
+    "METHOD z2ui5_if_app~main.",
+    "  view->tag( n = `Table` )->a( n = `id` v = `TABLE` ).",
+    "  client->popover_display( by_id = `TAB` ).",
+    "ENDMETHOD.",
+  ].join("\n");
+  const start = source.indexOf("by_id = `") + "by_id = `".length;
+  const offer = idCompletionAt(source, start + 2);
+  assert.deepEqual(offer?.ids, ["TABLE"]);
+  assert.equal(offer?.prefix, "TA");
+  assert.equal(source.slice(offer!.start, offer!.end), "TAB");
+});
+
+test("the declaring literal itself is not completed", () => {
+  // it is the source of truth for what the id is called - offering the ids it
+  // defines back into it says nothing
+  const source = [
+    "METHOD z2ui5_if_app~main.",
+    "  view->tag( n = `Table` )->a( n = `id` v = `TABLE` ).",
+    "ENDMETHOD.",
+  ].join("\n");
+  const at = source.indexOf("v = `TABLE") + "v = `".length;
+  assert.equal(idCompletionAt(source, at + 1), undefined);
+});
+
+test("a literal that is no id offers nothing", () => {
+  const source = [
+    "METHOD z2ui5_if_app~main.",
+    "  view->tag( n = `Table` )->a( n = `id` v = `TABLE` ).",
+    "  client->message_toast_display( `Saved` ).",
+    "ENDMETHOD.",
+  ].join("\n");
+  const at = source.indexOf("`Saved`") + 2;
+  assert.equal(idCompletionAt(source, at), undefined);
+});
+
+test("a wire quoted in a comment is not an id position", () => {
+  const source = [
+    "METHOD z2ui5_if_app~main.",
+    "  view->tag( n = `Table` )->a( n = `id` v = `TABLE` ).",
+    "  \" client->set_focus( `TABLE` ) once lived here",
+    "ENDMETHOD.",
+  ].join("\n");
+  const at = source.indexOf("set_focus( `TABLE`") + "set_focus( `".length;
+  assert.equal(idCompletionAt(source, at + 1), undefined);
 });

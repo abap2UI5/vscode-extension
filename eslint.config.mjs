@@ -1,3 +1,4 @@
+import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 /*
@@ -50,17 +51,54 @@ export default tseslint.config(
   },
   {
     // The build script and the generators are plain CJS/ESM Node scripts.
-    files: ["esbuild.js", "scripts/**/*.mjs"],
+    //
+    // They used to declare these globals and NOTHING else: the recommended
+    // rule sets above are mapped to `src/**/*.ts`, so no rule at all applied
+    // here and `eslint .` caught nothing but parse errors. These are the
+    // files that fetch remote content and overwrite committed snapshots, and
+    // they are outside tsconfig's `include` too, so `tsc --noEmit` never saw
+    // them either - between the two gates they were unchecked. `js.configs
+    // .recommended` is the plain-JavaScript half of what `src/**/*.ts` gets,
+    // and it is what turns the globals below into a real `no-undef` check
+    // rather than documentation.
+    files: ["esbuild.js", "scripts/**/*.mjs", "src/test/desktop/*.mjs"],
     languageOptions: {
+      // Hand-maintained rather than the `globals` package: it is a short,
+      // readable list of what these scripts are actually allowed to reach
+      // for, and a name that is not on it is a typo. `__dirname`/`__filename`
+      // are here for the two esbuild `inject` shims, which are .mjs files
+      // that end up inside a CJS bundle where both do exist.
       globals: {
         require: "readonly",
         module: "writable",
         process: "readonly",
         console: "readonly",
         __dirname: "readonly",
+        __filename: "readonly",
         URL: "readonly",
+        URLSearchParams: "readonly",
         fetch: "readonly",
+        AbortController: "readonly",
+        AbortSignal: "readonly",
+        Buffer: "readonly",
+        TextEncoder: "readonly",
+        TextDecoder: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
       },
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+      // The same idiom the TypeScript half allows: `catch { /* ignore */ }`
+      // as a best-effort probe (esbuild.js's linterPin does exactly that).
+      "no-empty": ["error", { allowEmptyCatch: true }],
+      // Every identifier these scripts use has to be either imported or in
+      // the globals list above - the point of the block.
+      "no-undef": "error",
+      "no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" },
+      ],
     },
   }
 );

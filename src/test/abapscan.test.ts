@@ -4,6 +4,7 @@ import {
   abapLiterals,
   abapSpans,
   abapStatements,
+  blankComments,
   blankNonCode,
   declaredNames,
 } from "../abapscan";
@@ -209,6 +210,130 @@ test("a template spans lines, and the embedded code goes with it", () => {
     "line breaks inside the template have to survive the blanking"
   );
   assert.ok(blanked.includes("tag("));
+});
+
+/*
+ * The blanking is built from the slices BETWEEN the spans now, rather than by
+ * writing over a per-character array - the array cost one single-character
+ * string per character of the class, several times per keystroke. The edges
+ * of "between" are what the cases below pin down.
+ */
+
+test("a span that runs to the end of the source keeps the length", () => {
+  for (const source of [
+    "DATA x. \" trailing comment to EOF",
+    "mv_a = `unterminated",
+    "* a full line comment to EOF",
+    "mv_a = |template to EOF",
+  ]) {
+    assert.equal(
+      blankNonCode(source).length,
+      source.length,
+      `length changed for ${JSON.stringify(source)}`
+    );
+  }
+});
+
+test("a source without a single span comes back unchanged", () => {
+  const source = "DATA mv_a TYPE i.\nmv_a = 1.\n";
+  assert.equal(blankNonCode(source), source);
+  assert.equal(blankComments(source), source);
+});
+
+test("CRLF survives the blanking as it always did - the \\n stays", () => {
+  // the \r sits INSIDE the comment span (which ends at the \n), so it is
+  // blanked like any other content character; the \n is what has to survive
+  const source = "DATA x. \" note\r\nDATA y.\r\n";
+  const blanked = blankNonCode(source);
+  assert.equal(blanked.length, source.length);
+  assert.equal(
+    blanked.split("\n").length,
+    source.split("\n").length,
+    "line breaks have to survive"
+  );
+  assert.equal(blanked.includes("note"), false);
+  assert.ok(blanked.startsWith("DATA x. "));
+  assert.ok(blanked.includes("DATA y."));
+});
+
+test("blankComments leaves the literals and the templates alone", () => {
+  const source = "mv_a = `keep`. \" drop\nmv_b = |t{ 1 }|.\n";
+  const code = blankComments(source);
+  assert.equal(code.length, source.length);
+  assert.ok(code.includes("`keep`"));
+  assert.ok(code.includes("|t{ 1 }|"));
+  assert.equal(code.includes("drop"), false);
+});
+
+test("every code character keeps its offset through both blankings", () => {
+  const source = [
+    "CLASS zcl DEFINITION.",
+    "  PUBLIC SECTION.",
+    "    DATA mv_a TYPE string. \" the title",
+    "ENDCLASS.",
+    "CLASS zcl IMPLEMENTATION.",
+    "  METHOD go.",
+    "    mv_a = 'it''s here'.",
+    "    lo_view->tag( n = `Button` )->a( n = `text` v = |x { mv_a } y| ).",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+    "",
+  ].join("\n");
+  for (const blanked of [blankNonCode(source), blankComments(source)]) {
+    assert.equal(blanked.length, source.length);
+    for (let i = 0; i < source.length; i++) {
+      const before = source[i];
+      const after = blanked[i];
+      assert.ok(
+        after === before || after === " ",
+        `offset ${i} became ${JSON.stringify(after)}, not a space`
+      );
+      if (before === "\n") {
+        assert.equal(after, "\n", `the newline at ${i} was blanked`);
+      }
+    }
+  }
+});
+
+/*
+ * The memo. It is keyed on the source as handed in - which for the VS Code
+ * callers is the identical string INSTANCE per document version - and it must
+ * be invisible: the same text answers the same way whether it hits or misses,
+ * and a different text is never served an older answer.
+ */
+
+test("the memo answers a repeat call with the same lex", () => {
+  // long enough to be worth a memo slot, so this exercises the cached path
+  const source =
+    "CLASS zcl DEFINITION.\n" +
+    "  PUBLIC SECTION.\n" +
+    `    DATA mv_a TYPE string. \" a comment\n`.repeat(200) +
+    "ENDCLASS.\n";
+  const first = abapSpans(source);
+  const second = abapSpans(source);
+  assert.equal(second, first, "the spans are handed out once, not rebuilt");
+  assert.equal(blankNonCode(source), blankNonCode(source));
+  assert.equal(blankComments(source), blankComments(source));
+  // and the answer is the same one the uncached path gives for equal text
+  const copy = source.slice(0, source.length - 1) + "\n";
+  assert.equal(blankNonCode(copy), blankNonCode(source));
+});
+
+test("a changed source is not served the previous answer", () => {
+  const head = "CLASS zcl DEFINITION.\n" + `    DATA mv TYPE i.\n`.repeat(200);
+  const before = head + "    mv = 'one'.\n";
+  const after = head + "    mv = 'two'.\n";
+  assert.ok(blankNonCode(before).length === before.length);
+  const blankedAfter = blankNonCode(after);
+  assert.equal(blankedAfter.length, after.length);
+  assert.equal(blankedAfter.includes("two"), false);
+  // back again - the first entry is still correct after the second evicted
+  // nothing it needed
+  assert.equal(blankNonCode(before).includes("one"), false);
+  assert.equal(
+    abapLiterals(after).map((l) => after.slice(l.start, l.end)).pop(),
+    "two"
+  );
 });
 
 test("blanking keeps its length even on a trailing escape mid-typing", () => {

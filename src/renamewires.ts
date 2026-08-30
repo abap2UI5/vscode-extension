@@ -56,17 +56,30 @@ interface Literal {
 }
 
 /**
- * Everything the detectors read out of one source, lexed once.
+ * Everything the detectors read out of one source, derived on demand.
  *
  * The lexing used to happen per detector per call - one F2 walks
  * `eventNameAt`, `idAt`, `attributeAt` and then the span collectors, and
- * each of them re-lexed the whole class. The single-entry cache keys on the
- * source TEXT (the callers hand in `getText( )` results, so identity is
- * useless), which makes every detector after the first free for the same
- * buffer version.
+ * each of them re-lexed the whole class.
+ *
+ * `abapscan.ts` now memoises the lex itself, so the spans and the two blanked
+ * copies are shared with every other feature in the window rather than only
+ * with the next detector here. What is left for this cache is the DERIVED
+ * shapes - the literal list, the comment ranges, the statements, the names a
+ * declaration statement introduces - and each of them is built the first time
+ * it is asked for, so a detector that only wants the literals no longer pays
+ * for the statement split as well.
  */
-interface Lexed {
-  source: string;
+class Lexed {
+  private literalList?: Literal[];
+  private commentList?: Array<[number, number]>;
+  private statementList?: AbapStatement[];
+  /** `declaredNames` per statement index - `declares( )` walks every
+   *  statement, and every walk used to re-blank and re-parse each one. */
+  private readonly names = new Map<number, ReturnType<typeof declaredNames>>();
+
+  constructor(readonly source: string) {}
+
   /** Every string literal with its content span, from the shared lexer.
    *
    *  This used to be its own scan, and it read a `'` inside a `" comment` as
@@ -75,14 +88,55 @@ interface Lexed {
    *  all. Silently: the rename went through on the id alone and the binding
    *  it belonged to kept pointing at the old name, which is the exact defect
    *  this module exists to prevent. */
-  literals: Literal[];
+  get literals(): Literal[] {
+    if (!this.literalList) {
+      this.literalList = abapSpans(this.source)
+        .filter((span) => span.kind === "literal")
+        .map((span) => ({
+          start: span.start,
+          end: span.end,
+          text: this.source.slice(span.start, span.end),
+        }));
+    }
+    return this.literalList;
+  }
+
   /** Comment spans, `[from, to)`. */
-  comments: Array<[number, number]>;
+  get comments(): Array<[number, number]> {
+    if (!this.commentList) {
+      this.commentList = abapSpans(this.source)
+        .filter((span) => span.kind === "comment")
+        .map((span) => [span.from, span.to] as [number, number]);
+    }
+    return this.commentList;
+  }
+
   /** The source with only comments blanked. */
-  code: string;
+  get code(): string {
+    return blankComments(this.source);
+  }
+
   /** The source with everything non-code blanked. */
-  blanked: string;
-  statements: AbapStatement[];
+  get blanked(): string {
+    return blankNonCode(this.source);
+  }
+
+  get statements(): AbapStatement[] {
+    if (!this.statementList) {
+      this.statementList = abapStatements(this.source);
+    }
+    return this.statementList;
+  }
+
+  /** The names the statement at `index` declares. */
+  declaredIn(index: number): ReturnType<typeof declaredNames> {
+    let out = this.names.get(index);
+    if (!out) {
+      out = declaredNames(this.statements[index].text);
+      this.names.set(index, out);
+    }
+    return out;
+  }
 }
 
 let cached: Lexed | undefined;
@@ -91,23 +145,7 @@ function lex(source: string): Lexed {
   if (cached && cached.source === source) {
     return cached;
   }
-  const spans = abapSpans(source);
-  cached = {
-    source,
-    literals: spans
-      .filter((span) => span.kind === "literal")
-      .map((span) => ({
-        start: span.start,
-        end: span.end,
-        text: source.slice(span.start, span.end),
-      })),
-    comments: spans
-      .filter((span) => span.kind === "comment")
-      .map((span) => [span.from, span.to] as [number, number]),
-    code: blankComments(source),
-    blanked: blankNonCode(source),
-    statements: abapStatements(source),
-  };
+  cached = new Lexed(source);
   return cached;
 }
 
@@ -164,7 +202,23 @@ function statementEnd(statements: readonly AbapStatement[], at: number): number 
  * same as the id (`setValue`, say) is not one, and renaming it would break the
  * wire it belongs to.
  */
-export function idLiterals(source: string): NamedSpan[] {
+export function idLiterals(source: string): IdLiteral[] {
+  return idLiteralScan(source, false);
+}
+
+/** Which end of a wire an id literal is: the `a( n = \`id\` v = … )` that
+ *  DECLARES the id on a control, or an ABAP wire that addresses one. */
+export type IdRole = "declaration" | "wire";
+
+export interface IdLiteral extends NamedSpan {
+  role: IdRole;
+}
+
+/** The marker that declares an id, as opposed to the ones that address one -
+ *  see {@link ID_MARKERS}, whose first alternative this is. */
+const DECLARING_MARKER = /^n\s*=/i;
+
+function idLiteralScan(source: string, includeEmpty: boolean): IdLiteral[] {
   /*
    * The markers are looked for in CODE, not in the raw text. Read raw, a
    * comment mentioning one ("TODO use control_by_id here") armed the scan,
@@ -175,18 +229,90 @@ export function idLiterals(source: string): NamedSpan[] {
    * one of the markers reads (`n = \`id\``).
    */
   const { literals, code, statements } = lex(source);
-  const out: NamedSpan[] = [];
+  const out: IdLiteral[] = [];
   const seen = new Set<number>();
   for (const marker of code.matchAll(ID_MARKERS)) {
     const at = (marker.index ?? 0) + marker[0].length;
     const literal = literalAfter(literals, at, statementEnd(statements, at));
-    if (!literal || !literal.text || seen.has(literal.start)) {
+    if (!literal || seen.has(literal.start)) {
+      continue;
+    }
+    // An EMPTY literal is nobody's id, so the readers skip it - but it is
+    // exactly where somebody is about to type one, which is what the
+    // completion below asks for.
+    if (!literal.text && !includeEmpty) {
       continue;
     }
     seen.add(literal.start);
-    out.push({ name: literal.text, start: literal.start, end: literal.end });
+    out.push({
+      name: literal.text,
+      start: literal.start,
+      end: literal.end,
+      role: DECLARING_MARKER.test(marker[0]) ? "declaration" : "wire",
+    });
   }
   return out.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * The ids this class DECLARES: the `a( n = \`id\` v = \`TABLE\` )` written on
+ * a control, in source order and without duplicates.
+ *
+ * The other half of the wire - `set_focus( \`TABLE\` )`, `by_id = \`TABLE\``,
+ * `control_by_id` - is judged against exactly this list by the linter's
+ * `frontend-action-unknown-id`, and a wire naming an id no view declares does
+ * nothing at all at runtime, not even a console line.
+ */
+export function declaredIds(source: string): string[] {
+  const out: string[] = [];
+  for (const literal of idLiterals(source)) {
+    if (literal.role === "declaration" && !out.includes(literal.name)) {
+      out.push(literal.name);
+    }
+  }
+  return out;
+}
+
+/** An id being written in a wire, with what may go there. */
+export interface IdCompletion {
+  /** What is already typed inside the literal. */
+  prefix: string;
+  /** The literal's content span - the range a completion replaces. */
+  start: number;
+  end: number;
+  /** The ids the class declares, in source order. */
+  ids: string[];
+}
+
+/**
+ * The id-taking literal the cursor sits in, with the ids the class declares -
+ * or undefined when the cursor is somewhere else.
+ *
+ * Only the WIRE end is completed. A typo there is the silent defect this
+ * module exists around: the wire addresses nothing and does nothing, with no
+ * error anywhere. The declaring `a( n = \`id\` … )` is the source of truth for
+ * what an id is called and has nothing to be completed from.
+ */
+export function idCompletionAt(
+  source: string,
+  offset: number
+): IdCompletion | undefined {
+  const wire = idLiteralScan(source, true).find(
+    (span) =>
+      span.role === "wire" && offset >= span.start && offset <= span.end
+  );
+  if (!wire) {
+    return undefined;
+  }
+  const ids = declaredIds(source);
+  return ids.length
+    ? {
+        prefix: source.slice(wire.start, Math.max(wire.start, offset)),
+        start: wire.start,
+        end: wire.end,
+        ids,
+      }
+    : undefined;
 }
 
 /** The id the cursor is on, if it is on one. */
@@ -228,17 +354,19 @@ function declares(lexed: Lexed, name: string): boolean {
   // `LENGTH` all looked declared - and F2 on the `string` in
   // `DATA mv_x TYPE string.` offered a rename that would have rewritten every
   // TYPE clause in the class.
-  return lexed.statements.some((statement) => {
-    const blanked = lexed.blanked.slice(
-      statement.start,
-      statement.start + statement.text.length
-    );
-    if (!DECLARING.test(blanked)) {
+  const blanked = lexed.blanked;
+  const wanted = name.toUpperCase();
+  return lexed.statements.some((statement, index) => {
+    if (
+      !DECLARING.test(
+        blanked.slice(statement.start, statement.start + statement.text.length)
+      )
+    ) {
       return false;
     }
-    return declaredNames(statement.text).some(
-      (declared) => declared.name.toUpperCase() === name.toUpperCase()
-    );
+    return lexed
+      .declaredIn(index)
+      .some((declared) => declared.name.toUpperCase() === wanted);
   });
 }
 
@@ -301,12 +429,66 @@ export function attributeSpans(source: string, name: string): NamedSpan[] {
  *  segment - provided the class declares it. */
 export function attributeAt(source: string, offset: number): NamedSpan | undefined {
   const word = wordAt(source, offset);
-  if (!word || !declares(lex(source), word.name)) {
+  if (!word) {
     return undefined;
   }
+  // `attributeSpans` runs the same `declares( )` check as its first line and
+  // answers with nothing when the class does not declare the name - asking
+  // here as well walked every statement of the class a second time, and F2
+  // (which calls this and then the span collector) paid for four walks.
   return attributeSpans(source, word.name).find(
     (span) => offset >= span.start && offset <= span.end
   );
+}
+
+// ---------------------------------------------------------------------------
+// What a renamed wire may be called
+// ---------------------------------------------------------------------------
+
+/** The three things F2 renames here. They do not share a spelling rule,
+ *  because only two of them are strings. */
+export type RenameKind = "event" | "id" | "attribute";
+
+/**
+ * An event name and a control id are STRINGS - the framework compares them
+ * with what the view wrote and nothing else reads them, so `-` is as good a
+ * character as any and the corpus uses it.
+ */
+const WIRE_NAME = /^[\w-]+$/;
+
+/**
+ * An attribute is an ABAP IDENTIFIER, and the permissive string test used to
+ * serve it as well: renaming `mv_title` to `mv-title` passed validation, and
+ * the rename then rewrote the DATA declaration and every use into a component
+ * selector that does not compile - silently, since nothing here reads ABAP
+ * syntax. A declared name starts with a letter or an underscore, holds
+ * letters, digits and underscores, and is at most 30 characters long.
+ */
+const ATTRIBUTE_NAME = /^[A-Za-z_]\w*$/;
+const ATTRIBUTE_MAX_LENGTH = 30;
+
+/** Why this new name cannot be used for this kind of target, or undefined
+ *  when it can. */
+export function renameNameError(
+  kind: RenameKind,
+  newName: string
+): string | undefined {
+  if (kind === "attribute") {
+    if (!ATTRIBUTE_NAME.test(newName)) {
+      return (
+        "An attribute name starts with a letter or _ and may only contain " +
+        "letters, digits and _ - a '-' would make it a component selector."
+      );
+    }
+    return newName.length > ATTRIBUTE_MAX_LENGTH
+      ? `An attribute name may be at most ${ATTRIBUTE_MAX_LENGTH} characters long.`
+      : undefined;
+  }
+  return WIRE_NAME.test(newName)
+    ? undefined
+    : `${
+        kind === "event" ? "An event name" : "A control id"
+      } may only contain letters, digits, _ and -.`;
 }
 
 /** The identifier-ish word around an offset, in code and inside a binding

@@ -627,3 +627,40 @@ test("a WHEN alternative chain longer than 200 characters still counts", () => {
   assert.ok(span, "the last alternative is still a WHEN literal");
   assert.equal(source.slice(span.start, span.end), "LAST");
 });
+
+/*
+ * The attribute run - "every `a( )` up to the next structural call" - is read
+ * by the property editor (`controlCallAt`) and by the binding-path context.
+ * The list of what counts as structural used to be written out twice, once as
+ * a `const` and once as a literal inside the other reader, which is a rule
+ * that can only ever drift apart.
+ */
+
+test("an attribute run ends at the next structural call", () => {
+  const source = [
+    "    view->tag( n = `Text` )->a( n = `text` v = `mine`",
+    "        )->tag( n = `Button` )->a( n = `text` v = `theirs`",
+    "        )->end( )->a( n = `late` v = `no` ).",
+  ].join("\n");
+  const call = controlCallAt(source, source.indexOf("Text` )"));
+  assert.deepEqual(
+    call?.attrs.map((a) => a.value),
+    ["mine"],
+    "the run must stop at the tag( ) that opens the next control"
+  );
+});
+
+test("factory( ) and stringify( ) end an attribute run too", () => {
+  for (const structural of ["factory( )", "stringify( )"]) {
+    const source = [
+      "    view->tag( n = `Text` )->a( n = `text` v = `mine`",
+      `        )->${structural}->a( n = \`late\` v = \`no\` ).`,
+    ].join("\n");
+    const call = controlCallAt(source, source.indexOf("Text` )"));
+    assert.deepEqual(
+      call?.attrs.map((a) => a.value),
+      ["mine"],
+      `${structural} has to end the run`
+    );
+  }
+});

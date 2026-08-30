@@ -11,7 +11,15 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    // Nothing here is ever compiled by `tsc` - esbuild bundles the sources,
+    // and esbuild transpiles one file at a time with no cross-file type
+    // information. So the constructs that need the whole program to be
+    // emitted correctly (a type re-exported without `export type`, a
+    // `const enum` read from another file) would type-check clean here and
+    // then be silently wrong in the bundle. This makes `tsc --noEmit` judge
+    // the sources the way the bundler actually reads them.
+    "isolatedModules": true
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]

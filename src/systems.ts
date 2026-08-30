@@ -78,13 +78,25 @@ export function allSystems(): SystemProfile[] {
  * the second could not be activated at all, and its checkmark sat on its
  * twin. Rather than refuse the configuration, the later one is numbered.
  */
-function withUniqueNames(all: SystemProfile[]): SystemProfile[] {
+export function withUniqueNames(all: SystemProfile[]): SystemProfile[] {
   const seen = new Map<string, number>();
   return all.map((system) => {
     const taken = seen.get(system.name) ?? 0;
     seen.set(system.name, taken + 1);
     return taken ? { ...system, name: `${system.name} (${taken + 1})` } : system;
   });
+}
+
+/** `name`, numbered until no configured system already carries it - what a
+ *  newly added system is called. The same numbering `withUniqueNames` shows
+ *  for two profiles configured with one name, applied before storing. */
+export function uniqueName(name: string, taken: readonly string[]): string {
+  const used = new Set(taken);
+  let unique = name;
+  for (let i = 2; used.has(unique); i++) {
+    unique = `${name} (${i})`;
+  }
+  return unique;
 }
 
 /** The system F9 launches against. */
@@ -214,11 +226,7 @@ export async function pickSystem(
     // The name is how the active system is resolved, so a duplicate would
     // activate its TWIN instead of the system just added - numbered here,
     // the same way withUniqueNames presents two configured twins.
-    const taken = new Set(allSystems().map((system) => system.name));
-    let unique = name;
-    for (let i = 2; taken.has(unique); i++) {
-      unique = `${name} (${i})`;
-    }
+    const unique = uniqueName(name, allSystems().map((system) => system.name));
     // Adding a second system turns the single setting into the first entry of
     // the list, so both end up in the same place.
     const cfg = config();
@@ -248,9 +256,34 @@ export async function pickSystem(
 // ---------------------------------------------------------------------------
 
 /** Secrets are keyed by origin: two clients on one host share a logon, two
- *  hosts do not. */
-function keysFor(origin: string): { user: string; pass: string } {
+ *  hosts do not. Exported for the test suite - the key SHAPE is a contract
+ *  with every installed copy of the extension (AGENTS.md: do not reuse these
+ *  names), and a silent change to it would ask every user for their password
+ *  again. */
+export function keysFor(origin: string): { user: string; pass: string } {
   return { user: `abap2ui5.user:${origin}`, pass: `abap2ui5.pass:${origin}` };
+}
+
+/**
+ * The pre-0.14 unscoped secrets when they are what this origin should be
+ * logged on with, undefined otherwise.
+ *
+ * Both halves matter: an origin that already has EITHER scoped secret keeps
+ * what it has, and a half-written legacy pair is not adopted - a user without
+ * a password would otherwise be stored against an origin it may not even
+ * belong to, and the prompt for the missing half never comes back.
+ */
+export function legacyAdoption(
+  scoped: { user?: string; pass?: string },
+  legacy: { user?: string; pass?: string }
+): Credentials | undefined {
+  if (scoped.user || scoped.pass) {
+    return undefined;
+  }
+  if (!legacy.user || !legacy.pass) {
+    return undefined;
+  }
+  return { user: legacy.user, pass: legacy.pass };
 }
 
 export interface Credentials {
@@ -274,19 +307,26 @@ export async function ensureCredentials(
   let pass = await secrets.get(keys.pass);
 
   if (!user && !pass) {
-    const legacyUser = await secrets.get(LEGACY_USER);
-    const legacyPass = await secrets.get(LEGACY_PASS);
-    if (legacyUser && legacyPass) {
-      await secrets.store(keys.user, legacyUser);
-      await secrets.store(keys.pass, legacyPass);
+    // only worth two secret reads when this origin has nothing of its own;
+    // legacyAdoption states that rule as well, and owns the decision
+    const adopted = legacyAdoption(
+      { user, pass },
+      {
+        user: await secrets.get(LEGACY_USER),
+        pass: await secrets.get(LEGACY_PASS),
+      }
+    );
+    if (adopted) {
+      await secrets.store(keys.user, adopted.user);
+      await secrets.store(keys.pass, adopted.pass);
       await secrets.delete(LEGACY_USER);
       await secrets.delete(LEGACY_PASS);
       // the migrated origin has to be findable for "Reset Credentials" too -
       // without this, credentials of a system later removed from the settings
       // were out of every deletion path's reach
       await rememberOrigin(context, origin);
-      user = legacyUser;
-      pass = legacyPass;
+      user = adopted.user;
+      pass = adopted.pass;
     }
   }
 

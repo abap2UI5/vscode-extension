@@ -100,10 +100,12 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/text.ts` | `plural(count, noun)` — the one pluralizer behind every counted string users read (dependency-free) |
 | `src/abap.ts`, `src/urls.ts`, `src/context.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
 | `src/test/` | `node --test` suite over exactly those modules |
+| `src/test/desktop/` | The `@vscode/test-electron` smoke test: `suite.ts` runs inside a real VS Code, `runner.mjs` writes the throwaway workspace and launches it |
+| `scripts/lib/snapshot.mjs` | The one lifecycle the three snapshot generators share: upstream read (local checkout or GitHub raw), shape check, `--check` byte-compare, write |
 | `snippets/` | ABAP snippets contributed to the editor |
 | `media/` | Icons: `icon.svg` (panel), `icon-light/dark.svg` (preview tab), `icon.png` (gallery) |
 | `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js`, and `src/test/` into `dist-test/` |
-| `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix` |
+| `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the four weekly `bump-*.yml` callers share |
 
 `dist/`, `dist-test/`, `node_modules/` and `*.vsix` are build output and are
 not committed.
@@ -140,25 +142,29 @@ When the interface changes, regenerate with
 
 ## Build and verify
 
-Run all four before pushing. CI runs the same commands on every push and pull
+Run all three before pushing. CI runs the same commands on every push and pull
 request, so a failure there means you skipped this:
 
 ```bash
 npm install
-npm run check     # the four below, in order
+npm run check     # the three below, in order
 ```
 
 ```bash
 npm run lint      # tsc --noEmit + eslint (eslint.config.mjs)
 npm test          # esbuild -> dist-test, then node --test
-npm run package   # production esbuild
-npm run vsix      # vsce package, catches manifest errors
+npm run vsix      # vsce package - runs vscode:prepublish, i.e. the production build
 ```
 
 `npm run check` is the ecosystem-wide name for "what CI will say about this
 tree" — every repository has one, and it means the same thing in each. Here it
-is the four commands above and not the fifth (`test:web`), which is the one CI
-step that cannot run in a restricted environment; the paragraph below says why.
+is the three commands above. `npm run vsix` covers `npm run package`: vsce runs
+the `vscode:prepublish` script, which *is* the production build, so listing both
+built the identical bundles twice — `ci.yml` had already worked that out and
+avoided it, and `check` is now aligned with it. The two gates it does not
+include are the in-host smoke tests, `npm run test:web` and
+`npm run test:desktop`: each needs to download somebody else's VS Code, so
+neither can run in a restricted environment. The paragraphs below say why.
 
 The eslint config is tuned to the codebase (empty catch as best-effort
 probe, the tests' mid-test `require()`), so a clean tree lints clean -
@@ -175,6 +181,21 @@ headless browser host via `@vscode/test-web` (suite in
 `src/web/test/suite.ts`). It needs to download VS Code web and a playwright
 chromium, so it may not run in restricted environments — treat it as the CI
 gate for "does the web build actually load", not as part of the local loop.
+
+CI also runs `npm run test:desktop`: the desktop bundle activated in a real
+VS Code by `@vscode/test-electron` (suite in `src/test/desktop/suite.ts`,
+launcher in `src/test/desktop/runner.mjs`). It is the desktop counterpart of
+`test:web` and answers what neither `npm test` nor `npm run vsix` can — that
+`src/extension.ts` and the `Session` wiring survive a real activation, and that
+`dist/properties.json` is found next to the bundle that is actually packaged.
+There is no probe API for the last one, so the suite drives the property gate
+end to end and insists on a real `unknown-property` diagnostic. It skips itself
+(exit 0, with a notice) when there is no display or VS Code cannot be
+downloaded; `ABAP2UI5_DESKTOP_TEST_REQUIRED=1`, which CI sets, turns every such
+skip into a failure so "it quietly stopped running" cannot become normal.
+`npm test` also runs on `windows-latest` in CI: `childproc.ts` exists for
+cross-platform shell quoting and process-tree kill, and `checkcore.ts` /
+`scaffold.ts` build paths — all of it used to be proven on Ubuntu only.
 
 ## Releasing
 
@@ -409,6 +430,27 @@ Facts an agent cannot see from the code but will trip over:
   `npm test`. **Add a directory name in mcp-server and regenerate here** — never
   by editing `repolayout.ts`. This used to be two hand-written lists with no
   gate between them, which is a rename that half-lands.
+- **The four weekly bump workflows share one implementation.**
+  `.github/workflows/bump-snapshot.yml` holds the shape (regenerate → diff →
+  gate → open a pull request) and is called through `workflow_call`; the four
+  named files are thin callers carrying only the schedule, what to regenerate
+  and what to say in the PR. They open their pull requests with
+  `BUMP_PR_TOKEN` when that repository secret is configured, and with the
+  default `GITHUB_TOKEN` otherwise — GitHub does not fire `pull_request`
+  workflows for a PR opened with the default token, so **without the secret
+  `ci.yml` never runs on a bump PR**, and the generated PR body says so
+  outright instead of claiming a check that did not happen. Because of that the
+  workflow itself runs the same four commands `ci.yml` runs (`lint`, `test`,
+  `vsix`, `test:web`) before opening the PR. `secrets: inherit` on each caller
+  is load-bearing: without it the secret is invisible in the called workflow and
+  every bump silently falls back to the default token.
+- **The `.vsix` size is a gate, not just a number.** `ci.yml` prints the
+  package size and its file list and fails above `MAX_VSIX_MB`. 0.25.1 packages
+  to ~457 KB, so the 5 MB limit is an order of magnitude of headroom for the
+  linter's `properties.json` drifting with the weekly pin — it exists to catch
+  an accident (a test bundle, a downloaded VS Code, a `node_modules` tree),
+  which is exactly how `dist/web/test.js` used to end up in locally built
+  packages before `.vscodeignore` excluded it.
 
 ## Related repositories
 

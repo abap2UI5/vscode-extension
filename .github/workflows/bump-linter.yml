@@ -1,9 +1,12 @@
-# The linter is a git dependency pinned to a commit in package-lock.json, so
-# a new finding type is invisible in the editor until the pin moves (see
+# The linter is a git dependency pinned to a commit in BOTH manifests, so a
+# new finding type is invisible in the editor until the pin moves (see
 # AGENTS.md, "Toolchain & supply chain"). This workflow moves it: once a week
 # it re-resolves the dependency against the linter's main, runs the full
-# gate, and opens a PR with the lockfile change - the human review stays, the
+# gate, and opens a PR with the change - the human review stays, the
 # remembering-to-do-it goes away.
+#
+# The mechanics live in bump-snapshot.yml, shared with the three snapshot
+# bumps. This file is the part that is specific to the linter pin.
 
 name: Bump linter
 
@@ -19,75 +22,51 @@ permissions:
 
 jobs:
   bump:
-    runs-on: ubuntu-latest
-    # more than the other bump workflows: this one re-resolves the linter's
-    # full tree (all @openui5/* packages plus playwright) and builds the vsix
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-
+    uses: ./.github/workflows/bump-snapshot.yml
+    # BUMP_PR_TOKEN is read by the reusable workflow; without `inherit` it
+    # would not be visible there and every PR would silently fall back to the
+    # default token.
+    secrets: inherit
+    with:
+      label: the pinned abap2UI5-linter commit
+      # This one re-resolves the linter's full tree (all @openui5/* packages
+      # plus playwright) as well as building the vsix and the web suite.
+      timeout-minutes: 45
+      # `npm install` above has already populated node_modules with the newly
+      # resolved tree; an `npm ci` would reinstall from the lockfile and is
+      # simply wasted time here.
+      needs-npm-ci: false
+      paths: |
+        package.json
+        package-lock.json
       # Re-resolve the git dependency. The SHA lives in BOTH manifests - the
       # spec in package.json carries `#<sha>` so a plain `npm install` cannot
       # drift to whatever main happens to be, and package-lock.json records
       # the same commit for `npm ci`. `npm install` rewrites the spec to the
       # bare form, so it is written back explicitly here; both files then move
-      # together, and both are committed below.
-      - run: npm install @abap2ui5/linter@github:abap2UI5/linter
-      - name: Write the resolved commit back into package.json
-        run: |
-          sha=$(node -p "
-            const l = require('./package-lock.json');
-            const k = Object.keys(l.packages).find(k => k.endsWith('@abap2ui5/linter'));
-            l.packages[k].resolved.replace(/^.*#/, '')
-          ")
-          node -e "
-            const fs = require('fs');
-            const t = fs.readFileSync('package.json', 'utf8');
-            fs.writeFileSync('package.json', t.replace(
-              /(\"@abap2ui5\/linter\": \"github:abap2UI5\/linter)(#[0-9a-f]{40})?\"/,
-              '\$1#$sha\"'));
-          "
-          node -e "require('./package.json')"   # it still has to parse
+      # together, and both are committed.
+      regenerate: |
+        npm install @abap2ui5/linter@github:abap2UI5/linter
+        sha=$(node -p "
+          const l = require('./package-lock.json');
+          const k = Object.keys(l.packages).find(k => k.endsWith('@abap2ui5/linter'));
+          l.packages[k].resolved.replace(/^.*#/, '')
+        ")
+        node -e "
+          const fs = require('fs');
+          const t = fs.readFileSync('package.json', 'utf8');
+          fs.writeFileSync('package.json', t.replace(
+            /(\"@abap2ui5\/linter\": \"github:abap2UI5\/linter)(#[0-9a-f]{40})?\"/,
+            '\$1#$sha\"'));
+        "
+        node -e "require('./package.json')"   # it still has to parse
+      branch: bump-linter
+      title: "chore: bump the pinned abap2UI5-linter commit"
+      body: |
+        Weekly re-resolve of the `@abap2ui5/linter` git dependency against
+        the linter's main. New rules, fixes and metadata land in the
+        editor only when this pin moves.
 
-      - name: Check whether the pin moved
-        id: diff
-        run: |
-          if git diff --quiet package.json package-lock.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      # The same four commands AGENTS.md asks for before pushing - a linter
-      # update that breaks them surfaces here, in the PR run, not on main.
-      - if: steps.diff.outputs.changed == 'true'
-        run: npm run lint
-      - if: steps.diff.outputs.changed == 'true'
-        run: npm test
-      - if: steps.diff.outputs.changed == 'true'
-        run: npm run package
-      - if: steps.diff.outputs.changed == 'true'
-        run: npm run vsix
-
-      - if: steps.diff.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
-        with:
-          branch: bump-linter
-          title: "chore: bump the pinned abap2UI5-linter commit"
-          commit-message: "chore: bump the pinned abap2UI5-linter commit"
-          body: |
-            Weekly re-resolve of the `@abap2ui5/linter` git dependency against
-            the linter's main. New rules, fixes and metadata land in the
-            editor only when this pin moves.
-
-            The full gate (lint, test, package, vsix) ran on the updated
-            lockfile in the workflow that opened this PR; CI repeats it here.
-          add-paths: |
-            package.json
-            package-lock.json
-          delete-branch: true
+        Read the diff before merging: both manifests have to name the same
+        commit, and a new rule can turn a clean workspace red for everyone
+        using the extension.

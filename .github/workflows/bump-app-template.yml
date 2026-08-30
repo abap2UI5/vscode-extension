@@ -8,10 +8,11 @@
 # pin at all.
 #
 # `npm test` proves the scaffold matches this snapshot. Only this workflow can
-# prove the snapshot matches app-template - so it does, weekly, the same way
-# bump-client-api and bump-linter do: regenerate, run the full gate, open a PR.
-# A red run here means a project created from the IDE today is not the project
-# the template hands out.
+# prove the snapshot matches app-template - so it does, weekly. A red run here
+# means a project created from the IDE today is not the project the template
+# hands out.
+#
+# The mechanics live in bump-snapshot.yml, shared with the other three bumps.
 
 name: Bump app template
 
@@ -28,57 +29,24 @@ permissions:
 
 jobs:
   bump:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    uses: ./.github/workflows/bump-snapshot.yml
+    secrets: inherit
+    with:
+      label: src/data/app-template.json
+      timeout-minutes: 30
+      paths: src/data/app-template.json
+      regenerate: node scripts/generate-app-template.mjs
+      branch: bump-app-template
+      title: "chore: sync app-template.json with abap2UI5/app-template"
+      body: |
+        Weekly regeneration of `src/data/app-template.json` from
+        `abap2UI5/app-template` main - "New Project from Template" writes
+        the project that template hands out only when this file moves with
+        it.
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Regenerate from app-template's main
-        run: node scripts/generate-app-template.mjs
-
-      - name: Check whether the template moved
-        id: diff
-        run: |
-          if git diff --quiet src/data/app-template.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - if: steps.diff.outputs.changed == 'true'
-        run: npm ci
-      - if: steps.diff.outputs.changed == 'true'
-        run: npm run lint
-      # The scaffold reads values out of the snapshot (the framework pin, the
-      # dependency versions, the linter action's pin, where the guide starts).
-      # A template that changed shape fails here rather than in a user's new
-      # project.
-      - if: steps.diff.outputs.changed == 'true'
-        run: npm test
-
-      - if: steps.diff.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
-        with:
-          branch: bump-app-template
-          title: "chore: sync app-template.json with abap2UI5/app-template"
-          commit-message: "chore: sync app-template.json with abap2UI5/app-template"
-          body: |
-            Weekly regeneration of `src/data/app-template.json` from
-            `abap2UI5/app-template` main - "New Project from Template" writes
-            the project that template hands out only when this file moves with
-            it.
-
-            Read the diff before merging: this is what a new project gets, so
-            a changed gate, rule set or framework pin over there becomes a
-            changed default here.
-
-            Lint and tests ran on the regenerated snapshot in the workflow that
-            opened this PR; CI repeats them here.
-          add-paths: |
-            src/data/app-template.json
-          delete-branch: true
+        Read the diff before merging: this is what a new project gets, so
+        a changed gate, rule set or framework pin over there becomes a
+        changed default here. The scaffold reads values out of this snapshot
+        (the framework pin, the dependency versions, the linter action's pin,
+        where the guide starts), so a template that changed shape fails the
+        gate rather than a user's new project.

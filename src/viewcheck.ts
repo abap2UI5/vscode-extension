@@ -5,7 +5,14 @@ import * as os from "os";
 import * as path from "path";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
 import { run } from "./childproc";
-import { installRenderGate, renderGateBrowsers, renderGateCli } from "./rendergate";
+import {
+  clearRenderGateFailure,
+  installRenderGate,
+  noteRenderGateFailure,
+  renderGateBrowsers,
+  renderGateCli,
+  renderGateState,
+} from "./rendergate";
 import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
 import { usesBuilder } from "./abap";
@@ -17,6 +24,8 @@ import {
   isCheckableSource,
   parseRenderReport,
   checkerCwd,
+  RenderGateOutcome,
+  renderGateNote,
   RenderResult,
   plannedFixes,
   resolveCheckerCommand,
@@ -56,10 +65,6 @@ import {
  *  that typing a control name does not flash three different errors, short
  *  enough to feel immediate. */
 const LIVE_DEBOUNCE_MS = 400;
-
-/** Set when spawning the external render checker failed once - avoids a
- *  warning on every save. */
-let spawnFailed = false;
 
 /** True while a workspace sweep runs. `fixWorkspace` opens every file it
  *  edits, and each open fires onDidOpenTextDocument - which scheduled a
@@ -187,11 +192,20 @@ export function spawnEnv(): NodeJS.ProcessEnv {
  */
 const RENDER_TIMEOUT_MS = 180_000;
 
+/** What one render-gate run produced: the report when there is one, and in
+ *  every other case WHY there is none - a timeout, a checker that could not be
+ *  started and an unreadable report are all "the render half did not run", and
+ *  the check has to be able to say so instead of showing an empty result. */
+interface RenderRun {
+  outcome: RenderGateOutcome;
+  result?: RenderResult;
+}
+
 async function runRenderGate(
   doc: vscode.TextDocument,
   log: (m: string) => void,
   superseded: () => boolean
-): Promise<RenderResult | undefined> {
+): Promise<RenderRun> {
   const scratchDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "abap2ui5-viewcheck-")
   );
@@ -239,19 +253,20 @@ async function runRenderGate(
       // the buffer moved on, or the document was closed - nothing will be
       // done with this answer, so it was not paid for to the end
       log("view-check: render gate no longer needed - killed");
-      return undefined;
+      return { outcome: "abandoned" };
     }
     if (outcome.kind === "timeout") {
       log(
         `view-check: render gate exceeded ${RENDER_TIMEOUT_MS} ms - killed, ` +
           "the property gate's findings still stand"
       );
-      return undefined;
+      return { outcome: "timeout" };
     }
     if (outcome.kind === "spawn-failed") {
       log(`view-check: render gate failed to start - ${String(outcome.error)}`);
-      if (!spawnFailed) {
-        spawnFailed = true;
+      const known = renderGateState(checker.installed).kind === "failed";
+      noteRenderGateFailure(`${checker.cmd} could not be started`);
+      if (!known) {
         void vscode.window
           .showWarningMessage(
             "abap2UI5: the render gate is enabled but its checker could not " +
@@ -262,13 +277,13 @@ async function runRenderGate(
           )
           .then(async (pick) => {
             if (pick === "Install Render Gate" && extContext) {
-              if (await installRenderGate(extContext, log, showLogFn)) {
-                spawnFailed = false;
-              }
+              // a successful install clears the recorded failure itself -
+              // installRenderGate owns that state
+              await installRenderGate(extContext, log, showLogFn);
             }
           });
       }
-      return undefined;
+      return { outcome: "spawn-failed" };
     }
 
     const parsed = parseRenderReport(outcome.stdout);
@@ -279,9 +294,9 @@ async function runRenderGate(
               (outcome.stderr ? ` - stderr: ${outcome.stderr.slice(0, 400)}` : "")
           : `view-check: render gate returned broken JSON - ${parsed.detail}`
       );
-      return undefined;
+      return { outcome: "no-report" };
     }
-    return parsed.result;
+    return { outcome: "ok", result: parsed.result };
   } finally {
     /* On every path, including a throw: the scratch directory is this run's
      * alone. It used to be removed inside a timer callback, where a Windows
@@ -487,18 +502,28 @@ async function checkDocument(
     config().get<boolean>("viewCheck.render", false) &&
     gate.renderable
   ) {
-    if (spawnFailed) {
-      // the gate is enabled but its checker could not be started - a "view
-      // check passed" that silently left it out would claim more than ran
-      helperNote = " (render gate skipped - its checker could not be started)";
+    /* One state, one note. The render half can be missing, busy installing,
+     * dead on a timeout or unreadable, and every one of those used to end in
+     * an empty `renderErrors` array indistinguishable from a clean render -
+     * so the on-demand command announced "view check passed" for a check
+     * whose second half never ran. */
+    const state = renderGateState(checkerCommand().installed);
+    if (state.kind === "failed") {
+      log(`view-check: render gate not run - ${state.reason}`);
+      helperNote = renderGateNote("skipped-not-started");
+    } else if (state.kind === "busy") {
+      helperNote = renderGateNote("skipped-busy");
     } else {
       const render = await runRenderGate(doc, log, superseded);
       if (superseded()) {
         return; // the document moved on while Chromium was busy
       }
-      renderErrors = render?.renderErrors ?? [];
-      if (render?.skippedRender) {
-        helperNote = " (render gate skipped - view built in helper methods)";
+      renderErrors = render.result?.renderErrors ?? [];
+      const note = renderGateNote(
+        render.result?.skippedRender ? "skipped-helpers" : render.outcome
+      );
+      if (note) {
+        helperNote = note;
       }
     }
   }
@@ -633,6 +658,17 @@ async function sweepWorkspace(
     }
   }
 
+  /* The settings half of the options, read once for the whole sweep: it is
+   * the same four values for every file, and only the config DISCOVERED per
+   * directory differs. Rebuilding it per file re-read four settings and
+   * allocated an object per file for no answer that could change. */
+  const sweepSettings = {
+    minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
+    distribution: config().get<string>("viewCheck.distribution", "sapui5"),
+    allow: config().get<string[]>("viewCheck.allow", []),
+    rules: ruleSettings(),
+  };
+
   const swept: SweptFile[] = [];
   for (const [index, target] of targets.entries()) {
     if (token.isCancellationRequested) {
@@ -660,12 +696,7 @@ async function sweepWorkspace(
     const key = uri.toString();
     // a document with no path on disk has no directory to discover a config
     // from - the workspace's own config governs it, as it does on the live path
-    const opts = resolveOptions(discoveryDirOf(uri), {
-      minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
-      distribution: config().get<string>("viewCheck.distribution", "sapui5"),
-      allow: config().get<string[]>("viewCheck.allow", []),
-      rules: ruleSettings(),
-    });
+    const opts = resolveOptions(discoveryDirOf(uri), sweepSettings);
     const cached = sweepCache.get(key);
     let entry = cached && cached.stamp === stamp ? cached : undefined;
     if (!entry) {
@@ -740,14 +771,18 @@ async function checkWorkspace(
       let swept: SweepResult;
       try {
         swept = await sweepWorkspace(progress, token, { baseline: true }, log);
-        // What the sweep did not find is no longer a problem: a file that was
-        // fixed, reverted or deleted since the last run kept its diagnostics
-        // forever, because only the files it DID report were written.
-        if (!swept.cancelled) {
-          diagnostics.clear();
-        }
         let problems = 0;
         let moved = 0;
+        /* What the sweep published, and what it deliberately did not touch -
+         * the reconciliation below removes everything else.
+         *
+         * Clearing the collection first was simpler and wrong: a file that
+         * was edited WHILE the sweep ran is skipped as `moved`, so the clear
+         * threw away the diagnostics the live check had just published for
+         * the current text and put nothing back. The file then looked clean
+         * until the next keystroke. */
+        const published = new Set<string>();
+        const untouched = new Set<string>();
         for (const file of swept.files) {
           /* Ranges come from the text that was gated: the open document when
            * it still is what was gated, the swept text otherwise - never a
@@ -761,6 +796,7 @@ async function checkWorkspace(
             );
             if (!doc || doc.version !== file.version) {
               moved++;
+              untouched.add(file.uri.toString());
               continue;
             }
             source = doc;
@@ -769,7 +805,23 @@ async function checkWorkspace(
           }
           const diags = source ? toDiagnostics(source, file.findings, []) : [];
           diagnostics.set(file.uri, diags);
+          published.add(file.uri.toString());
           problems += diags.length;
+        }
+        // What the sweep did not find is no longer a problem: a file that was
+        // fixed, reverted or deleted since the last run kept its diagnostics
+        // forever, because only the files it DID report were written.
+        if (!swept.cancelled) {
+          const stale: vscode.Uri[] = [];
+          diagnostics.forEach((uri) => {
+            const key = uri.toString();
+            if (!published.has(key) && !untouched.has(key)) {
+              stale.push(uri);
+            }
+          });
+          for (const uri of stale) {
+            diagnostics.delete(uri);
+          }
         }
         if (moved) {
           log(
@@ -1087,11 +1139,17 @@ export function registerViewCheck(
     schedule(doc, delay, request, diagnostics, log);
 
   /** Re-checks everything currently open - after a setting, a config file or
-   *  the linter's own opinion changed. */
+   *  the linter's own opinion changed.
+   *
+   *  Every open DOCUMENT, not only the visible editors: a checked file in a
+   *  background tab kept the diagnostics it was given under the old config
+   *  until it was edited, saved or closed - which is exactly the editor/CI
+   *  drift this pipeline exists to prevent, and the gate is in-process and
+   *  costs milliseconds per file. */
   const recheckOpen = () => {
-    for (const editor of vscode.window.visibleTextEditors) {
-      if (isCheckable(editor.document)) {
-        check(editor.document, 0, { render: false, announce: false });
+    for (const doc of vscode.workspace.textDocuments) {
+      if (isCheckable(doc)) {
+        check(doc, 0, { render: false, announce: false });
       }
     }
   };
@@ -1224,14 +1282,26 @@ export function registerViewCheck(
       // generation it was given cannot be handed out again.
       generations.delete(doc.uri.toString());
       memos.delete(doc.uri.toString());
+      /* The sweep's entry for an OPEN document is keyed on `v<version>`, and
+       * versions restart at 1 when a document is reopened. Closing without
+       * saving and typing back to the same version would otherwise hit a
+       * cached entry computed from entirely different text. */
+      sweepCache.delete(doc.uri.toString());
     }),
 
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration(`${CONFIG_SECTION}.viewCheck`)) {
+      // mcp.reposRoot too: `checkerCommand` reads it to find a local linter
+      // checkout, so it decides whether the render gate can start at all -
+      // and pointing it at one was the documented remedy for a checker that
+      // could not be started, which then appeared not to work
+      if (
+        e.affectsConfiguration(`${CONFIG_SECTION}.viewCheck`) ||
+        e.affectsConfiguration(`${CONFIG_SECTION}.mcp.reposRoot`)
+      ) {
         lastVersionLine = "";
         // the checker that could not be started may be exactly what was just
         // changed - without this the gate stayed off until the window reloaded
-        spawnFailed = false;
+        clearRenderGateFailure();
         clearSweepCache();
         recheckOpenDocuments();
         recheckOpen();

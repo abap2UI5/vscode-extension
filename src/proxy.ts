@@ -485,6 +485,10 @@ const FETCH_TIMEOUT_MS = 8000;
  *  this much arrived, the rest is not worth downloading. */
 const FETCH_BODY_CAP = 256 * 1024;
 
+/** How many minted-but-unused one-shot tokens are kept - see
+ *  `SapProxy.singleUseTokens`. The oldest is dropped beyond this. */
+const SINGLE_USE_MAX = 8;
+
 /** The request headers that describe one hop rather than the request, and so
  *  must not travel through a proxy (RFC 7230 section 6.1). `transfer-encoding`
  *  stays: Node manages the framing of what it forwards itself. */
@@ -517,6 +521,24 @@ export class SapProxy {
    * RELATIVE to that url, so a prefix travels with them at no cost.
    */
   private token?: string;
+
+  /**
+   * Secondary tokens, each accepted for exactly ONE authorized request and
+   * retired the moment it is used.
+   *
+   * They exist for the one caller that cannot receive the long-lived token
+   * privately: headless Chromium takes the page to shoot only as a command
+   * line argument, and an argument vector is readable by every process of
+   * this user (`ps`, /proc/<pid>/cmdline). What leaked there used to be the
+   * capability token itself - good for an authenticated session against the
+   * system for as long as the proxy ran. A one-shot token is spent on the
+   * screenshot's very first request, and the page's follow-up requests are
+   * carried by the HttpOnly cookie that first authorized answer plants.
+   *
+   * A minted token that is never used just sits here, so the set is capped -
+   * a screenshot that never starts must not grow this without bound.
+   */
+  private readonly singleUseTokens = new Set<string>();
 
   /** Live WebSocket tunnels. An upgraded socket no longer belongs to the
    *  http server, so `close( )` neither waits for it nor closes it - stop( )
@@ -601,6 +623,8 @@ export class SapProxy {
     this.authHeader = authHeader;
     this.target = target;
     this.token = randomBytes(16).toString("base64url");
+    // one-shot tokens belong to the proxy that minted them
+    this.singleUseTokens.clear();
     this.server = http.createServer((req, res) => this.handle(req, res));
     this.server.on("upgrade", (req, socket, head) =>
       this.handleUpgrade(req, socket, head)
@@ -679,7 +703,12 @@ export class SapProxy {
       const rest = url.slice(root.length);
       const end = rest.search(/[/?]/);
       const candidate = end === -1 ? rest : rest.slice(0, end);
-      if (tokensEqual(candidate, token)) {
+      // The one-shot token is spent HERE, where authorization is decided:
+      // the request it authorizes goes through, its answer plants the
+      // cookie the page's follow-up requests ride on, and the token itself
+      // is refused from the next request on. Only the prefixed form counts -
+      // a one-shot token is never accepted out of a cookie.
+      if (tokensEqual(candidate, token) || this.spendSingleUse(candidate)) {
         if (end === -1) {
           return "/";
         }
@@ -699,6 +728,49 @@ export class SapProxy {
     return cookie && tokensEqual(cookie.slice(this.cookieName.length + 1), token)
       ? url
       : undefined;
+  }
+
+  /**
+   * Whether `candidate` is one of the outstanding one-shot tokens - and if
+   * so, retires it. Compared in constant time like the long-lived one.
+   */
+  private spendSingleUse(candidate: string): boolean {
+    for (const oneShot of this.singleUseTokens) {
+      if (tokensEqual(candidate, oneShot)) {
+        this.singleUseTokens.delete(oneShot);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * The same url, authorized by a freshly minted ONE-SHOT token instead of
+   * the proxy's long-lived one - for a consumer that cannot keep the url
+   * private. Returns the url unchanged when it does not belong to this
+   * proxy, or while the proxy is not running: an unrecognised url is not
+   * this method's to rewrite.
+   *
+   * See `singleUseTokens` for why the screenshot needs it.
+   */
+  singleUseUrl(url: string): string {
+    const base = this.origin;
+    if (!this.token || this.port === undefined || !url.startsWith(base)) {
+      return url;
+    }
+    if (this.singleUseTokens.size >= SINGLE_USE_MAX) {
+      // insertion order: the oldest minted-but-unused token goes first
+      const oldest = this.singleUseTokens.values().next().value;
+      if (oldest !== undefined) {
+        this.singleUseTokens.delete(oldest);
+      }
+    }
+    const oneShot = randomBytes(16).toString("base64url");
+    this.singleUseTokens.add(oneShot);
+    return (
+      `http://127.0.0.1:${this.port}/${TOKEN_SEGMENT}/${oneShot}` +
+      url.slice(base.length)
+    );
   }
 
   /**
@@ -841,6 +913,62 @@ export class SapProxy {
     };
   }
 
+  /**
+   * The headers a forwarded request leaves this proxy with - the ONE place
+   * that decides them, for the plain path and the upgrade path alike.
+   *
+   * Four things happen here, and all four are security-relevant enough that
+   * two copies of them is a liability: the system's `Host`, the injected
+   * credentials, the proxy's own token cookie (which stops here - matched by
+   * prefix, so another window's port-scoped cookie stops here too), and the
+   * `Origin`/`Referer` rewrite that makes the request look same-origin to the
+   * system again. The browser addresses the proxy, so it sends 127.0.0.1 in
+   * both while the forwarded `Host` is the SAP host, and origin-validating
+   * CSRF checks reject that mismatch on every POST ("CSRF validation failed -
+   * cross-origin POST rejected").
+   *
+   * `stripHopByHop` is the one deliberate difference between the two callers:
+   * those headers describe the browser's connection to the proxy rather than
+   * the request and must not travel on - except on an upgrade, which IS the
+   * hop its `Connection`/`Upgrade` pair is about.
+   */
+  private prepareForwardHeaders(
+    incoming: http.IncomingHttpHeaders,
+    target: URL,
+    proxyOrigin: string,
+    options: { stripHopByHop: boolean }
+  ): http.OutgoingHttpHeaders {
+    const headers: http.OutgoingHttpHeaders = { ...incoming };
+    if (options.stripHopByHop) {
+      for (const name of HOP_BY_HOP_HEADERS) {
+        delete headers[name];
+      }
+    }
+    headers.host = target.host;
+    headers.authorization = this.authHeader;
+    if (headers.cookie) {
+      const kept = String(headers.cookie)
+        .split(";")
+        .map((part) => part.trim())
+        .filter((part) => part && !part.startsWith(TOKEN_COOKIE));
+      if (kept.length > 0) {
+        headers.cookie = kept.join("; ");
+      } else {
+        delete headers.cookie;
+      }
+    }
+    if (headers.origin) {
+      headers.origin = target.origin;
+    }
+    if (headers.referer) {
+      headers.referer = String(headers.referer).replace(
+        proxyOrigin,
+        target.origin
+      );
+    }
+    return headers;
+  }
+
   private handle(req: http.IncomingMessage, res: http.ServerResponse): void {
     const path = this.route(req);
     if (path === undefined) {
@@ -907,28 +1035,11 @@ export class SapProxy {
       });
     };
 
-    // Take over the incoming headers, overwrite host + auth. Hop-by-hop
-    // headers describe the browser's connection to the proxy, not the
-    // request, and must not travel on.
-    const headers: http.OutgoingHttpHeaders = { ...req.headers };
-    for (const name of HOP_BY_HOP_HEADERS) {
-      delete headers[name];
-    }
-    headers.host = target.host;
-    headers.authorization = this.authHeader;
-    // the token is the proxy's own business and stops here - matched by
-    // prefix, so another window's port-scoped cookie stops here too
-    if (headers.cookie) {
-      const kept = String(headers.cookie)
-        .split(";")
-        .map((part) => part.trim())
-        .filter((part) => part && !part.startsWith(TOKEN_COOKIE));
-      if (kept.length > 0) {
-        headers.cookie = kept.join("; ");
-      } else {
-        delete headers.cookie;
-      }
-    }
+    // Host, credentials, token cookie, Origin/Referer - see
+    // `prepareForwardHeaders`, which the upgrade path shares.
+    const headers = this.prepareForwardHeaders(req.headers, target, proxyOrigin, {
+      stripHopByHop: true,
+    });
 
     // A document request may get the runtime hook injected below. Injecting
     // means reading the body, so ask for it uncompressed - for the handful of
@@ -940,21 +1051,6 @@ export class SapProxy {
         req.headers["sec-fetch-dest"] === "iframe");
     if (expectsHtml) {
       headers["accept-encoding"] = "identity";
-    }
-
-    // The browser addresses the proxy, so it sends 127.0.0.1 as Origin and
-    // Referer while the forwarded Host is the SAP host. Origin-validating
-    // CSRF checks reject that mismatch on every POST ("CSRF validation
-    // failed - cross-origin POST rejected") - make the request look
-    // same-origin to the system again.
-    if (headers.origin) {
-      headers.origin = target.origin;
-    }
-    if (headers.referer) {
-      headers.referer = String(headers.referer).replace(
-        proxyOrigin,
-        target.origin
-      );
     }
 
     const options: https.RequestOptions = {
@@ -1219,23 +1315,10 @@ export class SapProxy {
 
     // The upgrade needs its `Connection`/`Upgrade` pair to travel, so no
     // hop-by-hop stripping here - this IS the hop the pair is about.
-    const headers: http.OutgoingHttpHeaders = { ...req.headers };
-    headers.host = target.host;
-    headers.authorization = this.authHeader;
-    if (headers.cookie) {
-      const kept = String(headers.cookie)
-        .split(";")
-        .map((part) => part.trim())
-        .filter((part) => part && !part.startsWith(TOKEN_COOKIE));
-      if (kept.length > 0) {
-        headers.cookie = kept.join("; ");
-      } else {
-        delete headers.cookie;
-      }
-    }
-    if (headers.origin) {
-      headers.origin = target.origin;
-    }
+    // Everything else is decided exactly as on the plain path.
+    const headers = this.prepareForwardHeaders(req.headers, target, this.origin, {
+      stripHopByHop: false,
+    });
 
     const proxyReq = mod.request({
       protocol: target.protocol,
@@ -1301,6 +1384,7 @@ export class SapProxy {
     // and isRunning read true for a proxy that had already been stopped
     this.authHeader = undefined;
     this.token = undefined;
+    this.singleUseTokens.clear();
     for (const tunnel of this.tunnels) {
       tunnel.destroy();
     }

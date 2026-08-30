@@ -2,7 +2,24 @@
   "version": "0.2.0",
   "configurations": [
     {
+      // The watch task, not the one-shot `npm: compile`. tasks.json already
+      // defines it with `$esbuild-watch`, whose background problem matcher
+      // tells VS Code when the first build has finished - which is exactly
+      // what makes a background task valid as a preLaunchTask. F5 therefore
+      // rebuilds on every save for the rest of the session, and the reload
+      // in the Extension Development Host picks the new bundle straight up,
+      // instead of every reload showing the bundle from the last F5.
       "name": "Run Extension (F5)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "npm: watch"
+    },
+    {
+      // The old behaviour, kept for the case the watcher is in the way: one
+      // build, nothing left running afterwards.
+      "name": "Run Extension (one-shot build)",
       "type": "extensionHost",
       "request": "launch",
       "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
