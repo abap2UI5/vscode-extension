@@ -17,6 +17,16 @@ export default tseslint.config(
       "node_modules/**",
       "scripts/web-shims/**", // deliberately empty shims for the web bundle
       "*.vsix",
+      // The two in-host runners download somebody else's VS Code INTO the
+      // checkout root (@vscode/test-web -> .vscode-test-web,
+      // @vscode/test-electron -> .vscode-test), and CI restores both from a
+      // cache before `npm run lint` runs. They are in .gitignore, which
+      // ESLint does not read, so `eslint .` walked a full VS Code build and
+      // died parsing its multi-megabyte minified bundles - 4 GB of heap,
+      // exit 134. Caching them is what made a latent hole fatal: before
+      // that, they were only ever present after a local in-host run.
+      ".vscode-test/**",
+      ".vscode-test-web/**",
     ],
   },
   ...tseslint.configs.recommended.map((config) => ({
