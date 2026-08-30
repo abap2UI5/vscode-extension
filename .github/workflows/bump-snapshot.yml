@@ -1,0 +1,172 @@
+# The one implementation behind all four weekly bump workflows.
+#
+# `bump-linter.yml`, `bump-client-api.yml`, `bump-app-template.yml` and
+# `bump-repo-dirs.yml` all do the same four things - regenerate a committed
+# artefact from the repository that owns it, see whether it moved, run the
+# gate, open a pull request - and they were four near-identical copies of that
+# shape. Every fix therefore had to be made four times, and the one that
+# mattered most (the token below) had been made zero times. They are now thin
+# callers that pass in what actually differs: what to regenerate, which files
+# that touches, and what to say in the PR.
+#
+# ---------------------------------------------------------------------------
+# BUMP_PR_TOKEN - the repository secret this workflow wants
+#
+# GitHub deliberately does not fire `pull_request` workflows for a pull
+# request opened with the default GITHUB_TOKEN. That is a loop guard, and it
+# is not optional. The consequence here was that ci.yml never ran on ANY of
+# the four weekly PRs, while every one of their bodies said "CI repeats it
+# here" - so the linter pin, which is the release lever for new rules, was
+# merged every week with no required check attached to it at all.
+#
+# Two halves to the fix, and both are in this file:
+#
+#   1. `token:` below prefers BUMP_PR_TOKEN, a fine-grained personal access
+#      token (or a GitHub App installation token) with `contents: write` and
+#      `pull-requests: write` on this repository. A PR opened with one is a
+#      normal PR: ci.yml runs on it and can be a required check. Without the
+#      secret it falls back to `github.token`, so the automation keeps
+#      working - it just opens a PR nothing runs on, and says so.
+#   2. The gate below runs the SAME commands ci.yml runs, in this workflow,
+#      before the PR is opened. That is what makes these PRs verified even
+#      in the fallback case - which is how three of the four used to be
+#      merged, having run neither `npm run vsix` nor `npm run test:web`.
+#
+# The PR body is generated from what actually happened, so it can no longer
+# claim a CI run that does not exist.
+# ---------------------------------------------------------------------------
+
+name: Bump a generated snapshot
+
+on:
+  workflow_call:
+    inputs:
+      label:
+        description: What is being bumped, for the log and the PR footer.
+        required: true
+        type: string
+      regenerate:
+        description: >-
+          Shell script that regenerates the artefact. Runs before any npm ci,
+          so a generator that only needs node builtins needs no install.
+        required: true
+        type: string
+      paths:
+        description: >-
+          The files the regeneration may touch, one per line. Used both for
+          the "did anything move" diff and as create-pull-request's add-paths,
+          so the two can never drift apart.
+        required: true
+        type: string
+      needs-npm-ci:
+        description: >-
+          Run `npm ci` before the gate. False for the linter bump, whose
+          regenerate step is itself an `npm install` and has already
+          populated node_modules - an `npm ci` there would throw the
+          newly resolved tree away.
+        required: false
+        default: true
+        type: boolean
+      branch:
+        required: true
+        type: string
+      title:
+        required: true
+        type: string
+      body:
+        description: Why this bump matters and what a reviewer should look at.
+        required: true
+        type: string
+      timeout-minutes:
+        required: false
+        default: 30
+        type: number
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # The bundled linter declares engines >= 22, same as ci.yml.
+          node-version: 22
+          cache: npm
+
+      - name: Regenerate ${{ inputs.label }}
+        run: ${{ inputs.regenerate }}
+
+      - name: Check whether ${{ inputs.label }} moved
+        id: diff
+        env:
+          PATHS: ${{ inputs.paths }}
+        run: |
+          # shellcheck disable=SC2086
+          files=$(echo "$PATHS" | tr '\n' ' ')
+          if git diff --quiet -- $files; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$files is unchanged - nothing to open a PR for"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff --stat -- $files
+          fi
+
+      # ---------------------------------------------------------------
+      # The gate. Deliberately the SAME commands ci.yml runs, because a PR
+      # opened from here may well be the only place they ever run on this
+      # change (see BUMP_PR_TOKEN above). `npm run vsix` covers
+      # `npm run package` too - vsce runs vscode:prepublish, which IS the
+      # production build.
+      # ---------------------------------------------------------------
+      - if: steps.diff.outputs.changed == 'true' && inputs.needs-npm-ci
+        run: npm ci
+
+      - if: steps.diff.outputs.changed == 'true'
+        run: npm run lint
+      - if: steps.diff.outputs.changed == 'true'
+        run: npm test
+      - if: steps.diff.outputs.changed == 'true'
+        run: npm run vsix
+      # The web bundle actually loading in a browser host - the gate three of
+      # these four workflows never had. A linter bump that breaks the web
+      # build used to reach main without anything noticing.
+      - if: steps.diff.outputs.changed == 'true'
+        run: npm run test:web
+
+      - name: Work out what this PR can honestly claim
+        if: steps.diff.outputs.changed == 'true'
+        id: claim
+        env:
+          HAVE_TOKEN: ${{ secrets.BUMP_PR_TOKEN != '' }}
+        run: |
+          if [ "$HAVE_TOKEN" = "true" ]; then
+            echo "ci=This PR was opened with \`BUMP_PR_TOKEN\`, so CI runs on it like on any other pull request." >> "$GITHUB_OUTPUT"
+          else
+            echo "ci=**CI does not run on this PR.** It was opened with the default \`GITHUB_TOKEN\`, and GitHub does not fire \`pull_request\` workflows for those - configure the \`BUMP_PR_TOKEN\` secret (see \`.github/workflows/bump-snapshot.yml\`) to change that. The gate above is therefore the only verification this change has had." >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          # Falls back to the default token when the secret is absent, so the
+          # weekly automation degrades to "a PR nothing runs on" rather than
+          # to "no PR at all".
+          token: ${{ secrets.BUMP_PR_TOKEN || github.token }}
+          branch: ${{ inputs.branch }}
+          title: ${{ inputs.title }}
+          commit-message: ${{ inputs.title }}
+          add-paths: ${{ inputs.paths }}
+          delete-branch: true
+          body: |
+            ${{ inputs.body }}
+
+            ---
+
+            `npm run lint`, `npm test`, `npm run vsix` and `npm run test:web`
+            all ran on this change in [the workflow run that opened this
+            PR](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) —
+            the same four commands `ci.yml` runs.
+
+            ${{ steps.claim.outputs.ci }}

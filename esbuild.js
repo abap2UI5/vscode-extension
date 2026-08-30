@@ -6,6 +6,7 @@ const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
 const tests = process.argv.includes("--tests");
 const webTests = process.argv.includes("--webtest");
+const desktopTests = process.argv.includes("--desktoptest");
 
 /** The UI5 metadata snapshot of the bundled view checker ships next to the
  *  bundle - the property gate reads it at runtime. The config-file schema
@@ -23,7 +24,10 @@ const webTests = process.argv.includes("--webtest");
  *  file as an empty registry by design, so `unknown-icon`, `icon-too-new` and
  *  `icon-removed` simply never fired in the editor while CI reported them -
  *  the same silent-metadata trap as a missing `dist/properties.json`, for the
- *  data file that arrived later. `gate.icons.test.ts` is the gate on it. */
+ *  data file that arrived later. The gate on it is the `unknown-icon`
+ *  assertion in `src/test/gate.parity.test.ts` - it fails with "the linter's
+ *  data/icons.json is not where the bundle looks for it" when this copy stops
+ *  landing in the extension root's `data/`. */
 function copySnapshot() {
   const data = path.join(
     path.dirname(require.resolve("@abap2ui5/linter/properties")),
@@ -164,6 +168,25 @@ async function main() {
       ...webConfig(),
       entryPoints: ["src/web/test/suite.ts"],
       outfile: "dist/web/test.js",
+    });
+    return;
+  }
+  if (desktopTests) {
+    // The suite @vscode/test-electron loads inside a real desktop host. It
+    // lands in `dist-test/`, not `dist/`: `dist/` is what gets packaged, and
+    // the web suite's own bundle already had to be excluded from the .vsix by
+    // hand after being shipped in locally built ones. A test bundle has no
+    // business in the directory the extension is packaged from.
+    await esbuild.build({
+      entryPoints: ["src/test/desktop/suite.ts"],
+      bundle: true,
+      format: "cjs",
+      platform: "node",
+      outfile: "dist-test/desktop/suite.js",
+      sourcemap: true,
+      // The host provides it, and it cannot be resolved at build time.
+      external: ["vscode"],
+      logLevel: "info",
     });
     return;
   }

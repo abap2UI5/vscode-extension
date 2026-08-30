@@ -31,7 +31,42 @@ jobs:
           # but there is no reason for CI to build on a version the toolchain
           # says it does not support.
           node-version: 22
+          # NOTE: this caches the npm tarball cache only. The two genuinely
+          # expensive downloads are handled by the two cache steps below.
           cache: npm
+
+      # `cache: npm` above does not cover this: the linter's tree pulls in
+      # playwright, whose postinstall fetches a Chromium into ~/.cache. That
+      # is a browser-sized download on every single run, and it only changes
+      # when the lockfile does.
+      - name: Cache the playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ms-playwright-${{ runner.os }}-
+
+      # @vscode/test-web downloads a VS Code web build into ./.vscode-test-web
+      # (its default `testRunnerDataDir`). Which build it fetches is decided by
+      # the tool's own version, so that is what the key is on.
+      - name: Work out the test-host versions to key the caches on
+        id: hosts
+        run: |
+          node -e '
+            const l = require("./package-lock.json");
+            const v = p => l.packages["node_modules/" + p]?.version ?? "none";
+            const fs = require("fs");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              `web=${v("@vscode/test-web")}\n` +
+              `electron=${v("@vscode/test-electron")}\n`);
+          '
+
+      - name: Cache the VS Code web build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .vscode-test-web
+          key: vscode-test-web-${{ runner.os }}-${{ steps.hosts.outputs.web }}
 
       - run: npm ci
 
@@ -44,10 +79,52 @@ jobs:
       - run: npm test
       - run: npm run vsix
 
+      # What actually ships. The package embeds the linter's properties.json
+      # and its icons.json, and the linter pin moves every week without
+      # anybody looking at the size - so print it, print the file list that
+      # explains it, and fail on a jump big enough to mean something got in
+      # that should not have (a test bundle, a downloaded VS Code, a
+      # node_modules tree).
+      #
+      # THRESHOLD: calibrated against a real build - 0.25.1 packages to
+      # 457 KB, of which the linter's properties.json is 473 KB uncompressed
+      # and moves weekly with the pin. 5 MB is an order of magnitude of
+      # headroom for that drift while still catching an accident: the web
+      # test bundle alone would roughly double the package, a downloaded
+      # VS Code or a node_modules tree would blow straight through it.
+      - name: Report the .vsix size
+        env:
+          MAX_VSIX_MB: 5
+        run: |
+          vsix=$(ls -1 ./*.vsix | head -n1)
+          bytes=$(wc -c < "$vsix")
+          mb=$(awk -v b="$bytes" 'BEGIN { printf "%.2f", b / 1048576 }')
+          echo "::notice::$vsix is ${mb} MB (${bytes} bytes)"
+          {
+            echo "### Package"
+            echo ""
+            echo "\`$vsix\` — **${mb} MB** (limit ${MAX_VSIX_MB} MB)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "--- contents ---"
+          npx vsce ls || true
+
+          limit=$((MAX_VSIX_MB * 1048576))
+          if [ "$bytes" -gt "$limit" ]; then
+            echo "::error::$vsix is ${mb} MB, over the ${MAX_VSIX_MB} MB limit. Check the file list above for something that should be in .vscodeignore."
+            exit 1
+          fi
+
       # The web bundle, activated in a real (headless) browser extension
       # host - the one thing the node-based suite cannot prove. Downloads
       # VS Code web and drives the playwright chromium fetched during
       # npm ci, so it runs here and not in the sandboxed pre-push loop.
+      #
+      # It runs AFTER the packaging step on purpose: it writes
+      # dist/web/test.js, and `npm run package` does not clean dist/.
+      # .vscodeignore excludes that file now, so the order is no longer
+      # load-bearing - but there is still no reason to package a tree that
+      # has a test bundle sitting in it.
       - run: npm run test:web
 
       # The .vsix of every branch, installable straight from the run page.
@@ -56,3 +133,75 @@ jobs:
           name: vsix
           path: "*.vsix"
           if-no-files-found: error
+
+  # The desktop half of the same question the web smoke test answers. The web
+  # host has had a real activation test for a while; `src/extension.ts`, the
+  # Session wiring and `dist/properties.json` being resolved next to the
+  # packaged bundle had nothing - `npm test` runs the vscode-free modules in
+  # plain Node and cannot activate any of it.
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache the playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ms-playwright-${{ runner.os }}-
+
+      - name: Work out the test-host version to key the cache on
+        id: hosts
+        run: |
+          node -e '
+            const l = require("./package-lock.json");
+            const fs = require("fs");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              `electron=${l.packages["node_modules/@vscode/test-electron"]?.version ?? "none"}\n`);
+          '
+
+      # @vscode/test-electron downloads a full VS Code into ./.vscode-test.
+      - name: Cache the VS Code desktop build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .vscode-test
+          key: vscode-test-electron-${{ runner.os }}-${{ steps.hosts.outputs.electron }}
+
+      - run: npm ci
+
+      # xvfb because Electron needs a display; ABAP2UI5_DESKTOP_TEST_REQUIRED
+      # because the runner is allowed to skip itself in a restricted
+      # environment and that must never quietly become true here.
+      - name: Run the desktop smoke test
+        env:
+          ABAP2UI5_DESKTOP_TEST_REQUIRED: "1"
+        run: xvfb-run -a npm run test:desktop
+
+  # `npm test` is pure `node --test` over the vscode-free modules and takes
+  # well under a minute, but a good deal of what it covers is exactly the
+  # OS-sensitive part: childproc.ts exists for shell quoting of a program AND
+  # its arguments and for killing a whole process tree, and checkcore.ts and
+  # scaffold.ts both build paths. All of it was only ever proven on Ubuntu.
+  # No vsix and no test:web here - the packaging and the web host are
+  # platform-independent and already covered by `build`.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test

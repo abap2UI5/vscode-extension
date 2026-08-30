@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.26.0
+
+An audit pass: five reviews over the whole extension produced a list of
+defects, and this closes it. Most of these you will notice as things that
+stop going wrong.
+
+- **Credentials stay out of the logs.** A launch URL carrying `sap-user` or
+  `sap-password` used to reach the "abap2UI5 Traffic" channel — and the
+  traffic an MCP agent can read — in full. Both are redacted now. Screenshots
+  authorize with a token that is retired the moment it is used, instead of
+  one that sat in the browser's command line for the life of the process.
+- **Reload on activation survives a wrong password.** A single 401 used to
+  switch the activation watch off for the rest of the window, silently: you
+  re-entered your credentials, everything else recovered, and the preview
+  simply never reloaded again until you reopened the window.
+- **F9 and the CodeLens follow the branch you switch to.** Classes that
+  arrive through `git pull` or a branch switch are picked up now, so an app
+  that inherits its `z2ui5_if_app` from a base class stops going quiet after
+  a checkout.
+- **The view check no longer overstates itself.** "View check passed" is only
+  said when the render gate actually reported; a timeout, a crash or an
+  unreadable report says so. Installing the render gate after a failed start
+  works without reloading the window, and pointing `mcp.reposRoot` at a local
+  linter checkout is noticed the same way the other settings are.
+- **Findings stay honest in the background.** Turning a rule off, rebuilding
+  the baseline or pulling a changed `abap2ui5lint.jsonc` now re-checks every
+  open file, not just the visible ones, so a background tab cannot keep
+  showing findings the repository has waived. On vscode.dev the live check and
+  the workspace sweep finally agree on which files a config excludes, and
+  editing while a workspace check runs no longer wipes the squiggles it just
+  produced.
+- **The editor keeps up while you type.** The ABAP scan behind completion,
+  hover, CodeLens, colours and the inline annotations runs once per edit
+  instead of six to eight times, and the apps tree stops re-reading the
+  workspace every time you save or click one of its entries. Large classes
+  and large workspaces are where you will feel it.
+- **Two new ways to follow a wire.** Control ids complete inside
+  `set_focus( )`, `by_id =` and `control_by_id( )` — the literals where a typo
+  used to fail silently — and putting the cursor on an id or an event name
+  highlights its other end.
+- **Renaming an attribute rejects a name that would not compile.** `F2` used
+  to accept `mv-title` and rewrite the declaration and every use into ABAP the
+  system refuses.
+- **The property editor edits the control you are looking at.** An edit sent
+  while the form was moving to another control could land on the wrong one.
+- **The wizards say what went wrong.** "New App from Template" no longer ends
+  in silence in a read-only editor, and a failed "New Project from Template"
+  names the file it could not write and how much it had created, instead of
+  leaving a half-written folder that the next attempt refuses.
+- **Turning the MCP system server off really stops it,** including clients
+  that were already connected, and a malformed request from one MCP client no
+  longer takes the rest of a batch down with it.
+
 ## 0.25.1
 
 A dedicated polish pass: 138 small improvements, none of them a new

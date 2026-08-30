@@ -108,6 +108,28 @@ jobs:
       - run: npm test
       - run: npm run vsix
 
+      # ...and that argument applies hardest to the web bundle, which is the
+      # one thing neither `npm test` nor `npm run vsix` says anything about:
+      # they would both pass on a build that throws at load in a browser
+      # host. This used to be the single CI step a release skipped, on
+      # exactly the path the comment above worries about.
+      #
+      # It matters here more than anywhere: the main consumer of the Open VSX
+      # publish below is SAP Business Application Studio, which IS a web host.
+      # A broken web bundle reaches those users through this workflow and
+      # nothing else.
+      #
+      # AGENTS.md's "may not run in restricted environments" caveat is about
+      # the sandboxed pre-push loop - this runner has full network, so the
+      # VS Code web and Chromium downloads it needs are fine.
+      #
+      # Ordered after `npm run vsix` deliberately: it writes dist/web/test.js
+      # into the directory the package is built from. `.vscodeignore` excludes
+      # that file, so this is belt and braces rather than the only thing
+      # keeping the test bundle out of a published release - which is what it
+      # was before.
+      - run: npm run test:web
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.meta.outputs.vsix }}
