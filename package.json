@@ -1056,7 +1056,7 @@
     "repo-dirs:check": "node scripts/generate-repo-dirs.mjs --check"
   },
   "devDependencies": {
-    "@abap2ui5/linter": "github:abap2UI5/linter#798d520af72a39c3f85cfb01d0c374b916792125",
+    "@abap2ui5/linter": "github:abap2UI5/linter#30cf871a92661c437265c60e931e96db29a1970e",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.2.0",
     "@types/vscode": "^1.101.0",
