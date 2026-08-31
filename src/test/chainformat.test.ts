@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chainIndentEdits } from "../chainformat";
 
 /*
- * The canonical shape is the ai-demokit corpus style: an element one step
+ * The canonical shape is the samples-controls corpus style: an element one step
  * (4 spaces) under its parent, an attribute one step under its element, a
  * shut( ) on the level of the open( ) it closes. A file already in that
  * shape must round-trip UNCHANGED - a formatter that touches canonical code

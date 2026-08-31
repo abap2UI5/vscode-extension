@@ -53,7 +53,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/xmlpreview.ts` | "Show Reconstructed XML View": virtual document + live refresh |
 | `src/xmlformat.ts` | Pretty-printer for the reconstructed view trees (`prepareAbap( ).nodes`) |
 | `src/codelens.ts` | Run / Activate & reload / Check views above the class definition |
-| `src/mcp.ts` | Registers the abap2UI5 MCP server (ai-mcp) and the in-extension system server for MCP clients in the window |
+| `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (list/search/run-with-screenshot) |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
@@ -249,7 +249,7 @@ Facts an agent cannot see from the code but will trip over:
 - The MCP registration (`src/mcp.ts`) and the view checker (`src/viewcheck.ts`)
   both probe checkout directories by name: `linter` (the checker's own
   repository name) plus the **pre-rename aliases** `abap2UI5-linter` and
-  `ai-view-check`. The same list lives in ai-mcp's `lib/repos.mjs` as
+  `ai-view-check`. The same list lives in mcp-server's `lib/repos.mjs` as
   `VIEW_CHECK_DIRS` — keep all three in sync, and drop an alias only in a
   coordinated change.
 
@@ -259,6 +259,6 @@ Facts an agent cannot see from the code but will trip over:
 | --- | --- |
 | [abap2UI5](https://github.com/abap2UI5/abap2UI5) | Core framework |
 | [samples](https://github.com/abap2UI5/samples) | Sample applications |
-| [ai-demokit](https://github.com/abap2UI5/ai-demokit) | Ported demo-kit samples — where this extension used to live, until 0.6.0 |
+| [samples-controls](https://github.com/abap2UI5/samples-controls) | Ported demo-kit samples — where this extension used to live, until 0.6.0 |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | The view checker behind `src/viewcheck.ts` (SHA-pinned package) and `src/rendergate.ts` (runtime bundle download) |
-| [ai-mcp](https://github.com/abap2UI5/ai-mcp) | The MCP server `src/mcp.ts` registers for MCP clients in the window |
+| [mcp-server](https://github.com/abap2UI5/mcp-server) | The MCP server `src/mcp.ts` registers for MCP clients in the window |

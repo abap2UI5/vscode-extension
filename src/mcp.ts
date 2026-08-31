@@ -5,13 +5,13 @@ import { VIEW_CHECK_DIRS } from "./repolayout";
 
 /*
  * MCP server registration: exposes the abap2UI5 MCP server
- * (https://github.com/abap2UI5/ai-mcp) to every MCP client in this VS Code
+ * (https://github.com/abap2UI5/mcp-server) to every MCP client in this VS Code
  * window - Copilot agent mode, Claude Code, or any other extension speaking
  * MCP. The server gives agents the full abap2UI5 dev loop without an SAP
  * system: capability queries, static view validation, deploy, transpiled
  * build, headless run with screenshot.
  *
- * The server orchestrates sibling checkouts (abap2UI5, ai-demokit,
+ * The server orchestrates sibling checkouts (abap2UI5, samples-controls,
  * abap2UI5-linter). Point `abap2ui5.mcp.reposRoot` at the folder containing
  * them and the matching *_HOME environment variables are passed along.
  */
@@ -19,10 +19,12 @@ import { VIEW_CHECK_DIRS } from "./repolayout";
 const CONFIG_SECTION = "abap2ui5";
 const PROVIDER_ID = "abap2ui5.mcp";
 
-/** Repo-name -> env var the server resolves it with (see ai-mcp lib/repos.mjs,
- *  whose VIEW_CHECK_DIRS this mirrors via src/repolayout.ts). */
+/** Repo-name -> env var the server resolves it with (see mcp-server
+ *  lib/repos.mjs, whose DEMOKIT_DIRS/VIEW_CHECK_DIRS this mirrors via
+ *  src/repolayout.ts) - newest directory name first, pre-rename names kept. */
 const HOME_VARS: ReadonlyArray<readonly [string, string]> = [
   ["abap2UI5", "A2UI5_HOME"],
+  ["samples-controls", "AI_DEMOKIT_HOME"],
   ["ai-demokit", "AI_DEMOKIT_HOME"],
   ...VIEW_CHECK_DIRS.map((d) => [d, "AI_VIEW_CHECK_HOME"] as const),
 ];
@@ -41,12 +43,14 @@ function serverCommand(): string[] {
   }
   const root = config().get<string>("mcp.reposRoot", "").trim();
   if (root) {
-    const server = path.join(root, "ai-mcp", "server.mjs");
-    if (fs.existsSync(server)) {
-      return ["node", server];
+    for (const dir of ["mcp-server", "ai-mcp"]) {
+      const server = path.join(root, dir, "server.mjs");
+      if (fs.existsSync(server)) {
+        return ["node", server];
+      }
     }
   }
-  return ["npx", "--yes", "github:abap2UI5/ai-mcp"];
+  return ["npx", "--yes", "github:abap2UI5/mcp-server"];
 }
 
 function serverEnv(): Record<string, string> {

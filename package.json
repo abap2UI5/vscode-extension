@@ -416,7 +416,7 @@
         "abap2ui5.mcp.enabled": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Offer the [abap2UI5 MCP server](https://github.com/abap2UI5/ai-mcp) to MCP clients in this window (Copilot agent mode and others). The server gives AI agents the abap2UI5 dev loop without an SAP system: capability queries, static view validation, deploy, build, headless run with screenshot."
+          "markdownDescription": "Offer the [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server) to MCP clients in this window (Copilot agent mode and others). The server gives AI agents the abap2UI5 dev loop without an SAP system: capability queries, static view validation, deploy, build, headless run with screenshot."
         },
         "abap2ui5.mcp.system": {
           "type": "boolean",
@@ -427,13 +427,13 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Command that starts the MCP server. Leave empty for the default: a local checkout under `#abap2ui5.mcp.reposRoot#` when present, otherwise `npx --yes github:abap2UI5/ai-mcp`.\n\nExample for a local clone: `node /home/me/ai-mcp/server.mjs`\n\nThis setting names a program the extension starts, so it is read from your user settings only - a cloned repository cannot point it somewhere else."
+          "markdownDescription": "Command that starts the MCP server. Leave empty for the default: a local checkout under `#abap2ui5.mcp.reposRoot#` when present, otherwise `npx --yes github:abap2UI5/mcp-server`.\n\nExample for a local clone: `node /home/me/mcp-server/server.mjs`\n\nThis setting names a program the extension starts, so it is read from your user settings only - a cloned repository cannot point it somewhere else."
         },
         "abap2ui5.mcp.reposRoot": {
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `ai-demokit`, and optionally `linter`, `ai-mcp`). The matching `A2UI5_HOME` / `AI_DEMOKIT_HOME` / `AI_VIEW_CHECK_HOME` environment variables are passed to the server, and local `ai-mcp` / `linter` checkouts found here are preferred over downloading via npx.\n\nWhat is found here decides which programs are started, so it is read from your user settings only."
+          "markdownDescription": "Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, and optionally `linter`, `mcp-server`; the pre-rename directory names `ai-demokit` / `ai-mcp` are found too). The matching `A2UI5_HOME` / `AI_DEMOKIT_HOME` / `AI_VIEW_CHECK_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx.\n\nWhat is found here decides which programs are started, so it is read from your user settings only."
         }
       }
     },

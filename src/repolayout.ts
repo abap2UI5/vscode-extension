@@ -1,7 +1,7 @@
 /*
  * repolayout - the sibling-checkout naming shared by every feature that
  * probes a repos root (the MCP registration and the local view-check
- * fallback). One list here instead of one per call site; ai-mcp's
+ * fallback). One list here instead of one per call site; mcp-server's
  * lib/repos.mjs carries the same VIEW_CHECK_DIRS for its own resolution.
  */
 

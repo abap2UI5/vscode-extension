@@ -12,7 +12,7 @@
  * (`)->open/leaf/a/shut`) inside a chain statement are touched. Continuation
  * lines of a multi-line value, comments, and everything outside a chain keep
  * their bytes - a formatter that touches code it does not understand is how
- * formatters lose trust. The canonical shape is the ai-demokit corpus style,
+ * formatters lose trust. The canonical shape is the samples-controls corpus style,
  * which a formatted file round-trips unchanged.
  *
  * `vscode`-free: pure text -> edits, tested headless.
