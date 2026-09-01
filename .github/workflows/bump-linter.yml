@@ -15,6 +15,11 @@ on:
     # Mondays 06:17 UTC - an odd minute, off the full-hour load spikes.
     - cron: "17 6 * * 1"
   workflow_dispatch:
+  # Fired by the upstream repository when a relevant change merges, so the
+  # bump lands the same day instead of waiting for the weekly schedule
+  # (send a repository_dispatch with this event type via the GitHub API).
+  repository_dispatch:
+    types: [bump-linter]
 
 permissions:
   contents: write

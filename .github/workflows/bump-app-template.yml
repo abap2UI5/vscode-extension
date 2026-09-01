@@ -22,6 +22,11 @@ on:
     # (06:41), off the full-hour spikes.
     - cron: "53 6 * * 1"
   workflow_dispatch:
+  # Fired by the upstream repository when a relevant change merges, so the
+  # bump lands the same day instead of waiting for the weekly schedule
+  # (send a repository_dispatch with this event type via the GitHub API).
+  repository_dispatch:
+    types: [bump-app-template]
 
 permissions:
   contents: write
