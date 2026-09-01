@@ -40,9 +40,9 @@
   "activationEvents": [
     "onLanguage:abap",
     "onLanguage:xml",
+    "workspaceContains:**/*.clas.abap",
     "workspaceContains:**/*.view.xml",
-    "workspaceContains:**/*.fragment.xml",
-    "onStartupFinished"
+    "workspaceContains:**/*.fragment.xml"
   ],
   "capabilities": {
     "untrustedWorkspaces": {

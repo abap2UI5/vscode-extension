@@ -17,6 +17,13 @@ import { splitCommandLine } from "./checkcore";
  * samples, samples-stack, linter). Point `abap2ui5.mcp.reposRoot` at the
  * folder containing them and the matching *_HOME environment variables are
  * passed along.
+ *
+ * Activation: this registration does NOT need `onStartupFinished`. VS Code
+ * generates an implicit `onMcpCollection:abap2ui5.mcp` activation event from
+ * the `contributes.mcpServerDefinitionProviders` entry and activates the
+ * extension itself whenever MCP discovery wants the provider (see
+ * mcpConfiguration.ts's activationEventsGenerator in the VS Code sources) -
+ * which is why the manifest lists only the language/workspaceContains events.
  */
 
 const PROVIDER_ID = "abap2ui5.mcp";
