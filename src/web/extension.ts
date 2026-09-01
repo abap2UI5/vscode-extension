@@ -5,6 +5,9 @@ import { registerXmlPreview } from "../xmlpreview";
 import { registerWebCheck, webFindingsNow } from "../webcheck";
 import { registerNewApp, registerNewProject } from "../wizard";
 import { registerConvert } from "../convert";
+import { registerNavMap } from "../navview";
+import { registerPropertyEditor } from "../propview";
+import { registerFindingsView } from "../findingsview";
 
 /*
  * The web extension host entry (vscode.dev, github.dev, browser-based SAP
@@ -12,7 +15,8 @@ import { registerConvert } from "../convert";
  *
  * Everything here is the in-process half of the extension: the UI5 metadata
  * snapshot, the property gate, completion/hover, binding paths, the view
- * outline, event navigation and the reconstructed XML - none of it needs a
+ * outline, event navigation, the reconstructed XML, the navigation map, the
+ * Control Properties view and the findings tree - none of it needs a
  * process, a socket or `fs`. What stays desktop-only is everything that
  * does: the embedded preview with its auth proxy, the ADT integration, the
  * render gate and the MCP server. `package.json` hides those commands from
@@ -59,6 +63,14 @@ export async function activate(
   registerNewApp(context);
   registerNewProject(context);
   registerConvert(context, log);
+  // The three surfaces that needed nothing a browser host lacks: the
+  // navigation map (workspace scan through workspace.fs), the Control
+  // Properties view (a form over the bundled snapshot) and the findings tree
+  // (the published diagnostics, with the web gate as its re-check source; no
+  // baseline machinery - that is a file on disk).
+  registerNavMap(context, log);
+  registerPropertyEditor(context, log);
+  registerFindingsView(context, webFindingsNow);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("abap2ui5.openHomepage", () =>

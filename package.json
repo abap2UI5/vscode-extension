@@ -414,10 +414,6 @@
           "when": "!isWeb"
         },
         {
-          "command": "abap2ui5.showNavMap",
-          "when": "!isWeb"
-        },
-        {
           "command": "abap2ui5.openRuleDocs",
           "when": "false"
         },
@@ -480,7 +476,7 @@
         },
         {
           "command": "abap2ui5.fixWorkspace",
-          "when": "view == abap2ui5.findings",
+          "when": "view == abap2ui5.findings && !isWeb",
           "group": "navigation@2"
         },
         {
@@ -618,8 +614,7 @@
           "id": "abap2ui5.findings",
           "name": "abap2UI5 Findings",
           "icon": "$(checklist)",
-          "visibility": "collapsed",
-          "when": "!isWeb"
+          "visibility": "collapsed"
         }
       ],
       "abap2ui5Panel": [
@@ -632,8 +627,7 @@
         {
           "id": "abap2ui5.properties",
           "name": "Control Properties",
-          "type": "webview",
-          "when": "!isWeb"
+          "type": "webview"
         }
       ]
     },
@@ -1031,8 +1025,7 @@
       },
       {
         "view": "abap2ui5.findings",
-        "contents": "Nothing found in what has been checked.\n\nThe view check runs while you type and on save, so this fills itself as you work. To cover everything at once rather than only what is open:\n\n[Check All Views](command:abap2ui5.checkWorkspace)",
-        "when": "!isWeb"
+        "contents": "Nothing found in what has been checked.\n\nThe view check runs while you type and on save, so this fills itself as you work. To cover everything at once rather than only what is open:\n\n[Check All Views](command:abap2ui5.checkWorkspace)"
       }
     ]
   },
