@@ -34,6 +34,14 @@ updates:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@abap2ui5/linter"
+      # The @types/vscode RANGE is coupled to engines.vscode: `vsce package`
+      # compares the two strings and refuses a types range newer than the
+      # engine floor, so a bump here does not produce a red test, it produces
+      # an unpackageable extension (bit us on 2026-09-01: ^1.134.0 against
+      # engines ^1.101.0 broke `npm run vsix` on main). The range stays at the
+      # engine floor and moves only WITH engines.vscode - by hand, as one
+      # commit. The lockfile may still resolve a newer .d.ts inside the range.
+      - dependency-name: "@types/vscode"
     groups:
       toolchain:
         patterns: ["*"]
