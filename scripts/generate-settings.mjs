@@ -88,7 +88,14 @@ function main() {
   const manifest = JSON.parse(
     fs.readFileSync(path.join(ROOT, "package.json"), "utf8")
   );
-  const readme = fs.readFileSync(README, "utf8");
+  /* EOL-agnostic on purpose: the Windows CI runner checks the repository out
+   * with core.autocrlf=true, so the README arrives with CRLF and a byte
+   * comparison against LF-rendered content can never pass there (the same
+   * reason lib/snapshot.mjs normalises upstream reads). The comparison runs
+   * over LF; a write puts the file's own line endings back. */
+  const raw = fs.readFileSync(README, "utf8");
+  const eol = raw.includes("\r\n") ? "\r\n" : "\n";
+  const readme = raw.replace(/\r\n/g, "\n");
   const next = updatedReadme(readme, renderSettings(manifest));
   if (check) {
     if (readme !== next) {
@@ -106,7 +113,7 @@ function main() {
     console.log("generate-settings: README.md already up to date");
     return;
   }
-  fs.writeFileSync(README, next);
+  fs.writeFileSync(README, eol === "\n" ? next : next.replace(/\n/g, eol));
   console.log("generate-settings: wrote the settings reference into README.md");
 }
 
