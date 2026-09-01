@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
-import { frozenBuilderOf, runGate, VIEW_XML_RE } from "./gate";
+import { frozenBuilderOf, GateOptions, runGate, VIEW_XML_RE } from "./gate";
+import { preparedAbapOf } from "./language";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
 import { plural } from "./text";
 import { usesBuilder } from "./abap";
@@ -138,6 +139,17 @@ function optionsForPath(path: string): CheckOptions {
 
 function options(doc: vscode.TextDocument): CheckOptions {
   return optionsForPath(doc.uri.path);
+}
+
+/** The options plus the language features' memoised reconstruction of this
+ *  document - one `prepareAbap` per version instead of one per consumer,
+ *  exactly like the desktop check (see `GateOptions.prep`). */
+function gateOptions(
+  doc: vscode.TextDocument,
+  opts: CheckOptions,
+  isXml: boolean
+): GateOptions {
+  return isXml ? opts : { ...opts, prep: preparedAbapOf(doc) };
 }
 
 /** What the configured baseline waives for this path, if it has one. */
@@ -372,7 +384,7 @@ export function webFindingsNow(doc: vscode.TextDocument): PropertyFinding[] {
     // on vscode.dev `doc.fileName` is `uri.fsPath`, which for an
     // authority-carrying scheme (`vscode-vfs://github/owner/repo/...`) starts
     // with `//github/` and matches no config-relative `exclude` pattern at all
-    gate = runGate(text, doc.uri.path, isXml, opts);
+    gate = runGate(text, doc.uri.path, isXml, gateOptions(doc, opts, isXml));
   } catch {
     return []; // an unparsable buffer mid-edit is not worth reporting
   }
@@ -419,7 +431,7 @@ export function registerWebCheck(
       // the same file identity the sweep hands the gate (`uri.path`) - see
       // webFindingsNow: with `doc.fileName` the live check and the sweep
       // disagreed about which `exclude` patterns apply
-      gate = runGate(text, doc.uri.path, isXml, opts);
+      gate = runGate(text, doc.uri.path, isXml, gateOptions(doc, opts, isXml));
     } catch (err) {
       // one keystroke's worth of unparsable buffer, not a reason to throw
       // out of a listener on every character

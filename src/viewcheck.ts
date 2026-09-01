@@ -16,7 +16,8 @@ import {
 import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
 import { usesBuilder } from "./abap";
-import { frozenBuilderOf, GateResult, runGate, VIEW_XML_RE } from "./gate";
+import { frozenBuilderOf, GateOptions, GateResult, runGate, VIEW_XML_RE } from "./gate";
+import { preparedAbapOf } from "./language";
 import { labelOf, noWorkspaceFolders } from "./abapsources";
 import {
   augmentedPath,
@@ -153,6 +154,17 @@ function optionsFor(doc: vscode.TextDocument): CheckOptions {
     allow: cfg.get<string[]>("viewCheck.allow", []),
     rules: ruleSettings(),
   });
+}
+
+/** The options plus the language features' memoised reconstruction of this
+ *  document - one `prepareAbap` per version instead of one per consumer
+ *  (see `GateOptions.prep`). XML never has one. */
+function gateOptionsFor(
+  doc: vscode.TextDocument,
+  options: CheckOptions,
+  isXml: boolean
+): GateOptions {
+  return isXml ? options : { ...options, prep: preparedAbapOf(doc) };
 }
 
 // ---------------------------------------------------------------------------
@@ -348,7 +360,12 @@ export function findingsNow(doc: vscode.TextDocument): PropertyFinding[] {
   const text = doc.getText();
   const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
   const options = optionsFor(doc);
-  const gate = runGate(text, doc.uri.fsPath || doc.fileName, isXml, options);
+  const gate = runGate(
+    text,
+    doc.uri.fsPath || doc.fileName,
+    isXml,
+    gateOptionsFor(doc, options, isXml)
+  );
   if (options.baseline && doc.uri.scheme === "file") {
     // the quick-fix provider must see what the diagnostics show - a fix
     // offered for a finding the baseline already swallowed makes no sense
@@ -463,7 +480,12 @@ async function checkDocument(
   // a single such file ended the whole run.
   let gate: GateResult;
   try {
-    gate = runGate(text, doc.uri.fsPath || name, isXml, options);
+    gate = runGate(
+      text,
+      doc.uri.fsPath || name,
+      isXml,
+      gateOptionsFor(doc, options, isXml)
+    );
   } catch (err) {
     log(`view-check: ${name} [${doc.uri.scheme}] - could not be checked (${String(err)})`);
     if (request.announce) {

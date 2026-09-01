@@ -78,6 +78,26 @@ function configRelative(
   return f.startsWith(`${dir}/`) ? f.slice(dir.length + 1) : undefined;
 }
 
+/** The linter's reconstruction of a class - what `prepareAbap` returns. */
+export type PreparedAbap = ReturnType<typeof prepareAbap>;
+
+/**
+ * What the gate is run with: the resolved check options, plus optionally the
+ * caller's own reconstruction of the SAME text.
+ *
+ * `prepareAbap` walks the whole source, and the vscode layer already memoises
+ * it per document version for completion, hover and the inline annotations
+ * (`preparedAbapOf`). Without the handover every keystroke and every CodeLens
+ * pass parsed the identical text a second time in here. A caller that has no
+ * document at hand (the workspace sweep over files on disk, the parity tests)
+ * simply leaves `prep` out and the gate derives it itself - the two paths are
+ * pinned to the same findings in `gate.parity.test.ts`.
+ */
+export interface GateOptions extends CheckOptions {
+  /** MUST be `prepareAbap` of exactly the `text` handed to `runGate`. */
+  prep?: PreparedAbap;
+}
+
 export interface GateResult {
   findings: PropertyFinding[];
   /** True when the source is one the render gate could load as a whole. */
@@ -99,7 +119,7 @@ export function runGate(
   text: string,
   fileName: string,
   isXml: boolean,
-  options: CheckOptions
+  options: GateOptions
 ): GateResult {
   const { minUi5, distribution, allow } = options;
   const data = snapshot();
@@ -130,7 +150,7 @@ export function runGate(
      * without the icon rules while CI judged it with them. */
     findings.push(...checkIcons(text, { minUi5 }));
   } else {
-    const prep = prepareAbap(text);
+    const prep = options.prep ?? prepareAbap(text);
     if (!prep.usesBuilder) {
       /* A class on a FROZEN builder gets the one finding `checkAbapSource`
        * gives it and nothing else - the other rules are written for the
