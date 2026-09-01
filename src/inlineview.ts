@@ -294,13 +294,19 @@ export function registerInlineAnnotations(
 
 /** Parsed mock files by path, keyed on mtime and size - the paint runs every
  *  300 ms while typing, and re-reading and re-parsing an unchanged JSON each
- *  time was the one cost in the pass that a stat can replace. Bounded by the
- *  mock files the window touches; a broken file stays uncached and is the
- *  preview's to report. */
+ *  time was the one cost in the pass that a stat can replace. A broken file
+ *  stays uncached and is the preview's to report. */
 const mockCache = new Map<
   string,
   { mtimeMs: number; size: number; model: Record<string, unknown> }
 >();
+
+/** Above this many remembered mock files the cache is dropped whole rather
+ *  than grown - the same working-set pattern as abapsources.ts's
+ *  CACHE_MAX_FILES. Nothing evicts an entry when its class closes, so a long
+ *  session hopping across many classes with mock data would otherwise keep
+ *  every parsed model forever. */
+const MOCK_CACHE_MAX_FILES = 200;
 
 /** The preview data next to a class, when there is some - the same file the
  *  systemless preview renders with, so both say the same thing about size. */
@@ -321,6 +327,9 @@ function mockModel(doc: vscode.TextDocument): Record<string, unknown> | undefine
     const model = JSON.parse(
       fs.readFileSync(candidate, "utf8")
     ) as Record<string, unknown>;
+    if (mockCache.size >= MOCK_CACHE_MAX_FILES) {
+      mockCache.clear();
+    }
     mockCache.set(candidate, { mtimeMs: stat.mtimeMs, size: stat.size, model });
     return model;
   } catch {

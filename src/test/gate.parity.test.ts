@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as path from "path";
 import { checkAbapSource, checkXmlSource } from "@abap2ui5/linter";
+import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import { runGate } from "../gate";
 import type { CheckOptions } from "../lintconfig";
 
@@ -373,4 +374,31 @@ test("a rules exclude anchored the way CI writes it matches in the editor too", 
     rules,
   });
   assert.ok(!theirs.findings.some((f) => f.type === "unknown-property"));
+});
+
+test("a precomputed prep produces exactly the findings the gate derives itself", () => {
+  /* `GateOptions.prep` lets the vscode layer hand in its memoised
+   * `prepareAbap` instead of the gate parsing the identical text a second
+   * time on every keystroke and CodeLens pass. The whole point of the
+   * handover is that it changes NOTHING about the verdict - so every ABAP
+   * fixture is run both ways and the findings are pinned to each other,
+   * `annotate`'s in-place line/column enrichment included. */
+  const file = "src/zcl_parity.clas.abap";
+  let compared = 0;
+  for (const [name, source] of Object.entries(ABAP_FIXTURES)) {
+    const derived = runGate(source, file, false, OPTIONS);
+    const handed = runGate(source, file, false, {
+      ...OPTIONS,
+      prep: prepareAbap(source),
+    });
+    assert.deepEqual(
+      reduce(handed.findings),
+      reduce(derived.findings),
+      `passing prep changed the findings for "${name}"`
+    );
+    assert.equal(handed.renderable, derived.renderable, name);
+    assert.equal(handed.nothingChecked, derived.nothingChecked, name);
+    compared++;
+  }
+  assert.ok(compared >= 5, "the fixture table went missing");
 });

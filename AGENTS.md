@@ -34,7 +34,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/connectcheck.ts` | `vscode`-free: what the connection check's probes MEAN - launch-URL shape, DNS/TCP/TLS failure and HTTP-status classification, bootstrap-page detection - behind "Check System Connection" |
 | `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list |
 | `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
-| `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only |
+| `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only - including the navigation map, the Control Properties view and the findings tree (fed by `webFindingsNow`, no baseline machinery) |
 | `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, repo config through `workspace.fs` (no render gate) |
 | `src/gate.ts` | The in-process property gate itself, shared by `viewcheck.ts` (desktop) and `webcheck.ts` (web) |
 | `src/diagnostics.ts` | Findings -> VS Code diagnostics (ranges, severities, rule links), shared by both checks |
@@ -96,6 +96,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over |
 | `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
 | `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
+| `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, and what a RENAME has to drop (never object identity against a memo) |
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
 | `src/text.ts` | `plural(count, noun)` — the one pluralizer behind every counted string users read (dependency-free) |
 | `src/abap.ts`, `src/urls.ts`, `src/context.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
@@ -116,7 +117,7 @@ not committed.
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `catalogue.ts`,
-`abapscan.ts`, `settings.ts`, `text.ts`,
+`abapscan.ts`, `appindex.ts`, `settings.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`,
@@ -368,8 +369,11 @@ Facts an agent cannot see from the code but will trip over:
   A module that newly pulls `child_process`/`os`/`crypto` into the web graph
   breaks the web build, which is why the desktop-only plumbing stays behind
   `extension.ts` and the shared pieces live in `gate.ts`/`diagnostics.ts`/
-  `selector.ts`. Desktop-only commands are hidden from the web palette with
-  `"when": "!isWeb"` entries under `menus.commandPalette`.
+  `selector.ts`. `webview.ts` is web-safe in fact, not merely `vscode`-free:
+  its nonce comes from Web Crypto (`globalThis.crypto.getRandomValues`), not
+  node's `crypto` module - that one import used to be what kept every webview
+  out of the web host. Desktop-only commands are hidden from the web palette
+  with `"when": "!isWeb"` entries under `menus.commandPalette`.
 - **The render gate is downloaded at runtime**, not bundled:
   `src/rendergate.ts` fetches `view-check-bundle.tgz` from the linter's
   rolling prerelease tag `render-gate-bundle` (published by the linter's

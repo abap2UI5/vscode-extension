@@ -1,8 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { navMapHtml, previewHtml, scriptJson, viewPreviewHtml, welcomeHtml } from "../webview";
+import {
+  createNonce,
+  navMapHtml,
+  previewHtml,
+  scriptJson,
+  viewPreviewHtml,
+  welcomeHtml,
+} from "../webview";
 
 const BASE = { nonce: "n0nce", hasLaunchUrl: true } as const;
+
+test("the nonce is base64url from the crypto RNG, web-safe", () => {
+  // Web Crypto, not node's "crypto" module - the web bundle does not shim the
+  // latter, so this shape (24 bytes -> 32 base64url chars, no padding) is
+  // what both hosts produce.
+  const nonce = createNonce();
+  assert.match(nonce, /^[A-Za-z0-9_-]{32}$/);
+  assert.notEqual(nonce, createNonce());
+});
 
 test("the preview carries the runtime-error badge, reset on every load", () => {
   const html = previewHtml({

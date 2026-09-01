@@ -88,6 +88,47 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
 All commands are in the Command Palette (`Ctrl/Cmd + Shift + P`) under
 *abap2UI5*.
 
+## Settings
+
+Everything lives under the `abap2ui5.` prefix. The full descriptions (with
+examples) are in the Settings UI; this reference is generated from
+`package.json` with `npm run settings`, and `npm run settings:check` fails
+when the two drift apart.
+
+<!-- BEGIN GENERATED SETTINGS (npm run settings) -->
+| Setting | Default | Description |
+| --- | --- | --- |
+| `abap2ui5.launchUrlTemplate` | `""` | URL template used to launch an abap2UI5 app. The `{class}` placeholder is replaced with the (upper-cased) class name. |
+| `abap2ui5.systems` | `[]` | The systems F9 can launch against. The active one is picked with the command **"abap2UI5: Select System"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again. |
+| `abap2ui5.allowUnauthorizedCerts` | `true` | Allow the embedded preview's local auth proxy to talk to systems whose **TLS certificate cannot be verified** - self-signed certificates, private CAs not in the OS trust store, hostname mismatches. SAP development systems typically serve self-signed certificates, which is why this is on by default. |
+| `abap2ui5.codeLens` | `true` | Show *Run*, *Activate & reload*, *Check views* and *Autofix n findings* above the class definition of an abap2UI5 app. The autofix lens appears only while the view check has findings it can correct mechanically. |
+| `abap2ui5.openMode` | `"tab"` | How F9 opens the app. |
+| `abap2ui5.reloadOn` | `"activation"` | When the preview of the shown app class reloads by itself. |
+| `abap2ui5.reloadOnSave` | `true` | Reload the preview when the shown app class is saved. *(deprecated)* |
+| `abap2ui5.viewCheck.onSave` | `true` | Run the static view check every time a checkable file is saved: an ABAP class building views with `z2ui5_cl_ui5_view_builder`, or a raw `*.view.xml` / `*.fragment.xml`. Findings appear in the Problems panel. The command *"abap2UI5: Check Views (Static)"* runs the same check on demand. |
+| `abap2ui5.viewCheck.live` | `true` | Also check while typing, shortly after each pause. Only the bundled property gate runs on a keystroke - it works in-process and needs no I/O; the render gate stays on save and on demand. |
+| `abap2ui5.viewCheck.command` | `""` | Command that runs the [abap2UI5-linter](https://github.com/abap2UI5/linter) CLI **for the render gate** - the property gate is bundled with the extension and needs no command. Leave empty for the default: a local checkout under `abap2ui5.mcp.reposRoot` when present (runs with VS Code's own Node.js), otherwise `npx --yes github:abap2UI5/linter`. |
+| `abap2ui5.viewCheck.distribution` | `"sapui5"` | Which UI5 distribution the target system serves. SAPUI5 ships libraries OpenUI5 does not (`sap.ui.comp`, `sap.suite.*`, `sap.ushell`, `sap.fe`, `sap.viz`, ...), so a SmartTable is fine on SAPUI5 and a guaranteed runtime error on OpenUI5. With `openui5` such controls are reported as errors. |
+| `abap2ui5.viewCheck.minUi5` | `"1.71"` | The UI5 version to check against - **the version your system runs**. A control or property introduced after it is reported (it would not exist on your system), and a deprecation is only reported once it is in effect at that version. The metadata itself comes from the bundled snapshot; see the abap2UI5 output channel for the version it was generated from. |
+| `abap2ui5.viewCheck.render` | `false` | Also run the render gate: the reconstructed view is loaded with a real `XMLView.create` in headless Chromium. Unlike the bundled property gate this needs the external checker - install it once with *"abap2UI5: Install Render Gate"* (downloads the checker bundle and Chromium, runs with VS Code's own runtime), or provide your own via `abap2ui5.viewCheck.command` / `abap2ui5.mcp.reposRoot`. |
+| `abap2ui5.viewCheck.rollingBundle` | `false` | Download the render gate from the linter's **rolling** bundle instead of the immutable one published for the linter commit this extension build pins. |
+| `abap2ui5.viewCheck.allow` | `[]` | Accepted deviations for the property gate, e.g. `sap.m.GenericTile.systemInfo` - each entry is passed to the checker as `--allow`. Merges with the `allow` list of a workspace's `abap2ui5lint.jsonc`. |
+| `abap2ui5.viewCheck.rules` | `{}` | Which view-check rules are active, and how loudly. A rule id maps to `false` to switch it off, to `"hint"` / `"warning"` / `"error"` to change its severity, or to `{ "severity": …, "exclude": […] }`. |
+| `abap2ui5.inlineFindings` | `"problems"` | Show the view check's message at the end of the line it concerns, next to the squiggle. A builder chain is long and the Problems panel is far away, so the message is put where you are already looking. |
+| `abap2ui5.inlineSince` | `true` | Show the UI5 version a control or attribute arrived in, at the end of its line - warned when it is above `abap2ui5.viewCheck.minUi5`. The metadata ships with the extension, so this answers *"does my system have this yet?"* while you write the line rather than after the check runs. |
+| `abap2ui5.inlineDeprecated` | `true` | Show a control's or attribute's deprecation at the end of its line, with the replacement the UI5 documentation names. Deprecations and `abap2ui5.inlineSince` share one decoration pass; this switch governs only the deprecation half. |
+| `abap2ui5.inlineRoundtripCost` | `true` | Show what each **PUBLIC** attribute adds to a roundtrip, next to its declaration. abap2UI5 serializes every public attribute into the model on every roundtrip; the size is measured from the class's own literal seeds, or from a `<class>.mock.json` when there is one. |
+| `abap2ui5.renamePreview` | `true` | Show the refactor preview when **F2** renames an event, a control id or a bound attribute, so every occurrence can be seen before it changes. |
+| `abap2ui5.previewThemes` | `[]` | Additional UI5 themes the preview's theme picker offers, merged after the built-in list - for a custom theme deployed on your system. |
+| `abap2ui5.previewLanguages` | `[]` | Additional logon languages the preview's language picker offers, merged after the built-in list - passed to the app as `sap-language`. |
+| `abap2ui5.viewPreview.theme` | `"sap_horizon"` | The UI5 theme *"abap2UI5: Preview View (No System)"* renders in. Any theme name the runtime ships, e.g. `sap_horizon`, `sap_horizon_dark`, `sap_fiori_3`, `sap_belize`. |
+| `abap2ui5.viewPreview.viewport` | `"1280x900"` | The viewport(s) the systemless preview renders at, `<width>x<height>` in CSS pixels - e.g. `390x844` to see the view the way a phone lays it out. **Several, comma-separated, become a device matrix**: `390x844,1280x900` renders both in one browser session and shows them side by side. The picture is taken full-page, so a view taller than the viewport is shown whole. |
+| `abap2ui5.mcp.enabled` | `true` | Offer the [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server) to MCP clients in this window (Copilot agent mode and others). The server gives AI agents the abap2UI5 dev loop without an SAP system: capability queries, static view validation, deploy, build, headless run with screenshot. |
+| `abap2ui5.mcp.system` | `true` | Also offer the **abap2UI5 System** MCP server: real-system tools hosted by the extension itself - list the configured systems, search classes on the system (ADT quick search) and run an app through the auth proxy with a headless screenshot. Uses the same credentials the preview stores; the run tool needs the render gate's Chromium. |
+| `abap2ui5.mcp.command` | `""` | Command that starts the MCP server. Leave empty for the default: a local checkout under `abap2ui5.mcp.reposRoot` when present, otherwise `npx --yes @abap2ui5/mcp-server`. |
+| `abap2ui5.mcp.reposRoot` | `""` | Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, `samples`, `samples-stack`, and optionally `linter`, `mcp-server`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `SAMPLES_HOME` / `SAMPLES_STACK_HOME` / `AI_VIEW_CHECK_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx. |
+<!-- END GENERATED SETTINGS -->
+
 ## Development
 
 ```bash
@@ -99,11 +140,13 @@ Open this repository in VS Code and press **F5** → a second VS Code window
 (Extension Development Host) starts with the extension loaded.
 
 Handy while developing: `npm run watch` rebuilds on every change,
-`npm run lint` type-checks (`tsc --noEmit`) and `npm test` runs the unit
-suite. The tests cover the modules that do not import `vscode` — URL and ABAP
-source handling, the completion context analysis, the metadata queries and the
-`abap2ui5lint.jsonc` merge — bundled with the same esbuild config the
-extension uses and run with `node --test`.
+`npm run lint` runs `tsc --noEmit` plus eslint, and `npm test` runs the unit
+suite with `node --test` — several hundred tests over every `vscode`-free
+module (bundled with the same esbuild config the extension ships with), plus
+the cross-checks: the manifest against the registered commands, the property
+gate against the linter's own pipeline, the snippets and templates through the
+bundled linter. The in-host smoke tests (`npm run test:web`,
+`npm run test:desktop`) each download a VS Code build and run in CI.
 
 ## Packaging as a `.vsix`
 

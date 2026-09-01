@@ -28,6 +28,10 @@ const EXPECTED_COMMANDS = [
   "abap2ui5.showReconstructedXml",
   "abap2ui5.newApp",
   "abap2ui5.openHomepage",
+  // web parity since 0.27.0: the navigation map and the findings tree's
+  // rule actions register in the browser host too
+  "abap2ui5.showNavMap",
+  "abap2ui5.openRuleDocs",
 ];
 
 /** A view whose one property does not exist - `unknown-property`, an error.

@@ -7,7 +7,14 @@ import {
   registerRenderGate,
   renderGateStatus,
 } from "./rendergate";
-import { findingsNow, registerViewCheck } from "./viewcheck";
+import {
+  baselineFileFor,
+  findingsNow,
+  recheckOpenDocuments,
+  registerViewCheck,
+} from "./viewcheck";
+import { addToBaseline } from "./baselinefile";
+import { clearBaselineCache } from "./lintconfig";
 import { registerXmlPreview } from "./xmlpreview";
 import { registerQuickFix } from "./quickfix";
 import { registerLanguageFeatures } from "./language";
@@ -565,7 +572,14 @@ export function activate(context: vscode.ExtensionContext): void {
   registerCodeLens(context);
   registerFindingsBar(context);
   registerExamples(context, log);
-  registerFindingsView(context);
+  registerFindingsView(context, findingsNow, {
+    // the desktop-only baseline machinery, injected so the view itself stays
+    // web-safe (see findingsview.ts)
+    baselineFileFor,
+    addToBaseline,
+    clearBaselineCache,
+    recheckOpenDocuments,
+  });
   registerInlineAnnotations(context, log);
   registerAppView(context);
   registerDiagnosticsReport(context, session);

@@ -81,6 +81,59 @@ export function isAppClassDeep(
 }
 
 /**
+ * What the app-class index remembers about one class: everything
+ * `isAppInfoDeep` needs and nothing more. It used to keep the full source
+ * text per class - megabytes across a big workspace - although the only two
+ * questions ever asked of an indexed class are "does it write the interface"
+ * and "what does it inherit from".
+ */
+export interface AppClassInfo {
+  isApp: boolean;
+  /** Upper-cased, or undefined for a root class. */
+  superclass?: string;
+}
+
+/** The index entry for one source - both answers derived once, at indexing
+ *  time, instead of re-derived from stored text on every lookup. */
+export function appClassInfoOf(source: string): AppClassInfo {
+  return { isApp: isAppClass(source), superclass: superclassOf(source) };
+}
+
+/**
+ * `isAppClassDeep` over an index of {@link AppClassInfo} instead of source
+ * texts: the class in front of us is still judged from its source (it is the
+ * one text the caller holds anyway), and every hop up the inheritance chain
+ * reads the two remembered answers. Same guards - an unknown parent is "not
+ * an app", never a guess, and a cycle in a half-written buffer terminates.
+ */
+export function isAppInfoDeep(
+  source: string,
+  infoOf: (className: string) => AppClassInfo | undefined,
+  maxDepth = 16
+): boolean {
+  if (isAppClass(source)) {
+    return true;
+  }
+  let parent = superclassOf(source);
+  const seen = new Set<string>();
+  for (let depth = 0; depth < maxDepth && parent !== undefined; depth++) {
+    if (seen.has(parent)) {
+      return false;
+    }
+    seen.add(parent);
+    const info = infoOf(parent);
+    if (!info) {
+      return false;
+    }
+    if (info.isApp) {
+      return true;
+    }
+    parent = info.superclass;
+  }
+  return false;
+}
+
+/**
  * The generic builder, the only one the linter reconstructs views from.
  * `z2ui5_cl_xml_view` — the typed builder — is on its way out of abap2UI5 and
  * deliberately not checked.

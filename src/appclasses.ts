@@ -1,5 +1,13 @@
 import * as vscode from "vscode";
-import { classNameOf, isAppClass, isAppClassDeep, superclassOf } from "./abap";
+import {
+  AppClassInfo,
+  appClassInfoOf,
+  classNameOf,
+  isAppClass,
+  isAppInfoDeep,
+  superclassOf,
+} from "./abap";
+import { AppClassIndex } from "./appindex";
 import {
   abapSources,
   invalidateAbapSource,
@@ -24,6 +32,11 @@ import {
  * classes are indexed in the background and the question is answered from that
  * index.
  *
+ * The index remembers per class only what the walk asks - "is it an app" and
+ * "what does it inherit from" (`AppClassInfo`), not the source text: keeping
+ * every class's full source made the index cost megabytes in a big workspace
+ * for two booleans' worth of answer.
+ *
  * What the index costs is freshness: a base class created after the last
  * refresh is not known until the next one. That is why every save of an ABAP
  * document schedules one, and why the answer for an unknown parent is "not an
@@ -31,49 +44,60 @@ import {
  * stale index can only ever be as wrong as the old behaviour was.
  */
 
-/** Upper-cased class name -> its source, for the classes this window sees. */
-let index = new Map<string, string>();
+/** Upper-cased class name -> what the walk asks of it, for the classes this
+ *  window sees. The bookkeeping - including what a rename has to drop - lives
+ *  `vscode`-free in appindex.ts, where the test suite can reach it. */
+const index = new AppClassIndex();
 let refreshing: Promise<void> | undefined;
 let rerun = false;
 let scheduled: NodeJS.Timeout | undefined;
 
+/** Upper-cased class name -> the OPEN document that defines it - the version
+ *  being edited beats whatever the index read from disk. Maintained by the
+ *  open/save/close listeners below; `infoOf` used to find this out by
+ *  scanning every open document per inheritance hop on every CodeLens pass. */
+const openByName = new Map<string, vscode.TextDocument>();
+
 /** What an open document last told us about itself, keyed on the document so
- *  a closed one falls away with it. `sourceOf` runs per inheritance hop on
- *  every CodeLens pass - re-reading and re-parsing every open document each
- *  time is what this memo replaces with a version check. */
+ *  a closed one falls away with it. Re-derived only when the version moved. */
 const docNames = new WeakMap<
   vscode.TextDocument,
-  { version: number; name: string; text: string }
+  { version: number; name: string; info: AppClassInfo }
 >();
 
 function docEntry(
   doc: vscode.TextDocument
-): { version: number; name: string; text: string } {
+): { version: number; name: string; info: AppClassInfo } {
   let entry = docNames.get(doc);
   if (!entry || entry.version !== doc.version) {
     const text = doc.getText();
     entry = {
       version: doc.version,
       name: classNameOf(text, doc.uri.path),
-      text,
+      info: appClassInfoOf(text),
     };
     docNames.set(doc, entry);
   }
   return entry;
 }
 
-/** Open documents first: they are what the user is editing, so their text
- *  beats whatever is on disk for the same class. */
-function openDocuments(): Map<string, string> {
-  const out = new Map<string, string>();
+/** Open documents first: they are what the user is editing, so their state
+ *  beats whatever is on disk for the same class. Also (re)seeds the
+ *  name->document map - documents already open at activation never fire
+ *  onDidOpenTextDocument - and records which name each document contributes,
+ *  which is what a later rename knows to delete. */
+function openDocuments(into: Map<string, AppClassInfo>): Map<string, string> {
+  const contributed = new Map<string, string>();
   for (const doc of vscode.workspace.textDocuments) {
     if (!isAbapDocument(doc)) {
       continue;
     }
     const entry = docEntry(doc);
-    out.set(entry.name, entry.text);
+    into.set(entry.name, entry.info);
+    contributed.set(doc.uri.toString(), entry.name);
+    openByName.set(entry.name, doc);
   }
-  return out;
+  return contributed;
 }
 
 /** Rebuilds the index from the workspace's files and the open documents. A
@@ -85,18 +109,16 @@ export async function refreshAppClasses(): Promise<void> {
     return refreshing;
   }
   refreshing = (async () => {
-    const next = new Map<string, string>();
+    const next = new Map<string, AppClassInfo>();
     try {
       for (const source of await abapSources()) {
-        next.set(classNameOf(source.text, source.uri.path), source.text);
+        next.set(classNameOf(source.text, source.uri.path), appClassInfoOf(source.text));
       }
     } catch {
       // a workspace that cannot be globbed still has its open documents
     }
-    for (const [name, text] of openDocuments()) {
-      next.set(name, text);
-    }
-    index = next;
+    const contributed = openDocuments(next);
+    index.replace(next, contributed);
   })();
   try {
     await refreshing;
@@ -114,33 +136,41 @@ export async function refreshAppClasses(): Promise<void> {
  *
  *  A renamed class leaves its OLD name behind: the index kept answering for a
  *  name the window no longer has, so `isAppSource` still followed
- *  `INHERITING FROM` to a base class that had been renamed away. The previous
- *  entry is dropped when it is still the text this document put there. */
+ *  `INHERITING FROM` to a base class that had been renamed away. Which name
+ *  to drop is the index's own record of what this document contributed
+ *  (appindex.ts) - it used to be an object-identity check against the
+ *  `docNames` memo, which every lookup and every background rebuild
+ *  refreshes as a side effect, so a rebuild landing between the rename
+ *  keystroke and the save left the stale name in place. */
 function updateFromDocument(doc: vscode.TextDocument): void {
-  const previous = docNames.get(doc);
   const entry = docEntry(doc);
-  if (
-    previous &&
-    previous.name !== entry.name &&
-    index.get(previous.name) === previous.text
-  ) {
-    index.delete(previous.name);
+  const stale = index.update(doc.uri.toString(), entry.name, entry.info);
+  if (stale !== undefined) {
+    const other = openByName.get(stale);
+    if (other && other !== doc && docEntry(other).name === stale) {
+      // another open document still defines the old name - its answer stands
+      index.restore(stale, docEntry(other).info);
+    } else if (other === doc) {
+      openByName.delete(stale);
+    }
   }
-  index.set(entry.name, entry.text);
+  openByName.set(entry.name, doc);
 }
 
-/** The source of a class this window knows, by name. */
-function sourceOf(className: string): string | undefined {
+/** What the window knows about a class, by name - the open document's current
+ *  state when it is open, the indexed answer otherwise. */
+function infoOf(className: string): AppClassInfo | undefined {
   const name = className.toUpperCase();
-  // an open document wins - it is the version being edited
-  for (const doc of vscode.workspace.textDocuments) {
-    if (!isAbapDocument(doc)) {
-      continue;
-    }
+  const doc = openByName.get(name);
+  if (doc) {
     const entry = docEntry(doc);
     if (entry.name === name) {
-      return entry.text;
+      return entry.info;
     }
+    // renamed while being edited - the map learns about it on the next save
+    // or open; until then the index answers for the name asked about
+    openByName.delete(name);
+    openByName.set(entry.name, doc);
   }
   return index.get(name);
 }
@@ -159,7 +189,7 @@ export function isAppSource(source: string): boolean {
   if (!superclassOf(source)) {
     return false; // a root class that does not write it is not one
   }
-  return isAppClassDeep(source, sourceOf);
+  return isAppInfoDeep(source, infoOf);
 }
 
 /**
@@ -212,10 +242,16 @@ export function registerAppClasses(context: vscode.ExtensionContext): void {
         updateFromDocument(doc);
       }
     }),
-    // a closed ADT or untitled document leaves the window's view - the
-    // rebuild drops it (a file on disk is picked up again)
+    // a closed ADT or untitled document leaves the window's view - its map
+    // entry goes at once, and the rebuild refreshes the index (a file on
+    // disk is picked up again)
     vscode.workspace.onDidCloseTextDocument((doc) => {
       if (isAbapDocument(doc)) {
+        const entry = docNames.get(doc);
+        if (entry && openByName.get(entry.name) === doc) {
+          openByName.delete(entry.name);
+        }
+        index.forget(doc.uri.toString());
         schedule();
       }
     }),

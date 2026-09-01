@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.27.0
+
+More of the extension in the browser, and a faster editor everywhere.
+
+- **Three more features work on vscode.dev, github.dev and browser-based
+  Business Application Studio:** the **App Navigation Map**, the **Control
+  Properties** view and the **abap2UI5 Findings** tree now run in the web
+  host too. The findings tree fills from the web view check; only "Add to
+  the Baseline" stays desktop-only (a baseline is a file on disk) and says
+  so instead of failing.
+- **Less work per keystroke.** The view check and the Autofix CodeLens now
+  reuse the reconstruction the language features already computed, instead
+  of parsing the class a second time on every pause and every lens pass.
+- **"Check All Views in the Workspace" is faster on large repositories:**
+  the file reads run concurrently ahead of the checks, and the progress
+  notification updates in batches instead of per file. Results and their
+  order are unchanged.
+- **Lower memory footprint in big workspaces:** the app-class index (the one
+  behind F9 and the apps tree recognising inherited `z2ui5_if_app`) keeps
+  two facts per class instead of every class's full source, and the inline
+  roundtrip-cost annotation bounds its mock-file cache.
+- **Faster window startup:** the extension no longer activates in every
+  window (`onStartupFinished`). It activates when ABAP or view XML is
+  around — and for MCP clients VS Code activates it on demand through the
+  MCP provider contribution, so agents see the abap2UI5 servers exactly as
+  before.
+- **Cleaner packaging:** the production build now cleans its output
+  directories first, so a locally built `.vsix` can no longer ship stale
+  files left behind by earlier dev or test builds.
+- **A settings reference in the README**, generated from the manifest so it
+  cannot drift, and an accurate description of the test suite.
+- For the ecosystem: the weekly bump workflows can now be fired by the
+  upstream repositories on merge (`repository_dispatch`), so a new linter
+  rule or template change can reach the editor the same day.
+
 ## 0.26.0
 
 An audit pass: five reviews over the whole extension produced a list of

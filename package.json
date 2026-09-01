@@ -2,7 +2,7 @@
   "name": "abap2ui5",
   "displayName": "abap2UI5",
   "description": "Develop abap2UI5 apps in VS Code: F9 launches a z2ui5_if_app class in an embedded preview, reload on activation, static view checks, the abap2UI5 MCP server for AI agents, snippets.",
-  "version": "0.26.0",
+  "version": "0.27.0",
   "publisher": "abap2ui5",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -40,9 +40,9 @@
   "activationEvents": [
     "onLanguage:abap",
     "onLanguage:xml",
+    "workspaceContains:**/*.clas.abap",
     "workspaceContains:**/*.view.xml",
-    "workspaceContains:**/*.fragment.xml",
-    "onStartupFinished"
+    "workspaceContains:**/*.fragment.xml"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -414,10 +414,6 @@
           "when": "!isWeb"
         },
         {
-          "command": "abap2ui5.showNavMap",
-          "when": "!isWeb"
-        },
-        {
           "command": "abap2ui5.openRuleDocs",
           "when": "false"
         },
@@ -480,7 +476,7 @@
         },
         {
           "command": "abap2ui5.fixWorkspace",
-          "when": "view == abap2ui5.findings",
+          "when": "view == abap2ui5.findings && !isWeb",
           "group": "navigation@2"
         },
         {
@@ -618,8 +614,7 @@
           "id": "abap2ui5.findings",
           "name": "abap2UI5 Findings",
           "icon": "$(checklist)",
-          "visibility": "collapsed",
-          "when": "!isWeb"
+          "visibility": "collapsed"
         }
       ],
       "abap2ui5Panel": [
@@ -632,8 +627,7 @@
         {
           "id": "abap2ui5.properties",
           "name": "Control Properties",
-          "type": "webview",
-          "when": "!isWeb"
+          "type": "webview"
         }
       ]
     },
@@ -1031,8 +1025,7 @@
       },
       {
         "view": "abap2ui5.findings",
-        "contents": "Nothing found in what has been checked.\n\nThe view check runs while you type and on save, so this fills itself as you work. To cover everything at once rather than only what is open:\n\n[Check All Views](command:abap2ui5.checkWorkspace)",
-        "when": "!isWeb"
+        "contents": "Nothing found in what has been checked.\n\nThe view check runs while you type and on save, so this fills itself as you work. To cover everything at once rather than only what is open:\n\n[Check All Views](command:abap2ui5.checkWorkspace)"
       }
     ]
   },
@@ -1053,13 +1046,15 @@
     "app-template": "node scripts/generate-app-template.mjs",
     "app-template:check": "node scripts/generate-app-template.mjs --check",
     "repo-dirs": "node scripts/generate-repo-dirs.mjs",
-    "repo-dirs:check": "node scripts/generate-repo-dirs.mjs --check"
+    "repo-dirs:check": "node scripts/generate-repo-dirs.mjs --check",
+    "settings": "node scripts/generate-settings.mjs",
+    "settings:check": "node scripts/generate-settings.mjs --check"
   },
   "devDependencies": {
     "@abap2ui5/linter": "github:abap2UI5/linter#30cf871a92661c437265c60e931e96db29a1970e",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.4.0",
-    "@types/vscode": "^1.134.0",
+    "@types/vscode": "^1.101.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^3.9.0",

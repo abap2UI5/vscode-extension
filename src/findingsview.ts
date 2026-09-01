@@ -5,9 +5,6 @@ import { DIAG_SOURCE, RULES_PAGE, ruleOf } from "./diagnostics";
 
 import { labelOf } from "./abapsources";
 import { plural } from "./text";
-import { addToBaseline } from "./baselinefile";
-import { clearBaselineCache } from "./lintconfig";
-import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
 import {
   FindingSeverity,
   groupByRule,
@@ -30,7 +27,31 @@ import {
  * it costs nothing and always agrees with the squiggles: what fills it is
  * whatever has been checked - the open files, and the whole repository after
  * "Check All Views in the Workspace".
+ *
+ * The two host-specific pieces come in as parameters, so the module itself
+ * stays out of the desktop-only import graph (viewcheck.ts drags fs, os and
+ * the child-process runner along): `findingsNow` is the host's memoised gate
+ * (viewcheck.ts on desktop, webcheck.ts in the browser), and `baseline` is
+ * the desktop-only baseline machinery - absent in the web host, where the
+ * baseline file cannot be written.
  */
+
+/** What "Add All Findings of This Rule to the Baseline" needs from the host -
+ *  desktop-only, because a baseline is a file on disk. */
+export interface FindingsBaseline {
+  /** The baseline file the repo config names for this document, if any. */
+  baselineFileFor(doc: vscode.TextDocument): string | undefined;
+  /** Appends one finding; returns the written key. Throws on I/O errors. */
+  addToBaseline(
+    baselineFile: string,
+    sourceFile: string,
+    finding: PropertyFinding
+  ): string;
+  /** Drops the mtime-keyed memo of a baseline file that was just written. */
+  clearBaselineCache(file?: string): void;
+  /** Re-checks the open documents after the baseline changed under them. */
+  recheckOpenDocuments(): void;
+}
 
 
 type Node = RuleGroup | RuleEntry;
@@ -155,7 +176,11 @@ function collect(): RuleEntry[] {
   return out;
 }
 
-export function registerFindingsView(context: vscode.ExtensionContext): void {
+export function registerFindingsView(
+  context: vscode.ExtensionContext,
+  findingsNow: (doc: vscode.TextDocument) => PropertyFinding[],
+  baseline?: FindingsBaseline
+): void {
   const provider = new FindingsTree();
   const view = vscode.window.createTreeView("abap2ui5.findings", {
     treeDataProvider: provider,
@@ -227,6 +252,15 @@ export function registerFindingsView(context: vscode.ExtensionContext): void {
         if (!node || !isGroup(node)) {
           return;
         }
+        if (!baseline) {
+          // the web host: the baseline is a file next to the repo config, and
+          // a browser extension host has no way to write it
+          vscode.window.showInformationMessage(
+            "abap2UI5: baselining needs the desktop editor - the baseline " +
+              "file cannot be written from the browser."
+          );
+          return;
+        }
         const rule = node.rule;
         let added = 0;
         let noBaseline = 0;
@@ -241,7 +275,7 @@ export function registerFindingsView(context: vscode.ExtensionContext): void {
             missed++;
             continue; // deleted or unreachable since the tree was filled
           }
-          const baselineFile = baselineFileFor(doc);
+          const baselineFile = baseline.baselineFileFor(doc);
           if (!baselineFile) {
             noBaseline++;
             continue;
@@ -267,7 +301,7 @@ export function registerFindingsView(context: vscode.ExtensionContext): void {
               continue;
             }
             try {
-              addToBaseline(baselineFile, doc.uri.fsPath, finding);
+              baseline.addToBaseline(baselineFile, doc.uri.fsPath, finding);
               added++;
               touchedBaselines.add(baselineFile);
             } catch (err) {
@@ -281,10 +315,10 @@ export function registerFindingsView(context: vscode.ExtensionContext): void {
         for (const baselineFile of touchedBaselines) {
           // the memo is keyed on mtime, and these writes may land in the
           // same second as the read that filled it
-          clearBaselineCache(baselineFile);
+          baseline.clearBaselineCache(baselineFile);
         }
         if (added) {
-          recheckOpenDocuments();
+          baseline.recheckOpenDocuments();
         }
         const names = [...touchedBaselines]
           .map((file) => path.basename(file))

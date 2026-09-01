@@ -156,6 +156,19 @@ function webConfig() {
 }
 
 async function main() {
+  if (production) {
+    /* The production build starts from nothing. `dist/` is what vsce
+     * packages, and nothing else ever removed a file from it - whether a
+     * locally built .vsix carried a stale bundle (dist/web/test.js, see
+     * .vscodeignore's history of exactly that) depended purely on what had
+     * been built before. `data/` and `dist-test/` are build output of the
+     * same runs, so they go with it; copySnapshot() below recreates
+     * dist/properties.json, dist/abap2ui5lint.schema.json and data/icons.json
+     * before anything is bundled or packaged. */
+    for (const dir of ["dist", "dist-test", "data"]) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
   copySnapshot();
   if (tests) {
     await buildTests();
