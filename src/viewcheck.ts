@@ -691,83 +691,148 @@ async function sweepWorkspace(
     rules: ruleSettings(),
   };
 
-  const swept: SweptFile[] = [];
-  for (const [index, target] of targets.entries()) {
-    if (token.isCancellationRequested) {
-      break;
-    }
-    const uri = target.uri;
+  /* The I/O half runs AHEAD of the CPU-bound gate, in small concurrent
+   * batches: the old loop awaited one stat, then one read, then gated, file
+   * by file, so a sweep over a network share or a large repository spent most
+   * of its wall time waiting on the disk one file at a time. A batch is
+   * staged with `Promise.all` (bounded, so a 5000-file workspace does not
+   * open 5000 reads at once) and then gated strictly IN ORDER - the finding
+   * set and the order the callers see are exactly the serial loop's.
+   *
+   * Progress is reported every `PROGRESS_EVERY` files plus once at the end:
+   * per file it was one host roundtrip per entry, which on a fast gate cost
+   * more than the check it reported on. */
+  const IO_BATCH = 8;
+  const PROGRESS_EVERY = 25;
+  let reported = 0;
+  const report = (index: number) => {
     progress.report({
-      message: `${index + 1}/${targets.length} - ${labelOf(uri)}`,
-      increment: 100 / targets.length,
+      message: `${index + 1}/${targets.length} - ${labelOf(targets[index].uri)}`,
+      increment: ((index + 1 - reported) * 100) / targets.length,
     });
-    /* Gated once per text: the cache key is the open document's version or
-     * the file's mtime, so a re-run only pays for what changed since. The
-     * cached findings are PRE-baseline - the baseline is applied per run
-     * below, because the rebuild needs the unfiltered truth. */
-    let stamp: string;
+    reported = index + 1;
+  };
+
+  /** One target's I/O, done concurrently within a batch: the cache stamp
+   *  (version or mtime), and the text when the cache misses. `undefined`
+   *  means the file vanished between the glob and the stat/read - skipped,
+   *  as before. An open document is captured synchronously, so its text
+   *  still matches the version in its stamp. */
+  const stage = async (target: {
+    uri: vscode.Uri;
+    open?: vscode.TextDocument;
+  }): Promise<
+    | { stamp: string; text?: string }
+    | undefined
+  > => {
     if (target.open) {
-      stamp = `v${target.open.version}`;
-    } else {
-      try {
-        stamp = `m${(await vscode.workspace.fs.stat(uri)).mtime}`;
-      } catch {
+      // always with the text - it is already in memory, and carrying it even
+      // on a cache hit means a cache cleared mid-sweep (a config change) can
+      // still be gated instead of skipped
+      return { stamp: `v${target.open.version}`, text: target.open.getText() };
+    }
+    let stamp: string;
+    try {
+      stamp = `m${(await vscode.workspace.fs.stat(target.uri)).mtime}`;
+    } catch {
+      return undefined;
+    }
+    const cached = sweepCache.get(target.uri.toString());
+    if (cached && cached.stamp === stamp) {
+      return { stamp };
+    }
+    try {
+      return {
+        stamp,
+        text: Buffer.from(
+          await vscode.workspace.fs.readFile(target.uri)
+        ).toString("utf8"),
+      };
+    } catch {
+      return undefined;
+    }
+  };
+
+  const swept: SweptFile[] = [];
+  for (
+    let base = 0;
+    base < targets.length && !token.isCancellationRequested;
+    base += IO_BATCH
+  ) {
+    const batch = targets.slice(base, base + IO_BATCH);
+    const staged = await Promise.all(batch.map(stage));
+    for (const [offset, io] of staged.entries()) {
+      if (token.isCancellationRequested) {
+        break;
+      }
+      const index = base + offset;
+      if ((index + 1) % PROGRESS_EVERY === 0 || index === targets.length - 1) {
+        report(index);
+      }
+      if (!io) {
         continue;
       }
-    }
-    const key = uri.toString();
-    // a document with no path on disk has no directory to discover a config
-    // from - the workspace's own config governs it, as it does on the live path
-    const opts = resolveOptions(discoveryDirOf(uri), sweepSettings);
-    const cached = sweepCache.get(key);
-    let entry = cached && cached.stamp === stamp ? cached : undefined;
-    if (!entry) {
-      let text: string;
-      if (target.open) {
-        text = target.open.getText();
-      } else {
-        try {
-          text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
-        } catch {
+      const target = batch[offset];
+      const uri = target.uri;
+      const key = uri.toString();
+      // a document with no path on disk has no directory to discover a config
+      // from - the workspace's own config governs it, as it does on the live path
+      const opts = resolveOptions(discoveryDirOf(uri), sweepSettings);
+      /* Gated once per text: the cache key is the open document's version or
+       * the file's mtime, so a re-run only pays for what changed since. The
+       * cached findings are PRE-baseline - the baseline is applied per run
+       * below, because the rebuild needs the unfiltered truth. */
+      const cached = sweepCache.get(key);
+      let entry = cached && cached.stamp === io.stamp ? cached : undefined;
+      if (!entry) {
+        let text = io.text;
+        if (text === undefined) {
+          // staged as a cache hit, but the entry was dropped between staging
+          // and gating (a config change clears the cache mid-sweep) - re-read
+          // rather than silently skip the file
+          try {
+            text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+          } catch {
+            continue;
+          }
+        }
+        const isXml = VIEW_XML_RE.test(uri.path);
+        if (!isXml && !usesBuilder(text) && !frozenBuilderOf(text)) {
+          sweepCache.set(key, { stamp: io.stamp, findings: [], skip: true });
           continue;
         }
+        let gate: GateResult;
+        try {
+          gate = runGate(text, uri.scheme === "file" ? uri.fsPath : uri.path, isXml, opts);
+        } catch (err) {
+          // one file that cannot be parsed is not a reason to abandon the sweep
+          log(`view-check: ${labelOf(uri)} skipped - ${String(err)}`);
+          continue;
+        }
+        entry = gate.nothingChecked
+          ? { stamp: io.stamp, findings: [], skip: true }
+          : {
+              stamp: io.stamp,
+              findings: gate.findings,
+              text: !target.open && gate.findings.length ? text : undefined,
+            };
+        sweepCache.set(key, entry);
       }
-      const isXml = VIEW_XML_RE.test(uri.path);
-      if (!isXml && !usesBuilder(text) && !frozenBuilderOf(text)) {
-        sweepCache.set(key, { stamp, findings: [], skip: true });
+      if (entry.skip) {
         continue;
       }
-      let gate: GateResult;
-      try {
-        gate = runGate(text, uri.scheme === "file" ? uri.fsPath : uri.path, isXml, opts);
-      } catch (err) {
-        // one file that cannot be parsed is not a reason to abandon the sweep
-        log(`view-check: ${labelOf(uri)} skipped - ${String(err)}`);
-        continue;
+      const findings = entry.findings.slice();
+      if (options.baseline && opts.baseline && uri.scheme === "file") {
+        applyBaselineTo(findings, opts.baseline, uri.fsPath);
       }
-      entry = gate.nothingChecked
-        ? { stamp, findings: [], skip: true }
-        : {
-            stamp,
-            findings: gate.findings,
-            text: !target.open && gate.findings.length ? text : undefined,
-          };
-      sweepCache.set(key, entry);
+      swept.push({
+        uri,
+        findings,
+        version: target.open?.version,
+        text: entry.text,
+        configFile: opts.configFile,
+      });
     }
-    if (entry.skip) {
-      continue;
-    }
-    const findings = entry.findings.slice();
-    if (options.baseline && opts.baseline && uri.scheme === "file") {
-      applyBaselineTo(findings, opts.baseline, uri.fsPath);
-    }
-    swept.push({
-      uri,
-      findings,
-      version: target.open?.version,
-      text: entry.text,
-      configFile: opts.configFile,
-    });
   }
   return { files: swept, cancelled: token.isCancellationRequested };
 }
