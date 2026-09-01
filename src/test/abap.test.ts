@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   classNameOf,
   isAppClass,
+  appClassInfoOf,
   isAppClassDeep,
+  isAppInfoDeep,
   methodImplementations,
   superclassOf,
   usesBuilder,
@@ -258,6 +260,52 @@ test("an inheritance cycle in a half-written buffer terminates", () => {
   const a = "CLASS zcl_a DEFINITION PUBLIC INHERITING FROM zcl_b.\nENDCLASS.";
   const b = "CLASS zcl_b DEFINITION PUBLIC INHERITING FROM zcl_a.\nENDCLASS.";
   assert.equal(isAppClassDeep(a, resolver({ ZCL_A: a, ZCL_B: b })), false);
+});
+
+/*
+ * The same walk over the app-class INDEX (appclasses.ts): it remembers per
+ * class only `{ isApp, superclass }`, not the source, so the lookup has its
+ * own entry point - and it must keep answering exactly like the source-fed
+ * walk did.
+ */
+
+const infoResolver = (classes: Record<string, string>) => (name: string) => {
+  const source = classes[name.toUpperCase()];
+  return source === undefined ? undefined : appClassInfoOf(source);
+};
+
+test("appClassInfoOf keeps exactly the two answers the walk asks", () => {
+  assert.deepEqual(appClassInfoOf(BASE), { isApp: true, superclass: undefined });
+  assert.deepEqual(appClassInfoOf(CHILD), {
+    isApp: false,
+    superclass: "ZCL_APP_BASE",
+  });
+});
+
+test("the info walk recognises inheritance like the source walk", () => {
+  const middle = `CLASS zcl_mid DEFINITION PUBLIC INHERITING FROM zcl_app_base.
+ENDCLASS.`;
+  const leaf = `CLASS zcl_leaf DEFINITION PUBLIC INHERITING FROM zcl_mid.
+ENDCLASS.`;
+  const infoOf = infoResolver({ ZCL_APP_BASE: BASE, ZCL_MID: middle });
+  assert.equal(isAppInfoDeep(CHILD, infoOf), true, "one hop");
+  assert.equal(isAppInfoDeep(leaf, infoOf), true, "two hops");
+  assert.equal(isAppInfoDeep(BASE, infoOf), true, "writes it itself");
+});
+
+test("the info walk answers 'not an app' for an unknown parent, not a guess", () => {
+  assert.equal(isAppInfoDeep(CHILD, () => undefined), false);
+});
+
+test("the info walk terminates on a cycle and rejects an unrelated chain", () => {
+  const a = "CLASS zcl_a DEFINITION PUBLIC INHERITING FROM zcl_b.\nENDCLASS.";
+  const b = "CLASS zcl_b DEFINITION PUBLIC INHERITING FROM zcl_a.\nENDCLASS.";
+  assert.equal(isAppInfoDeep(a, infoResolver({ ZCL_A: a, ZCL_B: b })), false);
+  const other = "CLASS zcl_other DEFINITION PUBLIC.\nENDCLASS.";
+  assert.equal(
+    isAppInfoDeep(CHILD, infoResolver({ ZCL_APP_BASE: other })),
+    false
+  );
 });
 
 test("a METHOD line inside a string template is not an implementation", () => {
