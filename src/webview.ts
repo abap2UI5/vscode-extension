@@ -8,15 +8,24 @@
  * variables, so they follow the user's colour theme (light, dark, contrast).
  */
 
-import { randomBytes } from "crypto";
-
 import { shortUrl } from "./urls";
 
 /** Random nonce so the webview CSP can allow exactly our own script/style.
  *  A nonce is a security token, so it comes from the crypto RNG - Math.random
- *  is predictable enough to be worth not relying on here. */
+ *  is predictable enough to be worth not relying on here. Web Crypto
+ *  (`globalThis.crypto`) rather than node's "crypto" module: it is the same
+ *  RNG in Node 22 and in a browser worker, and the node module is one the web
+ *  bundle does not shim - importing it here is what kept this module out of
+ *  the web graph. */
 export function createNonce(): string {
-  return randomBytes(24).toString("base64url");
+  const bytes = new Uint8Array(24);
+  globalThis.crypto.getRandomValues(bytes);
+  // base64url by hand: btoa exists in both hosts, Buffer only in node
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 export function escapeHtml(value: string): string {

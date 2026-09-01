@@ -368,8 +368,11 @@ Facts an agent cannot see from the code but will trip over:
   A module that newly pulls `child_process`/`os`/`crypto` into the web graph
   breaks the web build, which is why the desktop-only plumbing stays behind
   `extension.ts` and the shared pieces live in `gate.ts`/`diagnostics.ts`/
-  `selector.ts`. Desktop-only commands are hidden from the web palette with
-  `"when": "!isWeb"` entries under `menus.commandPalette`.
+  `selector.ts`. `webview.ts` is web-safe in fact, not merely `vscode`-free:
+  its nonce comes from Web Crypto (`globalThis.crypto.getRandomValues`), not
+  node's `crypto` module - that one import used to be what kept every webview
+  out of the web host. Desktop-only commands are hidden from the web palette
+  with `"when": "!isWeb"` entries under `menus.commandPalette`.
 - **The render gate is downloaded at runtime**, not bundled:
   `src/rendergate.ts` fetches `view-check-bundle.tgz` from the linter's
   rolling prerelease tag `render-gate-bundle` (published by the linter's
