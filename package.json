@@ -1046,7 +1046,9 @@
     "app-template": "node scripts/generate-app-template.mjs",
     "app-template:check": "node scripts/generate-app-template.mjs --check",
     "repo-dirs": "node scripts/generate-repo-dirs.mjs",
-    "repo-dirs:check": "node scripts/generate-repo-dirs.mjs --check"
+    "repo-dirs:check": "node scripts/generate-repo-dirs.mjs --check",
+    "settings": "node scripts/generate-settings.mjs",
+    "settings:check": "node scripts/generate-settings.mjs --check"
   },
   "devDependencies": {
     "@abap2ui5/linter": "github:abap2UI5/linter#30cf871a92661c437265c60e931e96db29a1970e",
