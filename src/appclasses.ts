@@ -7,6 +7,7 @@ import {
   isAppInfoDeep,
   superclassOf,
 } from "./abap";
+import { AppClassIndex } from "./appindex";
 import {
   abapSources,
   invalidateAbapSource,
@@ -44,8 +45,9 @@ import {
  */
 
 /** Upper-cased class name -> what the walk asks of it, for the classes this
- *  window sees. */
-let index = new Map<string, AppClassInfo>();
+ *  window sees. The bookkeeping - including what a rename has to drop - lives
+ *  `vscode`-free in appindex.ts, where the test suite can reach it. */
+const index = new AppClassIndex();
 let refreshing: Promise<void> | undefined;
 let rerun = false;
 let scheduled: NodeJS.Timeout | undefined;
@@ -82,18 +84,20 @@ function docEntry(
 /** Open documents first: they are what the user is editing, so their state
  *  beats whatever is on disk for the same class. Also (re)seeds the
  *  name->document map - documents already open at activation never fire
- *  onDidOpenTextDocument. */
-function openDocuments(): Map<string, AppClassInfo> {
-  const out = new Map<string, AppClassInfo>();
+ *  onDidOpenTextDocument - and records which name each document contributes,
+ *  which is what a later rename knows to delete. */
+function openDocuments(into: Map<string, AppClassInfo>): Map<string, string> {
+  const contributed = new Map<string, string>();
   for (const doc of vscode.workspace.textDocuments) {
     if (!isAbapDocument(doc)) {
       continue;
     }
     const entry = docEntry(doc);
-    out.set(entry.name, entry.info);
+    into.set(entry.name, entry.info);
+    contributed.set(doc.uri.toString(), entry.name);
     openByName.set(entry.name, doc);
   }
-  return out;
+  return contributed;
 }
 
 /** Rebuilds the index from the workspace's files and the open documents. A
@@ -113,10 +117,8 @@ export async function refreshAppClasses(): Promise<void> {
     } catch {
       // a workspace that cannot be globbed still has its open documents
     }
-    for (const [name, info] of openDocuments()) {
-      next.set(name, info);
-    }
-    index = next;
+    const contributed = openDocuments(next);
+    index.replace(next, contributed);
   })();
   try {
     await refreshing;
@@ -134,20 +136,24 @@ export async function refreshAppClasses(): Promise<void> {
  *
  *  A renamed class leaves its OLD name behind: the index kept answering for a
  *  name the window no longer has, so `isAppSource` still followed
- *  `INHERITING FROM` to a base class that had been renamed away. The previous
- *  entry is dropped when it is still the one this document put there. */
+ *  `INHERITING FROM` to a base class that had been renamed away. Which name
+ *  to drop is the index's own record of what this document contributed
+ *  (appindex.ts) - it used to be an object-identity check against the
+ *  `docNames` memo, which every lookup and every background rebuild
+ *  refreshes as a side effect, so a rebuild landing between the rename
+ *  keystroke and the save left the stale name in place. */
 function updateFromDocument(doc: vscode.TextDocument): void {
-  const previous = docNames.get(doc);
   const entry = docEntry(doc);
-  if (previous && previous.name !== entry.name) {
-    if (index.get(previous.name) === previous.info) {
-      index.delete(previous.name);
-    }
-    if (openByName.get(previous.name) === doc) {
-      openByName.delete(previous.name);
+  const stale = index.update(doc.uri.toString(), entry.name, entry.info);
+  if (stale !== undefined) {
+    const other = openByName.get(stale);
+    if (other && other !== doc && docEntry(other).name === stale) {
+      // another open document still defines the old name - its answer stands
+      index.restore(stale, docEntry(other).info);
+    } else if (other === doc) {
+      openByName.delete(stale);
     }
   }
-  index.set(entry.name, entry.info);
   openByName.set(entry.name, doc);
 }
 
@@ -245,6 +251,7 @@ export function registerAppClasses(context: vscode.ExtensionContext): void {
         if (entry && openByName.get(entry.name) === doc) {
           openByName.delete(entry.name);
         }
+        index.forget(doc.uri.toString());
         schedule();
       }
     }),
