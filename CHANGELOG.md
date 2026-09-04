@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.27.1
+
+Small fixes, and the linter's newest rules.
+
+- **A new project's `npm test` runs again.** app-template grew a `check:all`
+  script that chains through its `check:pin` — a script that reads a file out
+  of the template's own `scripts/` directory, which a scaffolded project does
+  not get and which "New Project from Template" therefore does not write. The
+  scaffold copied the chain verbatim, so a new project shipped two scripts
+  (`check:all` and the `test` that calls it) that existed and died with
+  "missing script". It now takes the links to a dropped script out of the
+  commands that survive, and drops a command that was nothing else.
+- **The bundled view check runs the linter's current rules** — thirteen more
+  than the last release. Among them the flow rules that read a method's
+  statement sequence (a popup rebuilt on every roundtrip, a display behind a
+  `nav_app_call`, the same slot displayed twice), an event raised in a
+  spelling its handler does not have, a library SAP deprecated whole, a
+  `DELETE` inside the `LOOP` that reads the table, and the abapGit
+  round-trip family (BOM, CRLF, trailing whitespace, a missing final
+  newline). Eight closed-set rules now name the one candidate a misspelling
+  can only have meant and offer a Quick Fix that writes it.
+- **`client->` hover and completion match the framework again**: the bundled
+  `z2ui5_if_client` reference is back in sync with the interface, including
+  the documentation `message_box_display` gained.
+
 ## 0.27.0
 
 More of the extension in the browser, and a faster editor everywhere.

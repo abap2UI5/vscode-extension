@@ -47,7 +47,12 @@ function expand(body: string[]): string {
     .replace(/\$\{\d+\|([^|]*)\|\}/g, (_, choices: string) => choices.split(",")[0])
     .replace(/\$\{\d+:([^}]*)\}/g, "$1")
     .replace(/\$\{\d+\}/g, "")
-    .replace(/\$\d+/g, "");
+    .replace(/\$\d+/g, "")
+    // A tab stop alone on its line (`    $0` - where the editor puts the
+    // cursor) leaves its indentation behind. That is a caret position, not
+    // shipped text, so it is not the snippet's trailing whitespace; trailing
+    // whitespace AFTER content still is, and still fails.
+    .replace(/^[ \t]+$/gm, "");
 }
 
 /** The attributes the snippet defaults reference, so the binding rules can
@@ -65,19 +70,35 @@ CLASS zcl_snippet IMPLEMENTATION.`;
 
 const SCAFFOLD_FOOT = `ENDCLASS.`;
 
-/** Wraps one expanded snippet into a complete class, by its shape. */
+/** A source as a FILE on disk would hold it - the linter's abapGit
+ *  round-trip rules judge a file, and a wrapper without a final newline would
+ *  report the harness rather than the snippet. */
+const file = (source: string): string => `${source}\n`;
+
+/** The body of a snippet, indented into the scaffold's method - an empty line
+ *  stays empty, because indenting it would be trailing whitespace the linter's
+ *  abapGit round-trip rules (rightly) report on the wrapper, not the snippet. */
+const indent = (expanded: string, pad = "    "): string =>
+  expanded
+    .split("\n")
+    .map((line, i) => (i === 0 || line === "" ? line : `${pad}${line}`))
+    .join("\n");
+
+/** Wraps one expanded snippet into a complete class file, by its shape - a
+ *  FILE, ending in a newline: the linter judges what it is handed, and a
+ *  wrapper missing one would report the harness rather than the snippet. */
 function wrap(expanded: string): string {
   if (/^CLASS\b/i.test(expanded)) {
-    return expanded; // already a whole class (z2ui5app)
+    return file(expanded); // already a whole class (z2ui5app)
   }
   if (/^METHOD\b/i.test(expanded)) {
     // a whole method (z2ui5main)
-    return `${SCAFFOLD_HEAD}\n${expanded}\n${SCAFFOLD_FOOT}`;
+    return file(`${SCAFFOLD_HEAD}\n${expanded}\n${SCAFFOLD_FOOT}`);
   }
   if (/^(ele|tag|a)\(/i.test(expanded)) {
     // a chain fragment - inserted where the corpus inserts it: after `)->`
     // inside a view being built
-    return `${SCAFFOLD_HEAD}
+    return file(`${SCAFFOLD_HEAD}
   METHOD z2ui5_if_app~main.
     DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
     view->ele( n = \`View\` ns = \`mvc\`
@@ -87,14 +108,21 @@ function wrap(expanded: string): string {
         )->${expanded}->end( ).
     client->view_display( view->stringify( ) ).
   ENDMETHOD.
-${SCAFFOLD_FOOT}`;
+${SCAFFOLD_FOOT}`);
   }
-  // whole statements (toast, popup, nav, the CASE dispatcher, the waiver)
-  return `${SCAFFOLD_HEAD}
+  // whole statements (toast, popup, nav, the CASE dispatcher, the waiver) -
+  // inserted where such a statement is written, INSIDE the event branch. The
+  // top level of `main( )` would be a placement the snippet does not choose
+  // and the linter rightly reports (a popup built there is rebuilt on every
+  // roundtrip: `unconditional-popup-display`), so wrapping them there would
+  // fail the harness's own choice rather than the shipped text.
+  return file(`${SCAFFOLD_HEAD}
   METHOD z2ui5_if_app~main.
-    ${expanded.split("\n").join("\n    ")}
+    IF client->check_on_event( ).
+      ${indent(expanded, "      ")}
+    ENDIF.
   ENDMETHOD.
-${SCAFFOLD_FOOT}`;
+${SCAFFOLD_FOOT}`);
 }
 
 /** error/warning findings of a wrapped source - hints (advisories like

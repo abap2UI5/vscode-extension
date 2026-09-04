@@ -312,6 +312,62 @@ repository is the fuller starting point — same files, plus an
 \`npm run rename\`, a LICENSE and a framework-pin gate.
 `;
 
+/** The one chain link a script body is made of: `npm run <target>`, alone in
+ *  its `&&` segment. Anything richer is left as it is - and then reported by
+ *  `scripts/generate-app-template.mjs --check` rather than rewritten by guess. */
+const CHAIN_LINK = /^npm\s+run\s+([\w:.@/-]+)$/;
+
+/**
+ * The scripts a scaffolded project gets: app-template's own, minus the ones
+ * that run files out of its `scripts/` directory - which this scaffold does
+ * not write, and a script that cannot run is worse than one that is not
+ * offered.
+ *
+ * Dropping them is not enough on its own. app-template's `check:all` reads
+ * `npm run check:pin && npm run check`, and `test` reads `npm run check:all`:
+ * keep those verbatim and a new project ships two scripts that exist and die
+ * with "missing script". So a surviving body loses the `npm run <dropped>`
+ * links, and a body that was nothing else is dropped in turn - to a fixpoint,
+ * because dropping one script can strand the next.
+ *
+ * Mirrored by `scaffoldScripts` in `scripts/generate-app-template.mjs`, which
+ * is where a template change that this rule CANNOT resolve fails the build.
+ */
+export function scaffoldScripts(template: Record<string, string>): Record<string, string> {
+  const scripts: Record<string, string> = {};
+  for (const [name, body] of Object.entries(template)) {
+    if (!body.includes("scripts/")) {
+      scripts[name] = body;
+    }
+  }
+  for (;;) {
+    let changed = false;
+    for (const [name, body] of Object.entries(scripts)) {
+      const kept = body
+        .split("&&")
+        .filter((segment) => {
+          const link = CHAIN_LINK.exec(segment.trim());
+          return !link || link[1] in scripts;
+        })
+        .map((segment) => segment.trim())
+        .filter(Boolean);
+      const rewritten = kept.join(" && ");
+      if (rewritten === body) {
+        continue;
+      }
+      changed = true;
+      if (rewritten) {
+        scripts[name] = rewritten;
+      } else {
+        delete scripts[name];
+      }
+    }
+    if (!changed) {
+      return scripts;
+    }
+  }
+}
+
 /*
  * Only the identity fields are decided here. The dependency versions and the
  * script bodies come from app-template's own package.json, because a hand-kept
@@ -330,15 +386,7 @@ const PACKAGE_JSON = (projectName: string): string => {
      *  template is where it is decided and where it will be removed. */
     overrides?: Record<string, unknown>;
   };
-  const scripts: Record<string, string> = {};
-  for (const [name, body] of Object.entries(template.scripts)) {
-    // The template's `rename` and `check:pin` run files out of its `scripts/`
-    // directory, which this scaffold does not write - a script that cannot run
-    // is worse than one that is not offered.
-    if (!body.includes("scripts/")) {
-      scripts[name] = body;
-    }
-  }
+  const scripts = scaffoldScripts(template.scripts);
   return `${JSON.stringify(
     {
       name: projectName,
