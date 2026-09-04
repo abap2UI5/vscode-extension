@@ -85,23 +85,61 @@ export const GUIDE_MARKER = "> **Provenance:**";
 const TOOL = "generate-app-template";
 
 /**
- * Which template scripts a scaffolded project would be left with, and which
- * `npm run` targets that leaves dangling.
+ * The scripts a scaffolded project is left with - `scaffoldScripts` in
+ * `src/scaffold.ts`, mirrored here because a .mjs generator cannot import the
+ * bundle's TypeScript (the same arrangement `frameworkPin` already has).
  *
  * `src/scaffold.ts` drops every script whose body runs files out of the
  * template's own `scripts/` directory - a scaffolded project does not get
- * one. The gate used to check only that `check` itself is not such a script,
- * which a KEPT script chaining to a DROPPED one walks straight past: a
- * template edit to `"check": "… && npm run check:pin"` would pass here and
- * every scaffolded project's `npm run check` would die with "missing
- * script". So the references are resolved among the kept scripts - and
- * transitively by construction, because every kept script is examined,
- * including the ones only reached through another.
+ * one - and then removes the `npm run <dropped>` links the surviving bodies
+ * chain through, to a fixpoint.
  */
-export function danglingScriptRefs(scripts = {}) {
+export function scaffoldScripts(scripts = {}) {
   const kept = Object.fromEntries(
     Object.entries(scripts).filter(([, body]) => !String(body).includes("scripts/"))
   );
+  for (;;) {
+    let changed = false;
+    for (const [name, body] of Object.entries(kept)) {
+      const rewritten = String(body)
+        .split("&&")
+        .map((segment) => segment.trim())
+        .filter((segment) => {
+          const link = /^npm\s+run\s+([\w:.@/-]+)$/.exec(segment);
+          return !link || link[1] in kept;
+        })
+        .filter(Boolean)
+        .join(" && ");
+      if (rewritten === body) {
+        continue;
+      }
+      changed = true;
+      if (rewritten) {
+        kept[name] = rewritten;
+      } else {
+        delete kept[name];
+      }
+    }
+    if (!changed) {
+      return kept;
+    }
+  }
+}
+
+/**
+ * Which `npm run` targets a scaffolded project would still be left chasing.
+ *
+ * The gate used to check only that `check` itself is not a `scripts/` script,
+ * which a KEPT script chaining to a DROPPED one walks straight past: a
+ * template edit to `"check:all": "npm run check:pin && npm run check"` passed
+ * here and every scaffolded project's `npm run check:all` died with "missing
+ * script". The scaffold resolves that shape itself now (above), so what is
+ * left here is what it CANNOT resolve: a reference the template does not
+ * define at all, and a dropped one written into a richer command than a bare
+ * `npm run <target>` - both of which want a human, not a rewrite.
+ */
+export function danglingScriptRefs(scripts = {}) {
+  const kept = scaffoldScripts(scripts);
   const dangling = [];
   for (const [name, body] of Object.entries(kept)) {
     for (const [, target] of String(body).matchAll(/\bnpm\s+run\s+([\w:.@/-]+)/g)) {
@@ -189,8 +227,7 @@ if (invokedDirectly(import.meta.url)) {
      * one). `check` moving there would silently take `npm run check` away from
      * every new project - the one command its README and AGENTS.md tell the
      * reader to run. */
-    const checkScript = pkg?.scripts?.check;
-    if (pkg && (!checkScript || checkScript.includes("scripts/"))) {
+    if (pkg && !scaffoldScripts(pkg.scripts).check) {
       missing.push(
         'package.json\'s "check" script is missing or runs files under scripts/ - the scaffold drops such scripts, so a new project would lose `npm run check`'
       );
@@ -201,7 +238,7 @@ if (invokedDirectly(import.meta.url)) {
       missing.push(
         `package.json's "${name}" script runs \`npm run ${target}\`, which ` +
           (reason === "dropped"
-            ? "the scaffold drops (it runs files under scripts/)"
+            ? "the scaffold drops (it runs files under scripts/) and cannot strip from this command"
             : "the template does not define") +
           ` - a scaffolded project's \`npm run ${name}\` would die with "missing script"`
       );

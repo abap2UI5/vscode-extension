@@ -10,6 +10,7 @@ import {
   guideSection,
   linterActionRef,
   scaffoldFiles,
+  scaffoldScripts,
 } from "../scaffold";
 
 /*
@@ -114,18 +115,56 @@ test("the dependency versions are the template's, not a second copy of them", ()
     "every gate is the version app-template installs"
   );
   for (const [name, body] of Object.entries(scaffolded.scripts)) {
-    assert.equal(
-      body,
-      template.scripts[name],
-      `script "${name}" says something different here than in app-template`
-    );
+    // A body is the template's, or the template's with the links into a
+    // dropped script taken out - never a third thing written here.
+    const segments = new Set(template.scripts[name]?.split("&&").map((s) => s.trim()));
+    for (const segment of body.split("&&").map((s) => s.trim())) {
+      assert.ok(
+        segments.has(segment),
+        `script "${name}" runs \`${segment}\`, which app-template's "${name}" does not`
+      );
+    }
   }
-  // The two the scaffold drops on purpose: they run files out of the
+  // The one the scaffold drops on purpose: it runs a file out of the
   // template's scripts/ directory, which a scaffolded project does not get.
-  for (const dropped of ["rename", "check:pin"]) {
+  for (const dropped of ["check:pin"]) {
     assert.equal(scaffolded.scripts[dropped], undefined, `"${dropped}" is not offered`);
   }
   assert.ok(scaffolded.scripts.check, "one command still runs the gates");
+  // And every script it DOES offer can run: a body chaining `npm run` into a
+  // script the project does not have is one that dies with "missing script".
+  for (const [name, body] of Object.entries(scaffolded.scripts)) {
+    for (const [, target] of body.matchAll(/\bnpm\s+run\s+([\w:.@/-]+)/g)) {
+      assert.ok(
+        scaffolded.scripts[target],
+        `"${name}" runs \`npm run ${target}\`, which this project has`
+      );
+    }
+  }
+});
+
+test("a script that chains into a dropped one is rewritten, not shipped broken", () => {
+  // app-template's own shape: `check:all` chains through `check:pin`, which
+  // runs a file out of its scripts/ directory and is therefore not scaffolded.
+  assert.deepEqual(
+    scaffoldScripts({
+      check: "abap2ui5lint",
+      "check:pin": "node scripts/check-pin.mjs",
+      "check:all": "npm run check:pin && npm run check",
+      test: "npm run check:all",
+    }),
+    { check: "abap2ui5lint", "check:all": "npm run check", test: "npm run check:all" }
+  );
+  // A body that was NOTHING but the dropped link goes with it, and so does
+  // whatever was only reachable through it - resolved to a fixpoint.
+  assert.deepEqual(
+    scaffoldScripts({
+      rename: "node scripts/rename.mjs",
+      "rename:all": "npm run rename",
+      test: "npm run rename:all",
+    }),
+    {}
+  );
 });
 
 test("no scaffolded file names a linter version of its own", () => {

@@ -2,7 +2,7 @@
   "name": "abap2ui5",
   "displayName": "abap2UI5",
   "description": "Develop abap2UI5 apps in VS Code: F9 launches a z2ui5_if_app class in an embedded preview, reload on activation, static view checks, the abap2UI5 MCP server for AI agents, snippets.",
-  "version": "0.27.0",
+  "version": "0.27.1",
   "publisher": "abap2ui5",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -1051,7 +1051,7 @@
     "settings:check": "node scripts/generate-settings.mjs --check"
   },
   "devDependencies": {
-    "@abap2ui5/linter": "github:abap2UI5/linter#30cf871a92661c437265c60e931e96db29a1970e",
+    "@abap2ui5/linter": "github:abap2UI5/linter#adc3ed25a61905936ffebf0f6bdf4d33ba6f91ff",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.4.0",
     "@types/vscode": "^1.101.0",
