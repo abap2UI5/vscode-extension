@@ -25,7 +25,7 @@ test("the POST a client makes with the token, from loopback, is dispatched", () 
   for (const host of ["127.0.0.1:53535", "localhost:53535", "[::1]:53535"]) {
     assert.equal(
       authorizeMcpRequest(
-        { method: "POST", url: TOKEN_PATH, host },
+        { method: "POST", url: TOKEN_PATH, host, contentType: "application/json" },
         TOKEN_PATH,
         isLoopbackHost
       ),
@@ -113,5 +113,90 @@ test("the token is checked before the method - an unauthorized GET is a 404", ()
       isLoopbackHost
     ),
     "not-found"
+  );
+});
+
+test("a request carrying an Origin header is a page's, and is 404", () => {
+  // An MCP client is not a browser. A page that reaches this port has no
+  // business with the system credentials - and a cross-site "simple" POST
+  // (text/plain, no preflight) used to be dispatched and the tool run.
+  for (const origin of [
+    "https://evil.example.com",
+    "http://127.0.0.1:3000",
+    "http://localhost:53535",
+    "null",
+    "",
+  ]) {
+    assert.equal(
+      authorizeMcpRequest(
+        {
+          method: "POST",
+          url: TOKEN_PATH,
+          host: "127.0.0.1:53535",
+          origin,
+          contentType: "application/json",
+        },
+        TOKEN_PATH,
+        isLoopbackHost
+      ),
+      "not-found",
+      `origin ${JSON.stringify(origin)}`
+    );
+    assert.equal(
+      authorizeMcpRequest(
+        { method: "DELETE", url: TOKEN_PATH, host: "127.0.0.1:53535", origin },
+        TOKEN_PATH,
+        isLoopbackHost
+      ),
+      "not-found",
+      "the teardown too"
+    );
+  }
+});
+
+test("a POST is dispatched only with a body declared as JSON", () => {
+  const post = (contentType?: string) =>
+    authorizeMcpRequest(
+      { method: "POST", url: TOKEN_PATH, host: "127.0.0.1:53535", contentType },
+      TOKEN_PATH,
+      isLoopbackHost
+    );
+  assert.equal(post("application/json"), "dispatch");
+  assert.equal(post("application/json; charset=utf-8"), "dispatch");
+  assert.equal(post("Application/JSON"), "dispatch");
+  for (const wrong of [
+    undefined, // sendBeacon( ) with a Blob of no type sends none at all
+    "",
+    "text/plain",
+    "text/plain;charset=UTF-8", // fetch( ) with a string body
+    "application/x-www-form-urlencoded", // a form
+    "multipart/form-data; boundary=x",
+    "application/jsonx",
+  ]) {
+    assert.equal(
+      post(wrong),
+      "unsupported-media-type",
+      `content-type ${JSON.stringify(wrong)}`
+    );
+  }
+});
+
+test("the media type is checked after the token and the method", () => {
+  // a 415 to an unauthorized caller would confirm that something answers here
+  assert.equal(
+    authorizeMcpRequest(
+      { method: "POST", url: "/wrong", host: "127.0.0.1", contentType: "text/plain" },
+      TOKEN_PATH,
+      isLoopbackHost
+    ),
+    "not-found"
+  );
+  assert.equal(
+    authorizeMcpRequest(
+      { method: "GET", url: TOKEN_PATH, host: "127.0.0.1", contentType: "text/plain" },
+      TOKEN_PATH,
+      isLoopbackHost
+    ),
+    "method-not-allowed"
   );
 });

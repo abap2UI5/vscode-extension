@@ -9,6 +9,10 @@ import {
   decodeBody,
   describeRejection,
   injectRuntimeHook,
+  parseAdtClassRefs,
+  rebasedReferer,
+  requestHostname,
+  rewriteSetCookie,
   SapProxy,
   withUtf8Charset,
 } from "../proxy";
@@ -246,12 +250,16 @@ test("ADT search answers keep the short text and the package", () => {
 /** A plain http "SAP system" that keeps what it was asked for. */
 function recordingSystem(): Promise<{
   origin: string;
-  seen: { path: string; cookie?: string }[];
+  seen: { path: string; cookie?: string; referer?: string }[];
   close: () => void;
 }> {
-  const seen: { path: string; cookie?: string }[] = [];
+  const seen: { path: string; cookie?: string; referer?: string }[] = [];
   const server = http.createServer((req, res) => {
-    seen.push({ path: String(req.url), cookie: req.headers.cookie });
+    seen.push({
+      path: String(req.url),
+      cookie: req.headers.cookie,
+      referer: req.headers.referer,
+    });
     res.writeHead(200, { "content-type": "text/plain" });
     res.end("system answer");
   });
@@ -1224,7 +1232,7 @@ test("a failed forward still writes a traffic entry", async () => {
 // ---------------------------------------------------------------------------
 
 /** A system with one WebSocket endpoint that echoes what it receives. */
-function upgradingSystem(): Promise<{
+function upgradingSystem(extraHeaderLines: string[] = []): Promise<{
   origin: string;
   seen: { path?: string; auth?: string }[];
   close: () => void;
@@ -1235,7 +1243,9 @@ function upgradingSystem(): Promise<{
     seen.push({ path: req.url, auth: String(req.headers.authorization ?? "") });
     socket.write(
       "HTTP/1.1 101 Switching Protocols\r\n" +
-        "Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+        "Upgrade: websocket\r\nConnection: Upgrade\r\n" +
+        extraHeaderLines.map((line) => `${line}\r\n`).join("") +
+        "\r\n"
     );
     socket.on("data", (chunk) => socket.write(chunk));
     socket.on("error", () => socket.destroy());
@@ -1321,4 +1331,396 @@ test("a WebSocket upgrade without the token is refused", async () => {
     await proxy.stop();
     system.close();
   }
+});
+
+// ---------------------------------------------------------------------------
+// The review round: the address a request is opened against, what the gate
+// refuses, what leaves the proxy, and the upgrade path's edge cases
+// ---------------------------------------------------------------------------
+
+test("an IPv6 literal loses its brackets on the way to the socket", () => {
+  // URL.hostname keeps them, and Node hands "[fd00::10]" to getaddrinfo as a
+  // NAME - ENOTFOUND, which the connection check read as a DNS failure
+  assert.equal(
+    requestHostname(new URL("https://[fd00::10]:44300/sap/bc/z2ui5")),
+    "fd00::10"
+  );
+  assert.equal(requestHostname(new URL("http://[::1]:8000/")), "::1");
+  assert.equal(
+    requestHostname(new URL("https://sap.example.com:44300/")),
+    "sap.example.com"
+  );
+  assert.equal(requestHostname(new URL("http://127.0.0.1:8000/")), "127.0.0.1");
+});
+
+test("a request to an IPv6 target does not fail in the name lookup", async () => {
+  // nothing listens on [::1]:1 - this sandbox may not even have an IPv6
+  // loopback - so the connect fails; whatever it says, it is not "the
+  // hostname does not resolve", which is what the brackets turned it into
+  const proxy = new SapProxy();
+  try {
+    await proxy.start("http://[::1]:1", "user", "pass");
+    await assert.rejects(
+      proxy.fetchFromSystem("/sap/bc/adt/probe", undefined, { timeoutMs: 3000 }),
+      (err: NodeJS.ErrnoException) => {
+        assert.notEqual(err.code, "ENOTFOUND", err.message);
+        assert.ok(!/\[::1\]/.test(err.message), err.message);
+        return true;
+      }
+    );
+  } finally {
+    await proxy.stop();
+  }
+});
+
+test("an absolute-form request target is refused, cookie or not", async () => {
+  // `GET http://127.0.0.1:<port>/__abap2ui5/<token>/x HTTP/1.1` is a
+  // forward-proxy request nobody legitimately makes here - it used to fall
+  // through to the cookie branch and go to the system VERBATIM, token and all
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const first = await rawGet(proxy, `${tokenPath(proxy)}/sap/bc/z2ui5`);
+    const cookie = first.setCookie
+      .find((c) => c.startsWith("__abap2ui5_proxy_"))!
+      .split(";")[0];
+    const port = new URL(proxy.origin).port;
+
+    const withCookie = await rawGet(proxy, `${proxy.origin}/sap/bc/z2ui5`, {
+      cookie,
+    });
+    assert.equal(withCookie.status, 404);
+    const bare = await rawGet(proxy, `http://127.0.0.1:${port}/sap/bc/z2ui5`, {
+      cookie,
+    });
+    assert.equal(bare.status, 404);
+    const tokenOnly = await rawGet(proxy, `${proxy.origin}/x`);
+    assert.equal(tokenOnly.status, 404);
+
+    assert.equal(system.seen.length, 1, "only the origin-form request went out");
+    assert.equal(system.seen[0].path, "/sap/bc/z2ui5");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the cookie authorizes the page it was planted for, not a cross-site requester", async () => {
+  // the cookie is host-scoped and SameSite=None, so every page in the
+  // webview's cookie jar carries it - a foreign <img>, iframe or form on
+  // 127.0.0.1:<another port> rode it, with the Origin rewrite making the
+  // request look same-origin to the system
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const first = await rawGet(proxy, `${tokenPath(proxy)}/sap/bc/z2ui5`);
+    const cookie = first.setCookie
+      .find((c) => c.startsWith("__abap2ui5_proxy_"))!
+      .split(";")[0];
+
+    for (const site of ["cross-site", "same-site"]) {
+      const answer = await rawGet(proxy, "/sap/bc/z2ui5", {
+        cookie,
+        "sec-fetch-site": site,
+      });
+      assert.equal(answer.status, 404, site);
+    }
+    assert.equal(system.seen.length, 1, "a cross-site request was forwarded");
+
+    // the page's own resources, a user-initiated navigation (the headless
+    // screenshot), and a client that is not a browser at all
+    for (const site of ["same-origin", "none", undefined]) {
+      const answer = await rawGet(proxy, "/sap/public/bc/ui5_ui5/x.js", {
+        cookie,
+        ...(site ? { "sec-fetch-site": site } : {}),
+      });
+      assert.equal(answer.status, 200, String(site));
+    }
+    // a prefixed request is authorized by its token however it was initiated:
+    // the iframe navigation itself is cross-site to the webview that frames it
+    const framed = await rawGet(proxy, `${tokenPath(proxy)}/sap/bc/z2ui5`, {
+      "sec-fetch-site": "cross-site",
+    });
+    assert.equal(framed.status, 200);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the Referer is rewritten by shape, whichever token the page carried", () => {
+  const target = new URL("https://sap.example.com:44300/sap/bc/z2ui5");
+  const base = "http://127.0.0.1:3000/__abap2ui5/longLivedTok3n_-x";
+  const origin = "https://sap.example.com:44300";
+  assert.equal(
+    rebasedReferer(`${base}/sap/bc/z2ui5?app_start=X`, base, target),
+    `${origin}/sap/bc/z2ui5?app_start=X`
+  );
+  // a page loaded through a one-shot url - a token the base never matched
+  assert.equal(
+    rebasedReferer("http://127.0.0.1:3000/__abap2ui5/oneShotTok3n/sap/bc/z2ui5", base, target),
+    `${origin}/sap/bc/z2ui5`
+  );
+  assert.equal(
+    rebasedReferer("http://127.0.0.1:3000/__abap2ui5/oneShotTok3n", base, target),
+    `${origin}/`
+  );
+  // a cookie-authorized page, addressed without any token
+  assert.equal(
+    rebasedReferer("http://127.0.0.1:3000/sap/public/x.js", base, target),
+    `${origin}/sap/public/x.js`
+  );
+  // not this proxy's: another port that merely starts with these digits, and
+  // a foreign page
+  assert.equal(
+    rebasedReferer("http://127.0.0.1:30001/sap/bc/z2ui5", base, target),
+    "http://127.0.0.1:30001/sap/bc/z2ui5"
+  );
+  assert.equal(
+    rebasedReferer("https://idp.example.com/saml", base, target),
+    "https://idp.example.com/saml"
+  );
+});
+
+test("a one-shot page's follow-up requests carry a token-free Referer", async () => {
+  // the rewrite knew only the long-lived base, so a page loaded for the
+  // screenshot referred to itself with the one-shot token - spent, but
+  // recognisable - in every request the system saw
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const page = proxy.singleUseUrl(`${proxy.origin}/sap/bc/z2ui5?app_start=ZCL_X`);
+    const shot = await rawGet(proxy, new URL(page).pathname + new URL(page).search);
+    const cookie = shot.setCookie
+      .find((c) => c.startsWith("__abap2ui5_proxy_"))!
+      .split(";")[0];
+    await rawGet(proxy, "/sap/public/bc/ui5_ui5/x.js", { cookie, referer: page });
+    assert.equal(
+      system.seen[1].referer,
+      `${system.origin}/sap/bc/z2ui5?app_start=ZCL_X`
+    );
+    // the preview's page, referring to itself the two ways it can
+    await rawGet(proxy, `${tokenPath(proxy)}/sap/public/y.js`, {
+      referer: `${proxy.origin}/sap/bc/z2ui5`,
+    });
+    assert.equal(system.seen[2].referer, `${system.origin}/sap/bc/z2ui5`);
+    const port = new URL(proxy.origin).port;
+    await rawGet(proxy, "/sap/public/z.js", {
+      cookie,
+      referer: `http://127.0.0.1:${port}/sap/public/bc/ui5_ui5/x.js`,
+    });
+    assert.equal(
+      system.seen[3].referer,
+      `${system.origin}/sap/public/bc/ui5_ui5/x.js`
+    );
+    // (the "system" here is loopback too, so only the token segment can be
+    // asserted absent - a real system would see its own host)
+    for (const entry of system.seen) {
+      assert.ok(!/__abap2ui5/.test(entry.referer ?? ""), String(entry.referer));
+    }
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a cookie scoped to the system's path is rescoped to the proxy's root", () => {
+  // a cookie set with Path=/sap/bc/z2ui5 is never sent with the
+  // /__abap2ui5/<token>/sap/bc/z2ui5 requests the page actually makes
+  assert.equal(
+    rewriteSetCookie(
+      "SAP_SESSIONID_A4H_001=abc; Path=/sap/bc/z2ui5; Domain=sap.example.com; Secure"
+    ),
+    "SAP_SESSIONID_A4H_001=abc; Path=/"
+  );
+  assert.equal(
+    rewriteSetCookie("sap-usercontext=sap-client=001; path=/sap; HttpOnly"),
+    "sap-usercontext=sap-client=001; Path=/; HttpOnly"
+  );
+  assert.equal(
+    rewriteSetCookie("s=1; Path=/sap/bc; SameSite=None; Secure"),
+    "s=1; Path=/; SameSite=None; Secure",
+    "SameSite=None keeps Secure"
+  );
+  assert.equal(rewriteSetCookie("plain=1; HttpOnly"), "plain=1; HttpOnly");
+});
+
+test("path-scoped system cookies come through the proxy usable", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, {
+      "content-type": "text/plain",
+      "set-cookie": [
+        "x=1; Path=/sap/bc/z2ui5; HttpOnly",
+        "y=2; path=/sap; SameSite=None; Secure",
+        "z=3",
+      ],
+    });
+    res.end("ok");
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(`http://127.0.0.1:${port}`, "user", "pass");
+    const answer = await rawGet(proxy, `${tokenPath(proxy)}/sap/bc/z2ui5`);
+    const system = answer.setCookie.filter((c) => !c.startsWith("__abap2ui5_proxy_"));
+    assert.deepEqual(system, [
+      "x=1; Path=/; HttpOnly",
+      "y=2; Path=/; SameSite=None; Secure",
+      "z=3",
+    ]);
+  } finally {
+    await proxy.stop();
+    server.close();
+  }
+});
+
+test("a cookie planted on the WebSocket handshake is rebased like a page's", async () => {
+  // the 101 was relayed header for header - a session cookie set on the
+  // handshake kept the system's Domain and Path and was never sent back
+  const system = await upgradingSystem([
+    "Set-Cookie: SAP_SESSIONID_A4H_001=abc; Path=/sap/bc/apc; Domain=sap.example.com; Secure",
+    "Set-Cookie: keep=me; Path=/; SameSite=None; Secure",
+  ]);
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const answer = await rawUpgrade(proxy, `${tokenPath(proxy)}/sap/bc/apc/ws`);
+    assert.match(answer, /^HTTP\/1\.1 101 /, answer);
+    assert.match(answer, /\r\nSet-Cookie: SAP_SESSIONID_A4H_001=abc; Path=\/\r\n/);
+    assert.match(answer, /\r\nSet-Cookie: keep=me; Path=\/; SameSite=None; Secure\r\n/);
+    assert.ok(!/Domain=/.test(answer), "the system's domain is gone");
+    assert.ok(answer.endsWith("ping"), "and the tunnel still works");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+/** A system that refuses every upgrade with 401 - the WebSocket counterpart
+ *  of `rejectingSystem`. */
+function upgradeRejectingSystem(): Promise<{
+  origin: string;
+  seen: string[];
+  close: () => void;
+}> {
+  const seen: string[] = [];
+  const server = http.createServer((_req, res) => res.end("plain"));
+  server.on("upgrade", (req, socket) => {
+    seen.push(String(req.url));
+    socket.end(
+      "HTTP/1.1 401 Unauthorized\r\n" +
+        'WWW-Authenticate: Basic realm="SAP NetWeaver Application Server"\r\n' +
+        "Content-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      resolve({
+        origin: `http://127.0.0.1:${port}`,
+        seen,
+        close: () => server.close(),
+      });
+    });
+  });
+}
+
+test("a WebSocket refused with 401 trips the breaker and is reported once", async () => {
+  // an app reopening its socket after a wrong password sent one failed logon
+  // per attempt - the burst the breaker exists to stop - and nobody heard
+  // about the 401, so "Re-enter Credentials" never came
+  const system = await upgradeRejectingSystem();
+  const proxy = new SapProxy();
+  const reported: { status: number; path: string; authenticate?: string }[] = [];
+  proxy.onResponse = (r) => reported.push(r);
+  try {
+    await proxy.start(system.origin, "user", "wrong");
+    const first = await rawUpgrade(proxy, `${tokenPath(proxy)}/sap/bc/apc/ws`);
+    assert.match(first, /^HTTP\/1\.1 401 /, first);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const again = await rawUpgrade(proxy, `${tokenPath(proxy)}/sap/bc/apc/ws`);
+      assert.equal(again, "", "answered locally, by hanging up");
+    }
+    assert.deepEqual(system.seen, ["/sap/bc/apc/ws"], "the system saw one attempt");
+    assert.equal(reported.length, 1, "reported once");
+    assert.equal(reported[0].status, 401);
+    assert.equal(reported[0].path, "/sap/bc/apc/ws", "token-free path");
+    assert.match(reported[0].authenticate ?? "", /^Basic realm=/);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a client that hangs up before the 101 leaves no tunnel behind", async () => {
+  // the teardown was registered only once the system had answered: a client
+  // gone before that left both sockets in `tunnels` until stop( )
+  let systemSocketClosed = false;
+  let upgradeArrived: () => void = () => {};
+  const upgradeSeen = new Promise<void>((r) => (upgradeArrived = r));
+  const server = http.createServer((_req, res) => res.end("plain"));
+  server.on("upgrade", (_req, socket) => {
+    // the system takes its time - and never answers, in fact. It reads, as a
+    // real one does: a socket nobody reads would not notice the proxy's FIN.
+    socket.resume();
+    socket.on("end", () => socket.destroy());
+    socket.on("close", () => (systemSocketClosed = true));
+    socket.on("error", () => socket.destroy());
+    upgradeArrived();
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+  const proxy = new SapProxy();
+  const tunnels = (proxy as unknown as { tunnels: Set<unknown> }).tunnels;
+  try {
+    await proxy.start(`http://127.0.0.1:${port}`, "user", "pass");
+    const proxyPort = Number(new URL(proxy.origin).port);
+    const client = await new Promise<net.Socket>((resolve) => {
+      const socket = net.connect(proxyPort, "127.0.0.1", () => resolve(socket));
+      socket.on("error", () => {});
+    });
+    client.write(
+      `GET ${tokenPath(proxy)}/sap/bc/apc/ws HTTP/1.1\r\n` +
+        `Host: 127.0.0.1:${proxyPort}\r\n` +
+        "Upgrade: websocket\r\nConnection: Upgrade\r\n" +
+        "Sec-WebSocket-Key: x\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    await upgradeSeen; // the system holds the request, unanswered
+    assert.equal(tunnels.size, 1, "the pending client socket is tracked for stop( )");
+    client.destroy(); // and the client leaves
+    const deadline = Date.now() + 3000;
+    while ((!systemSocketClosed || tunnels.size > 0) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(systemSocketClosed, "the request to the system was not taken down");
+    assert.equal(tunnels.size, 0, "a tunnel was kept for a client that is gone");
+  } finally {
+    await proxy.stop();
+    server.close();
+  }
+});
+
+test("ADT answers arrive entity-escaped and are decoded", () => {
+  const xml =
+    `<adtcore:objectReference adtcore:type="CLAS/OC" adtcore:name="ZCL_SD" ` +
+    `adtcore:description="Sales &amp; Distribution &lt;v2&gt; &quot;beta&quot; ` +
+    `&apos;x&apos; &#169; &#x1F600;" adtcore:packageName="$TMP"/>`;
+  assert.deepEqual(parseAdtClassRefs(xml), [
+    {
+      name: "ZCL_SD",
+      description: `Sales & Distribution <v2> "beta" 'x' © \u{1F600}`,
+      packageName: "$TMP",
+    },
+  ]);
+  // an unknown or malformed entity is left as it is
+  assert.equal(
+    parseAdtClassRefs(
+      `<adtcore:objectReference adtcore:type="CLAS/OC" adtcore:name="ZCL_A" adtcore:description="a &bogus; b &#; c"/>`
+    )[0].description,
+    "a &bogus; b &#; c"
+  );
 });

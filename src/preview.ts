@@ -3,6 +3,7 @@ import { createNonce, LANGUAGES, previewHtml, THEMES, welcomeHtml } from "./webv
 import { AppTarget, loadMessage, modelRootsOfSource } from "./previewcore";
 import { classNameOf, errorTokens } from "./abap";
 import { proxiedUrl, withParams } from "./urls";
+import { redact } from "./report";
 import { abapNsMap, viewOutline } from "./context";
 import { matchOutline, RuntimeControl } from "./inspect";
 import {
@@ -130,6 +131,11 @@ export class PreviewViewProvider
    *  updated the session while the panel reloaded from the url it had first. */
   private showsApp = false;
   private previewRendered = false;
+  /** The reason a show( ) was asked with, for the render that happens INSIDE
+   *  the focus command when the view is still unresolved - that render has
+   *  no load message to carry it, so "Moved into the panel" never showed on
+   *  the first move. */
+  private pendingReason?: string;
 
   constructor(private readonly session: Session) {}
 
@@ -177,6 +183,7 @@ export class PreviewViewProvider
     this.showsApp = true;
     lastErrorLocation = undefined; // the incoming app's errors are its own
     const renderedBefore = this.previewRendered;
+    this.pendingReason = reason;
     await vscode.commands.executeCommand(`${PreviewViewProvider.viewId}.focus`);
     // Focusing an unresolved view resolves it, and resolving renders the app -
     // which starts loading it. Rendering again here would post a load message
@@ -252,8 +259,10 @@ export class PreviewViewProvider
         themes: mergedThemes(),
         languages: mergedLanguages(),
         device: session.device(),
+        reason: reason ?? this.pendingReason,
         nonce: createNonce(),
       });
+      this.pendingReason = undefined;
       this.previewRendered = true;
     } else {
       void view.webview.postMessage(loadMessageFor(session, target, reason));
@@ -361,6 +370,8 @@ export async function applyPreviewParam(
       : undefined) ?? externalUrl;
   session.currentTarget = { ...target, externalUrl, frameUrl };
   session.updateStatusItem();
+  // a theme or language switch reloads the version the server already has;
+  // nothing about the server changed, so an activation watch keeps waiting
   reloadShownApp(
     session,
     name === "theme"
@@ -369,7 +380,8 @@ export async function applyPreviewParam(
         : "Theme: system default"
       : value
         ? `Language: ${value}`
-        : "Logon language"
+        : "Logon language",
+    { keepWatch: true }
   );
 }
 
@@ -449,7 +461,9 @@ export function handleWebviewMessage(
         : message.kind === "console"
           ? "console.error"
           : "error";
-    session.log(`app ${target?.className ?? "?"}: ${kind}: ${message.text ?? ""}`);
+    // UI5's ModuleError quotes the page URL - proxy origin, live token and
+    // all - and this channel is what users paste into issues
+    session.log(`app ${target?.className ?? "?"}: ${kind}: ${redact(message.text ?? "")}`);
     const located = locateErrorInSource(message.text ?? "", target?.className);
     if (located) {
       session.log(`  ↳ ${located.label}`);
@@ -620,7 +634,10 @@ export function showInTab(session: Session, target: AppTarget): void {
   if (session.appPanel) {
     // Existing tab: just reload (or switch to the new class).
     session.appPanel.title = title;
-    session.appPanel.reveal(vscode.ViewColumn.Beside, true);
+    // no column: reveal( ) MOVES a shown panel to the column it is given, and
+    // Beside is relative to the active group - every F9 dragged the tab
+    // across the groups. Beside is for creating the panel, below.
+    session.appPanel.reveal(undefined, true);
     void session.appPanel.webview.postMessage(loadMessageFor(session, target));
     return;
   }

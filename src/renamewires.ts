@@ -364,15 +364,47 @@ function declares(lexed: Lexed, name: string): boolean {
     ) {
       return false;
     }
+    // A component of a `BEGIN OF … END OF` structure is not an attribute
+    // either: its path segment is nested (`{/MS_DATA/TITLE}`), which the
+    // root-segment pattern below deliberately leaves alone - so accepting the
+    // name here renamed the declaration and every same-named field elsewhere,
+    // and left the binding behind.
     return lexed
       .declaredIn(index)
-      .some((declared) => declared.name.toUpperCase() === wanted);
+      .some(
+        (declared) =>
+          !declared.component && declared.name.toUpperCase() === wanted
+      );
   });
 }
 
 /** Is this offset inside one of the source's string literals? */
 function insideLiteral(all: readonly Literal[], offset: number): boolean {
   return all.some((literal) => offset >= literal.start && offset < literal.end);
+}
+
+/** The two spellings of one attribute: the ABAP identifier as the class
+ *  writes it, and the root segment of a binding path, which the framework
+ *  derives from the identifier UPPER-cased. */
+export type AttributeSpanKind = "identifier" | "path";
+
+export interface AttributeSpan extends NamedSpan {
+  kind: AttributeSpanKind;
+}
+
+/** A span F2 writes into. Event names and control ids are strings written
+ *  exactly as typed; an attribute span carries which spelling it takes. */
+export type RenameSpan = NamedSpan & { kind?: AttributeSpanKind };
+
+/**
+ * What a rename WRITES into one span. abap2UI5 derives a model path from the
+ * attribute's name upper-cased (`mv_title` -> `{/MV_TITLE}`), so the typed
+ * new name goes into a path span upper-cased too. Writing it as typed put
+ * `{/mv_header}` into the view - an unknown binding path, which is the
+ * silently empty wire the rename exists to prevent.
+ */
+export function renameSpelling(span: RenameSpan, newName: string): string {
+  return span.kind === "path" ? newName.toUpperCase() : newName;
 }
 
 /**
@@ -389,14 +421,14 @@ function insideLiteral(all: readonly Literal[], offset: number): boolean {
  * repository on the strength of a regex would be a worse offer than a
  * confident local one.
  */
-export function attributeSpans(source: string, name: string): NamedSpan[] {
+export function attributeSpans(source: string, name: string): AttributeSpan[] {
   const lexed = lex(source);
   if (!declares(lexed, name)) {
     return [];
   }
   const inComment = (at: number) =>
     lexed.comments.some(([from, to]) => at >= from && at < to);
-  const out: NamedSpan[] = [];
+  const out: AttributeSpan[] = [];
 
   // the ABAP identifier, outside literals and comments
   const identifier = new RegExp(String.raw`\b${name}\b`, "gi");
@@ -405,7 +437,12 @@ export function attributeSpans(source: string, name: string): NamedSpan[] {
     if (insideLiteral(lexed.literals, at) || inComment(at)) {
       continue;
     }
-    out.push({ name: match[0], start: at, end: at + match[0].length });
+    out.push({
+      name: match[0],
+      start: at,
+      end: at + match[0].length,
+      kind: "identifier",
+    });
   }
 
   // the binding paths inside view literals, where the ROOT segment is the name
@@ -419,7 +456,12 @@ export function attributeSpans(source: string, name: string): NamedSpan[] {
       }
       const at =
         literal.start + (segment.index ?? 0) + segment[1].length + 1;
-      out.push({ name: segment[2], start: at, end: at + segment[2].length });
+      out.push({
+        name: segment[2],
+        start: at,
+        end: at + segment[2].length,
+        kind: "path",
+      });
     }
   }
   return out.sort((a, b) => a.start - b.start);

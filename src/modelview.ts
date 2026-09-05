@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { safeFileStem } from "./previewcore";
 
 /*
  * The live model of the running app, as a document.
@@ -64,9 +65,12 @@ export function registerModelView(
       const stamp = new Date().toISOString().replace("T", " ").slice(0, 19);
       body = `// ${className} - model as of ${stamp}\n` + body;
 
+      // A namespace class (`/UI2/CL_APP`) starts with a slash, and a path
+      // beginning with `//` is not a URI without an authority - the button
+      // threw and visibly did nothing. The raw name stays in the header.
       const uri = vscode.Uri.from({
         scheme: SCHEME,
-        path: `/${className}.model.json`,
+        path: `/${safeFileStem(className)}.model.json`,
       });
       contents.set(uri.toString(), body);
       emitter.fire(uri);

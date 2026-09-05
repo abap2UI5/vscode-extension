@@ -402,6 +402,39 @@ export interface AdtClassRef {
   packageName?: string;
 }
 
+/** The five named XML entities, plus the numeric forms. An attribute value
+ *  arrives escaped - a short text of `Sales &amp; Distribution` used to reach
+ *  the QuickPick with the `&amp;` still in it. */
+function decodeXmlEntities(value: string): string {
+  const named: Record<string, string> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+  };
+  return value.replace(
+    /&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi,
+    (all, entity: string) => {
+      if (entity[0] === "#") {
+        const code =
+          entity[1] === "x" || entity[1] === "X"
+            ? parseInt(entity.slice(2), 16)
+            : parseInt(entity.slice(1), 10);
+        return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : all;
+      }
+      return named[entity.toLowerCase()];
+    }
+  );
+}
+
+/** One attribute of a matched tag, entity-decoded; undefined when absent or
+ *  empty. */
+function attributeOf(tag: string, name: string): string | undefined {
+  const raw = new RegExp(`${name}="([^"]*)"`).exec(tag)?.[1];
+  return raw ? decodeXmlEntities(raw) : undefined;
+}
+
 /**
  * Class references out of an ADT quick-search answer. The tag's attribute
  * order is not fixed, so the tag is matched first and its attributes second;
@@ -411,18 +444,87 @@ export interface AdtClassRef {
 export function parseAdtClassRefs(xml: string): AdtClassRef[] {
   const refs: AdtClassRef[] = [];
   for (const tag of xml.matchAll(/<adtcore:objectReference\b[^>]*>/g)) {
-    const type = /adtcore:type="([^"]*)"/.exec(tag[0])?.[1];
-    const name = /adtcore:name="([^"]*)"/.exec(tag[0])?.[1];
+    const type = attributeOf(tag[0], "adtcore:type");
+    const name = attributeOf(tag[0], "adtcore:name");
     if (type !== "CLAS/OC" || !name || refs.some((ref) => ref.name === name)) {
       continue;
     }
     refs.push({
       name,
-      description: /adtcore:description="([^"]*)"/.exec(tag[0])?.[1] || undefined,
-      packageName: /adtcore:packageName="([^"]*)"/.exec(tag[0])?.[1] || undefined,
+      description: attributeOf(tag[0], "adtcore:description"),
+      packageName: attributeOf(tag[0], "adtcore:packageName"),
     });
   }
   return refs;
+}
+
+/**
+ * The host a request to `target` is opened against. `URL.hostname` keeps the
+ * brackets of an IPv6 literal (`https://[fd00::10]:44300/` -> `[fd00::10]`),
+ * and Node hands that string to getaddrinfo as if it were a name - ENOTFOUND,
+ * which the connection check then read as "the hostname does not resolve".
+ * The same thing `url.urlToHttpOptions( )` does to the field, kept explicit
+ * because three request sites here depend on it.
+ */
+export function requestHostname(target: URL): string {
+  return target.hostname.replace(/^\[(.*)\]$/, "$1");
+}
+
+/**
+ * A `Set-Cookie` from the system, made valid on the proxy's origin.
+ *
+ * Three attributes describe the SYSTEM's authority and break on loopback:
+ * `Domain` (the system's host - the browser refuses it for 127.0.0.1),
+ * `Path` (a cookie scoped to `/sap/bc/z2ui5` is never sent with the
+ * `/__abap2ui5/<token>/sap/bc/z2ui5` requests the page actually makes, so
+ * every such session cookie was set and then silently never returned), and
+ * `Secure` - which goes unless the cookie needs it: a `SameSite=None` cookie
+ * without `Secure` is dropped outright by the webview's Chromium, so stripping
+ * it there loses the session cookie of every system configured per SAP's
+ * cross-site notes - and loopback counts as a trustworthy origin, so Secure is
+ * accepted over http anyway.
+ *
+ * Exported for the tests; the plain path and the relayed 101 of a WebSocket
+ * upgrade both apply it, so a cookie planted on the handshake is as valid as
+ * one planted on a page.
+ */
+export function rewriteSetCookie(cookie: string): string {
+  const rebased = cookie
+    .replace(/;\s*Domain=[^;]*/i, "")
+    .replace(/;\s*Path=[^;]*/i, "; Path=/");
+  return /;\s*SameSite\s*=\s*None\b/i.test(rebased)
+    ? rebased
+    : rebased.replace(/;\s*Secure\b/i, "");
+}
+
+/**
+ * A `Referer` the browser addressed to the proxy, as the system would have
+ * seen it. Rewritten by SHAPE rather than by replacing the long-lived base:
+ * a page loaded through a one-shot url (the screenshot) refers to itself as
+ * `http://127.0.0.1:<port>/__abap2ui5/<one-shot>/...`, which the base never
+ * matched - so the one-shot token, spent but recognisable, travelled on to
+ * the system in every follow-up request. Any token-shaped first segment goes;
+ * a bare proxy url (a cookie-authorized page) is rebased on its own. A
+ * referer that is not this proxy's is left alone.
+ */
+export function rebasedReferer(
+  referer: string,
+  proxyOrigin: string,
+  target: URL
+): string {
+  const base = new URL(proxyOrigin).origin; // http://127.0.0.1:<port>
+  if (!referer.startsWith(base)) {
+    return referer;
+  }
+  const rest = referer.slice(base.length);
+  if (rest && !/^[/?#]/.test(rest)) {
+    return referer; // another port that merely starts with these digits
+  }
+  const prefixed = new RegExp(`^/${TOKEN_SEGMENT}/[A-Za-z0-9_-]+(?=[/?#]|$)`).exec(
+    rest
+  );
+  const path = prefixed ? rest.slice(prefixed[0].length) : rest;
+  return target.origin + (path.startsWith("/") ? path : `/${path}`);
 }
 
 /** First segment of every url the proxy hands out, so the token that follows
@@ -698,6 +800,14 @@ export class SapProxy {
     }
 
     const url = String(req.url ?? "/");
+    // Origin-form only. A browser addressing an origin server sends the path
+    // (`GET /x HTTP/1.1`); the absolute form (`GET http://127.0.0.1:<port>/x`)
+    // is a forward-proxy request nobody legitimately makes here - and it used
+    // to fall through to the cookie branch below and be forwarded VERBATIM,
+    // token segment included, to the system.
+    if (!url.startsWith("/")) {
+      return undefined;
+    }
     const root = `/${TOKEN_SEGMENT}/`;
     if (url.startsWith(root)) {
       const rest = url.slice(root.length);
@@ -720,7 +830,20 @@ export class SapProxy {
       }
     }
 
-    // no prefix: only the cookie from an earlier authorized answer counts
+    // No prefix: only the cookie from an earlier authorized answer counts -
+    // and only from the page it was planted for. The cookie is host-scoped
+    // and SameSite=None (it has to travel from the framed page), so every
+    // page in the webview's cookie jar carries it: a foreign <img>, iframe or
+    // form on 127.0.0.1:<another port> would ride it, with the Origin rewrite
+    // in `prepareForwardHeaders` making the request look same-origin to the
+    // system. The browser says where a request comes from: `same-origin` is
+    // the app page's own resources and roundtrips, `none` a user-initiated
+    // navigation (the headless screenshot), an absent header a client that is
+    // not a browser. Anything else is cross-site by its own account.
+    const site = headerValue(req.headers["sec-fetch-site"]);
+    if (site && site !== "same-origin" && site !== "none") {
+      return undefined;
+    }
     const cookie = String(req.headers.cookie ?? "")
       .split(";")
       .map((part) => part.trim())
@@ -811,7 +934,7 @@ export class SapProxy {
       const req = mod.request(
         {
           protocol: target.protocol,
-          hostname: target.hostname,
+          hostname: requestHostname(target),
           port: target.port || (isHttps ? 443 : 80),
           method: "GET",
           path,
@@ -961,10 +1084,7 @@ export class SapProxy {
       headers.origin = target.origin;
     }
     if (headers.referer) {
-      headers.referer = String(headers.referer).replace(
-        proxyOrigin,
-        target.origin
-      );
+      headers.referer = rebasedReferer(String(headers.referer), proxyOrigin, target);
     }
     return headers;
   }
@@ -1055,7 +1175,7 @@ export class SapProxy {
 
     const options: https.RequestOptions = {
       protocol: target.protocol,
-      hostname: target.hostname,
+      hostname: requestHostname(target),
       port: target.port || (isHttps ? 443 : 80),
       method: req.method,
       path,
@@ -1168,21 +1288,10 @@ export class SapProxy {
         );
       }
 
-      // Make cookies valid on localhost: strip Domain, and Secure unless the
-      // cookie needs it. A `SameSite=None` cookie without `Secure` is dropped
-      // outright by the webview's Chromium, so stripping it there loses the
-      // session cookie of every system configured per SAP's cross-site notes
-      // - and loopback counts as a trustworthy origin, so Secure is accepted
-      // over http anyway.
+      // Make the system's cookies valid on the proxy's origin - Domain, Path
+      // and Secure, see `rewriteSetCookie`.
       const setCookie = proxyRes.headers["set-cookie"];
-      const cookies = setCookie
-        ? setCookie.map((c) => {
-            const withoutDomain = c.replace(/;\s*Domain=[^;]+/i, "");
-            return /;\s*SameSite\s*=\s*None\b/i.test(withoutDomain)
-              ? withoutDomain
-              : withoutDomain.replace(/;\s*Secure/i, "");
-          })
-        : [];
+      const cookies = setCookie ? setCookie.map(rewriteSetCookie) : [];
       if (seedCookie) {
         // SameSite=None, not Lax: the page lives in an iframe whose top-level
         // document is the vscode-webview:// origin, so every request the page
@@ -1320,17 +1429,57 @@ export class SapProxy {
       stripHopByHop: false,
     });
 
+    // Tracked from here on, not from the 101: an upgraded socket no longer
+    // belongs to the http server (see `tunnels`), and neither does one whose
+    // upgrade is still pending - `close( )` waits for it all the same, so a
+    // stop( ) during a pending upgrade used to hang on it forever.
+    this.tunnels.add(socket);
+    socket.on("close", () => this.tunnels.delete(socket));
+
     const proxyReq = mod.request({
       protocol: target.protocol,
-      hostname: target.hostname,
+      hostname: requestHostname(target),
       port: target.port || (isHttps ? 443 : 80),
       method: req.method,
       path,
       headers,
       rejectUnauthorized: !this.allowUnauthorized,
     });
+
+    // A client that leaves before the system has answered takes the pending
+    // request with it. A FIN counts as leaving: the http server hands the
+    // socket over half-open-capable, so a client that merely ended its side
+    // never produced a "close" - and the teardown below is only registered
+    // once the 101 is in, so both sockets of an upgrade that never completed
+    // used to stay open until stop( ).
+    const abandon = () => {
+      proxyReq.destroy();
+      socket.destroy();
+    };
+    socket.on("close", abandon);
+    socket.on("end", abandon);
+    socket.on("error", abandon);
+    // Read while the answer is pending - a socket nobody reads is paused, and
+    // a paused socket surfaces neither the FIN nor the reset. Whatever the
+    // client sends before the 101 (a WebSocket client sends nothing, but the
+    // protocol is not ours to assume) is kept for the tunnel.
+    const early: Buffer[] = [];
+    const keepEarly = (chunk: Buffer) => {
+      early.push(chunk);
+    };
+    socket.on("data", keepEarly);
+
     proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
-      this.tunnels.add(socket);
+      socket.off("close", abandon);
+      socket.off("end", abandon);
+      socket.off("error", abandon);
+      socket.off("data", keepEarly);
+      if (socket.destroyed || socket.readableEnded) {
+        // the client hung up while the system was still deciding: there is
+        // nobody to hand the tunnel to, and a tunnel with one end is a leak
+        proxySocket.destroy();
+        return;
+      }
       this.tunnels.add(proxySocket);
       const teardown = () => {
         this.tunnels.delete(socket);
@@ -1346,7 +1495,14 @@ export class SapProxy {
         `HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage ?? ""}`.trimEnd(),
       ];
       for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
-        lines.push(`${proxyRes.rawHeaders[i]}: ${proxyRes.rawHeaders[i + 1]}`);
+        const name = proxyRes.rawHeaders[i];
+        const value = proxyRes.rawHeaders[i + 1];
+        // the handshake may plant a session cookie exactly as a page does,
+        // and it needs the same rebasing onto the proxy's origin - or it is
+        // set once and never sent back
+        lines.push(
+          `${name}: ${name.toLowerCase() === "set-cookie" ? rewriteSetCookie(value) : value}`
+        );
       }
       socket.write(lines.join("\r\n") + "\r\n\r\n");
       if (proxyHead.length) {
@@ -1355,19 +1511,40 @@ export class SapProxy {
       if (head.length) {
         proxySocket.write(head);
       }
+      for (const chunk of early) {
+        proxySocket.write(chunk);
+      }
       proxySocket.pipe(socket);
       socket.pipe(proxySocket);
     });
     proxyReq.on("response", (proxyRes) => {
-      // the system refused the upgrade - relay the refusal and hang up
+      // The system refused the upgrade - relay the refusal and hang up. A 401
+      // here is the same rejected logon as on the plain path and is treated
+      // the same way: an app that reopens its WebSocket on every failure used
+      // to send one failed logon per attempt - the burst `authRejected` exists
+      // to stop - while nothing ever offered the user to re-enter the
+      // credentials, because nobody reported the answer.
+      const status = proxyRes.statusCode ?? 502;
+      if (status === 401) {
+        this.authRejected = true;
+      }
+      this.onResponse?.({
+        status,
+        path,
+        authenticate: headerValue(proxyRes.headers["www-authenticate"]),
+      });
+      // Ended AND destroyed once the refusal is out: nothing reads this socket
+      // any more, and a WebSocket client has its first frame ready to send -
+      // unread bytes keep a half-open socket from ever closing, and
+      // `server.close( )` waiting on it.
       socket.end(
-        `HTTP/1.1 ${proxyRes.statusCode ?? 502} ` +
-          `${proxyRes.statusMessage ?? ""}\r\nconnection: close\r\n\r\n`
+        `HTTP/1.1 ${status} ${proxyRes.statusMessage ?? ""}\r\n` +
+          "connection: close\r\n\r\n",
+        () => socket.destroy()
       );
       proxyRes.destroy();
     });
     proxyReq.on("error", () => socket.destroy());
-    socket.on("error", () => proxyReq.destroy());
     proxyReq.end();
   }
 

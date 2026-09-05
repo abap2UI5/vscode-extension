@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { run, shellSafe } from "../childproc";
+import { killTree, run, shellSafe } from "../childproc";
 
 /*
  * The one spawn.
@@ -147,4 +147,31 @@ test("multibyte output is decoded whole, not per 64 KiB chunk", async () => {
   }
   assert.ok(!outcome.stdout.includes("�"), "replacement character found");
   assert.equal(outcome.stdout, "€".repeat(60000));
+});
+
+test("an empty program resolves as spawn-failed rather than throwing", async () => {
+  // a viewCheck.command of "" splits into one empty word, and spawn("")
+  // throws synchronously - inside the executor that was a REJECTION from a
+  // function documented never to reject, and the preview awaited it bare
+  const outcome = await run("", []);
+  assert.equal(outcome.kind, "spawn-failed");
+  if (outcome.kind === "spawn-failed") {
+    assert.ok(outcome.error instanceof Error);
+  }
+});
+
+test("a taskkill that cannot start is not an uncaught error", async () => {
+  // killTree's Windows branch spawned taskkill without an error listener; a
+  // spawn failure emits "error" asynchronously, past the try/catch around it,
+  // and an unheard "error" event is an uncaught exception in the host. Here
+  // taskkill does not exist (on Windows it ends the child, which is fine too).
+  const { spawn } = require("child_process") as typeof import("child_process");
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+  child.on("error", () => {});
+  try {
+    killTree(child, "win32");
+    await new Promise((r) => setTimeout(r, 300));
+  } finally {
+    child.kill("SIGKILL");
+  }
 });

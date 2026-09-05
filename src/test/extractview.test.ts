@@ -328,3 +328,16 @@ test("a selection reaching past stringify is refused", () => {
   assert.ok("error" in plan);
   assert.match(plan.error, /stringify/);
 });
+
+test("a method name may start with an underscore, like the framework's own", () => {
+  const { methodNameError } = require("../extractview") as typeof import("../extractview");
+  assert.equal(methodNameError("_render_section"), undefined);
+  assert.equal(methodNameError("render_section"), undefined);
+  assert.match(methodNameError("2fast") ?? "", /starts with a letter or _/);
+  assert.match(methodNameError("a".repeat(31)) ?? "", /at most 30 characters/);
+  assert.match(methodNameError("with-dash") ?? "", /letters, digits and _/);
+  // the plan applies the same rule - the input box and the refusal used to
+  // carry two copies, and both rejected the leading `_`
+  const plan = planExtract(SOURCE, SOURCE.indexOf(")->tag("), "_render_button");
+  assert.ok(!("error" in plan), "error" in plan ? plan.error : "");
+});

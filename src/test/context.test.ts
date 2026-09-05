@@ -4,6 +4,7 @@ import {
   abapBindingContextAt,
   abapContextAt,
   abapNsMap,
+  ContainerStack,
   controlCallAt,
   eventNameSpans,
   eventUsagesOf,
@@ -663,4 +664,38 @@ test("factory( ) and stringify( ) end an attribute run too", () => {
       `${structural} has to end the run`
     );
   }
+});
+
+test("a literal in a call's arguments never spans lines, as in the lexer", () => {
+  // the literal pattern read on to the next quote wherever it was, so an
+  // unterminated value swallowed the line below it into one "literal" the
+  // property editor then offered to rewrite
+  const source = [
+    "    view->tag( `Text` )->a( n = `text` v = `one",
+    "        two` ).",
+  ].join("\n");
+  const call = controlCallAt(source, source.indexOf("Text` )"));
+  assert.ok(call);
+  assert.ok(
+    !call.attrs.some((a) => a.literal && a.value.includes("\n")),
+    JSON.stringify(call.attrs)
+  );
+});
+
+test("ContainerStack follows the builder's ownership rule", () => {
+  const stack = new ContainerStack<string>();
+  assert.equal(stack.owner, undefined);
+  stack.push("ele", "Page");
+  assert.equal(stack.owner, "Page", "a container without children owns its attributes");
+  stack.push("ele", "VBox");
+  stack.push("tag", "Text");
+  assert.equal(stack.owner, "Text", "the last child written");
+  stack.push("end", "end");
+  assert.equal(stack.owner, "VBox", "after end( ) the closed container is the owner");
+  stack.push("end", "end");
+  assert.equal(stack.owner, "Page");
+  stack.push("end", "end");
+  assert.equal(stack.owner, "Page", "an end( ) too many does not pop the root");
+  stack.push("factory", "factory");
+  assert.equal(stack.owner, undefined, "a fresh factory( ) starts over");
 });

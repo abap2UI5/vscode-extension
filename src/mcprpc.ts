@@ -249,7 +249,9 @@ export type McpRequestVerdict =
   /** Not authorized, or a path that is not ours: 404, told nothing more. */
   | "not-found"
   /** Authorized, but not a method this transport speaks: 405. */
-  | "method-not-allowed";
+  | "method-not-allowed"
+  /** A POST whose body is not declared as JSON - answered 415. */
+  | "unsupported-media-type";
 
 /** Both sides hashed before comparing, so the comparison touches every byte
  *  of the secret whatever the request sent - a plain `===` returns on the
@@ -280,11 +282,29 @@ export function pathAuthorized(
  * would end up laxer than the other.
  */
 export function authorizeMcpRequest(
-  request: { method?: string; url?: string; host?: string },
+  request: {
+    method?: string;
+    url?: string;
+    host?: string;
+    /** The `Origin` header, verbatim - undefined when the request has none. */
+    origin?: string;
+    /** The `Content-Type` header, verbatim. */
+    contentType?: string;
+  },
   expectedPath: string,
   isLoopbackHost: (host: string | undefined) => boolean
 ): McpRequestVerdict {
   if (!isLoopbackHost(request.host)) {
+    return "not-found";
+  }
+  // An `Origin` header is a browser's signature: a PAGE made this request. An
+  // MCP client is not a browser, and a page that reaches this port has no
+  // business with the system credentials - a cross-site "simple" POST (a
+  // form, a text/plain fetch) needs no preflight and no permission from
+  // anyone, and a token that leaked into a page would have been enough. The
+  // MCP transport spec asks servers to validate Origin for exactly this
+  // reason; here the only valid Origin is none at all.
+  if (request.origin !== undefined) {
     return "not-found";
   }
   if (!pathAuthorized(request.url, expectedPath)) {
@@ -295,6 +315,12 @@ export function authorizeMcpRequest(
   }
   if (request.method !== "POST") {
     return "method-not-allowed";
+  }
+  // JSON-RPC over HTTP is JSON. A body declared as anything else - text/plain
+  // is what a form or a preflight-free fetch( ) sends - is not a client's
+  // message, whatever it would parse as.
+  if (!/^application\/json\s*(;|$)/i.test(String(request.contentType ?? "").trim())) {
+    return "unsupported-media-type";
   }
   return "dispatch";
 }
