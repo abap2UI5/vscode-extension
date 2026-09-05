@@ -61,6 +61,33 @@ export function withParams(
 }
 
 /**
+ * The same URL without SAP's logon parameters (`sap-user`, `sap-password`) -
+ * for a URL that leaves the extension's own hands. The screenshot hands its
+ * page to headless Chromium as a command line argument, which every process
+ * of this user can read, and a launch URL configured with those two carried
+ * them there in clear text. The proxy injects the credentials anyway, so the
+ * page loads exactly as before. Byte-identical when there is nothing to take
+ * out.
+ */
+export function withoutLogonParams(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const logon = [...parsed.searchParams.keys()].filter((key) =>
+      /^sap-(user|password)$/i.test(key)
+    );
+    if (!logon.length) {
+      return url;
+    }
+    for (const key of logon) {
+      parsed.searchParams.delete(key);
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+/**
  * The launch URL rebased onto the running proxy: same path, query and hash,
  * loaded through `http://127.0.0.1:<port>/__abap2ui5/<token>` instead of the
  * system's origin.
@@ -101,24 +128,35 @@ export function sapClientOf(url: string): string | undefined {
   }
 }
 
-/** Origin of a launch URL, or undefined when it is not a URL at all. */
+/**
+ * Origin of a launch URL, or undefined when it has none worth the name.
+ *
+ * `host:44300/sap/bc/z2ui5?...` - a template typed without its scheme -
+ * PARSES: `host:` is a valid scheme, and such a URL has the origin `"null"`,
+ * the string. Truthy, so it went on to become the key the credentials were
+ * stored under ("SAP User for null") and the origin the proxy was started
+ * for, which is where it finally failed with "Invalid URL".
+ */
 export function originOf(url: string): string | undefined {
   try {
-    return new URL(url).origin;
+    const origin = new URL(url).origin;
+    return origin === "null" ? undefined : origin;
   } catch {
     return undefined;
   }
 }
 
-/** True when the template can actually launch something. */
+/** True when the template can actually launch something: it has the
+ *  placeholder, and it is an http(s) URL - not merely something the URL
+ *  parser accepts (see `originOf` for the shape that slipped through). */
 export function isUsableTemplate(template: string): boolean {
   const trimmed = template.trim();
   if (!trimmed || !/\{class\}/i.test(trimmed)) {
     return false;
   }
   try {
-    new URL(trimmed);
-    return true;
+    const protocol = new URL(trimmed).protocol;
+    return protocol === "http:" || protocol === "https:";
   } catch {
     return false;
   }
@@ -166,7 +204,17 @@ export function rebasedLocation(
     return location;
   }
   if (!/^[a-z][a-z0-9+.-]*:/i.test(location) && !location.startsWith("//")) {
-    return location; // relative: the browser resolves it against the proxy
+    // Path-relative (`../x`, `x?y=1`): the browser resolves it against the
+    // page's own url, prefix and token included - rewriting it would double
+    // the prefix. Root-relative (`/sap/bc/x`) resolves against the proxy's
+    // BARE origin, where only the cookie authorizes and a browser marks the
+    // redirected navigation cross-site (its initiator is the webview, not the
+    // page) - so it is rebased onto the token like an absolute one: the
+    // redirected document is authorized the way the page was, and its own
+    // relative resources keep the prefix.
+    return location.startsWith("/")
+      ? proxyOrigin + parsed.pathname + parsed.search + parsed.hash
+      : location;
   }
   if (
     parsed.hostname !== target.hostname ||

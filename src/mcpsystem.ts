@@ -381,10 +381,18 @@ export function createSystemMcpServer(
     res: http.ServerResponse
   ): Promise<void> => {
     /* The token in the path AND a loopback `Host`, both of them - the rule
-     * every local listener here follows, decided in `authorizeMcpRequest`
-     * (mcprpc.ts) where the negative cases are unit-tested. */
+     * every local listener here follows - plus what tells a browser's request
+     * from a client's: no `Origin` header, and a body declared as JSON. All
+     * of it decided in `authorizeMcpRequest` (mcprpc.ts), where the negative
+     * cases are unit-tested. */
     const verdict = authorizeMcpRequest(
-      { method: req.method, url: req.url, host: req.headers.host },
+      {
+        method: req.method,
+        url: req.url,
+        host: req.headers.host,
+        origin: req.headers.origin,
+        contentType: req.headers["content-type"],
+      },
       `/${token}`,
       isLoopbackHost
     );
@@ -398,6 +406,10 @@ export function createSystemMcpServer(
     }
     if (verdict === "method-not-allowed") {
       res.writeHead(405, { allow: "POST, DELETE" }).end();
+      return;
+    }
+    if (verdict === "unsupported-media-type") {
+      res.writeHead(415).end();
       return;
     }
     let body = "";
