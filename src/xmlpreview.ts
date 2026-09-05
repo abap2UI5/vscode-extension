@@ -29,6 +29,16 @@ export const XML_PREVIEW_SCHEME = "abap2ui5-xml";
 /** The one preview document. The name deliberately does not end in
  *  `.view.xml`: the view check would treat that as a checkable view file
  *  and double-report everything the class already gets. */
+/** Is a tab showing the preview document open in any group? */
+const previewTabOpen = (): boolean =>
+  vscode.window.tabGroups.all.some((group) =>
+    group.tabs.some(
+      (tab) =>
+        tab.input instanceof vscode.TabInputText &&
+        tab.input.uri.toString() === PREVIEW_URI.toString()
+    )
+  );
+
 const PREVIEW_URI = vscode.Uri.from({
   scheme: XML_PREVIEW_SCHEME,
   path: "/abap2UI5.reconstructed.xml",
@@ -176,6 +186,9 @@ export function registerXmlPreview(
     readonly onDidChange = this.onDidChangeEmitter.event;
 
     provideTextDocumentContent(): string {
+      // VS Code drops a hidden virtual document after a while and asks for it
+      // again when the tab comes back: being asked means the preview is open
+      previewOpen = true;
       const source = activeSourceDoc();
       if (!source) {
         return (
@@ -338,9 +351,12 @@ export function registerXmlPreview(
       }
     }),
 
-    // A closed preview tab does not need following any more.
+    // A closed preview tab does not need following any more. The document
+    // closing is not the tab closing, though: VS Code drops a hidden virtual
+    // document after some minutes and re-creates it on demand, and reading
+    // that as "closed" froze the preview for good. The tabs decide.
     vscode.workspace.onDidCloseTextDocument((doc) => {
-      if (doc.uri.toString() === PREVIEW_URI.toString()) {
+      if (doc.uri.toString() === PREVIEW_URI.toString() && !previewTabOpen()) {
         previewOpen = false;
         diagnostics.delete(PREVIEW_URI);
         if (timer) {

@@ -14,6 +14,7 @@ import { allSystems, SystemProfile } from "./systems";
 import { ModelView } from "./modelview";
 
 import { CONFIG_SECTION } from "./settings";
+import { redactQueryCredentials } from "./report";
 
 export { CONFIG_SECTION };
 
@@ -236,8 +237,15 @@ export class Session implements vscode.Disposable {
     this.sourceColumn = editor.viewColumn;
   }
 
+  forgetSource(): void {
+    this.sourceDoc = undefined;
+    this.sourceSelection = undefined;
+    this.sourceColumn = undefined;
+  }
+
   async restoreSourceFocus(): Promise<void> {
-    if (!this.sourceDoc) {
+    // a document closed since F9 would be reopened by showTextDocument
+    if (!this.sourceDoc || this.sourceDoc.isClosed) {
       return;
     }
     await vscode.window.showTextDocument(this.sourceDoc, {
@@ -255,7 +263,7 @@ export class Session implements vscode.Disposable {
     this.statusItem.text = `$(play-circle) ${this.currentTarget.className}`;
     this.statusItem.tooltip = new vscode.MarkdownString(
       `**abap2UI5 preview** — ${this.currentTarget.system}\n\n` +
-        `${this.currentTarget.externalUrl}\n\nClick for preview actions.`
+        `${redactQueryCredentials(this.currentTarget.externalUrl)}\n\nClick for preview actions.`
     );
     this.statusItem.show();
   }
