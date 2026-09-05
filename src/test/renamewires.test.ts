@@ -9,6 +9,7 @@ import {
   idLiterals,
   idSpans,
   renameNameError,
+  renameSpelling,
 } from "../renamewires";
 
 /*
@@ -457,4 +458,75 @@ test("a wire quoted in a comment is not an id position", () => {
   ].join("\n");
   const at = source.indexOf("set_focus( `TABLE`") + "set_focus( `".length;
   assert.equal(idCompletionAt(source, at + 1), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// What a rename WRITES: the two spellings of one attribute
+// ---------------------------------------------------------------------------
+
+test("attribute spans say which spelling they take", () => {
+  const spans = attributeSpans(SOURCE, "mv_title");
+  const byKind = (kind: string) =>
+    spans.filter((s) => s.kind === kind).map((s) => SOURCE.slice(s.start, s.end));
+  // the declaration, the assignment and the _bind( ) argument are identifiers
+  assert.deepEqual(byKind("identifier"), ["mv_title", "mv_title", "mv_title"]);
+  // the root segment of the binding path is the framework's derived spelling
+  assert.deepEqual(byKind("path"), ["MV_TITLE"]);
+});
+
+test("a path span is written upper-cased, an identifier as typed", () => {
+  /*
+   * Regression: the typed name went into every span verbatim, so renaming
+   * mv_title to mv_header wrote `{/mv_header}` into the view - a path the
+   * framework never derives (it upper-cases the attribute name), i.e. the
+   * silently empty wire the rename exists to prevent.
+   */
+  assert.equal(
+    renameSpelling({ name: "MV_TITLE", start: 0, end: 8, kind: "path" }, "mv_header"),
+    "MV_HEADER"
+  );
+  assert.equal(
+    renameSpelling({ name: "mv_title", start: 0, end: 8, kind: "identifier" }, "mv_header"),
+    "mv_header"
+  );
+  // an event name or a control id has no kind and is a string written as typed
+  assert.equal(renameSpelling({ name: "TABLE", start: 0, end: 5 }, "my-table"), "my-table");
+});
+
+test("a component of a BEGIN OF structure is not a rename target", () => {
+  /*
+   * Its binding path is nested (`{/MS_DATA/TITLE}`), which the root-segment
+   * pattern leaves alone on purpose - so accepting the component renamed the
+   * declaration, an unrelated TYPES field of the same name and `ls_other-title`,
+   * and left the TITLE segment of the wire behind.
+   */
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    TYPES: BEGIN OF ty_other,
+             title TYPE string,
+           END OF ty_other.
+    DATA: BEGIN OF ms_data,
+            title TYPE string,
+          END OF ms_data.
+ENDCLASS.
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA ls_other TYPE ty_other.
+    ls_other-title = \`x\`.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->tag( n = \`Text\` )->a( n = \`text\` v = \`{/MS_DATA/TITLE}\` ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+  assert.deepEqual(attributeSpans(source, "title"), []);
+  assert.equal(
+    attributeAt(source, source.indexOf("title TYPE string,\n          END") + 1),
+    undefined,
+    "F2 on the component is refused"
+  );
+  // the structure itself stays renameable, root segment included
+  const spans = attributeSpans(source, "ms_data");
+  assert.ok(spans.some((s) => s.kind === "path" && source.slice(s.start, s.end) === "MS_DATA"));
+  assert.ok(spans.some((s) => s.kind === "identifier" && source.slice(s.start, s.end) === "ms_data"));
 });

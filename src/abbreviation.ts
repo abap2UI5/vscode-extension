@@ -294,7 +294,12 @@ export function expandAbbreviation(
   const xml = wrapped
     ? `<siblings>${toXml(parsed.roots)}</siblings>`
     : toXml(parsed.roots);
-  const { abap } = xmlToAbap(xml, indent);
+  /* A statement of its own may leave the trailing `end( )`s off - stringify
+   * closes what is still open. An expansion INSIDE a chain may not: the
+   * caller's next line was written for the container the cursor is in, and
+   * with `Panel>content>Button` emitted as three unclosed calls it became a
+   * child of `content`. */
+  const { abap } = xmlToAbap(xml, indent, { keepTrailingEnds: continuation });
   if (!continuation) {
     return { abap };
   }
@@ -308,6 +313,12 @@ export function expandAbbreviation(
   }
   if (wrapped) {
     body.shift(); // the throwaway root
+    // and the `)->end( ).` that closes it: the siblings belong to the
+    // container the cursor is in, which nothing here closes
+    body.pop();
+    while (body.length && !body[body.length - 1].trim()) {
+      body.pop();
+    }
     for (const [index, line] of body.entries()) {
       body[index] = line.startsWith(`${indent}    `)
         ? indent + line.slice(indent.length + 4)
@@ -319,7 +330,8 @@ export function expandAbbreviation(
   }
   body[0] = body[0].replace(/^(\s*)view->/, `$1)->`);
   // the statement continues below the insertion, so the emitter's closing
-  // `).` has to go back to being an open call
+  // `).` has to go back to being an open call - the leading `)` of the
+  // caller's next line closes it
   const last = body.length - 1;
   body[last] = body[last].replace(/\s*\)\.$/, "");
   return { abap: body.join("\n") };

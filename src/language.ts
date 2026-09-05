@@ -13,7 +13,12 @@ import {
   whenBranchOf,
   whenNameAt,
 } from "./context";
-import { declarationSpan, methodImplementations, usesBuilder } from "./abap";
+import {
+  declarationSpan,
+  isOwnMethodCall,
+  methodImplementations,
+  usesBuilder,
+} from "./abap";
 import {
   apiReferenceUrl,
   clientCallAt,
@@ -46,9 +51,11 @@ import {
   idCompletionAt,
   idSpans,
   renameNameError,
+  renameSpelling,
   type RenameKind,
+  type RenameSpan,
 } from "./renamewires";
-import { planExtract } from "./extractview";
+import { methodNameError, planExtract } from "./extractview";
 import { expandAbbreviation } from "./abbreviation";
 
 /*
@@ -575,10 +582,14 @@ class MethodDefinition implements vscode.DefinitionProvider {
     const word = doc.getText(wordRange);
     // only a call takes the jump - a `(` right after the name; anything else
     // is left to the ABAP extension's own resolution
-    const after = doc
-      .lineAt(position.line)
-      .text.slice(wordRange.end.character);
+    const lineText = doc.lineAt(position.line).text;
+    const after = lineText.slice(wordRange.end.character);
     if (!/^\s*\(/.test(after)) {
+      return undefined;
+    }
+    // and only a call on THIS class - `client->view_display( )` is the
+    // client's method, whatever the class calls its own (`abap.ts` decides)
+    if (!isOwnMethodCall(lineText.slice(0, wordRange.start.character))) {
       return undefined;
     }
     const text = doc.getText();
@@ -784,7 +795,7 @@ function renameSpans(
   text: string,
   target: RenameTarget,
   name: string
-): NamedSpan[] {
+): RenameSpan[] {
   if (target.kind === "event") {
     return eventNameSpans(text, name);
   }
@@ -851,13 +862,16 @@ class WireRename implements vscode.RenameProvider {
         doc.positionAt(target.start),
         doc.positionAt(target.end)
       );
+      // the spelling the span takes: a binding path is the attribute's name
+      // UPPER-cased, the way the framework derives it (`renamewires.ts`)
+      const replacement = renameSpelling(target, newName);
       /* Marking the edits as needing confirmation is what makes VS Code open
        * the refactor PREVIEW instead of applying straight away - worth it for
        * a rename that crosses from ABAP into view literals on the strength of
        * where a string stands, and switchable for anyone who would rather
        * just rename (the preview stays reachable with Ctrl+Shift+Enter, and
        * the labels below are what it reads). */
-      edit.replace(doc.uri, range, newName, {
+      edit.replace(doc.uri, range, replacement, {
         needsConfirmation: vscode.workspace
           .getConfiguration(CONFIG_SECTION)
           .get<boolean>("renamePreview", true),
@@ -866,7 +880,7 @@ class WireRename implements vscode.RenameProvider {
             ? `Rename ${span.name} to ${newName} - ${targets.length} occurrence${
                 targets.length === 1 ? "" : "s"
               }`
-            : `${span.name} -> ${newName}`,
+            : `${target.name} -> ${replacement}`,
         description: doc.lineAt(range.start.line).text.trim(),
       });
     }
@@ -1138,10 +1152,8 @@ async function extractViewMethod(
     title: "abap2UI5: Extract to View Method",
     prompt: "Name for the new method - it takes the builder and returns it",
     value: "render_section",
-    validateInput: (value) =>
-      /^[a-z][a-z0-9_]{0,29}$/i.test(value)
-        ? undefined
-        : "A method name starts with a letter and holds letters, digits and _.",
+    // the plan's own rule, so the box and the refusal cannot disagree
+    validateInput: methodNameError,
   });
   if (!name) {
     return;

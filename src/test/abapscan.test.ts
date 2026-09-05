@@ -347,3 +347,25 @@ test("blanking keeps its length even on a trailing escape mid-typing", () => {
     );
   }
 });
+
+test("BEGIN OF ENUM and BEGIN OF MESH declare the type, not the keyword", () => {
+  // the structure used to come back as `ENUM` / `MESH`
+  const enumeration = declaredNames(
+    "TYPES: BEGIN OF ENUM ty_color, red, green, END OF ENUM ty_color"
+  );
+  assert.deepEqual(
+    enumeration.map((d) => [d.name, d.component === true]),
+    [
+      ["ty_color", false],
+      ["red", true],
+      ["green", true],
+    ]
+  );
+  const mesh = declaredNames("TYPES: BEGIN OF MESH ty_mesh, nodes TYPE ty_nodes, END OF MESH ty_mesh");
+  assert.deepEqual(mesh.map((d) => d.name), ["ty_mesh", "nodes"]);
+  const at = enumeration[0].at;
+  assert.equal(
+    "TYPES: BEGIN OF ENUM ty_color, red, green, END OF ENUM ty_color".slice(at, at + 8),
+    "ty_color"
+  );
+});

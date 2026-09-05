@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { isAbapSourceDocument } from "./abap";
 import { sourceLabel } from "./checkcore";
 
 /*
@@ -40,10 +41,18 @@ const EXCLUDE = "**/{node_modules,.git,dist,out}/**";
  *  to `limit` files, and a fresh TextDecoder per file was pure overhead. */
 const DECODER = new TextDecoder();
 
-/** Whether a document is ABAP at all - by language id first, because an ADT
- *  document's path may carry no extension worth testing. */
+/** Whether a document is ABAP source this window should know about - the
+ *  decision lives `vscode`-free in `abap.ts`: language id first (an ADT
+ *  document's path may carry no extension worth testing), and never for a
+ *  scheme that only shows a COPY of a class, such as the revision side of a
+ *  `git:` diff - that one used to enter the scan as a second class of the
+ *  same name. */
 export function isAbapDocument(doc: vscode.TextDocument): boolean {
-  return doc.languageId === "abap" || /\.abap$/i.test(doc.uri.path);
+  return isAbapSourceDocument({
+    languageId: doc.languageId,
+    scheme: doc.uri.scheme,
+    path: doc.uri.path,
+  });
 }
 
 // ---------------------------------------------------------------------------

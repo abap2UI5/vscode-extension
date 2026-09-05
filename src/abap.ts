@@ -36,7 +36,7 @@ export function isAppClass(source: string): boolean {
  * first for the same reason.
  */
 export function superclassOf(source: string): string | undefined {
-  const def = classDefinitionIn(blankComments(source));
+  const def = classDefinitionIn(blankNonCode(source));
   return def
     ? /\binheriting\s+from\s+([\w/]+)/i.exec(def.statement)?.[1].toUpperCase()
     : undefined;
@@ -160,6 +160,12 @@ const CLASS_DEF_RE = /^[ \t]*class\s+(\S+)\s+definition\b/gim;
  * it for the definition returned the wrong class name and, worse, no
  * superclass at all, so an app inheriting the interface behind such a line
  * went unrecognised.
+ *
+ * Takes the BLANKED source (`blankNonCode`): a `CLASS x DEFINITION.` at the
+ * start of a line inside a multi-line string template - an app that generates
+ * ABAP - is text, and read raw it won over the real definition further down.
+ * Blanking keeps every offset, and a real definition is code, so its name
+ * survives untouched.
  */
 function classDefinitionIn(
   code: string
@@ -177,7 +183,7 @@ function classDefinitionIn(
 
 /** Class name from the source, falling back to the file name. Upper case. */
 export function classNameOf(source: string, fileName: string): string {
-  const def = classDefinitionIn(source);
+  const def = classDefinitionIn(blankNonCode(source));
   if (def) {
     return def.name.toUpperCase();
   }
@@ -193,7 +199,7 @@ export function classNameOf(source: string, fileName: string): string {
  * 0 when the source has none, so the lens still lands somewhere sensible.
  */
 export function classDefinitionOffset(source: string): number {
-  return classDefinitionIn(source)?.index ?? 0;
+  return classDefinitionIn(blankNonCode(source))?.index ?? 0;
 }
 
 /**
@@ -259,6 +265,60 @@ export function methodImplementations(
     out.push({ name: m[1], start, end: start + m[1].length });
   }
   return out;
+}
+
+/**
+ * Whether a call written as `<before>name( )` can be one of THIS class's own
+ * methods - `before` being the line text in front of the name. A bare call
+ * and one on `me->` are; a call on any other receiver (`client->`, `super->`,
+ * `zcl_x=>`, the result of another call) is somebody else's method, however
+ * the name reads. F12 used to look at the name alone, and every gallery
+ * template declares a `view_display` of its own - so on
+ * `client->view_display( )` it jumped to the class's method of that name.
+ */
+export function isOwnMethodCall(before: string): boolean {
+  const selector = /([\w~/)]+)?\s*(?:->|=>)\s*$/.exec(before);
+  if (!selector) {
+    return true;
+  }
+  return selector[1]?.toLowerCase() === "me";
+}
+
+/**
+ * Document schemes whose ABAP is a COPY of a class, not the class: the
+ * revision side of a `git:` diff, GitLens' and the pull-request extensions'
+ * read-only views, an output channel echoing source. Their language id is
+ * `abap` all the same, so they used to enter the source scan (deduplicated by
+ * uri only) as a second class of the same name - a duplicate row in the apps
+ * tree, and an old revision that could override the class's index entry.
+ *
+ * A DENY list, deliberately: `adt:`, `abapfs:`, `untitled:` and whatever
+ * scheme the next ADT client chooses must keep working without a change here.
+ */
+const SHADOW_SCHEMES = new Set([
+  "git",
+  "gitlens",
+  "gitlens-git",
+  "pr",
+  "review",
+  "output",
+  "vscode-userdata",
+  "search-editor",
+  "debug",
+]);
+
+/** Whether a document is ABAP source this window should know about - by
+ *  language id first, because an ADT document's path may carry no extension
+ *  worth testing; never for a scheme that only shows a copy of a class. */
+export function isAbapSourceDocument(doc: {
+  languageId: string;
+  scheme: string;
+  path: string;
+}): boolean {
+  if (SHADOW_SCHEMES.has(doc.scheme.toLowerCase())) {
+    return false;
+  }
+  return doc.languageId === "abap" || /\.abap$/i.test(doc.path);
 }
 
 /**

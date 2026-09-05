@@ -239,3 +239,18 @@ test("a binding or plain value on an event-named attribute stays a literal", () 
   const text = xmlToAbap(`<Text text="onPress"/>`);
   assert.match(text.abap, /v = `onPress`/);
 });
+
+test("an unquoted attribute is dropped WITH a warning", () => {
+  // `enabled=true` is not XML - it used to vanish without a word, like a
+  // typo the converter had silently forgiven
+  const { roots, warnings } = parseXml(`<Button enabled=true text="Go"/>`);
+  assert.deepEqual(roots[0].attrs, [["text", "Go"]]);
+  assert.ok(
+    warnings.some((w) => w.includes("enabled=true") && w.includes("<Button>") && w.includes("no quotes")),
+    warnings.join("\n")
+  );
+  // and it reaches the conversion's own list
+  assert.ok(xmlToAbap(`<Button enabled=true/>`).warnings.some((w) => w.includes("enabled=true")));
+  // a quoted value holding an `=` is not mistaken for one
+  assert.deepEqual(parseXml(`<Text text="a=b" tooltip='c=d'/>`).warnings, []);
+});

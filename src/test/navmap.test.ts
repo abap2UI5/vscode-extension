@@ -195,3 +195,18 @@ ENDCLASS.`;
   const graph = navGraph([{ fileName: "zcl_child.clas.abap", source: child }]);
   assert.deepEqual(graph.nodes, []);
 });
+
+test("a CAST around the NEW names the class, not the type it is cast to", () => {
+  // `CAST z2ui5_if_app( NEW zcl_x( ) )` used to draw an edge to the interface
+  const source = [
+    "METHOD z2ui5_if_app~main.",
+    "  client->nav_app_call( CAST z2ui5_if_app( NEW zcl_detail( ) ) ).",
+    "  client->nav_app_call( CAST zif_my_app( NEW zcl_other( ) ) ).",
+    "  client->nav_app_call( CONV #( NEW zcl_third( ) ) ).",
+    "ENDMETHOD.",
+  ].join("\n");
+  assert.deepEqual(
+    navCallsOf(source).map((call) => call.target),
+    ["ZCL_DETAIL", "ZCL_OTHER", "ZCL_THIRD"]
+  );
+});

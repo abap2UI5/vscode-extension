@@ -305,8 +305,11 @@ function argsOf(source: string, call: Call): string {
  * source. `abapscan.ts` has always handled the doubling; these regexes did
  * not.
  */
+// Never across a line break: an ABAP literal ends at the end of its line
+// (`abapscan.ts` stops there), and a pattern that read on to the next quote
+// turned an unterminated value and the line below it into one "literal".
 const LITERAL_ALTERNATIVES =
-  "(?:`((?:[^`]|``)*)`|'((?:[^']|'')*)'|\"((?:[^\"]|\"\")*)\")";
+  "(?:`((?:[^`\\n]|``)*)`|'((?:[^'\\n]|'')*)'|\"((?:[^\"\\n]|\"\")*)\")";
 
 /** The written form of a literal turned into its value: a doubled quote is
  *  one quote. */
@@ -357,39 +360,57 @@ function writtenName(args: string): string | undefined {
 }
 
 /**
- * The control an `a( )` call attaches to — the rule the builder itself (and
- * the linter's reconstruction) follows: the last CHILD of the open container,
- * or the container itself while it has none. `end( )` pops a level, so an
- * `a( )` after it belongs to the container that was just closed, not to the
- * last `tag( )` written — reading it lexically made completion offer the
- * tag's members where the gate validates the container's.
+ * The rule that says which control an `a( )` call attaches to — the builder's
+ * own (and the linter's reconstruction's): the last CHILD of the open
+ * container, or the container itself while it has none. `end( )` pops a
+ * level, so an `a( )` after it belongs to the container that was just closed,
+ * not to the last `tag( )` written — reading it lexically made completion
+ * offer the tag's members where the gate validates the container's, and gave
+ * the colour swatches the wrong owner.
+ *
+ * Fed the structural calls in source order; `owner` is the answer for an
+ * attribute written at that point. Generic over what a "call" is so the
+ * regex-scanning colour provider can walk its matches through the same rule
+ * instead of keeping a second, lexical one.
  */
-function controlCallBefore(calls: Call[], before: number): Call | undefined {
-  interface Frame {
-    call?: Call;
-    lastChild?: Call;
+export class ContainerStack<T> {
+  private stack: Array<{ call?: T; lastChild?: T }> = [{}];
+
+  /** One structural call: `verb` lower-cased (`ele`, `tag`, `end`, `factory`,
+   *  `stringify`; anything else is ignored). */
+  push(verb: string, call: T): void {
+    if (verb === "factory" || verb === "stringify") {
+      this.stack = [{}];
+    } else if (verb === "ele") {
+      this.stack[this.stack.length - 1].lastChild = call;
+      this.stack.push({ call });
+    } else if (verb === "tag") {
+      this.stack[this.stack.length - 1].lastChild = call;
+    } else if (verb === "end") {
+      if (this.stack.length > 1) {
+        this.stack.pop();
+      }
+    }
   }
-  let stack: Frame[] = [{}];
+
+  /** The control an `a( )` written now belongs to, if any. */
+  get owner(): T | undefined {
+    const top = this.stack[this.stack.length - 1];
+    return top.lastChild ?? top.call;
+  }
+}
+
+/** The control an `a( )` call at `before` attaches to - see
+ *  {@link ContainerStack}. */
+function controlCallBefore(calls: Call[], before: number): Call | undefined {
+  const stack = new ContainerStack<Call>();
   for (const call of calls) {
     if (call.open >= before) {
       break;
     }
-    const name = call.name.toLowerCase();
-    if (name === "factory" || name === "stringify") {
-      stack = [{}];
-    } else if (name === "ele") {
-      stack[stack.length - 1].lastChild = call;
-      stack.push({ call });
-    } else if (name === "tag") {
-      stack[stack.length - 1].lastChild = call;
-    } else if (name === "end") {
-      if (stack.length > 1) {
-        stack.pop();
-      }
-    }
+    stack.push(call.name.toLowerCase(), call);
   }
-  const top = stack[stack.length - 1];
-  return top.lastChild ?? top.call;
+  return stack.owner;
 }
 
 /** Library-qualified control name of an `ele( )` / `tag( )` call. */
@@ -873,8 +894,30 @@ export function controlCallAt(
     let appendAt = -1;
     if (anchorClose !== undefined) {
       const newlineBeforeClose = source.lastIndexOf("\n", anchorClose);
-      if (newlineBeforeClose > last.open) {
+      const lastLineStart = source.lastIndexOf("\n", last.open) + 1;
+      if (
+        newlineBeforeClose > last.open &&
+        !source.slice(newlineBeforeClose + 1, anchorClose).trim()
+      ) {
         appendAt = newlineBeforeClose;
+      } else if (
+        /^\s*(?:\)|\w+)\s*->\s*\w+\s*\($/.test(
+          source.slice(lastLineStart, last.open + 1)
+        )
+      ) {
+        /*
+         * The block's last call closes on its own line - `)->a( n = \`text\`
+         * v = \`x\` ).` - which is what the LAST control of every chain looks
+         * like (all five templates end that way), so answering -1 here refused
+         * "add attribute" on exactly that control. The call opens its line,
+         * so the new line goes in front of its `)`: after the last character
+         * of the call's content, before the whitespace preceding the `)`.
+         */
+        let end = anchorClose;
+        while (end > last.open + 1 && /\s/.test(source[end - 1])) {
+          end--;
+        }
+        appendAt = end;
       }
     } else {
       const eol = source.indexOf("\n", last.open);

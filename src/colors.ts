@@ -11,7 +11,13 @@
  * covered by the test suite. The provider plumbing lives in language.ts.
  */
 
-import { abapNsMap, DEFAULT_LIBRARY, splitName, xmlNsMap } from "./context";
+import {
+  abapNsMap,
+  ContainerStack,
+  DEFAULT_LIBRARY,
+  splitName,
+  xmlNsMap,
+} from "./context";
 import { blankComments } from "./abapscan";
 
 /** Channels 0..1, the way VS Code's Color wants them. */
@@ -219,54 +225,68 @@ export function cssColorPresentations(color: RgbaColor): string[] {
  *  (this module deliberately does not know it). */
 export type IsColorMember = (control: string, member: string) => boolean;
 
-const ABAP_CONTROL_RE =
-  /->\s*(?:ele|tag)\s*\(\s*(?:n\s*=\s*)?([`'"])([\w:.]+)\1(?:\s*ns\s*=\s*([`'"])([\w.]+)\3)?/g;
-const ABAP_ATTR_RE =
-  /->\s*a\s*\(\s*n\s*=\s*([`'"])([\w:.]+)\1\s*v\s*=\s*([`'"])([^`'"]*)\3/g;
+/** Every builder call that shapes the tree or writes an attribute, in source
+ *  order - the walk the ownership rule is fed with. */
+const ABAP_CALL_RE = /(?:->|=>)\s*(ele|tag|end|a|factory|stringify)\s*\(/g;
+/** The arguments of an `ele( )` / `tag( )`, right after its `(`: the name
+ *  (named or positional) and an optional `ns`. Sticky, anchored at the call. */
+const ABAP_CONTROL_ARGS_RE =
+  /\s*(?:n\s*=\s*)?([`'"])([\w:.]+)\1(?:\s*ns\s*=\s*([`'"])([\w.]+)\3)?/y;
+/** The arguments of an `a( )`: a literal name and a literal value. */
+const ABAP_ATTR_ARGS_RE =
+  /\s*n\s*=\s*([`'"])([\w:.]+)\1\s*v\s*=\s*([`'"])([^`'"\n]*)\3/y;
 
 /** Colour values in an ABAP builder source. Regex-scanned on purpose - a
  *  full parse per keystroke would cost too much - but over blanked comments:
  *  a commented-out `->tag( )` between a control and its `a( )` used to become
- *  the owner, and the real attribute was judged against the wrong control. */
+ *  the owner, and the real attribute was judged against the wrong control.
+ *
+ *  Which control owns an `a( )` is the builder's rule, not the lexical one:
+ *  the matches are walked through `ContainerStack` - the same rule completion
+ *  and the gate apply - so an attribute written after `end( )` is judged
+ *  against the container just closed, not against the last `tag( )` above it. */
 export function abapColorSpans(
   source: string,
   isColorMember: IsColorMember
 ): ColorSpan[] {
   const ns = abapNsMap(source);
   const code = blankComments(source);
-  const controls: Array<{ at: number; control: string }> = [];
-  for (const m of code.matchAll(ABAP_CONTROL_RE)) {
-    const { prefix, local } = splitName(m[2]);
-    const library =
-      ns[prefix || m[4] || ""] ?? (prefix || m[4] ? undefined : DEFAULT_LIBRARY);
-    if (library) {
-      controls.push({ at: m.index, control: `${library}.${local}` });
-    }
-  }
+  const stack = new ContainerStack<{ control?: string }>();
   const out: ColorSpan[] = [];
-  // Both lists come out in ascending offset order, so one index walks along
-  // the controls as the attributes advance. Copying and reversing the whole
-  // control list per attribute made this quadratic on exactly the long
-  // generated views it runs over, on every document change.
-  let ownerIndex = -1;
-  for (const m of code.matchAll(ABAP_ATTR_RE)) {
-    while (
-      ownerIndex + 1 < controls.length &&
-      controls[ownerIndex + 1].at < m.index
-    ) {
-      ownerIndex++;
-    }
-    const owner = ownerIndex >= 0 ? controls[ownerIndex] : undefined;
-    if (!owner || !isColorMember(owner.control, m[2])) {
+  // One pass, in source order: the structural calls feed the stack, and an
+  // attribute is judged against what the stack says at that point.
+  for (const m of code.matchAll(ABAP_CALL_RE)) {
+    const verb = m[1].toLowerCase();
+    const argsAt = m.index + m[0].length;
+    if (verb === "a") {
+      ABAP_ATTR_ARGS_RE.lastIndex = argsAt;
+      const attr = ABAP_ATTR_ARGS_RE.exec(code);
+      const owner = stack.owner?.control;
+      if (!attr || !owner || !isColorMember(owner, attr[2])) {
+        continue;
+      }
+      const value = attr[4];
+      const color = parseCssColor(value);
+      if (!color) {
+        continue;
+      }
+      const start = argsAt + attr[0].length - 1 - value.length;
+      out.push({ start, end: start + value.length, color });
       continue;
     }
-    const value = m[4];
-    const color = parseCssColor(value);
-    if (!color) {
-      continue;
+    let control: string | undefined;
+    if (verb === "ele" || verb === "tag") {
+      ABAP_CONTROL_ARGS_RE.lastIndex = argsAt;
+      const named = ABAP_CONTROL_ARGS_RE.exec(code);
+      if (named) {
+        const { prefix, local } = splitName(named[2]);
+        const library =
+          ns[prefix || named[4] || ""] ??
+          (prefix || named[4] ? undefined : DEFAULT_LIBRARY);
+        control = library ? `${library}.${local}` : undefined;
+      }
     }
-    const start = m.index + m[0].length - 1 - value.length;
-    out.push({ start, end: start + value.length, color });
+    stack.push(verb, { control });
   }
   return out;
 }

@@ -40,13 +40,21 @@ export interface NavGraph {
 /** Words that appear inside a nav_app_call argument but never name a class. */
 const NOT_A_CLASS = new Set([
   "new",
+  "cast",
+  "conv",
   "client",
   "me",
   "app",
   "val",
   "factory",
   "get_app_prev",
+  // the parameter's own type, written out in `CAST z2ui5_if_app( NEW zcl_x( ) )`
+  "z2ui5_if_app",
 ]);
+
+/** Operators whose NEXT word is a type, not the class navigated to:
+ *  `CAST zif_my_app( NEW zcl_x( ) )` names zcl_x. */
+const TYPE_OPERATORS = new Set(["cast", "conv"]);
 
 /** One `nav_app_call( )` and the class it names. */
 export interface NavCall {
@@ -68,9 +76,16 @@ export function navCallsOf(source: string): NavCall[] {
     // `/dmo/cl_travel_app` counts as one word: the namespace is part of the
     // class name, and a pattern that could only start at a letter never saw
     // one of them - the `/^\//` branch below was unreachable
+    let afterTypeOperator = false;
     for (const word of arg.matchAll(/(\/\w+\/)?\b([a-z]\w+)\b/gi)) {
       const name = (word[0].startsWith("/") ? word[0] : word[2]).toUpperCase();
-      if (NOT_A_CLASS.has(word[2].toLowerCase())) {
+      const lower = word[2].toLowerCase();
+      // the type a CAST names is what the call is typed AS, not where it goes
+      // - taken for the target, `CAST z2ui5_if_app( NEW zcl_x( ) )` drew an
+      // edge to the interface instead of to zcl_x
+      const isCastType = afterTypeOperator;
+      afterTypeOperator = TYPE_OPERATORS.has(lower);
+      if (isCastType || NOT_A_CLASS.has(lower)) {
         continue;
       }
       // Only class-looking names: the customer namespaces and z2ui5's own.
