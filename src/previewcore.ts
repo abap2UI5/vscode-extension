@@ -1,5 +1,6 @@
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import { shortUrl } from "./urls";
+import { redactQueryCredentials } from "./report";
 
 /*
  * The `vscode`-free core of the preview: what a launched app IS (the
@@ -29,7 +30,8 @@ export function loadMessage(
     type: "load" as const,
     className: target.className,
     frameUrl: target.frameUrl,
-    externalUrl: target.externalUrl,
+    // display only (the toolbar tooltip) - so without logon parameters
+    externalUrl: redactQueryCredentials(target.externalUrl),
     shortUrl: shortUrl(target.externalUrl),
     theme,
     language,

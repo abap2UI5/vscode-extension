@@ -150,3 +150,29 @@ test("a broken config is reported, not silently ignored", () => {
   assert.equal(options.minUi5, "1.71", "falls back to the settings");
   assert.match(describeOptions(options), /unreadable/);
 });
+
+test("a change in an extended base config is noticed without touching the extending file", () => {
+  /* The memo used to be keyed on the DISCOVERED file's mtime alone. A repo
+   * whose abap2ui5lint.jsonc extends a shared base took the base's floor, and
+   * an edit to that base - the file CI reads through the same chain - changed
+   * nothing in the editor until the extending file was touched or the window
+   * reloaded. The chain's mtimes are part of the key now. */
+  const dir = workspace('{ "extends": "./shared/base.jsonc" }');
+  fs.mkdirSync(path.join(dir, "shared"));
+  const base = path.join(dir, "shared", "base.jsonc");
+  fs.writeFileSync(base, '{ "ui5": "1.108" }');
+  assert.equal(resolveOptions(dir, SETTINGS).minUi5, "1.108");
+  fs.writeFileSync(base, '{ "ui5": "1.120" }');
+  // an explicit mtime: a filesystem with one-second stamps would otherwise
+  // report the same one for a write this close to the read
+  const later = new Date(Date.now() + 5_000);
+  fs.utimesSync(base, later, later);
+  assert.equal(resolveOptions(dir, SETTINGS).minUi5, "1.120");
+});
+
+test("an unset distribution is described as undecided, not as a distribution", () => {
+  assert.match(
+    describeOptions({ minUi5: "1.71", distribution: null, allow: [] }),
+    /target UI5 \(distribution not set\) 1\.71/
+  );
+});

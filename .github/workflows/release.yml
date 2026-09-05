@@ -72,7 +72,14 @@ jobs:
           else
             # Started by hand: the manifest decides the tag.
             tag="v$version"
-            remote=$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)
+            # The peeled ref (^{}) is the COMMIT an annotated tag points at;
+            # the plain ref would be the tag object, and a retry after an
+            # annotated `git tag -a` compared that against the commit and
+            # refused. A lightweight tag has no peeled ref: fall back.
+            remote=$(git ls-remote --tags origin "refs/tags/$tag^{}" | cut -f1)
+            if [ -z "$remote" ]; then
+              remote=$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)
+            fi
             # An existing tag on THIS commit is a retry of a run that got as
             # far as tagging - re-running after a marketplace token failed is
             # the expected way to finish such a release, so let it through.

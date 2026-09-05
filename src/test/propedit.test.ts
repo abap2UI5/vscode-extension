@@ -2,6 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { controlCallAt } from "../context";
 import { removeAttributeEdit, setAttributeEdit } from "../propedit";
+import { APP_TEMPLATES } from "../template";
+import { prepareAbap } from "@abap2ui5/linter/reconstruct";
+import type { ViewNode } from "@abap2ui5/linter/reconstruct";
 
 const SOURCE = `CLASS zcl_x DEFINITION PUBLIC.
   PUBLIC SECTION.
@@ -178,5 +181,123 @@ test("a new value containing a quote is written escaped", () => {
   assert.equal(
     reread?.attrs.find((a) => a.name === "text")?.value,
     "it`s fine"
+  );
+});
+
+/*
+ * Two a-calls on one line. The guard used to check only that the LINE started
+ * with an a-call, never that it was the attribute's own - so removing the
+ * second one cut the whole line, first attribute included, and the
+ * same-line-close variant left nothing but `).` behind.
+ */
+const SHARED = `    view->ele( \`Page\`
+        )->tag( \`Input\`
+            )->a( n = \`text\` v = \`Hello\` )->a( n = \`type\` v = \`Email\`
+        )->tag( \`Button\`
+            )->a( n = \`text\` v = \`Go\` )->a( n = \`type\` v = \`Emphasized\` ).`;
+
+test("removing a later a-call on a shared line keeps the first one", () => {
+  const call = controlCallAt(SHARED, SHARED.indexOf("`Email`"))!;
+  assert.equal(call.label, "Input");
+  const edit = removeAttributeEdit(SHARED, call, "type");
+  assert.ok(edit, "the edit is offered");
+  const next = apply(SHARED, edit!);
+  assert.ok(
+    next.includes(
+      ")->tag( `Input`\n            )->a( n = `text` v = `Hello`\n        )->tag( `Button`"
+    ),
+    next
+  );
+  assert.ok(!next.includes("Email"));
+});
+
+test("removing a later a-call that closes on its own line keeps the first one", () => {
+  const call = controlCallAt(SHARED, SHARED.indexOf("`Emphasized`"))!;
+  assert.equal(call.label, "Button");
+  const edit = removeAttributeEdit(SHARED, call, "type");
+  assert.ok(edit, "the edit is offered");
+  const next = apply(SHARED, edit!);
+  assert.ok(next.endsWith(")->a( n = `text` v = `Go` )."), next);
+  assert.ok(!next.includes("Emphasized"));
+  const parens = (s: string, ch: string) => s.split(ch).length - 1;
+  assert.equal(parens(next, "("), parens(next, ")"));
+});
+
+test("removing the first a-call of a shared line leaves the second in place", () => {
+  const call = controlCallAt(SHARED, SHARED.indexOf("`Email`"))!;
+  const next = apply(SHARED, removeAttributeEdit(SHARED, call, "text")!);
+  assert.ok(
+    next.includes(")->tag( `Input`\n            )->a( n = `type` v = `Email`\n"),
+    next
+  );
+  assert.ok(!next.includes("Hello"));
+});
+
+test("the normal shape still drops the whole line", () => {
+  // the guard must not refuse the usual line-per-attribute layout
+  const call = controlCallAt(SOURCE, SOURCE.indexOf("`Press me`"))!;
+  const edit = removeAttributeEdit(SOURCE, call, "text")!;
+  const lineStart = SOURCE.lastIndexOf("\n", SOURCE.indexOf("`Press me`")) + 1;
+  assert.equal(edit.start, lineStart);
+  assert.equal(SOURCE[edit.end - 1], "\n");
+});
+
+test("the last control of every template chain takes a new attribute", () => {
+  /*
+   * Its block ends `)->a( … ).` - the close on the same line as the a-call -
+   * which used to make appendAt -1, so "add attribute" was refused on the
+   * LAST control of every chain, in all five templates.
+   */
+  for (const template of APP_TEMPLATES) {
+    const source = template.source;
+    const ends = [...source.matchAll(/^[ \t]*\)->(?:a|tag)\( .*\)\.$/gm)];
+    assert.ok(ends.length > 0, `${template.id}: has chain ends`);
+    for (const end of ends) {
+      const call = controlCallAt(source, end.index + end[0].indexOf("->") + 2);
+      assert.ok(call, `${template.id}: a control at the chain end`);
+      assert.ok(call.appendAt >= 0, `${template.id}: appendAt for ${call.label}`);
+      const edit = setAttributeEdit(source, call, "zz_probe", "1");
+      assert.ok(edit, `${template.id}: the edit is offered for ${call.label}`);
+      const next = apply(source, edit);
+      // the new line sits between the block's last line and its ` ).`
+      const stripped = end[0].replace(/\s*\)\.$/, "");
+      const indent = /^[ \t]*/.exec(end[0])![0] + (call.attrs.length ? "" : "    ");
+      assert.ok(
+        next.includes(`${stripped}\n${indent})->a( n = \`zz_probe\` v = \`1\` ).`),
+        `${template.id}:\n${next.slice(edit.start - 200, edit.start + 120)}`
+      );
+      // and the linter's reconstruction puts it on that very control
+      const owners: string[] = [];
+      const walk = (node: ViewNode): void => {
+        if (node.name !== null && node.attrs.some(([key]) => key === "zz_probe")) {
+          owners.push(node.name);
+        }
+        node.children.forEach(walk);
+      };
+      prepareAbap(next).nodes.forEach(walk);
+      assert.deepEqual(owners, [call.label.replace(/^.*:/, "")], template.id);
+    }
+  }
+});
+
+test("a multi-line value keeps its continuation lines together", () => {
+  // the close `)` here opens the last line of the VALUE, not a chain line of
+  // its own - inserting at the newline before it split the `&&` off its literal
+  const source = [
+    "    view->tag( `Text`",
+    "        )->a( n = `text` v = `aaa`",
+    "            && `bbb` ).",
+  ].join("\n");
+  const call = controlCallAt(source, source.indexOf("Text`"))!;
+  const edit = setAttributeEdit(source, call, "zz_probe", "1")!;
+  assert.ok(edit);
+  assert.equal(
+    apply(source, edit),
+    [
+      "    view->tag( `Text`",
+      "        )->a( n = `text` v = `aaa`",
+      "            && `bbb`",
+      "        )->a( n = `zz_probe` v = `1` ).",
+    ].join("\n")
   );
 });

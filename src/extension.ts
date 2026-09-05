@@ -156,7 +156,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // both surfaces, not just the tab - an app reloading in a hidden
       // panel looked like the command doing nothing at all
       if (session.appPanel) {
-        session.appPanel.reveal(vscode.ViewColumn.Beside, true);
+        session.appPanel.reveal(undefined, true);
       } else {
         provider.reveal();
       }
@@ -175,7 +175,8 @@ export function activate(context: vscode.ExtensionContext): void {
     // command rather than something the user has to go looking for.
     vscode.commands.registerCommand("abap2ui5.revealApp", async () => {
       if (session.appPanel) {
-        session.appPanel.reveal(vscode.ViewColumn.Beside, false);
+        // where it is, not Beside: a column would move the tab
+        session.appPanel.reveal(undefined, false);
         return;
       }
       if (provider.isShowing) {

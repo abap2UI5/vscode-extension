@@ -27,6 +27,7 @@ Module._load = function (request: string, ...rest: unknown[]) {
 };
 
 const {
+  enteredUser,
   keysFor,
   legacyAdoption,
   uniqueName,
@@ -106,4 +107,14 @@ test("a newly added system is numbered past the names already taken", () => {
       { name: "DEV", template: "https://b/{class}" },
     ])[1].name
   );
+});
+
+test("the SAP user is stored trimmed, and a blank answer is a cancel", () => {
+  // a user pasted with a trailing space is a different user to the system -
+  // every logon with it failed until the credentials were reset
+  assert.equal(enteredUser(" DEVELOPER "), "DEVELOPER");
+  assert.equal(enteredUser("developer"), "developer");
+  assert.equal(enteredUser("   "), undefined);
+  assert.equal(enteredUser(""), undefined);
+  assert.equal(enteredUser(undefined), undefined);
 });

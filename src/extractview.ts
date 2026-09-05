@@ -184,7 +184,21 @@ function declarationPoint(code: string, definition: ClassPart): number {
   return definition.endclass;
 }
 
-const NAME_RE = /^[a-z][a-z0-9_]{0,29}$/i;
+/** An ABAP method name: a letter or `_` first (the framework's own
+ *  `_bind`/`_event` start that way), then letters, digits and `_`, at most
+ *  30 characters. The one rule for both the input box and the plan - the two
+ *  used to carry their own copies, and both rejected the leading `_`. */
+const NAME_RE = /^[a-z_][a-z0-9_]{0,29}$/i;
+
+/** Why `name` cannot be a method name, or undefined when it can. */
+export function methodNameError(name: string): string | undefined {
+  if (NAME_RE.test(name)) {
+    return undefined;
+  }
+  return name.length > 30
+    ? `A method name has at most 30 characters - this one has ${name.length}.`
+    : "A method name starts with a letter or _ and holds letters, digits and _.";
+}
 
 /**
  * The edits that move the selected tail of a chain into `methodName`.
@@ -199,13 +213,9 @@ export function planExtract(
   methodName: string,
   builderClass = "z2ui5_cl_ui5_view_builder"
 ): ExtractPlan | ExtractRefusal {
-  if (!NAME_RE.test(methodName)) {
-    return {
-      error:
-        methodName.length > 30
-          ? `A method name has at most 30 characters - this one has ${methodName.length}.`
-          : "A method name starts with a letter and holds letters, digits and _.",
-    };
+  const nameError = methodNameError(methodName);
+  if (nameError) {
+    return { error: nameError };
   }
   // the statement and the cut are decided on code alone - a period or a `->`
   // inside a literal or a comment is neither a statement end nor a boundary

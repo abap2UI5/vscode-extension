@@ -143,6 +143,10 @@ export async function runApp(
   // the loading app is handed back (the content loads asynchronously).
   if (editor) {
     session.rememberSource(editor);
+  } else {
+    // a start from Recent, the welcome view, the system search or MCP has no
+    // source to return to - the previous F9's document must not come back
+    session.forgetSource();
   }
   session.bounceFocusUntil = Date.now() + FOCUS_BOUNCE_MS;
 

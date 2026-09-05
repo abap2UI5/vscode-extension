@@ -90,10 +90,12 @@ export function setAttributeEdit(
 
 /**
  * The edit that removes an attribute: its whole chain line (or lines, for a
- * multi-line value). Only offered when the a-call sits on lines of its own -
- * the leading `)` of its line closes the previous call, and the closing `)`
- * on the following line takes over that job, so dropping the full lines
- * keeps the chain balanced. Undefined when the layout is anything else.
+ * multi-line value) when the a-call opens its line - the leading `)` of its
+ * line closes the previous call, and the closing `)` on the following line
+ * takes over that job, so dropping the full lines keeps the chain balanced.
+ * A later a-call on a line shared with another call is cut out between the
+ * `)` in front of it and its own `)`. Undefined when the layout is anything
+ * else.
  */
 export function removeAttributeEdit(
   source: string,
@@ -109,9 +111,37 @@ export function removeAttributeEdit(
   const line = source.slice(lineStart, lineEnd < 0 ? source.length : lineEnd);
   const opener = /^\s*\)->\s*a\s*\(/.exec(line);
   if (!opener) {
-    return undefined; // shares its line with another call - keep hands off
+    return undefined; // a line that does not start with an a-call - keep hands off
   }
   const closeLineStart = source.lastIndexOf("\n", attr.aClose) + 1;
+  if (lineStart + opener[0].length - 1 !== attr.aOpen) {
+    /*
+     * The line opens with an a-call, but not with THIS one:
+     * `)->a( n = \`text\` … )->a( n = \`type\` … `. The guard used to check
+     * only that the line started with an a-call, so removing `type` cut the
+     * whole line and took `text` with it. What can go is the `)->a( … )`
+     * of this call alone: from the `)` closing the call in front of it, so
+     * that the `)` opening the next line (or this call's own, when it closes
+     * on the same line) takes over closing that one.
+     */
+    const chained = /\)\s*->\s*a\s*\($/.exec(source.slice(lineStart, attr.aOpen + 1));
+    if (!chained) {
+      return undefined;
+    }
+    const previousClose = lineStart + chained.index;
+    if (closeLineStart > lineStart) {
+      if (source.slice(closeLineStart, attr.aClose).trim()) {
+        return undefined; // its `)` does not open the next line either
+      }
+      // the blank in front of the `)` goes too, or the line ends in one
+      let start = previousClose;
+      while (start > lineStart && /[ \t]/.test(source[start - 1])) {
+        start--;
+      }
+      return { start, end: closeLineStart - 1, text: "" };
+    }
+    return { start: previousClose + 1, end: attr.aClose + 1, text: "" };
+  }
   if (closeLineStart > lineStart) {
     // the usual chain shape: the call's own `)` opens the next line, so the
     // whole line (or lines, for a multi-line value) can go

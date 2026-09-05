@@ -69,7 +69,13 @@ export function killTree(
   }
   try {
     if (platform === "win32") {
-      spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"]);
+      // a taskkill that cannot be started emits "error" asynchronously - the
+      // try/catch below does not see it, and unheard it is an uncaught
+      // exception in the extension host
+      spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"]).on(
+        "error",
+        () => {}
+      );
     } else {
       try {
         process.kill(-child.pid, "SIGKILL");
@@ -115,13 +121,26 @@ export function run(
     let stdout = "";
     let stderr = "";
 
-    const child = spawn(safe.cmd, safe.args, {
-      cwd: options.cwd,
-      env: options.env,
-      shell,
-      // its own process group, so killTree can reach the grandchildren
-      detached: platform !== "win32",
-    });
+    let child: ChildProcess;
+    try {
+      child = spawn(safe.cmd, safe.args, {
+        cwd: options.cwd,
+        env: options.env,
+        shell,
+        // its own process group, so killTree can reach the grandchildren
+        detached: platform !== "win32",
+      });
+    } catch (err) {
+      // spawn( ) validates its arguments synchronously: an empty program (a
+      // `viewCheck.command` of "" splits into one empty word) throws here
+      // instead of emitting "error", and inside a Promise executor a throw is
+      // a rejection - which "never rejects" has to cover too
+      resolve({
+        kind: "spawn-failed",
+        error: err instanceof Error ? err : new Error(String(err)),
+      });
+      return;
+    }
 
     // A failed spawn emits "error" and may still emit "close" - and a timeout
     // races both. Whoever is first wins, and the timers go with it.

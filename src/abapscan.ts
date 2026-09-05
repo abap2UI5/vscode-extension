@@ -422,7 +422,9 @@ export function declaredNames(
   let at = keyword[0].length;
   let depth = 0; // BEGIN OF nesting
   for (const part of (chained ? code.slice(at).split(",") : [code.slice(at)])) {
-    const begin = /^\s*BEGIN\s+OF\s+([A-Za-z_]\w*)/i.exec(part);
+    // `BEGIN OF ENUM x` / `BEGIN OF MESH x` declare x - the keyword between
+    // used to come back as the structure's name
+    const begin = /^\s*BEGIN\s+OF\s+(?:(?:ENUM|MESH)\s+)?([A-Za-z_]\w*)/i.exec(part);
     const end = /^\s*END\s+OF\b/i.exec(part);
     if (begin) {
       out.push({

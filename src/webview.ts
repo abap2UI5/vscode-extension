@@ -9,6 +9,7 @@
  */
 
 import { shortUrl } from "./urls";
+import { redactQueryCredentials } from "./report";
 
 /** Random nonce so the webview CSP can allow exactly our own script/style.
  *  A nonce is a security token, so it comes from the crypto RNG - Math.random
@@ -198,12 +199,16 @@ export interface PreviewOptions {
   /** Device width the last preview showed - the webview's own saved state
    *  wins while it lives, this seeds a freshly created one. */
   device?: string;
+  /** Why this preview appears ("Moved into the panel") - shown as the toast a
+   *  load message would carry; the first render has no load message. */
+  reason?: string;
   nonce: string;
 }
 
 export function previewHtml(options: PreviewOptions): string {
   const { nonce } = options;
-  const externalUrl = escapeHtml(options.externalUrl);
+  // the tooltip is display, and a launch template may carry sap-user/sap-password
+  const externalUrl = escapeHtml(redactQueryCredentials(options.externalUrl));
   const className = escapeHtml(options.className);
   const urlLabel = escapeHtml(shortUrl(options.externalUrl));
 
@@ -547,6 +552,7 @@ ${BASE_CSS}
   const pinBtn = document.getElementById('pin');
   let pinOn = false;
   let modelRoots = ${scriptJson(options.modelRoots)};
+  const initialReason = ${scriptJson(options.reason ?? null)};
   let pendingRestore = null;  // captured model JSON, waiting for the fresh page
   let awaitingCapture = null; // {url, message} while the capture is in flight
   function markPin(on) {
@@ -602,6 +608,7 @@ ${BASE_CSS}
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
   }
+  if (initialReason) { showToast(initialReason); }
 
   function beginLoad(message) {
     body.dataset.state = 'loading';

@@ -9,6 +9,7 @@ import {
   sapClientOf,
   shortUrl,
   withParams,
+  withoutLogonParams,
   rebasedLocation,
 } from "../urls";
 
@@ -62,13 +63,26 @@ test("the sap-client is read off the launch URL for the ADT lookups", () => {
 test("the origin is what the proxy is started for", () => {
   assert.equal(originOf(TEMPLATE), "https://host:44300");
   assert.equal(originOf("nonsense"), undefined);
+  // a template typed without its scheme PARSES - `host:` is a scheme - and
+  // has the origin "null", the string; truthy, it became the key the
+  // credentials were stored under ("SAP User for null") and the origin the
+  // proxy then refused to start for
+  assert.equal(originOf("host:44300/sap/bc/z2ui5?app_start=ZCL_A"), undefined);
+  assert.equal(originOf("data:text/plain,x"), undefined);
 });
 
 test("a template is usable only with a placeholder and a real URL", () => {
   assert.ok(isUsableTemplate(TEMPLATE));
+  assert.ok(isUsableTemplate("http://host:8000/sap/bc/z2ui5?app_start={class}"));
   assert.equal(isUsableTemplate(""), false);
   assert.equal(isUsableTemplate("https://host/sap/bc/z2ui5"), false, "no placeholder");
   assert.equal(isUsableTemplate("host/{class}"), false, "not a URL");
+  assert.equal(
+    isUsableTemplate("host:44300/sap/bc/z2ui5?app_start={class}"),
+    false,
+    "scheme-less: parses, with `host:` as the scheme"
+  );
+  assert.equal(isUsableTemplate("ftp://host/{class}"), false, "not http(s)");
 });
 
 // ---------------------------------------------------------------------------
@@ -183,15 +197,52 @@ test("rebasedLocation leaves a foreign host alone", () => {
   assert.equal(rebasedLocation(idp, TARGET, REDIRECT_PROXY), idp);
 });
 
-test("rebasedLocation leaves a relative Location untouched", () => {
-  // the browser resolves these against the proxy origin by itself, token and
-  // all - rewriting them would double the prefix
-  assert.equal(rebasedLocation("/sap/bc/x", TARGET, REDIRECT_PROXY), "/sap/bc/x");
+test("rebasedLocation leaves a path-relative Location untouched", () => {
+  // the browser resolves these against the page's own url, token and all -
+  // rewriting them would double the prefix
   assert.equal(rebasedLocation("../x", TARGET, REDIRECT_PROXY), "../x");
   assert.equal(rebasedLocation("x?y=1", TARGET, REDIRECT_PROXY), "x?y=1");
+});
+
+test("rebasedLocation puts a root-relative Location behind the token", () => {
+  // `/sap/bc/x` resolves against the proxy's BARE origin, where only the
+  // cookie authorizes - and the browser marks that redirected navigation
+  // cross-site (its initiator is the webview), which the cookie gate refuses.
+  // Behind the token it is authorized the way the page was, and its own
+  // relative resources keep the prefix.
+  assert.equal(
+    rebasedLocation("/sap/bc/x", TARGET, REDIRECT_PROXY),
+    `${REDIRECT_PROXY}/sap/bc/x`
+  );
+  assert.equal(
+    rebasedLocation("/sap/bc/x?sap-client=100#f", TARGET, REDIRECT_PROXY),
+    `${REDIRECT_PROXY}/sap/bc/x?sap-client=100#f`
+  );
 });
 
 test("rebasedLocation returns nonsense unchanged rather than throwing", () => {
   assert.equal(rebasedLocation("", TARGET, REDIRECT_PROXY), "");
   assert.equal(rebasedLocation("::::", TARGET, REDIRECT_PROXY), "::::");
+});
+
+test("the logon parameters come out of a URL that leaves the extension", () => {
+  // the screenshot hands its page to Chromium as an argument every process
+  // of this user can read - and the proxy injects the credentials anyway
+  assert.equal(
+    withoutLogonParams(
+      "http://127.0.0.1:3000/__abap2ui5/tok3n/sap/bc/z2ui5" +
+        "?sap-user=DEVELOPER&app_start=ZCL_A&sap-password=secret&sap-client=100"
+    ),
+    "http://127.0.0.1:3000/__abap2ui5/tok3n/sap/bc/z2ui5?app_start=ZCL_A&sap-client=100"
+  );
+  // spelled in any case
+  assert.equal(
+    withoutLogonParams("https://host/x?SAP-USER=a&Sap-Password=b&c=1"),
+    "https://host/x?c=1"
+  );
+  // byte-identical when there is nothing to take out - an app's own `user`
+  // parameter is not SAP's, and nothing is re-serialised
+  const clean = "https://host:44300/sap/bc/z2ui5?app_start=ZCL_A&user=app-param#frag";
+  assert.equal(withoutLogonParams(clean), clean);
+  assert.equal(withoutLogonParams("nonsense"), "nonsense");
 });

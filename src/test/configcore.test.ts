@@ -10,6 +10,7 @@ import {
   parseLintConfig,
 } from "../configcore";
 import { findingKey } from "@abap2ui5/linter/baseline";
+import type { LintConfig } from "@abap2ui5/linter/config";
 
 /*
  * What an abap2ui5lint.jsonc means for a check - the half both builds share.
@@ -21,8 +22,9 @@ import { findingKey } from "@abap2ui5/linter/baseline";
 const SETTINGS = { minUi5: "1.71", distribution: "sapui5", allow: ["sap.m.X.y"] };
 
 test("the repo config wins where it speaks, the settings fill in the rest", () => {
+  // the parsed shape: the linter's validation has folded `ui5` into minUi5
   const options = optionsFromConfig(
-    { ui5: "1.120", rules: { "duplicate-id": false } },
+    { minUi5: "1.120", rules: { "duplicate-id": false } },
     "/repo/abap2ui5lint.jsonc",
     SETTINGS
   );
@@ -60,12 +62,17 @@ test("a baseline that is not a path is a typo, not a crash", () => {
   // that resolves options - once per keystroke on the live path
   for (const typo of [true, 1, {}, ""]) {
     const options = optionsFromConfig(
-      { baseline: typo },
+      { baseline: typo } as unknown as LintConfig,
       "/repo/abap2ui5lint.jsonc",
       SETTINGS
     );
     assert.equal(options.baseline, undefined);
   }
+  // and the parse itself refuses it, with the CLI's own words
+  assert.throws(
+    () => parseLintConfig('{ "baseline": true }', "/repo/abap2ui5lint.jsonc"),
+    /\/repo\/abap2ui5lint\.jsonc: 'baseline' must be a file path/
+  );
 });
 
 test("JSONC comments parse, and a broken config names the file", () => {
@@ -76,7 +83,8 @@ test("JSONC comments parse, and a broken config names the file", () => {
 }`,
     "/repo/abap2ui5lint.jsonc"
   );
-  assert.equal(raw.ui5, "1.120");
+  // normalised the way loadConfig normalises: `ui5` arrives as `minUi5`
+  assert.equal(raw.minUi5, "1.120");
   assert.throws(
     () => parseLintConfig("{ nope", "/repo/abap2ui5lint.jsonc"),
     /\/repo\/abap2ui5lint\.jsonc: not valid JSONC/
@@ -187,4 +195,68 @@ test("no opinion on either side leaves the gate its defaults", () => {
     allow: [],
   });
   assert.equal(options.rules, undefined);
+});
+
+/*
+ * The web build used to read the config with a bare JSON.parse over the
+ * stripped JSONC: no validation, no normalisation. So an unknown key the CLI
+ * refuses was silently accepted, `"distribution": "OpenUI5"` reached the
+ * property gate in a spelling it does not recognise - which turned
+ * `sapui5-only-control` from the error CI reports into a hint - and a numeric
+ * `ui5` stayed a number. `parseLintConfig` now IS the linter's parseConfig.
+ */
+test("the text is read the way the CLI reads it: validated and normalised", () => {
+  const raw = parseLintConfig(
+    '{ "ui5": 1.96, "distribution": "OpenUI5", "render": { "pages": 2 } }',
+    "/repo/abap2ui5lint.jsonc"
+  );
+  assert.equal(raw.minUi5, "1.96", "a numeric ui5 becomes the string the gate compares");
+  assert.equal(raw.distribution, "openui5", "the distribution is lower-cased");
+  assert.equal(raw.render, true, "the object form of render is a boolean plus a pool size");
+  assert.throws(
+    () => parseLintConfig('{ "distrbution": "openui5" }', "/repo/abap2ui5lint.jsonc"),
+    /\/repo\/abap2ui5lint\.jsonc: unknown key 'distrbution'/
+  );
+  assert.throws(
+    () => parseLintConfig('{ "rules": { "no-such-rule": false } }', "/repo/abap2ui5lint.jsonc"),
+    /no-such-rule/
+  );
+});
+
+test("an extends is surfaced, not followed and not dropped", () => {
+  // the web host has no second file to merge - the caller says so in the log
+  const raw = parseLintConfig(
+    '{ "extends": "../base.jsonc", "ui5": "1.120" }',
+    "/repo/apps/abap2ui5lint.jsonc"
+  );
+  assert.equal(raw.extends, "../base.jsonc");
+  assert.equal(raw.minUi5, "1.120");
+});
+
+test("render and ignore travel into the options - CI does not run what they switch off", () => {
+  const options = optionsFromConfig(
+    { render: false, ignore: ["^src/99/", "/generated/"] },
+    "/repo/abap2ui5lint.jsonc",
+    SETTINGS
+  );
+  assert.equal(options.render, false);
+  assert.deepEqual(options.ignore, ["^src/99/", "/generated/"]);
+  // and absent on both sides they stay absent - the gate keeps its defaults
+  const plain = optionsFromConfig({}, "/repo/abap2ui5lint.jsonc", SETTINGS);
+  assert.equal(plain.render, undefined);
+  assert.equal(plain.ignore, undefined);
+});
+
+test("no distribution anywhere is null - the linter's own default, not sapui5", () => {
+  const undecided = { ...SETTINGS, distribution: null };
+  assert.equal(
+    optionsFromConfig({}, "/repo/abap2ui5lint.jsonc", undecided).distribution,
+    null
+  );
+  // the config's word still wins over an undecided setting
+  assert.equal(
+    optionsFromConfig({ distribution: "openui5" }, "/repo/abap2ui5lint.jsonc", undecided)
+      .distribution,
+    "openui5"
+  );
 });

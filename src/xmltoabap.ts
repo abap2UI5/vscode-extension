@@ -66,6 +66,9 @@ export function decodeEntities(text: string): string {
 }
 
 const ATTR_RE = /([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+/** What is left of an attribute once the quoted ones are taken out: a name,
+ *  an `=`, and a value with no quotes around it. */
+const UNQUOTED_ATTR_RE = /([\w:.-]+)\s*=\s*([^\s"'=]+)/g;
 
 export function parseXml(text: string): ParsedXml {
   const roots: XmlElement[] = [];
@@ -160,8 +163,17 @@ export function parseXml(text: string): ParsedXml {
       continue;
     }
     const attrs: Array<[string, string]> = [];
-    for (const m of body.slice(name.length).matchAll(ATTR_RE)) {
+    const attrText = body.slice(name.length);
+    for (const m of attrText.matchAll(ATTR_RE)) {
       attrs.push([m[1], decodeEntities(m[2] ?? m[3] ?? "")]);
+    }
+    // An unquoted value (`enabled=true`) is not XML, and a pasted snippet has
+    // them. The attribute is dropped like the other unreadable pieces - and
+    // said so, where it used to vanish without a word.
+    for (const m of attrText.replace(ATTR_RE, " ").matchAll(UNQUOTED_ATTR_RE)) {
+      warnings.push(
+        `attribute ${m[1]}=${m[2]} of <${name}> has no quotes and was dropped`
+      );
     }
     const el: XmlElement = { name, attrs, children: [] };
     attach(el);
@@ -324,14 +336,30 @@ export interface ConvertedXml {
   warnings: string[];
 }
 
+export interface ConvertOptions {
+  /**
+   * Keep the `end( )` calls that close the root's containers at the end of
+   * the chain. `stringify( )` closes everything still open, so a statement of
+   * its own does not need them - but a chain INSERTED INTO another one does:
+   * without them the caller's next call, written for the container the
+   * abbreviation was expanded in, lands inside the deepest new one.
+   */
+  keepTrailingEnds?: boolean;
+}
+
 /**
  * One XML view (or fragment) as the builder chain that produces it.
  *
  * `stringify( )` renders from the root, so the trailing `end( )`s that only
  * walk the cursor back up are dropped - the corpus ends a chain at its
- * deepest node with a single `).`, and so does this.
+ * deepest node with a single `).`, and so does this (unless asked to keep
+ * them, see {@link ConvertOptions}).
  */
-export function xmlToAbap(text: string, baseIndent = ""): ConvertedXml {
+export function xmlToAbap(
+  text: string,
+  baseIndent = "",
+  options: ConvertOptions = {}
+): ConvertedXml {
   const { roots, droppedText, warnings } = parseXml(text);
   if (!roots.length) {
     return {
@@ -363,7 +391,11 @@ export function xmlToAbap(text: string, baseIndent = ""): ConvertedXml {
   emitElement(roots[0], 0, ops, warnings);
   // Trailing ends only walk the cursor back to the root - the render closes
   // every still-open tag structurally, so the corpus leaves them off.
-  while (ops.length && ops[ops.length - 1].verb === "end") {
+  while (
+    !options.keepTrailingEnds &&
+    ops.length &&
+    ops[ops.length - 1].verb === "end"
+  ) {
     ops.pop();
   }
 

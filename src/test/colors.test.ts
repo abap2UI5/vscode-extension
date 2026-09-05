@@ -140,3 +140,42 @@ test("the picker gets a second spelling to cycle to", () => {
     ["rgba(0,0,255,0.5)", "#0000ff80"]
   );
 });
+
+test("an attribute after end( ) belongs to the container just closed", () => {
+  /*
+   * The owner used to be the lexically previous ele/tag - here the Text -
+   * while the builder (and completion, and the gate) attach an `a( )` written
+   * after `end( )` to the container the end( ) closed. So the swatch on a
+   * container's colour property vanished once the container had children.
+   */
+  const source = [
+    "view->ele( n = `View` )->a( n = `xmlns` v = `sap.m`",
+    "    )->ele( `ObjectStatus`",
+    "        )->tag( `Text`",
+    "    )->end( )->a( n = `iconColor` v = `#1873b4` ).",
+  ].join("\n");
+  const asked: string[] = [];
+  const spans = abapColorSpans(source, (control, member) => {
+    asked.push(`${control}.${member}`);
+    return control === "sap.m.ObjectStatus" && member === "iconColor";
+  });
+  assert.ok(asked.includes("sap.m.ObjectStatus.iconColor"), asked.join(", "));
+  assert.ok(!asked.some((a) => a.startsWith("sap.m.Text.")), asked.join(", "));
+  assert.equal(spans.length, 1);
+  assert.equal(source.slice(spans[0].start, spans[0].end), "#1873b4");
+});
+
+test("a fresh factory( ) starts the ownership over", () => {
+  const source = [
+    "view->ele( `ObjectStatus` )->a( n = `iconColor` v = `#111111`",
+    "    )->tag( `Text` ).",
+    "DATA(popup) = z2ui5_cl_ui5_view_builder=>factory( ).",
+    "popup->tag( `Avatar` )->a( n = `backgroundColor` v = `#222222` ).",
+  ].join("\n");
+  const owners: string[] = [];
+  abapColorSpans(source, (control) => {
+    owners.push(control);
+    return true;
+  });
+  assert.deepEqual(owners, ["sap.m.ObjectStatus", "sap.m.Avatar"]);
+});

@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { prepareAbap } from "@abap2ui5/linter/reconstruct";
+import type { ViewNode } from "@abap2ui5/linter/reconstruct";
 import { expandAbbreviation, parseAbbreviation } from "../abbreviation";
 
 /*
@@ -150,4 +152,46 @@ test("a view has one root, and an abbreviation that is not one says so", () => {
 test("a wild repeat count is capped rather than obeyed", () => {
   // a typo is not a reason to write four thousand lines
   assert.equal(parseAbbreviation("Button*4000").roots.length, 50);
+});
+
+test("an expansion inside a chain closes its containers, so the next line stays a sibling", () => {
+  /*
+   * Regression: the emitter drops the trailing `end( )`s (stringify closes
+   * what is still open), and in continuation mode the expansion is inserted
+   * mid-chain - so `Panel>content>Button` emitted three unclosed calls and
+   * the user's next existing line, written for the Page, became a child of
+   * `content`.
+   */
+  const { abap, error } = expandAbbreviation("Panel>content>Button", "        ", true);
+  assert.equal(error, undefined);
+  assert.ok(abap.trimEnd().endsWith(")->end("), abap);
+  const source = `CLASS zcl_x DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+ENDCLASS.
+CLASS zcl_x IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( \`Page\`
+${abap}
+        )->tag( \`Input\` ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const prep = prepareAbap(source);
+  const tree = (node: ViewNode): unknown =>
+    node.name === null
+      ? node.children.map(tree)
+      : { [node.name]: node.children.map(tree) };
+  // the reconstruction hangs the view off a nameless root - flattened away
+  assert.deepEqual(prep.nodes.map(tree).flat(), [
+    { Page: [{ Panel: [{ content: [{ Button: [] }] }] }, { Input: [] }] },
+  ]);
+});
+
+test("a whole statement still ends at its deepest node", () => {
+  // outside a chain nothing follows the expansion, so the trailing ends stay off
+  const { abap } = expandAbbreviation("Page>content>Button", "    ", false);
+  assert.ok(!abap.includes("->end("), abap);
+  assert.match(abap, /\)->tag\( `Button` \)\.\n/);
 });

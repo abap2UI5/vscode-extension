@@ -1,11 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as path from "path";
+import { checkXmlSource } from "@abap2ui5/linter";
+import { applyDirectives, defaultSeverityOf } from "@abap2ui5/linter/findings";
+import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import {
   augmentedPath,
   checkerCwd,
+  cliCollects,
+  diagnosticSeverityKey,
   directiveLine,
   isCheckableSource,
+  settleRenderErrors,
+  suppressionEdits,
+  SuppressionEdit,
   findingsBarText,
   findingsBarTooltip,
   groupByRule,
@@ -620,8 +628,8 @@ test("directiveLine leaves ABAP alone - a full-line comment is legal anywhere", 
     "    )->tag( n = `Button`",
     "        )->a( n = `text` v = `Go` ).",
   ].join("\n");
-  assert.equal(directiveLine(abap, 2, false), 2);
-  assert.equal(directiveLine(abap, 0, false), 0);
+  assert.deepEqual(directiveLine(abap, 2, false), { open: 2, close: 2 });
+  assert.deepEqual(directiveLine(abap, 0, false), { open: 0, close: 0 });
 });
 
 test("directiveLine climbs out of a multi-line XML start tag", () => {
@@ -633,8 +641,9 @@ test("directiveLine climbs out of a multi-line XML start tag", () => {
     "</mvc:View>",
   ].join("\n");
   // the finding sits on `nosuchprop`, the comment has to go above `<Button`
-  assert.equal(directiveLine(xml, 3, true), 1);
-  assert.equal(directiveLine(xml, 2, true), 1);
+  // - and the tag runs to the `/>` on line 3
+  assert.deepEqual(directiveLine(xml, 3, true), { open: 1, close: 3 });
+  assert.deepEqual(directiveLine(xml, 2, true), { open: 1, close: 3 });
 });
 
 test("directiveLine keeps the line when the tag is closed on it", () => {
@@ -643,7 +652,7 @@ test("directiveLine keeps the line when the tag is closed on it", () => {
     '  <Button text="Go" nosuchprop="x"/>',
     "</mvc:View>",
   ].join("\n");
-  assert.equal(directiveLine(xml, 1, true), 1);
+  assert.deepEqual(directiveLine(xml, 1, true), { open: 1, close: 1 });
 });
 
 test("directiveLine is not fooled by < inside attribute values or comments", () => {
@@ -656,9 +665,9 @@ test("directiveLine is not fooled by < inside attribute values or comments", () 
     "</mvc:View>",
   ].join("\n");
   // line 4 is inside the start tag opened on line 3
-  assert.equal(directiveLine(xml, 4, true), 3);
+  assert.deepEqual(directiveLine(xml, 4, true), { open: 3, close: 4 });
   // line 2 is between tags - its own line is fine
-  assert.equal(directiveLine(xml, 2, true), 2);
+  assert.deepEqual(directiveLine(xml, 2, true), { open: 2, close: 2 });
 });
 
 test("directiveLine handles an apostrophe-quoted attribute holding a >", () => {
@@ -669,7 +678,7 @@ test("directiveLine handles an apostrophe-quoted attribute holding a >", () => {
     '    nosuchprop="x"/>',
     "</mvc:View>",
   ].join("\n");
-  assert.equal(directiveLine(xml, 3, true), 1);
+  assert.deepEqual(directiveLine(xml, 3, true), { open: 1, close: 3 });
 });
 
 test("directiveLine survives the prolog", () => {
@@ -680,7 +689,7 @@ test("directiveLine survives the prolog", () => {
     '    nosuchprop="x"/>',
     "</mvc:View>",
   ].join("\n");
-  assert.equal(directiveLine(xml, 3, true), 2);
+  assert.deepEqual(directiveLine(xml, 3, true), { open: 2, close: 3 });
 });
 
 test("directiveLine is CRLF-exact - the drift grew by one column per line", () => {
@@ -699,8 +708,8 @@ test("directiveLine is CRLF-exact - the drift grew by one column per line", () =
   const lf = lines.join("\n");
   const crlf = lines.join("\r\n");
   // a single-line tag: the directive goes directly above the finding's line
-  assert.equal(directiveLine(lf, 4, true), 4);
-  assert.equal(directiveLine(crlf, 4, true), 4);
+  assert.deepEqual(directiveLine(lf, 4, true), { open: 4, close: 4 });
+  assert.deepEqual(directiveLine(crlf, 4, true), { open: 4, close: 4 });
 });
 
 test("directiveLine climbs out of a CRLF multi-line start tag too", () => {
@@ -711,8 +720,265 @@ test("directiveLine climbs out of a CRLF multi-line start tag too", () => {
     '    nosuchprop="x"/>',
     "</mvc:View>",
   ].join("\r\n");
-  assert.equal(directiveLine(crlf, 3, true), 1);
-  assert.equal(directiveLine(crlf, 2, true), 1);
+  assert.deepEqual(directiveLine(crlf, 3, true), { open: 1, close: 3 });
+  assert.deepEqual(directiveLine(crlf, 2, true), { open: 1, close: 3 });
+});
+
+test("directiveLine runs an unterminated start tag to the end of the text", () => {
+  const xml = ['<mvc:View xmlns="sap.m">', "  <Button", '    text="Go"', '    nosuchprop="x"'].join("\n");
+  assert.deepEqual(directiveLine(xml, 3, true), { open: 1, close: 3 });
+});
+
+// ---------------------------------------------------------------------------
+// The suppression edits, judged by the linter that has to honour them
+// ---------------------------------------------------------------------------
+
+/** The snapshot next to the test bundle - what the gate itself loads. */
+const SNAPSHOT = path.join(__dirname, "properties.json");
+
+const applyEdits = (text: string, edits: readonly SuppressionEdit[]): string =>
+  [...edits]
+    .sort((a, b) => b.offset - a.offset)
+    .reduce((t, e) => t.slice(0, e.offset) + e.text + t.slice(e.offset), text);
+
+const MULTI_LINE_TAG = [
+  '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">',
+  "  <Button",
+  '    text="Go"',
+  '    nosuchprop="x"/>',
+  "</mvc:View>",
+].join("\n");
+
+/** The 0-based line the linter puts `unknown-property` on - the ATTRIBUTE's. */
+const findingLine = (xml: string): number => {
+  const f = checkXmlSource(xml, { snapshot: SNAPSHOT, render: false }).findings.find(
+    (finding) => finding.type === "unknown-property"
+  );
+  assert.ok(f?.line, "the fixture stopped producing unknown-property");
+  return f.line - 1;
+};
+
+test("an attribute inside a multi-line start tag gets a disable/enable pair the linter honours", () => {
+  const line = findingLine(MULTI_LINE_TAG);
+  assert.equal(line, 3, "the linter places the finding on the attribute's line");
+  /* The control: `disable-next-line` above `<Button` is what used to be
+   * written. It protects line 1 - and the finding is on line 3, so the
+   * linter kept reporting it. This is the fact the pair exists for. */
+  const naive = MULTI_LINE_TAG.replace(
+    "  <Button",
+    "  <!-- abap2ui5lint-disable-next-line unknown-property -->\n  <Button"
+  );
+  assert.ok(
+    checkXmlSource(naive, { snapshot: SNAPSHOT, render: false }).findings.some(
+      (f) => f.type === "unknown-property"
+    ),
+    "the linter now honours a next-line directive above a multi-line tag - the pair is no longer needed"
+  );
+  const edits = suppressionEdits(MULTI_LINE_TAG, line, true, "unknown-property");
+  assert.deepEqual(
+    edits.map((e) => e.text),
+    ["  <!-- abap2ui5lint-disable unknown-property -->\n", "  <!-- abap2ui5lint-enable -->\n"]
+  );
+  const waived = applyEdits(MULTI_LINE_TAG, edits);
+  assert.equal(
+    waived,
+    [
+      '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">',
+      "  <!-- abap2ui5lint-disable unknown-property -->",
+      "  <Button",
+      '    text="Go"',
+      '    nosuchprop="x"/>',
+      "  <!-- abap2ui5lint-enable -->",
+      "</mvc:View>",
+    ].join("\n")
+  );
+  assert.deepEqual(
+    checkXmlSource(waived, { snapshot: SNAPSHOT, render: false }).findings.map((f) => f.type),
+    [],
+    "the pinned linter does not honour the pair the quick fix writes"
+  );
+});
+
+test("a single-line tag keeps disable-next-line, which the linter honours as before", () => {
+  const xml = [
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">',
+    '  <Button text="Go" nosuchprop="x"/>',
+    "</mvc:View>",
+  ].join("\n");
+  const edits = suppressionEdits(xml, findingLine(xml), true, "unknown-property");
+  assert.deepEqual(
+    edits.map((e) => e.text),
+    ["  <!-- abap2ui5lint-disable-next-line unknown-property -->\n"]
+  );
+  assert.deepEqual(
+    checkXmlSource(applyEdits(xml, edits), { snapshot: SNAPSHOT, render: false }).findings,
+    []
+  );
+});
+
+test("the pair uses the file's own line ending", () => {
+  const crlf = MULTI_LINE_TAG.replace(/\n/g, "\r\n");
+  const edits = suppressionEdits(crlf, 3, true, "unknown-property");
+  assert.ok(edits.every((e) => e.text.endsWith("\r\n")));
+  assert.ok(!applyEdits(crlf, edits).includes("-->\n"), "a lone LF crept into a CRLF file");
+});
+
+test("a tag that closes on the last line, without a line break, still gets its enable", () => {
+  const xml = ['<mvc:View xmlns="sap.m">', "  <Button", '    nosuchprop="x"/>'].join("\n");
+  const edits = suppressionEdits(xml, 2, true, "unknown-property");
+  const waived = applyEdits(xml, edits);
+  assert.ok(waived.endsWith('    nosuchprop="x"/>\n  <!-- abap2ui5lint-enable -->'), waived);
+  // the linter reads the same pair whether or not the enable is the last line
+  const findings: PropertyFinding[] = [{ type: "unknown-property", line: 4 }];
+  assert.deepEqual(applyDirectives(findings, waived), []);
+});
+
+test("ABAP gets the next-line comment above the finding's line, indented like it", () => {
+  const abap = [
+    "    view->ele( n = `Page`",
+    "        )->tag( n = `Button`",
+    "            )->a( n = `nosuchprop` v = `x` ).",
+  ].join("\n");
+  const edits = suppressionEdits(abap, 2, false, "unknown-property");
+  assert.deepEqual(edits, [
+    {
+      offset: abap.indexOf("            )->a("),
+      text: '            " abap2ui5lint-disable-next-line unknown-property\n',
+    },
+  ]);
+  const waived = applyEdits(abap, edits);
+  // the finding moved down by the inserted line: line 3 -> 4 (1-based)
+  const findings: PropertyFinding[] = [{ type: "unknown-property", line: 4 }];
+  assert.deepEqual(applyDirectives(findings, waived), []);
+});
+
+// ---------------------------------------------------------------------------
+// What the CLI's directory walk collects - the sweep and the baseline follow it
+// ---------------------------------------------------------------------------
+
+test("cliCollects takes the names collectFiles takes, and no others", () => {
+  for (const yes of [
+    "src/zcl_app.clas.abap",
+    "src/01/deep/zcl_app.clas.abap",
+    "zcl_app.clas.abap",
+    "webapp/view/Main.view.xml",
+    "webapp/fragment/Dialog.fragment.xml",
+    "./src/zcl_app.clas.abap",
+    "src\\zcl_app.clas.abap",
+  ]) {
+    assert.ok(cliCollects(yes), `${yes} is collected by the CLI`);
+  }
+  for (const no of [
+    "src/zcl_app.clas.testclasses.abap",
+    "src/zcl_app.clas.locals_imp.abap",
+    "src/zcl_app.clas.locals_def.abap",
+    "src/zreport.prog.abap",
+    "src/zif_app.intf.abap",
+    "src/zcl_app.clas.xml",
+    "src/other.xml",
+    "node_modules/pkg/src/zcl_app.clas.abap",
+    "src/node_modules/zcl_app.clas.abap",
+    ".hidden/zcl_app.clas.abap",
+    "src/.zcl_app.clas.abap",
+    "",
+  ]) {
+    assert.ok(!cliCollects(no), `${no} is never collected by the CLI`);
+  }
+});
+
+test("cliCollects prunes what the config's ignore patterns prune - directories included", () => {
+  const ignore = ["^src/99/", "generated$", "/vendor/"];
+  assert.ok(!cliCollects("src/99/zcl_old.clas.abap", { ignore }));
+  assert.ok(cliCollects("src/01/zcl_new.clas.abap", { ignore }));
+  // `generated$` matches the DIRECTORY on the way down, as the walk tests
+  // each entry before descending - the file name itself never matches it
+  assert.ok(!cliCollects("src/generated/zcl_gen.clas.abap", { ignore }));
+  assert.ok(!cliCollects("src/vendor/zcl_gen.clas.abap", { ignore }));
+  // a pattern written against the absolute spelling a discovered config's
+  // `paths` produce matches through `root`
+  assert.ok(!cliCollects("src/zcl_app.clas.abap", { ignore: ["^/repo/src/"], root: "/repo" }));
+  assert.ok(cliCollects("src/zcl_app.clas.abap", { ignore: ["^/repo/src/"] }));
+  // a pattern that does not compile suppresses nothing rather than everything
+  assert.ok(cliCollects("src/zcl_app.clas.abap", { ignore: ["("] }));
+});
+
+// ---------------------------------------------------------------------------
+// rules['render-error'], applied against the real file
+// ---------------------------------------------------------------------------
+
+test("settleRenderErrors leaves the errors alone without a render-error entry", () => {
+  const settled = settleRenderErrors(["XMLView.create failed"], {}, ["/repo/src/zcl_app.clas.abap"]);
+  assert.deepEqual(settled.renderErrors, ["XMLView.create failed"]);
+  assert.equal(settled.severity, undefined);
+  assert.equal(settled.waived, 0);
+  assert.equal(settled.staleWaiver, false);
+  assert.deepEqual(settleRenderErrors(["x"], undefined, []).renderErrors, ["x"]);
+});
+
+test("settleRenderErrors waives on false and on an exclude that matches the REAL file", () => {
+  const rules = { "render-error": { exclude: ["^src/02/"] } };
+  // the scratch copy the CLI ran on matches nothing - which is the defect
+  const scratch = settleRenderErrors(["boom"], rules, ["/tmp/abap2ui5-viewcheck-x/zcl_app.clas.abap"]);
+  assert.deepEqual(scratch.renderErrors, ["boom"]);
+  // the config-relative spelling of the real file does
+  const real = settleRenderErrors(["boom"], rules, [
+    "/repo/src/02/zcl_app.clas.abap",
+    "src/02/zcl_app.clas.abap",
+  ]);
+  assert.deepEqual(real.renderErrors, []);
+  assert.equal(real.waived, 1);
+  assert.equal(real.staleWaiver, false);
+  // backslashes are not what the pattern is about
+  assert.equal(
+    settleRenderErrors(["boom"], rules, ["src\\02\\zcl_app.clas.abap"]).waived,
+    1
+  );
+  const off = settleRenderErrors(["boom", "bang"], { "render-error": false }, ["x"]);
+  assert.equal(off.waived, 2);
+  assert.equal(off.staleWaiver, false, "switched off wholesale is never stale");
+});
+
+test("settleRenderErrors reports a stale waiver only for an excluded file that rendered clean", () => {
+  const rules = { "render-error": { exclude: ["zcl_app"] } };
+  assert.equal(settleRenderErrors([], rules, ["src/zcl_app.clas.abap"]).staleWaiver, true);
+  // not rendered at all (helpers, no report) - nothing is known about it
+  assert.equal(settleRenderErrors([], rules, ["src/zcl_app.clas.abap"], false).staleWaiver, false);
+});
+
+test("settleRenderErrors hands on a severity the entry sets, and only a real one", () => {
+  assert.equal(
+    settleRenderErrors(["boom"], { "render-error": "warning" }, ["x"]).severity,
+    "warning"
+  );
+  assert.equal(
+    settleRenderErrors(["boom"], { "render-error": { severity: "Hint" } }, ["x"]).severity,
+    "hint"
+  );
+  assert.equal(
+    settleRenderErrors(["boom"], { "render-error": "critical" }, ["x"]).severity,
+    undefined
+  );
+});
+
+test("renderGateNote says when the repo config switched the gate off", () => {
+  assert.match(renderGateNote("off-by-config"), /render gate off by config/);
+});
+
+// ---------------------------------------------------------------------------
+// The severity a finding is shown with is always one the diagnostics map knows
+// ---------------------------------------------------------------------------
+
+test("diagnosticSeverityKey keeps a real severity and clamps an unknown one", () => {
+  assert.equal(diagnosticSeverityKey({ type: "unknown-property", severity: "warning" }), "warning");
+  // no severity on the finding: the linter's default for the rule
+  assert.equal(
+    diagnosticSeverityKey({ type: "unknown-property" }),
+    defaultSeverityOf("unknown-property")
+  );
+  // `viewCheck.rules` is not validated - a misspelt severity used to reach
+  // DIAGNOSTIC_SEVERITY as undefined, which VS Code shows as an Error
+  assert.equal(diagnosticSeverityKey({ type: "unknown-property", severity: "critical" }), "hint");
+  assert.equal(diagnosticSeverityKey({ type: "unknown-property", severity: "" }), defaultSeverityOf("unknown-property"));
 });
 
 // ---------------------------------------------------------------------------

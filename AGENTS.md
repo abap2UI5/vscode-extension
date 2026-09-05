@@ -274,8 +274,10 @@ identity (see Conventions).
 - **A setting that names a program to start is `"scope": "machine"`.**
   `viewCheck.command`, `mcp.command` and `mcp.reposRoot` decide which binary
   the extension spawns; machine scope keeps a cloned repository's
-  `.vscode/settings.json` out of that decision. The same three are listed
-  under `capabilities.untrustedWorkspaces.restrictedConfigurations`.
+  `.vscode/settings.json` out of that decision. They are listed under
+  `capabilities.untrustedWorkspaces.restrictedConfigurations`, together with
+  `systems` and `launchUrlTemplate` - five settings a cloned repository must
+  not be able to set; `manifest.test.ts` pins the list.
 - **The linter owns the rules, this extension owns the presentation.**
   Severity, wording, the `fixes` on a finding, the `rules` block and the
   `abap2ui5lint-disable…` directives all live in `@abap2ui5/linter` and are
@@ -344,9 +346,9 @@ Facts an agent cannot see from the code but will trip over:
   / `duplicate-property` / `attribute-without-element`, and the icon floor)
   with no symptom beyond CI and the editor disagreeing. `gate.parity.test.ts`
   now diffs the two over fixtures and is the reason a sixth missing input
-  fails a test instead of going quiet. The one known difference is written
-  down there: the XML branch cannot run `checkIcons`, which the linter does
-  not export through its `exports` map.
+  fails a test instead of going quiet. The XML branch runs `checkIcons`
+  through the linter's `./icons` export (there was a time it could not, and
+  the same file was judged differently by the editor and by CI).
 - **The rule reference is coupled by URL, not by import.** Every diagnostic's
   code links to `https://abap2ui5.github.io/linter/#<rule-id>`, which the
   linter's `generate-rules-page` emits one anchor per rule for. The rule ids

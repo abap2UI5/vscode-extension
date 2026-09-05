@@ -286,6 +286,19 @@ export function legacyAdoption(
   return { user: legacy.user, pass: legacy.pass };
 }
 
+/**
+ * What was typed as the SAP user, as it is stored: trimmed. A user pasted
+ * with a trailing space is a different user to the system, and every logon
+ * with it failed until the credentials were reset - with nothing in the 401
+ * saying why. Undefined for a cancelled or blank answer, which the caller
+ * treats as "not now". The password is not touched: it may legitimately
+ * carry the characters a trim would take.
+ */
+export function enteredUser(answer: string | undefined): string | undefined {
+  const trimmed = answer?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export interface Credentials {
   user: string;
   pass: string;
@@ -331,11 +344,13 @@ export async function ensureCredentials(
   }
 
   if (!user) {
-    user = await vscode.window.showInputBox({
-      title: `abap2UI5: SAP User for ${originOf(origin) ?? origin}`,
-      prompt: "User for logging on to the SAP system (same as in ADT)",
-      ignoreFocusOut: true,
-    });
+    user = enteredUser(
+      await vscode.window.showInputBox({
+        title: `abap2UI5: SAP User for ${originOf(origin) ?? origin}`,
+        prompt: "User for logging on to the SAP system (same as in ADT)",
+        ignoreFocusOut: true,
+      })
+    );
     if (!user) {
       return undefined;
     }

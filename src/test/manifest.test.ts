@@ -325,3 +325,91 @@ test("no contribution offers a desktop-only command in the web host", () => {
       'when clause - in the web host they fail with "command not found"'
   );
 });
+
+/*
+ * Two more things the manifest can only promise: a `viewItem == …` clause
+ * names a contextValue some tree item actually sets (a typo here hides the
+ * menu entry with no error anywhere), and every file the manifest points at
+ * - the extension icon, the container icon, the walkthrough pages - exists in
+ * the tree that gets packaged.
+ */
+test("every viewItem in a when clause is a contextValue the code sets", () => {
+  const set = new Set<string>();
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "test") {
+          walk(full);
+        }
+        continue;
+      }
+      if (!entry.name.endsWith(".ts")) {
+        continue;
+      }
+      for (const m of fs
+        .readFileSync(full, "utf8")
+        .matchAll(/contextValue\s*=\s*(?:["'`]([^"'`]+)["'`]|([^;]+));/g)) {
+        if (m[1]) {
+          set.add(m[1]);
+        } else {
+          // a conditional: every quoted alternative it can take
+          for (const alt of m[2].matchAll(/["'`]([^"'`]+)["'`]/g)) {
+            set.add(alt[1]);
+          }
+        }
+      }
+    }
+  };
+  walk(path.join(ROOT, "src"));
+  assert.ok(set.size > 0, "the scan finds contextValue assignments at all");
+  const referenced = new Set<string>();
+  for (const entries of Object.values(manifest.contributes.menus ?? {})) {
+    for (const entry of entries as Array<{ when?: string }>) {
+      for (const m of (entry.when ?? "").matchAll(/viewItem\s*==\s*([\w.-]+)/g)) {
+        referenced.add(m[1]);
+      }
+    }
+  }
+  assert.ok(referenced.size > 0, "the menus reference a viewItem at all");
+  for (const value of referenced) {
+    assert.ok(set.has(value), `viewItem ${value} is a contextValue set in src/`);
+  }
+});
+
+test("every file the manifest points at exists", () => {
+  const raw = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    icon?: string;
+    contributes: {
+      viewsContainers?: Record<string, Array<{ icon?: string }>>;
+      walkthroughs?: Array<{
+        steps: Array<{ media: { markdown?: string; image?: string; svg?: string } }>;
+      }>;
+    };
+  };
+  const files: string[] = [];
+  if (raw.icon) {
+    files.push(raw.icon);
+  }
+  for (const containers of Object.values(raw.contributes.viewsContainers ?? {})) {
+    for (const container of containers) {
+      // a codicon ($(name)) is not a file
+      if (container.icon && !container.icon.startsWith("$(")) {
+        files.push(container.icon);
+      }
+    }
+  }
+  for (const walkthrough of raw.contributes.walkthroughs ?? []) {
+    for (const step of walkthrough.steps) {
+      for (const file of [step.media.markdown, step.media.image, step.media.svg]) {
+        if (file) {
+          files.push(file);
+        }
+      }
+    }
+  }
+  assert.ok(files.length >= 3, `the manifest names files at all (${files.length})`);
+  for (const file of files) {
+    assert.ok(fs.existsSync(path.join(ROOT, file)), `${file} exists`);
+  }
+});

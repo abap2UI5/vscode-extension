@@ -328,3 +328,86 @@ test("a METHOD line inside a string template is not an implementation", () => {
     "real_one"
   );
 });
+
+// ---------------------------------------------------------------------------
+// Whose method a call names - what F12 may jump to
+// ---------------------------------------------------------------------------
+
+test("a bare call or one on me-> is the class's own method", () => {
+  const { isOwnMethodCall } = require("../abap") as typeof import("../abap");
+  assert.equal(isOwnMethodCall("    "), true);
+  assert.equal(isOwnMethodCall("    me->"), true);
+  assert.equal(isOwnMethodCall("    ME->"), true);
+  assert.equal(isOwnMethodCall("    DATA(view) = "), true);
+});
+
+test("a call on any other receiver is somebody else's method", () => {
+  // every gallery template declares a view_display of its own, and F12 on
+  // `client->view_display( )` used to jump there
+  const { isOwnMethodCall } = require("../abap") as typeof import("../abap");
+  assert.equal(isOwnMethodCall("    client->"), false);
+  assert.equal(isOwnMethodCall("    super->"), false);
+  assert.equal(isOwnMethodCall("    zcl_helper=>"), false);
+  assert.equal(isOwnMethodCall("    lo_app->mo_child->"), false);
+  assert.equal(isOwnMethodCall("    zcl_x=>factory( )->"), false);
+});
+
+// ---------------------------------------------------------------------------
+// Which documents are ABAP sources of this window
+// ---------------------------------------------------------------------------
+
+test("an ABAP document counts by language id, whatever its scheme", () => {
+  const { isAbapSourceDocument } = require("../abap") as typeof import("../abap");
+  for (const scheme of ["file", "adt", "abapfs", "untitled", "vscode-vfs"]) {
+    assert.equal(
+      isAbapSourceDocument({ languageId: "abap", scheme, path: "/ZCL_X" }),
+      true,
+      scheme
+    );
+  }
+  // an .abap file whose language id was not set still counts
+  assert.equal(
+    isAbapSourceDocument({ languageId: "plaintext", scheme: "file", path: "/x/zcl_x.clas.abap" }),
+    true
+  );
+  assert.equal(
+    isAbapSourceDocument({ languageId: "plaintext", scheme: "file", path: "/x/readme.md" }),
+    false
+  );
+});
+
+test("a copy of a class in a diff or an output channel is not a source", () => {
+  // the revision side of a `git:` diff has language id abap too - it used to
+  // enter the scan as a second class of the same name (a duplicate row in the
+  // apps tree, and an old revision overriding the class's index entry)
+  const { isAbapSourceDocument } = require("../abap") as typeof import("../abap");
+  for (const scheme of ["git", "gitlens", "pr", "review", "output"]) {
+    assert.equal(
+      isAbapSourceDocument({ languageId: "abap", scheme, path: "/x/zcl_x.clas.abap" }),
+      false,
+      scheme
+    );
+  }
+});
+
+test("a CLASS DEFINITION inside a string template does not name the class", () => {
+  // an app that generates ABAP writes one at the start of a template line -
+  // read raw, it won over the real definition further down
+  const { classDefinitionOffset } = require("../abap") as typeof import("../abap");
+  const source = [
+    "CLASS lcl_gen IMPLEMENTATION.",
+    "  METHOD emit.",
+    "    rv_code = |",
+    "CLASS zcl_fake DEFINITION PUBLIC INHERITING FROM zcl_fake_base.",
+    "ENDCLASS.|.",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+    "",
+    "CLASS zcl_gen DEFINITION PUBLIC INHERITING FROM zcl_gen_base.",
+    "  PUBLIC SECTION.",
+    "ENDCLASS.",
+  ].join("\n");
+  assert.equal(classNameOf(source, "x.clas.abap"), "ZCL_GEN");
+  assert.equal(superclassOf(source), "ZCL_GEN_BASE");
+  assert.equal(classDefinitionOffset(source), source.indexOf("CLASS zcl_gen DEFINITION"));
+});

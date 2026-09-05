@@ -4,6 +4,7 @@ import * as path from "path";
 import { run } from "./childproc";
 import { offerInstall, renderGateBrowsers } from "./rendergate";
 import { safeFileStem } from "./previewcore";
+import { withoutLogonParams } from "./urls";
 
 /*
  * "Take App Screenshot" - the running app as a PNG, without leaving the
@@ -56,6 +57,20 @@ const SHOT_TIMEOUT_MS = 45_000;
 /** How many screenshots stay in global storage. Every shot lands there and
  *  nothing else ever deletes one - unbounded, that directory only grows. */
 const KEEP_SHOTS = 20;
+
+/** Screenshots taken by this window so far. The file name carries it: two
+ *  shots within one second used to share a name (the stamp stopped at the
+ *  second), and the later one silently overwrote the earlier - an agent
+ *  shooting three viewports in a row got one PNG back three times. */
+let shotSequence = 0;
+
+/** `<class stem>-<yyyy-mm-dd-hh-mm-ss-mmm>-<n>.png`. The stem, not the raw
+ *  name: namespaced classes carry `/`, and the name may arrive over MCP -
+ *  neither gets to steer where the PNG lands. */
+function screenshotFileName(className: string, at: Date, sequence: number): string {
+  const stamp = at.toISOString().replace(/[:T.]/g, "-").replace(/Z$/, "");
+  return `${safeFileStem(className)}-${stamp}-${sequence}.png`;
+}
 
 /** Resolves with Chromium's stderr - the only witness when it exits cleanly
  *  but writes no PNG. */
@@ -135,13 +150,11 @@ export async function takeScreenshot(
 
   const dir = path.join(context.globalStorageUri.fsPath, "screenshots");
   fs.mkdirSync(dir, { recursive: true });
-  const stamp = new Date()
-    .toISOString()
-    .slice(0, 19)
-    .replace(/[:T]/g, "-");
-  // The stem, not the raw name: namespaced classes carry `/`, and the name
-  // may arrive over MCP - neither gets to steer where the PNG lands.
-  const file = path.join(dir, `${safeFileStem(options.className)}-${stamp}.png`);
+  shotSequence += 1;
+  const file = path.join(
+    dir,
+    screenshotFileName(options.className, new Date(), shotSequence)
+  );
 
   const args = [
     "--headless=new",
@@ -167,8 +180,12 @@ export async function takeScreenshot(
      * authorized, and the page's follow-up requests ride on the HttpOnly
      * cookie that first answer plants. What leaks into the argument vector
      * is then a token that is already spent by the time the shot is taken.
+     *
+     * The same argument vector is why a launch URL's own `sap-user` and
+     * `sap-password` do not travel here: the proxy injects the credentials
+     * anyway, so the page loads exactly as before without them.
      */
-    options.url,
+    withoutLogonParams(options.url),
   ];
   // Chromium refuses its sandbox as root (containers, some CI images).
   if (typeof process.getuid === "function" && process.getuid() === 0) {

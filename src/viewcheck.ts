@@ -16,12 +16,21 @@ import {
 import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
 import { usesBuilder } from "./abap";
-import { frozenBuilderOf, GateOptions, GateResult, runGate, VIEW_XML_RE } from "./gate";
+import {
+  configRelative,
+  frozenBuilderOf,
+  GateOptions,
+  GateResult,
+  runGate,
+  VIEW_XML_RE,
+} from "./gate";
 import { preparedAbapOf } from "./language";
 import { labelOf, noWorkspaceFolders } from "./abapsources";
 import {
   augmentedPath,
   CheckerCommand,
+  cliCollects,
+  FindingSeverity,
   isCheckableSource,
   parseRenderReport,
   checkerCwd,
@@ -31,6 +40,7 @@ import {
   plannedFixes,
   resolveCheckerCommand,
   scratchFileName,
+  settleRenderErrors,
 } from "./checkcore";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
 import { plural } from "./text";
@@ -102,6 +112,15 @@ function ruleSettings(): Record<string, unknown> | undefined {
   return rules && Object.keys(rules).length > 0 ? rules : undefined;
 }
 
+/** The `viewCheck.distribution` setting. Its default, "", means "not
+ *  decided" and travels as null: that is the linter's own default and its
+ *  own answer - a SAPUI5-only control is then a hint rather than an error
+ *  (openui5) or nothing (sapui5). Defaulting to "sapui5" here used to
+ *  silence in the editor what a configless CLI run reports. */
+function distributionSetting(): string | null {
+  return config().get<string>("viewCheck.distribution", "") || null;
+}
+
 /** See `isCheckableSource` - this is only the document unwrapping. */
 export function isCheckable(doc: vscode.TextDocument): boolean {
   return isCheckableSource(doc.fileName, doc.languageId, doc.getText());
@@ -150,7 +169,7 @@ function optionsFor(doc: vscode.TextDocument): CheckOptions {
   const cfg = config();
   return resolveOptions(discoveryDir(doc), {
     minUi5: cfg.get<string>("viewCheck.minUi5", "1.71"),
-    distribution: cfg.get<string>("viewCheck.distribution", "sapui5"),
+    distribution: distributionSetting(),
     allow: cfg.get<string[]>("viewCheck.allow", []),
     rules: ruleSettings(),
   });
@@ -519,6 +538,9 @@ async function checkDocument(
 
   let helperNote = gate.helperNote;
   let renderErrors: string[] = [];
+  let renderSeverity: FindingSeverity | undefined;
+  /** The repo config says `render: false` - the gate was not started. */
+  let renderOff = false;
   if (
     request.render &&
     config().get<boolean>("viewCheck.render", false) &&
@@ -530,7 +552,15 @@ async function checkDocument(
      * so the on-demand command announced "view check passed" for a check
      * whose second half never ran. */
     const state = renderGateState(checkerCommand().installed);
-    if (state.kind === "failed") {
+    if (options.render === false) {
+      /* The repo's `abap2ui5lint.jsonc` switches CI's render gate off. The
+       * CLI discovers that config from its cwd and skips rendering - so it
+       * used to be spawned anyway, over a scratch copy, and came back with an
+       * empty report that announced itself as "view check passed". Not
+       * started, and the message says which gate did not run. */
+      renderOff = true;
+      helperNote = renderGateNote("off-by-config");
+    } else if (state.kind === "failed") {
       log(`view-check: render gate not run - ${state.reason}`);
       helperNote = renderGateNote("skipped-not-started");
     } else if (state.kind === "busy") {
@@ -540,7 +570,31 @@ async function checkDocument(
       if (superseded()) {
         return; // the document moved on while Chromium was busy
       }
-      renderErrors = render.result?.renderErrors ?? [];
+      /* `rules['render-error']` over the REAL file. The CLI applies the entry
+       * itself, but it ran on a scratch copy under os.tmpdir(), so an
+       * `exclude` written for `src/02/zcl_app.clas.abap` matched the scratch
+       * path never - the repository's waiver held in CI and not here. */
+      const file = doc.uri.fsPath || name;
+      const settledRender = settleRenderErrors(
+        render.result?.renderErrors ?? [],
+        options.rules,
+        [file, configRelative(file, options.configFile)],
+        render.outcome === "ok" && !render.result?.skippedRender
+      );
+      renderErrors = settledRender.renderErrors;
+      renderSeverity = settledRender.severity;
+      if (settledRender.waived) {
+        log(
+          `view-check: ${settledRender.waived} render error(s) in ${name} waived by ` +
+            "rules['render-error']"
+        );
+      }
+      if (settledRender.staleWaiver) {
+        log(
+          `view-check: stale render-error waiver for ${name} - the view renders ` +
+            "clean, remove it from rules['render-error'].exclude"
+        );
+      }
       const note = renderGateNote(
         render.result?.skippedRender ? "skipped-helpers" : render.outcome
       );
@@ -550,7 +604,7 @@ async function checkDocument(
     }
   }
 
-  const diags = toDiagnostics(doc, gate.findings, renderErrors);
+  const diags = toDiagnostics(doc, gate.findings, renderErrors, renderSeverity);
   diagnostics.set(doc.uri, diags);
   /* The scheme rides along on purpose. A window can hold a checked-out
    * repository and classes opened straight from a system at the same time,
@@ -567,7 +621,11 @@ async function checkDocument(
   if (request.announce) {
     if (diags.length === 0) {
       vscode.window.showInformationMessage(
-        `abap2UI5: view check passed for ${name}${helperNote}.`
+        renderOff
+          ? // not "passed": the half CI does not run was not run here either
+            `abap2UI5: property gate passed for ${name} - render gate off by config ` +
+              `(render: false in ${path.basename(options.configFile ?? "abap2ui5lint.jsonc")}).`
+          : `abap2UI5: view check passed for ${name}${helperNote}.`
       );
     } else {
       showProblemsMessage(
@@ -583,9 +641,14 @@ async function checkDocument(
 // Whole workspace
 // ---------------------------------------------------------------------------
 
-/** File patterns the workspace sweep looks at - the same shapes the CLI
- *  collects. */
-const WORKSPACE_GLOB = "**/*.{abap,view.xml,fragment.xml}";
+/** File patterns the workspace sweep looks at - the NAMES the CLI's
+ *  `collectFiles` walk collects: `*.clas.abap` and view/fragment XML. It used
+ *  to be every `*.abap`, so a builder call inside `*.clas.testclasses.abap`,
+ *  `*.clas.locals_imp.abap` or a report made the sweep check - and a rebuilt
+ *  baseline name - files the CLI never sees, whose entries CI then failed as
+ *  STALE. `cliCollects` finishes the job per file (dot-directories, the
+ *  config's `ignore` patterns). */
+const WORKSPACE_GLOB = "**/*.{clas.abap,view.xml,fragment.xml}";
 
 /** What a sweep found, and whether it got to the end. A cancelled sweep has
  *  looked at part of the workspace, which is not the same answer - reporting
@@ -650,9 +713,12 @@ async function sweepWorkspace(
    * were sitting open in the editor - and the on-save check had been
    * checking them all along.
    */
+  // `node_modules` and the dot-directories are what the CLI's walk skips;
+  // `.git` is named here only to spare the glob the descent - `cliCollects`
+  // drops every other dot-entry (and would drop this one)
   const found = await vscode.workspace.findFiles(
     WORKSPACE_GLOB,
-    "**/{node_modules,.git,dist,out}/**"
+    "**/{node_modules,.git}/**"
   );
   /*
    * An open document WINS over the file of the same name, always - it is what
@@ -686,7 +752,7 @@ async function sweepWorkspace(
    * allocated an object per file for no answer that could change. */
   const sweepSettings = {
     minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
-    distribution: config().get<string>("viewCheck.distribution", "sapui5"),
+    distribution: distributionSetting(),
     allow: config().get<string[]>("viewCheck.allow", []),
     rules: ruleSettings(),
   };
@@ -742,11 +808,19 @@ async function sweepWorkspace(
       return { stamp };
     }
     try {
+      /* TextDecoder, not Buffer.toString: it drops a byte-order mark, and
+       * `TextDocument.getText()` never has one. Fixes carry character
+       * offsets into the text they were computed from, and `fixWorkspace`
+       * maps them through `doc.positionAt` of the BOM-less document - with
+       * the mark counted in, every fix in such a file landed one character
+       * off. The live check and the web sweep already read it this way; the
+       * cost is that the sweep does not report `byte-order-mark` for a file
+       * on disk, exactly as the live check does not. */
       return {
         stamp,
-        text: Buffer.from(
+        text: new TextDecoder().decode(
           await vscode.workspace.fs.readFile(target.uri)
-        ).toString("utf8"),
+        ),
       };
     } catch {
       return undefined;
@@ -778,6 +852,24 @@ async function sweepWorkspace(
       // a document with no path on disk has no directory to discover a config
       // from - the workspace's own config governs it, as it does on the live path
       const opts = resolveOptions(discoveryDirOf(uri), sweepSettings);
+      /* Only what the CLI's walk would reach, judged from the directory it
+       * walks: the governing config's, or the workspace folder when the
+       * settings govern. A file under a dot-directory or one a config
+       * `ignore` pattern prunes is checked by nobody in CI - checking it here
+       * squiggles what CI never sees, and a baseline rebuilt from it carries
+       * an entry CI fails as stale. Open documents that the glob did not
+       * find (a class from a system) have no place in that walk and stay. */
+      if (known.has(key) && uri.scheme === "file") {
+        const root = opts.configFile
+          ? path.dirname(opts.configFile)
+          : vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
+        if (
+          root &&
+          !cliCollects(path.relative(root, uri.fsPath), { ignore: opts.ignore, root })
+        ) {
+          continue;
+        }
+      }
       /* Gated once per text: the cache key is the open document's version or
        * the file's mtime, so a re-run only pays for what changed since. The
        * cached findings are PRE-baseline - the baseline is applied per run
@@ -791,7 +883,7 @@ async function sweepWorkspace(
           // and gating (a config change clears the cache mid-sweep) - re-read
           // rather than silently skip the file
           try {
-            text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+            text = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
           } catch {
             continue;
           }
@@ -1078,7 +1170,7 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
   }
   const rootOptions = resolveOptions(folder.uri.fsPath, {
     minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
-    distribution: config().get<string>("viewCheck.distribution", "sapui5"),
+    distribution: distributionSetting(),
     allow: config().get<string[]>("viewCheck.allow", []),
     rules: ruleSettings(),
   });
@@ -1156,8 +1248,19 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
         const rel = path.relative(root, uri.fsPath);
         return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
       };
+      // the CLI walks from the config's directory, and prunes what its
+      // `ignore` names - a file it never collects cannot be a baseline entry
+      const configDir = rootOptions.configFile
+        ? path.dirname(rootOptions.configFile)
+        : folder.uri.fsPath;
       const mine = swept.files.filter(
-        (file) => inRepo(file.uri) && file.configFile === rootOptions.configFile
+        (file) =>
+          inRepo(file.uri) &&
+          file.configFile === rootOptions.configFile &&
+          cliCollects(path.relative(configDir, file.uri.fsPath), {
+            ignore: rootOptions.ignore,
+            root: configDir,
+          })
       );
       const foreign = swept.files.length - mine.length;
       if (foreign) {
@@ -1259,9 +1362,9 @@ export function registerViewCheck(
     lastVersionLine = "";
     // the memoised findings behind the lightbulb and the "fix all" lens were
     // computed under the old config - the version they are keyed on does not
-    // move when a config file does
+    // move when a config file does; the re-check of every open document
+    // rides along (recheckOpenDocuments calls recheckOpen)
     recheckOpenDocuments();
-    recheckOpen();
   };
 
   /* The baseline files the configs name are part of the answer too: a pull
@@ -1390,8 +1493,9 @@ export function registerViewCheck(
         // changed - without this the gate stayed off until the window reloaded
         clearRenderGateFailure();
         clearSweepCache();
+        // re-checks every open document too - a second recheckOpen() here
+        // scheduled each of them twice
         recheckOpenDocuments();
-        recheckOpen();
       }
     })
   );

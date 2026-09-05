@@ -5,7 +5,7 @@ import * as path from "path";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
 import { RENDER_RULE } from "@abap2ui5/linter/findings";
 import { addToBaseline } from "./baselinefile";
-import { directiveLine, plannedFixes } from "./checkcore";
+import { directiveLine, plannedFixes, suppressionEdits } from "./checkcore";
 import { plural } from "./text";
 import { clearBaselineCache } from "./lintconfig";
 import { CONFIG_SECTION } from "./settings";
@@ -67,34 +67,33 @@ function isXmlDoc(doc: vscode.TextDocument): boolean {
   return /\.(view|fragment)\.xml$/i.test(doc.fileName) || doc.languageId === "xml";
 }
 
-/** Where the directive goes and how it is indented. In XML the finding's
- *  line is often an attribute line inside a multi-line start tag, and a
- *  comment may not go there - see `directiveLine`. */
+/** Where the ABAP reason-carrying directive goes and how it is indented -
+ *  the finding's own line, a full-line comment being legal anywhere in ABAP.
+ *  The XML cases live in `suppressionEdits`. */
 function suppressionSpot(
   doc: vscode.TextDocument,
   line: number
 ): { target: number; indent: string } {
-  const target = directiveLine(doc.getText(), line, isXmlDoc(doc));
+  const target = directiveLine(doc.getText(), line, false).open;
   const indent = /^[ \t]*/.exec(doc.lineAt(target).text)?.[0] ?? "";
   return { target, indent };
 }
 
 /**
- * The directive that waives a rule for the next line, in the comment syntax
- * of the file it goes into. Indented like the line it protects, so it does
- * not stand out in otherwise aligned ABAP.
+ * The directives that waive a rule for the finding's line, in the comment
+ * syntax of the file they go into - `disable-next-line` above it, or for an
+ * attribute inside a multi-line XML start tag the `disable`/`enable` pair
+ * around the whole tag, which is the only placement the linter's line-based
+ * directives can honour there. The decision is `suppressionEdits`'; this only
+ * turns its offsets into positions.
  */
 function suppressionFor(
   doc: vscode.TextDocument,
   line: number,
   rule: string
-): vscode.TextEdit {
-  const { target, indent } = suppressionSpot(doc, line);
-  const directive = `abap2ui5lint-disable-next-line ${rule}`;
-  const comment = isXmlDoc(doc) ? `<!-- ${directive} -->` : `" ${directive}`;
-  return vscode.TextEdit.insert(
-    new vscode.Position(target, 0),
-    `${indent}${comment}\n`
+): vscode.TextEdit[] {
+  return suppressionEdits(doc.getText(), line, isXmlDoc(doc), rule).map((edit) =>
+    vscode.TextEdit.insert(doc.positionAt(edit.offset), edit.text)
   );
 }
 
@@ -206,9 +205,7 @@ class ViewCheckActions implements vscode.CodeActionProvider {
         vscode.CodeActionKind.QuickFix
       );
       action.edit = new vscode.WorkspaceEdit();
-      action.edit.set(doc.uri, [
-        suppressionFor(doc, diagnostic.range.start.line, rule),
-      ]);
+      action.edit.set(doc.uri, suppressionFor(doc, diagnostic.range.start.line, rule));
       action.diagnostics = [diagnostic];
       actions.push(action);
 
