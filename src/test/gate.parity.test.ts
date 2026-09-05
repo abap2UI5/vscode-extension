@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "fs";
 import * as path from "path";
 import { checkAbapSource, checkXmlSource } from "@abap2ui5/linter";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
@@ -28,6 +29,14 @@ import type { CheckOptions } from "../lintconfig";
  * So the two are pinned to each other here. A fixture whose findings differ
  * fails - which is what should happen when the linter's pipeline grows a
  * sixth input and this copy does not.
+ *
+ * Three more went the same way later and are pinned below: `boolFields`
+ * (absent-boolean-overrides-default), the full `attachSourceFixes` /
+ * `attachSuggestionFixes` (the did-you-mean and json-bind FIXES existed for
+ * `--fix` and not for the lightbulb - `reduce` carries `fixes` now so that
+ * cannot regress), and an early "nothing to check" exit for a class whose
+ * view reconstructs to nothing, which skipped `view-never-displayed` and the
+ * flow rules the CLI reports for exactly such a class.
  */
 
 /** The snapshot the gate itself uses - `snapshot.ts` resolves it next to the
@@ -59,7 +68,9 @@ const linterOptions = (file: string) => ({
 });
 
 /** A finding, reduced to what both sides must agree on. Messages are the
- *  linter's to word; type, place and subject are the verdict. */
+ *  linter's to word; type, place, subject and the mechanical correction are
+ *  the verdict - a fix the CLI applies and the lightbulb does not offer is a
+ *  divergence like any other. */
 interface Reduced {
   type: string;
   offset?: number;
@@ -67,6 +78,7 @@ interface Reduced {
   member?: string;
   value?: string;
   severity?: string;
+  fixes?: Array<{ start: number; end: number; text: string }>;
 }
 
 const reduce = (findings: unknown[]): Reduced[] =>
@@ -80,6 +92,7 @@ const reduce = (findings: unknown[]): Reduced[] =>
         member: f.member,
         value: f.value,
         severity: f.severity,
+        fixes: f.fixes,
       };
     })
     .sort((a, b) =>
@@ -235,8 +248,71 @@ ABAP_FIXTURES["a class on the frozen cc builder"] = FROZEN_CLASS.replace(
   "z2ui5_cl_xml_view_cc=>factory"
 );
 
+/** The classes below carry a FIX on the linter's side - the did-you-mean
+ *  rewrite of a misspelt control and the deletion of a `json = abap_true` on
+ *  a scalar property. The gate attached only the namespace fix, so `--fix`
+ *  corrected what the lightbulb, "fix all" and the workspace fix could not. */
+const clazzWithField = (inner: string): string =>
+  clazz(inner).replace(
+    "    INTERFACES z2ui5_if_app.\n",
+    "    INTERFACES z2ui5_if_app.\n    DATA mv_text TYPE string.\n"
+  );
+ABAP_FIXTURES["a control written in the wrong case (did-you-mean fix)"] =
+  clazz(`            )->tag( \`button\`
+                )->a( n = \`text\` v = \`Go\``);
+ABAP_FIXTURES["a json bind on a scalar property (fix deletes the argument)"] =
+  clazzWithField(`            )->tag( n = \`Text\`
+                )->a( n = \`text\` v = client->_bind( val = mv_text json = abap_true )`);
+
+/** Fixtures copied verbatim from the linter's own test/fixtures, read from
+ *  disk so they stay byte-identical to upstream. `nodisplay` builds a view
+ *  it never displays and `flow` builds its views in helper methods - both
+ *  reconstruct to NO document, which is where the gate used to leave with
+ *  "nothing to check" while CI reported view-never-displayed and the flow
+ *  rules. `rowdefaults` is the boolFields case, at the floor its controls
+ *  need. */
+const LINTER_FIXTURES = path.join(__dirname, "..", "src", "test", "fixtures", "linter");
+const linterFixture = (name: string): string =>
+  fs.readFileSync(path.join(LINTER_FIXTURES, name), "utf8");
+ABAP_FIXTURES["a view that is built and never displayed (linter fixture nodisplay)"] =
+  linterFixture("nodisplay.clas.abap");
+ABAP_FIXTURES["views built in helper methods, with flow defects (linter fixture flow)"] =
+  linterFixture("flow.clas.abap");
+
+/** A bare factory that builds no element at all: the reconstruction still
+ *  yields an (empty) root, and neither side has anything to say - a gate
+ *  that finds nothing must agree about that too. */
+const EMPTY_BUILDER = `CLASS zcl_parity DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+ENDCLASS.
+
+CLASS zcl_parity IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    client->view_display( view->stringify( ) ).
+
+  ENDMETHOD.
+ENDCLASS.
+`;
+ABAP_FIXTURES["a bare factory that builds no element"] = EMPTY_BUILDER;
+
+/** Fixtures that need a floor of their own - the same comparison, with both
+ *  sides told the same `minUi5`. */
+const ABAP_FIXTURES_AT: Record<string, { source: string; minUi5: string }> = {
+  "a row that omits a default-true boolean (linter fixture rowdefaults)": {
+    source: linterFixture("rowdefaults.clas.abap"),
+    minUi5: "1.150",
+  },
+};
+
 const XML_FIXTURES: Record<string, string> = {
   clean: '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <Button text="Go"/>\n</mvc:View>',
+  // a lower-case control reads as an aggregation to UI5; the linter carries
+  // the did-you-mean fix, and the gate's XML branch attached no fixes at all
+  "a control written in the wrong case (did-you-mean fix)":
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <button text="Go"/>\n</mvc:View>',
   "unknown property":
     '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <Button text="Go" nosuchprop="x"/>\n</mvc:View>',
   "child in the wrong aggregation":
@@ -248,6 +324,23 @@ for (const [name, source] of Object.entries(ABAP_FIXTURES)) {
     const file = "src/zcl_parity.clas.abap";
     const mine = runGate(source, file, false, OPTIONS);
     const theirs = checkAbapSource(source, linterOptions(file));
+    assert.deepEqual(
+      reduce(mine.findings),
+      reduce(theirs.findings),
+      "gate.ts and checkAbapSource disagree - an input of the linter's " +
+        "pipeline is missing from the gate (see the header of this file)"
+    );
+  });
+}
+
+for (const [name, fixture] of Object.entries(ABAP_FIXTURES_AT)) {
+  test(`the gate agrees with checkAbapSource - ${name}`, () => {
+    const file = "src/zcl_parity.clas.abap";
+    const mine = runGate(fixture.source, file, false, { ...OPTIONS, minUi5: fixture.minUi5 });
+    const theirs = checkAbapSource(fixture.source, {
+      ...linterOptions(file),
+      minUi5: fixture.minUi5,
+    });
     assert.deepEqual(
       reduce(mine.findings),
       reduce(theirs.findings),
@@ -346,6 +439,87 @@ test("the rules the missing inputs used to silence are reachable through the gat
     "frozen-view-builder is missing - the gate answered 'nothing to check' " +
       "for a class on the frozen builder, which CI reports"
   );
+  assert.ok(
+    new Set(
+      runGate(
+        ABAP_FIXTURES_AT["a row that omits a default-true boolean (linter fixture rowdefaults)"].source,
+        "src/zcl_parity.clas.abap",
+        false,
+        { ...OPTIONS, minUi5: "1.150" }
+      ).findings.map((f) => f.type)
+    ).has("absent-boolean-overrides-default"),
+    "absent-boolean-overrides-default is missing - boolFields is not reaching checkAbapRules"
+  );
+  assert.ok(
+    typesOf(
+      ABAP_FIXTURES["a view that is built and never displayed (linter fixture nodisplay)"]
+    ).has("view-never-displayed"),
+    "view-never-displayed is missing - the gate left with 'nothing to check' " +
+      "for a class whose view reconstructs to nothing"
+  );
+  const flow = typesOf(
+    ABAP_FIXTURES["views built in helper methods, with flow defects (linter fixture flow)"]
+  );
+  for (const rule of ["unconditional-popup-display", "display-after-nav-app-call"]) {
+    assert.ok(
+      flow.has(rule),
+      `${rule} is missing - the ABAP-side rules did not run over a class that reconstructs no view`
+    );
+  }
+});
+
+test("the fixes the CLI applies are on the findings the lightbulb sees", () => {
+  const fixOf = (source: string, type: string, isXml = false) => {
+    const f = runGate(
+      source,
+      isXml ? "src/view.view.xml" : "src/zcl_parity.clas.abap",
+      isXml,
+      OPTIONS
+    ).findings.find((finding) => finding.type === type);
+    assert.ok(f, `${type} was not produced - the fixture measures nothing`);
+    return f.fixes;
+  };
+  const rename = fixOf(
+    ABAP_FIXTURES["a control written in the wrong case (did-you-mean fix)"],
+    "unknown-aggregation"
+  );
+  assert.equal(rename?.[0]?.text, "Button", "the did-you-mean fix is missing on the ABAP side");
+  const json = fixOf(
+    ABAP_FIXTURES["a json bind on a scalar property (fix deletes the argument)"],
+    "json-bind-on-scalar-property"
+  );
+  assert.equal(json?.[0]?.text, "", "the json = abap_true deletion is missing");
+  const xml = fixOf(
+    XML_FIXTURES["a control written in the wrong case (did-you-mean fix)"],
+    "unknown-aggregation",
+    true
+  );
+  assert.equal(xml?.[0]?.text, "Button", "the did-you-mean fix is missing on the XML side");
+});
+
+test("a class that reconstructs no view is judged by the ABAP rules, and 'nothing checked' only without a finding", () => {
+  const file = "src/zcl_parity.clas.abap";
+  const judged = runGate(
+    ABAP_FIXTURES["a view that is built and never displayed (linter fixture nodisplay)"],
+    file,
+    false,
+    OPTIONS
+  );
+  assert.equal(judged.nothingChecked, undefined, "a finding was produced, so something WAS checked");
+  assert.equal(judged.renderable, false, "nothing to hand the render gate");
+  assert.match(judged.helperNote, /no view could be reconstructed/);
+  /* The same class with the one rule it trips switched off by the repo: no
+   * view to judge, no finding left - "passed" would claim a validation that
+   * never happened, so this is the case that still says "nothing checked". */
+  const silent = runGate(
+    ABAP_FIXTURES["a view that is built and never displayed (linter fixture nodisplay)"],
+    file,
+    false,
+    { ...OPTIONS, rules: { "view-never-displayed": false } }
+  );
+  assert.deepEqual(silent.findings, []);
+  assert.match(String(silent.nothingChecked), /no view could be reconstructed/);
+  assert.equal(silent.renderable, false);
 });
 
 test("a rules exclude anchored the way CI writes it matches in the editor too", () => {

@@ -14,7 +14,8 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { findConfigFrom, loadConfig } from "@abap2ui5/linter/config";
+import { findConfigFrom, loadConfig, parseConfig } from "@abap2ui5/linter/config";
+import type { LintConfig } from "@abap2ui5/linter/config";
 import {
   applyBaseline,
   baselineBase,
@@ -26,8 +27,17 @@ import { optionsFromConfig } from "./configcore";
 /** The knobs both the config file and the VS Code settings can set. */
 export interface CheckOptions {
   minUi5: string;
-  distribution: string;
+  /** `"sapui5"`, `"openui5"` - or null: nobody decided, which is the linter's
+   *  own default and its own answer (a SAPUI5-only control is then a hint,
+   *  not silence and not an error). */
+  distribution: string | null;
   allow: string[];
+  /** The config's `render` switch. `false` means CI does not run the render
+   *  gate, so the editor must not announce a pass for it either. */
+  render?: boolean;
+  /** The config's `ignore` patterns - paths the CLI's directory walk prunes,
+   *  which the workspace sweep therefore has to skip as well. */
+  ignore?: string[];
   /** Per-rule severity overrides / switch-offs, as the linter interprets it. */
   rules?: Record<string, unknown>;
   /** The adoption baseline file (absolute) - findings it covers are dropped,
@@ -42,7 +52,8 @@ export interface CheckOptions {
 /** What the extension's own settings contribute. */
 export interface SettingsOptions {
   minUi5: string;
-  distribution: string;
+  /** null when the setting is left at its default: "not decided". */
+  distribution: string | null;
   allow: string[];
   /** Per-rule severity overrides / switch-offs from the VS Code settings,
    *  in the shape `abap2ui5lint.jsonc` uses for the same thing. */
@@ -50,8 +61,12 @@ export interface SettingsOptions {
 }
 
 interface CacheEntry {
-  mtimeMs: number;
-  loaded: Record<string, unknown>;
+  /** The mtimes of every file the entry was read from, `extends` chain
+   *  included - what decides whether it is still current. */
+  stamp: string;
+  /** Those files, so the next lookup knows which mtimes to compare. */
+  chain: string[];
+  loaded: LintConfig;
   error?: string;
 }
 
@@ -64,31 +79,82 @@ export function clearConfigCache(): void {
   discoveryCache.clear();
 }
 
+/** Bounds a runaway `extends` chain here - the linter refuses a cycle itself. */
+const MAX_EXTENDS = 32;
+
 /**
- * Reads a config file, memoised on its mtime: the check runs on every
- * keystroke once live checking is on, and re-parsing JSONC that often would
- * be the one avoidable cost in the whole path.
+ * The files a config's answer is made of: itself, then whatever its `extends`
+ * names, and so on - the same chain `loadConfig` follows. Read from the raw
+ * text through the linter's own `parseConfig`, because the merged result
+ * `loadConfig` returns has the `extends` key resolved away and says nothing
+ * about where its values came from. A link that cannot be read or parsed ends
+ * the chain there; `loadConfig` reports the same failure as the error.
+ */
+function configChain(file: string): string[] {
+  const chain: string[] = [];
+  let current: string | undefined = path.resolve(file);
+  while (current && !chain.includes(current) && chain.length < MAX_EXTENDS) {
+    chain.push(current);
+    let text: string;
+    try {
+      text = fs.readFileSync(current, "utf8");
+    } catch {
+      break;
+    }
+    let base: string | undefined;
+    try {
+      base = (parseConfig(current, text) as { extends?: string }).extends;
+    } catch {
+      break;
+    }
+    current = base ? path.resolve(path.dirname(current), base) : undefined;
+  }
+  return chain;
+}
+
+/** The mtimes of a chain, as one comparable string. A file that is gone
+ *  stamps as 0 - and differs from what it stamped as while it existed. */
+function stampOf(chain: readonly string[]): string {
+  return chain
+    .map((f) => {
+      try {
+        return `${f}@${fs.statSync(f).mtimeMs}`;
+      } catch {
+        return `${f}@0`;
+      }
+    })
+    .join("|");
+}
+
+/**
+ * Reads a config file, memoised on the mtimes of every file it is made of:
+ * the check runs on every keystroke once live checking is on, and re-parsing
+ * JSONC that often would be the one avoidable cost in the whole path.
+ *
+ * Every file, not only the discovered one: a config that `extends` a base
+ * file takes the base's values, and the memo used to be keyed on the
+ * discovered file's mtime alone - so an edit to the base (a floor raised in
+ * the shared config of a monorepo) changed nothing in the editor until the
+ * extending file was touched or the window reloaded, while CI already
+ * checked against the new value.
  */
 function readConfig(file: string): CacheEntry {
-  let mtimeMs = 0;
-  try {
-    mtimeMs = fs.statSync(file).mtimeMs;
-  } catch {
-    // gone since discovery — fall through and let loadConfig report it
-  }
   const cached = cache.get(file);
-  if (cached && cached.mtimeMs === mtimeMs) {
+  if (cached && stampOf(cached.chain) === cached.stamp) {
     return cached;
   }
+  const chain = configChain(file);
+  const stamp = stampOf(chain);
   let entry: CacheEntry;
   try {
-    entry = { mtimeMs, loaded: loadConfig(file) as Record<string, unknown> };
+    entry = { stamp, chain, loaded: loadConfig(file) };
   } catch (err) {
     // A broken config is reported, never silently ignored: the linter itself
     // refuses to run on one, and pretending it is not there would mean the
     // editor checks against something CI does not.
     entry = {
-      mtimeMs,
+      stamp,
+      chain,
       loaded: {},
       error: err instanceof Error ? err.message : String(err),
     };
@@ -245,7 +311,7 @@ export function describeOptions(options: CheckOptions): string {
       ? "OpenUI5"
       : options.distribution === "sapui5"
         ? "SAPUI5"
-        : options.distribution;
+        : options.distribution || "UI5 (distribution not set)";
   const from = options.configFile
     ? options.error
       ? `${options.configFile} (unreadable: ${options.error}) - using the VS Code settings`

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
-import { describe, RENDER_RULE, RULES, severityOf } from "@abap2ui5/linter/findings";
+import { describe, RENDER_RULE, RULES } from "@abap2ui5/linter/findings";
+import { diagnosticSeverityKey, FindingSeverity } from "./checkcore";
 import { renderErrorOffset } from "./renderloc";
 
 /*
@@ -166,17 +167,26 @@ function diagnosticCode(
   return { value: type, target: vscode.Uri.parse(`${RULES_PAGE}#${type}`) };
 }
 
+/**
+ * `renderSeverity` is what a render error counts as - Error unless the repo's
+ * `rules['render-error']` re-weighs it (`settleRenderErrors` in checkcore.ts),
+ * the same way the CLI's report does.
+ */
 export function toDiagnostics(
   doc: FindingSource,
   findings: PropertyFinding[],
-  renderErrors: string[]
+  renderErrors: string[],
+  renderSeverity: FindingSeverity = "error"
 ): vscode.Diagnostic[] {
   const diagnostics: vscode.Diagnostic[] = [];
   for (const f of findings) {
     const d = new vscode.Diagnostic(
       findingRange(doc, f),
       f.message ?? describe(f),
-      DIAGNOSTIC_SEVERITY[f.severity ?? severityOf(f)]
+      // never `DIAGNOSTIC_SEVERITY[<unknown string>]`: a severity a
+      // `viewCheck.rules` entry misspells is undefined there, and VS Code
+      // renders undefined as Error - `diagnosticSeverityKey` clamps it
+      DIAGNOSTIC_SEVERITY[diagnosticSeverityKey(f)]
     );
     d.source = DIAG_SOURCE;
     d.code = diagnosticCode(f.type);
@@ -199,7 +209,7 @@ export function toDiagnostics(
     const d = new vscode.Diagnostic(
       range,
       `render: ${e.slice(0, 300)}`,
-      vscode.DiagnosticSeverity.Error
+      DIAGNOSTIC_SEVERITY[renderSeverity]
     );
     d.source = DIAG_SOURCE;
     d.code = RENDER_RULE;

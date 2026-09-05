@@ -1,4 +1,5 @@
-import { stripJsonc } from "@abap2ui5/linter/config";
+import { parseConfig } from "@abap2ui5/linter/config";
+import type { LintConfig } from "@abap2ui5/linter/config";
 import { applyBaseline } from "@abap2ui5/linter/baseline";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import type { CheckOptions, SettingsOptions } from "./lintconfig";
@@ -71,17 +72,27 @@ export function nearestConfig(
   return best;
 }
 
-/** Parse an `abap2ui5lint.jsonc`'s TEXT. Comments are stripped by the
- *  linter's own `stripJsonc`, so a config it accepts parses identically here.
- *  Throws with the file named, the way the CLI reports it. */
-export function parseLintConfig(text: string, file: string): Record<string, unknown> {
-  try {
-    return JSON.parse(stripJsonc(text)) as Record<string, unknown>;
-  } catch (err) {
-    throw new Error(
-      `${file}: not valid JSONC - ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
+/** A validated config, plus the one key `parseConfig` keeps that `loadConfig`
+ *  resolves away: `extends`. The web host cannot follow it (no second file
+ *  is read here), so it is surfaced for the caller to say so. */
+export type ParsedLintConfig = LintConfig & { extends?: string };
+
+/**
+ * Parse an `abap2ui5lint.jsonc`'s TEXT, the way the CLI would.
+ *
+ * Through the linter's own `parseConfig`: the same JSONC stripping, the same
+ * validation (an unknown key or rule id fails loudly, by design) and the same
+ * normalisation - `ui5` folds into `minUi5` as a string, `distribution` is
+ * lower-cased, `render: { pages }` becomes a boolean. A bare `JSON.parse`
+ * skipped all of that, so the web build accepted a config the CLI refuses,
+ * and read `"distribution": "OpenUI5"` as a spelling the property gate does
+ * not recognise - which turned `sapui5-only-control` from the error CI
+ * reports into a hint. Throws with the file named, as the CLI reports it.
+ * `extends` is NOT followed - `loadConfig` does that with a filesystem; a
+ * text-only consumer gets the key back to report.
+ */
+export function parseLintConfig(text: string, file: string): ParsedLintConfig {
+  return parseConfig(file, text) as ParsedLintConfig;
 }
 
 /**
@@ -92,7 +103,7 @@ export function parseLintConfig(text: string, file: string): Record<string, unkn
  * because a repo-wide allowance and a personal one are both meant.
  */
 export function optionsFromConfig(
-  raw: Record<string, unknown>,
+  raw: LintConfig,
   configFile: string,
   settings: SettingsOptions
 ): CheckOptions {
@@ -101,9 +112,12 @@ export function optionsFromConfig(
   const baseline =
     typeof raw.baseline === "string" && raw.baseline ? raw.baseline : undefined;
   return {
-    minUi5: (raw.minUi5 as string) ?? (raw.ui5 as string) ?? settings.minUi5,
-    distribution: (raw.distribution as string) ?? settings.distribution,
-    allow: [...new Set([...((raw.allow as string[] | undefined) ?? []), ...settings.allow])],
+    // `ui5` has already been folded into `minUi5` by the linter's validation
+    minUi5: raw.minUi5 ?? settings.minUi5,
+    // the config's own word, or the settings' - and `null` when neither
+    // decided, which the linter treats as its own answer (see gate.ts)
+    distribution: raw.distribution ?? settings.distribution,
+    allow: [...new Set([...(raw.allow ?? []), ...settings.allow])],
     /*
      * Per RULE, not per block: the repo decides about the rules it names and
      * the settings fill in the rest. A personal opinion about a rule the
@@ -112,9 +126,15 @@ export function optionsFromConfig(
      * exists to prevent - while a rule the repository says nothing about is
      * nobody else's business.
      */
-    rules: mergeRules(settings.rules, raw.rules as Record<string, unknown>),
+    rules: mergeRules(settings.rules, raw.rules),
     baseline: baseline ? joinPath(dirOf(configFile), baseline) : undefined,
     configFile,
+    // `render: false` switches CI's render gate off - the editor's must not
+    // announce a pass for a gate the repository does not run
+    render: raw.render,
+    // the repo-level path patterns the CLI's walk prunes - what the workspace
+    // sweep has to prune too, or a rebuilt baseline names files CI never sees
+    ignore: raw.ignore,
   };
 }
 

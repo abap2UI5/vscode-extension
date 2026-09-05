@@ -727,15 +727,17 @@
         "abap2ui5.viewCheck.distribution": {
           "type": "string",
           "enum": [
+            "",
             "sapui5",
             "openui5"
           ],
           "enumDescriptions": [
-            "SAPUI5 - the distribution served by an ABAP system. Includes sap.ui.comp (Smart controls), sap.suite.*, sap.ushell, sap.fe and more.",
-            "OpenUI5 - the open-source distribution. Controls from SAPUI5-only libraries are reported: they do not exist there."
+            "Not decided - the linter's own default. A control from a SAPUI5-only library is then reported as a hint: worth knowing, and the cue to write the distribution into the repository's abap2ui5lint.jsonc.",
+            "SAPUI5 - the distribution served by an ABAP system. Includes sap.ui.comp (Smart controls), sap.suite.*, sap.ushell, sap.fe and more; such controls are not reported.",
+            "OpenUI5 - the open-source distribution. Controls from SAPUI5-only libraries are reported as errors: they do not exist there."
           ],
-          "default": "sapui5",
-          "markdownDescription": "Which UI5 distribution the target system serves. SAPUI5 ships libraries OpenUI5 does not (`sap.ui.comp`, `sap.suite.*`, `sap.ushell`, `sap.fe`, `sap.viz`, ...), so a SmartTable is fine on SAPUI5 and a guaranteed runtime error on OpenUI5. With `openui5` such controls are reported as errors.\n\nA workspace's `abap2ui5lint.jsonc` wins over this setting - that is the file CI checks against."
+          "default": "",
+          "markdownDescription": "Which UI5 distribution the target system serves. SAPUI5 ships libraries OpenUI5 does not (`sap.ui.comp`, `sap.suite.*`, `sap.ushell`, `sap.fe`, `sap.viz`, ...), so a SmartTable is fine on SAPUI5 and a guaranteed runtime error on OpenUI5. With `openui5` such controls are reported as errors, with `sapui5` not at all; left unset, they are hints - the same answer a configless `abap2ui5lint` run gives.\n\nA workspace's `abap2ui5lint.jsonc` wins over this setting - that is the file CI checks against."
         },
         "abap2ui5.viewCheck.minUi5": {
           "type": "string",

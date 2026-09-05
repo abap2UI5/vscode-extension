@@ -16,6 +16,7 @@ import {
   optionsFromConfig,
   parseBaseline,
   parseLintConfig,
+  ParsedLintConfig,
 } from "./configcore";
 
 /*
@@ -59,7 +60,9 @@ function settings(): SettingsOptions {
   const cfg = config();
   return {
     minUi5: cfg.get<string>("viewCheck.minUi5", "1.71"),
-    distribution: cfg.get<string>("viewCheck.distribution", "sapui5"),
+    // "" is the default and means "not decided" - handed on as null, which
+    // the linter treats as its own answer (a SAPUI5-only control is a hint)
+    distribution: cfg.get<string>("viewCheck.distribution", "") || null,
     allow: cfg.get<string[]>("viewCheck.allow", []),
     rules: ruleSettings(),
   };
@@ -75,7 +78,7 @@ function settings(): SettingsOptions {
  * ------------------------------------------------------------------------ */
 
 /** path -> parsed config, or the error that says why it is not applied. */
-const configs = new Map<string, { raw?: Record<string, unknown>; error?: string }>();
+const configs = new Map<string, { raw?: ParsedLintConfig; error?: string }>();
 /** Baseline file path -> key/count map, loaded with the config that names it. */
 const baselines = new Map<string, Map<string, number> | null>();
 
@@ -95,9 +98,21 @@ async function readWorkspaceConfigs(log: (m: string) => void): Promise<void> {
       continue;
     }
     try {
+      // validated and normalised by the linter's own parseConfig - a config
+      // the CLI refuses is refused here too, and read the same way
       const raw = parseLintConfig(text, uri.path);
       configs.set(uri.path, { raw });
-      const baseline = raw.baseline as string | undefined;
+      if (raw.extends) {
+        /* `loadConfig` follows the chain with a filesystem; this host reads
+         * one text through workspace.fs and has no second file to merge. The
+         * values written in THIS file still apply - the base's do not, and
+         * saying so is the difference between a known gap and a silent one. */
+        log(
+          `web: ${uri.path} extends ${raw.extends} - not followed in the web host, ` +
+            "only the values written in the file itself are applied"
+        );
+      }
+      const baseline = raw.baseline;
       if (baseline) {
         const file = joinPath(dirOf(uri.path), baseline);
         try {

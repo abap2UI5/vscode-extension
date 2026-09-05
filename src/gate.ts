@@ -18,6 +18,7 @@ import {
   checkNodes,
   collectControlIds,
   collectEnumBoundFields,
+  DEFAULT_TRUE_BOOLEAN,
   parseXml,
   PropertyFinding,
 } from "@abap2ui5/linter/properties";
@@ -26,7 +27,8 @@ import {
   annotate,
   applyDirectives,
   applyRules,
-  attachNamespaceFixes,
+  attachSourceFixes,
+  attachSuggestionFixes,
 } from "@abap2ui5/linter/findings";
 import { snapshot } from "./snapshot";
 import type { CheckOptions } from "./lintconfig";
@@ -59,8 +61,12 @@ export function frozenBuilderOf(text: string): string | undefined {
  * - the repo root for a CLI run, the extension host's arbitrary directory
  * here. So the config-relative spelling is derived too and `applyRules` runs
  * over both, or an exclude CI honours kept squiggling in the editor.
+ *
+ * Exported for the render gate's `rules['render-error'].exclude`, which the
+ * desktop check matches against the same two spellings (`checkcore.ts`,
+ * `settleRenderErrors`).
  */
-function configRelative(
+export function configRelative(
   file: string,
   configFile: string | undefined
 ): string | undefined {
@@ -107,6 +113,23 @@ export interface GateResult {
   helperNote: string;
 }
 
+/** What the callers say about a builder class that reconstructs no view. */
+const NO_VIEW = "builder call found but no view could be reconstructed";
+
+/** Merge one `collectEnumBoundFields` answer into the per-table map. */
+function mergeFields(
+  into: Map<string, Set<string>>,
+  from: Map<string, Set<string>>
+): void {
+  for (const [table, fields] of from) {
+    const known = into.get(table) ?? new Set<string>();
+    for (const field of fields) {
+      known.add(field);
+    }
+    into.set(table, known);
+  }
+}
+
 /**
  * Runs every in-process rule over one source and returns the surviving
  * findings: after the repo config's `rules` block (severity overrides and
@@ -121,11 +144,18 @@ export function runGate(
   isXml: boolean,
   options: GateOptions
 ): GateResult {
-  const { minUi5, distribution, allow } = options;
+  const { minUi5, allow } = options;
+  /* `""`/null is "nobody said which distribution" - the linter's own default,
+   * and its own answer (a SAPUI5-only control is then a HINT). It is handed
+   * on as the absence it is, never turned into "sapui5" on the way: that
+   * would silence the one finding an undecided repository should see. */
+  const distribution = options.distribution || undefined;
   const data = snapshot();
   const findings: PropertyFinding[] = [];
   let renderable = true;
   let helperNote = "";
+  /** ABAP only: the builder is called but nothing was reconstructable. */
+  let noView = false;
 
   // the linter's `settle`, plus the config-relative spelling of the file for
   // `rules.*.exclude` - see `configRelative`
@@ -149,6 +179,11 @@ export function runGate(
      * `checkIcons` had no subpath export, so the editor judged a `.view.xml`
      * without the icon rules while CI judged it with them. */
     findings.push(...checkIcons(text, { minUi5 }));
+    // the did-you-mean fixes (unknown-control, unknown-property, …): the
+    // rule records `written`/`suggestion`, this turns them into a span -
+    // exactly what `checkXmlSource` does, so the lightbulb offers what
+    // `--fix` applies
+    attachSuggestionFixes(findings, text, { xml: true });
   } else {
     const prep = options.prep ?? prepareAbap(text);
     if (!prep.usesBuilder) {
@@ -174,18 +209,23 @@ export function runGate(
         nothingChecked: "no z2ui5_cl_ui5_view_builder=>factory call found",
       };
     }
-    if (prep.nodes.length === 0) {
-      // usesBuilder matched, but nothing was reconstructable - saying
-      // "passed" here would claim a validation that never happened
-      return {
-        findings: [],
-        renderable: false,
-        helperNote: "",
-        nothingChecked: "builder call found but no view could be reconstructed",
-      };
-    }
+    /* No early exit for a class that reconstructs no view. `checkAbapSource`
+     * has none either: the ABAP-side rules run over the class regardless -
+     * and a class that builds a view it never displays is exactly what
+     * `view-never-displayed` and the flow rules are for. Leaving here with
+     * "nothing to check" kept such a class clean in the editor and red in
+     * CI; whether the answer is "nothing checked" is decided at the end,
+     * from the findings. */
+    noView = prep.nodes.length === 0;
     const controlIds: Record<string, string> = {};
     const enumFields = new Map<string, Set<string>>();
+    /* The same collection, one predicate over: fields bound to a boolean
+     * property whose own default is `true`. Two maps rather than one, because
+     * the two defects are judged differently - an unseeded ENUM field is
+     * wrong on its own, an unseeded BOOLEAN one only where the seed is
+     * inconsistent (absent-boolean-overrides-default, which never fired in
+     * the editor while this map was not passed). */
+    const boolFields = new Map<string, Set<string>>();
     // Which `name>` prefixes a binding may use: the class itself is the only
     // place that can widen the framework's three (SET_ODATA_MODEL). `null`
     // means "widened non-literally", which silences unknown-model rather than
@@ -241,13 +281,8 @@ export function runGate(
       // the enum-typed fields a bound aggregation exposes, by table: a row
       // appended without setting one reaches UI5 as '' and fails its strict
       // validation, which takes the binding update - and the view - down
-      for (const [table, fields] of collectEnumBoundFields(node, data)) {
-        const known = enumFields.get(table) ?? new Set<string>();
-        for (const field of fields) {
-          known.add(field);
-        }
-        enumFields.set(table, known);
-      }
+      mergeFields(enumFields, collectEnumBoundFields(node, data));
+      mergeFields(boolFields, collectEnumBoundFields(node, data, DEFAULT_TRUE_BOOLEAN));
     }
     // Structural defects of the builder chain itself - an excess shut( )
     // asserts at RUNTIME, so this is the loudest thing the gate can find and
@@ -265,6 +300,7 @@ export function runGate(
         data,
         controlIds,
         enumFields,
+        boolFields,
         rules: options.rules,
         // the ABAP-side icon check judges against the target release; without
         // it every repo was judged against the 1.71 default, so a higher floor
@@ -272,7 +308,12 @@ export function runGate(
         minUi5,
       })
     );
-    attachNamespaceFixes(findings, text);
+    /* Every fix the pipeline attaches, in the linter's one call: the
+     * undeclared-namespace declaration, the `json = abap_true` deletion and
+     * the did-you-mean rewrites. Calling only the first of the three meant
+     * `--fix` corrected what the lightbulb, "fix all", the Autofix lens and
+     * the workspace fix could not. */
+    attachSourceFixes(findings, text);
     renderable = prep.docs.length > 0 && prep.helperTokens === 0;
     if (prep.helperTokens > 0) {
       helperNote = " (render gate skipped - view built in helper methods)";
@@ -282,5 +323,16 @@ export function runGate(
   // severity, wording and the line/column behind each recorded offset - the
   // directives are keyed by line, so annotation has to happen before they
   // are applied; both live in `settled`
-  return { findings: settled(findings), renderable, helperNote };
+  const out = settled(findings);
+  if (noView) {
+    // usesBuilder matched, but nothing was reconstructable: the ABAP-side
+    // rules had their say above, the view rules had nothing to look at. With
+    // no finding either, saying "passed" would claim a validation that never
+    // happened - so it is "nothing checked", exactly as before.
+    if (out.length === 0) {
+      return { findings: out, renderable: false, helperNote: "", nothingChecked: NO_VIEW };
+    }
+    return { findings: out, renderable: false, helperNote: ` (${NO_VIEW})` };
+  }
+  return { findings: out, renderable, helperNote };
 }
