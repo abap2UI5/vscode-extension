@@ -167,13 +167,14 @@ export async function suggestSystemUi5(
 
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const setMin = cfg.get<string>("viewCheck.minUi5", "1.71");
-  const setDist = cfg.get<string>("viewCheck.distribution", "sapui5");
+  // "" is the default now - "not decided", handed to the linter as null
+  const setDist = cfg.get<string>("viewCheck.distribution", "");
   const mismatches: string[] = [];
   if (info.minor !== setMin) {
     mismatches.push(`minUi5 ${setMin} → ${info.minor}`);
   }
   if (info.distribution && info.distribution !== setDist) {
-    mismatches.push(`distribution ${setDist} → ${info.distribution}`);
+    mismatches.push(`distribution ${setDist || "not set"} → ${info.distribution}`);
   }
   if (!mismatches.length) {
     return;

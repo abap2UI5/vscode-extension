@@ -5,8 +5,238 @@
 A review round: every module read against the linter it ships and against
 the API contracts it relies on. Bug fixes throughout, no new commands.
 
-<!-- entries:start -->
-<!-- entries:end -->
+- **The bundled property gate reports what the CLI reports, for three more
+  rules.** `absent-boolean-overrides-default` never fired in the editor: the
+  gate handed the linter's ABAP rules the enum-typed fields of a bound table
+  but not the boolean ones whose default is `true`, so a row that omits
+  `iconInset` was red in CI and clean here. A class that builds a view and
+  never displays it - or builds its views in helper methods the reconstruction
+  cannot follow - answered "nothing to check" in the editor while CI reported
+  `view-never-displayed`, the flow rules and the ABAP hygiene rules for it;
+  the ABAP-side rules now run over such a class too, and "nothing to check"
+  is only said when there is indeed no finding. The parity test that holds
+  the gate to the linter's own pipeline covers all three with the linter's
+  own fixtures.
+- **The lightbulb offers every fix `abap2ui5lint --fix` applies.** The
+  did-you-mean corrections (a misspelt control, property, aggregation, enum
+  value or event parameter) and the deletion of a `json = abap_true` on a
+  scalar property were attached by the CLI only - the quick fix, "fix all",
+  the Autofix code lens and "Fix Workspace" saw the finding but no fix, in
+  ABAP and in XML views alike. The parity test now compares the fixes as
+  well, so a fix cannot go missing on one side again.
+- **"Suppress on this line" in an XML view now works for an attribute inside a
+  multi-line start tag.** The directive was written above the tag's `<`
+  line, but the linter records the finding on the attribute's own line and
+  reads directives per line - so the comment was placed correctly and
+  suppressed nothing. Such a finding now gets an `abap2ui5lint-disable
+  <rule>` / `abap2ui5lint-enable` pair around the whole tag, which the linter
+  honours; a tag on one line keeps `disable-next-line`. Both are proven
+  against the bundled linter.
+- **"Check Workspace", "Fix Workspace" and "Update Baseline" look at exactly
+  the files the CLI collects.** The sweep used to take every `*.abap` that
+  calls the builder - including `*.clas.testclasses.abap`,
+  `*.clas.locals_imp.abap` and reports the CLI never looks at - and ignored
+  the config's `ignore` patterns and dot-directories. A baseline rebuilt from
+  the editor could therefore carry entries CI fails as stale. The sweep now
+  follows the CLI's collection rule (`*.clas.abap` and view/fragment XML, no
+  `node_modules`, no dot-entries, the config's `ignore` honoured, directories
+  included), and the baseline rebuild applies the same rule once more.
+- **On vscode.dev, `enum-value-too-new` fires.** The web build's snapshot
+  loader attached the enum table and the UI5 version the way the linter does,
+  but not the per-value `@since` table the rule reads; the hidden tables are
+  now held to the linter's own loader by a test.
+- **On vscode.dev, `abap2ui5lint.jsonc` is read the way the CLI reads it.**
+  The web build parsed the file as plain JSONC: an unknown key or rule id the
+  CLI refuses was accepted, `"distribution": "OpenUI5"` was not recognised
+  (which turned `sapui5-only-control` from an error into a hint) and a numeric
+  `ui5` stayed a number. The linter's own `parseConfig` validates and
+  normalises it now. An `extends` cannot be followed in the browser host and
+  is said so in the output channel instead of being dropped silently.
+- **Workspace fixes land on the right character in files with a byte-order
+  mark.** The sweep read files from disk with the mark kept, the editor's
+  document has none, so every fix in such a file was one character off. The
+  sweep decodes like the live check does; as a consequence the sweep no
+  longer reports `byte-order-mark` for a file on disk - the live check never
+  did.
+- **`abap2ui5.viewCheck.distribution` can be left undecided.** The setting
+  used to default to `sapui5`, which silenced `sapui5-only-control` in every
+  workspace that never thought about the distribution - while a configless
+  `abap2ui5lint` run reports the control as a hint. The default is now empty,
+  meaning "not decided", and the gate answers as the linter does: a hint, and
+  the cue to write the distribution into `abap2ui5lint.jsonc`. `sapui5` and
+  `openui5` behave as before.
+- **A repository with `render: false` no longer hears "view check passed" for
+  a render gate that did not run.** The render gate was started regardless of
+  the config, came back with an empty report and read as a pass; it is now
+  not started, and the message says "render gate off by config". A
+  `rules['render-error']` entry with `exclude` patterns is applied against
+  the real file's path (the CLI had matched it against the scratch copy in
+  the temp directory, where it matched nothing), and its severity reaches the
+  Problems panel.
+- **A misspelt severity in `abap2ui5.viewCheck.rules` no longer shows as an
+  error.** `"some-rule": "critical"` is not a severity the linter knows; it
+  used to render every such finding as Error and is shown as Information now.
+- **A change to a config named in an `extends` chain is picked up at once.**
+  The repo config's cache watched the mtime of the discovered file only, so
+  an edit to the base config it extends changed nothing in the editor until
+  the extending file was touched; every file in the chain is watched now.
+- Changing a setting or a config file re-checked every open document twice;
+  once is enough.
+
+- **The `{ }` model button works for a namespace class.** `/UI2/CL_APP` starts
+  with a slash, the virtual document's path therefore started with two, and
+  the URI validator refused it - the button threw into the host log and did
+  visibly nothing. The path uses the file-safe stem now; the raw name stays
+  in the header comment.
+
+- **Reloading and revealing an app tab no longer moves it.** `reveal( )`
+  MOVES a shown panel to the column it is given, and "Beside" is relative to
+  the active group - with three groups every F9 dragged the app tab from
+  group 3 to group 2, and with the tab itself active it opened a fourth. An
+  existing tab is revealed where it is; "Beside" is where a NEW tab opens.
+
+- **Focus returns to the source only when there is one.** A start from Recent,
+  the welcome view, the system search or MCP has no editor, and the previous
+  F9's document came back into focus - reopened, even when it had been closed
+  since. Such a start forgets the remembered source, and a closed document is
+  never reopened.
+
+- **The XML preview no longer freezes after a while.** VS Code drops a hidden
+  virtual document after some minutes and asks for it again when the tab
+  comes back; the preview read that drop as "tab closed" and stopped
+  following the class for good. The open tabs decide now, and being asked
+  for the content means the preview is open.
+
+- **A theme or language switch keeps the activation watch running.** The
+  preview reloads the version the server already has; nothing about the
+  server changed, so a watch waiting behind the "not activated" badge keeps
+  waiting instead of being cancelled.
+
+- **No live token in the output channel, no logon parameters in tooltips.**
+  A runtime error UI5 reports quotes the page URL - proxy origin and
+  capability token included - and it went into the channel users paste into
+  issues verbatim; it is redacted like the generated report. The full launch
+  URL in the status-bar tooltip and the toolbar tooltip is shown without
+  `sap-user`/`sap-password`.
+
+- **`release.yml` accepts an annotated tag.** The retry check compared the
+  tag OBJECT's hash with the commit and refused a `workflow_dispatch` retry
+  with "already released from commit"; it reads the peeled ref first.
+
+- **`manifest.test.ts` checks two more promises**: every `viewItem == …`
+  clause names a contextValue the code sets, and every file the manifest
+  points at - the icons, the walkthrough pages - exists.
+
+- **Removing an attribute in the Control Properties view no longer takes its
+  neighbour with it.** When two `a( )` calls shared a line, removing the
+  second one cut the whole line - the first attribute included, and in the
+  last line of a chain everything but the closing `).`. The edit now cuts
+  exactly the call it was asked to remove, and keeps the chain balanced.
+- **"Add attribute" works on the last control of a chain.** Its block ends
+  with `… ).` on the attribute's own line, which the property editor read as
+  "not chain style" and refused - on the final control of every chain, in
+  all five templates. The new line now goes in front of that `).`, in the
+  chain's own layout. A value continued over `&&` lines keeps its
+  continuation lines together.
+- **Renaming a bound attribute writes the binding path the framework
+  derives.** abap2UI5 addresses `DATA mv_title` as `{/MV_TITLE}` - the name
+  upper-cased - and F2 wrote the new name into the path as typed:
+  `{/mv_header}`, a path that binds to nothing, which is the silently empty
+  wire the rename exists to prevent. The identifier is written as typed, the
+  path segment upper-cased.
+- **F2 refuses a field of a `DATA: BEGIN OF … END OF` structure.** Its
+  binding path is nested (`{/MS_DATA/TITLE}`), which the rename deliberately
+  leaves alone - so accepting the field renamed its declaration, every
+  same-named `TYPES` field and `ls_other-title`, and left the wire behind.
+  The structure itself stays renameable, path included.
+- **An abbreviation expanded inside a chain closes the containers it opens.**
+  `Panel>content>Button` expanded mid-chain used to leave `Panel` and
+  `content` open, so the line below the cursor - written for the Page -
+  became a child of `content`. The expansion now ends with the `end( )`
+  calls the next line's leading `)` completes.
+- **F12 on `client->view_display( )` no longer jumps to the class's own
+  `view_display`.** Go to Definition looked at the method name alone, and
+  every template declares a method of that name. A call on any receiver
+  other than `me->` is left to the ABAP extension.
+- **The navigation map follows `CAST z2ui5_if_app( NEW zcl_x( ) )` to
+  `zcl_x`.** The first Z-name in the call - the interface the result is cast
+  to - used to be drawn as the target.
+- **`BEGIN OF ENUM` and `BEGIN OF MESH` declare their type,** not a type
+  called `ENUM` - which is what the roundtrip-cost annotation and F2 read.
+- **A class shown in a diff is not a second class.** The revision side of a
+  `git:` diff (and GitLens', the pull-request extensions' and output
+  channels' read-only views) has the ABAP language id too, and entered the
+  source scan as a duplicate: a second row in the apps tree, and an old
+  revision that could shadow the class's inheritance entry. Those schemes
+  are excluded; ADT's and every other virtual scheme keep working.
+- **Converting XML reports an unquoted attribute.** `enabled=true` is not
+  XML and was dropped without a word; the conversion now says so, like it
+  does for text content and mismatched tags.
+- **Colour swatches follow the builder's ownership rule.** An attribute
+  written after `end( )` belongs to the container just closed - the rule
+  completion and the view check already applied - not to the last control
+  written above it, so a container's colour property gets its swatch even
+  when the container has children.
+- **Extract to View Method accepts a name starting with `_`,** as ABAP does
+  (the framework's own `_bind` and `_event` start that way); the input box
+  and the refusal share one rule instead of two copies.
+- The property editor never reads a value across a line break (an ABAP
+  literal ends at the end of its line), and a `CLASS … DEFINITION` written
+  inside a multi-line string template no longer names the class for the
+  CodeLens, F9 and the inheritance lookup.
+
+- **A system with an IPv6 address works.** A launch URL such as
+  `https://[fd00::10]:44300/...` failed every request with "the hostname does
+  not resolve (DNS)": the brackets of the address travelled into the name
+  lookup. The preview, the ADT lookups and WebSocket upgrades now connect to
+  the address itself.
+- **A launch URL typed without its scheme is refused where it is typed.**
+  `host:44300/sap/bc/z2ui5?app_start={class}` parses as a URL - with the
+  scheme `host:` - so it was accepted, the credentials were stored under the
+  origin "null" ("SAP User for null"), and the launch then failed with
+  "Invalid URL". A template has to be http or https now.
+- **A wrong password no longer lets a WebSocket-using app hammer the system.**
+  An app that reopens its WebSocket after the system refused the logon sent
+  one failed logon per attempt - the burst that locks an account - and the
+  offer to re-enter the credentials never came, because the refusal was not
+  reported. The upgrade path now trips the same breaker as every other
+  request and reports the 401.
+- **WebSocket tunnels are cleaned up when the app gives up first.** A client
+  that hung up before the system answered left both ends of the pending
+  upgrade open until the proxy stopped.
+- **The proxy is stricter about what it forwards and who may ask.** An
+  absolute-form request (`GET http://127.0.0.1:<port>/...`) used to be
+  forwarded to the system verbatim, token segment included; it is refused. A
+  request authorized only by the proxy's cookie is accepted only from the page
+  the cookie was planted for - a cross-site `<img>`, iframe or form on another
+  local port is refused, told apart by the browser's own `Sec-Fetch-Site`. And
+  the `Referer` of a page loaded through a one-shot screenshot URL is
+  rewritten to the system's origin like every other, instead of carrying the
+  one-shot token on to the system.
+- **System cookies scoped to a path work through the proxy.** A cookie the
+  system set with `Path=/sap/bc/z2ui5` was never sent back, because the
+  proxied requests live under `/__abap2ui5/<token>/...`; the path is rewritten
+  to `/`, on pages and on WebSocket handshakes alike. A root-relative redirect
+  (`Location: /sap/bc/...`) now lands behind the token too, rather than on the
+  cookie alone.
+- **The system MCP server ignores browsers.** A request carrying an `Origin`
+  header - a page made it, not an MCP client - is answered 404, and a POST
+  whose body is not declared `application/json` gets 415, so a cross-site
+  "simple" POST can no longer reach a tool.
+- **Screenshots: unique file names, no credentials on the command line.** Two
+  shots within one second no longer overwrite each other (the name carries
+  milliseconds and a counter), and a launch URL carrying `sap-user` or
+  `sap-password` has them stripped before the page URL is handed to Chromium
+  - the proxy injects the credentials anyway.
+- **Class descriptions from the system show `&`, `<` and quotes correctly** in
+  "Run an App from the System"; they arrived entity-escaped (`&amp;`) and were
+  shown that way.
+- **A pasted SAP user is trimmed** before it is stored, so a trailing space
+  cannot turn every logon into a failure until the credentials are reset.
+- **"Preview View (No System)" survives an empty `viewCheck.command`.** Set
+  to `""`, the checker start threw instead of reporting that nothing could be
+  started; it is reported like any other failed start now, and a `taskkill`
+  that cannot start on Windows no longer surfaces as an uncaught error.
 
 ## 0.27.1
 
