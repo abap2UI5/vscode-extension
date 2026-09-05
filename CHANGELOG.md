@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.28.0
+
+A review round: every module read against the linter it ships and against
+the API contracts it relies on. Bug fixes throughout, no new commands.
+
+<!-- entries:start -->
+<!-- entries:end -->
+
 ## 0.27.1
 
 Small fixes, and the linter's newest rules.
