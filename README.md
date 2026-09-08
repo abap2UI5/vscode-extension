@@ -85,8 +85,60 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
 - **Works in the browser** — vscode.dev, github.dev and browser-based SAP
   Business Application Studio get the language half.
 
-All commands are in the Command Palette (`Ctrl/Cmd + Shift + P`) under
-*abap2UI5*.
+## Commands
+
+All of them are in the Command Palette (`Ctrl/Cmd + Shift + P`) under
+*abap2UI5*; the few with a key are the ones you reach for while typing. This
+reference is generated from `package.json` with `npm run commands`, and
+`npm run commands:check` fails when the two drift apart.
+
+<!-- BEGIN GENERATED COMMANDS (npm run commands) -->
+| Command | Id | Key |
+| --- | --- | --- |
+| Run App | `abap2ui5.run` | `f9` |
+| Reload Preview | `abap2ui5.reload` |  |
+| Activate and Reload Preview | `abap2ui5.activate` | `ctrl+f3` / `cmd+f3` |
+| Run a Recently Launched App | `abap2ui5.runRecent` |  |
+| Run an App from the System | `abap2ui5.runFromSystem` |  |
+| Show the Preview in the Panel | `abap2ui5.previewInPanel` |  |
+| Show the Preview in an Editor Tab | `abap2ui5.previewInTab` |  |
+| Go to the Running App | `abap2ui5.revealApp` |  |
+| Set Launch URL | `abap2ui5.setLaunchUrl` |  |
+| Select System | `abap2ui5.selectSystem` |  |
+| Check System Connection | `abap2ui5.checkConnection` |  |
+| Clear Stored SAP Credentials | `abap2ui5.resetCredentials` |  |
+| New App from Template | `abap2ui5.newApp` |  |
+| New Project from Template | `abap2ui5.newProject` |  |
+| Take App Screenshot | `abap2ui5.screenshot` |  |
+| Show Traffic Log | `abap2ui5.showTraffic` |  |
+| Convert XML View to Builder Chain | `abap2ui5.convertXml` |  |
+| Show App Navigation Map | `abap2ui5.showNavMap` |  |
+| Open Project on GitHub | `abap2ui5.openHomepage` |  |
+| Check Views (Static) | `abap2ui5.checkViews` |  |
+| Check All Views in the Workspace | `abap2ui5.checkWorkspace` |  |
+| Open the Rule Documentation | `abap2ui5.openRuleDocs` |  |
+| Expand Abbreviation to a Chain | `abap2ui5.expandAbbreviation` |  |
+| Extract to View Method | `abap2ui5.extractViewMethod` |  |
+| Show Examples for This Control | `abap2ui5.showExamples` |  |
+| Fix All View Findings in the Workspace | `abap2ui5.fixWorkspace` |  |
+| Rebuild the View-Check Baseline | `abap2ui5.updateBaseline` |  |
+| Preview View (No System) | `abap2ui5.previewView` |  |
+| Compare View Preview with HEAD | `abap2ui5.previewDiff` |  |
+| Show Reconstructed XML View | `abap2ui5.showReconstructedXml` |  |
+| Fix All View Findings in This File | `abap2ui5.fixAll` |  |
+| Install Render Gate | `abap2ui5.installRenderGate` |  |
+| Refresh the App List | `abap2ui5.refreshApps` |  |
+| Run This App | `abap2ui5.runApp` |  |
+| Preview This App's View | `abap2ui5.previewApp` |  |
+| Check This App's Views | `abap2ui5.checkApp` |  |
+| Copy the App's Class Name | `abap2ui5.copyAppName` |  |
+| Turn a View-Check Rule Off | `abap2ui5.disableRule` |  |
+| Copy Diagnostics for a Bug Report | `abap2ui5.copyDiagnostics` |  |
+| Preview Actions | `abap2ui5.previewMenu` |  |
+| Update Render Gate | `abap2ui5.updateRenderGate` |  |
+| Show MCP Status | `abap2ui5.showMcpStatus` |  |
+| Add All Findings of This Rule to the Baseline | `abap2ui5.baselineRule` |  |
+<!-- END GENERATED COMMANDS -->
 
 ## Settings
 

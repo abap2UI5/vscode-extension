@@ -88,6 +88,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
 | `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot |
 | `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/mcp-server's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
+| `scripts/generate-settings.mjs` | Regenerates the settings table in `README.md` from `contributes.configuration`; `--check` fails when it is stale (`src/test/settings.test.ts`) |
+| `scripts/generate-commands.mjs` | Regenerates the command table in `README.md` from `contributes.commands`, with the keys off `contributes.keybindings`; `--check` fails when it is stale (`src/test/commands.test.ts`). abap2UI5/docs sends the reader here for it — *"the full settings and command tables are in the repository README"* — and before it there was no command table: 43 commands, one of them named in the file |
 | `src/propedit.ts` | Property-editor edits: set/add/remove one `a( )` attribute as a span edit |
 | `src/propview.ts` | The "Control Properties" webview view: cursor -> `controlCallAt` -> form -> WorkspaceEdit |
 | `src/navmap.ts` | App navigation graph: nav_app_call extraction, column layout, SVG rendering |
