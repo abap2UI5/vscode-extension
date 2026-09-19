@@ -401,9 +401,12 @@ Facts an agent cannot see from the code but will trip over:
   from a snapshot.** `src/data/app-template.json` carries that repository's
   `abaplint.jsonc`, `abap2ui5lint.jsonc`, `.claude/settings.json`,
   `.gitattributes`, `.gitignore`, `dependabot.yml`, `AGENTS.md`, its
-  `package.json` and its `check.yml`; `scaffold.ts` writes the first six
-  verbatim and reads the dependency versions, the framework pin, the linter
-  action's pin and the app-building guide out of the rest. A snapshot rather
+  `package.json` and its `check.yml` - and, since 0.29.0, its named files
+  (the starter class, its sidecar, its test include, `.abapgit.xml`,
+  `package.devc.xml`) with the placeholder class as the template has it;
+  `scaffold.ts` writes the shared files verbatim, the named ones substituted
+  (next bullet), and reads the dependency versions, the framework pin, the
+  linter action's pin and the app-building guide out of the rest. A snapshot rather
   than a clone because `abap2ui5.newProject` is registered in the WEB entry
   too and vscode.dev has neither git nor a child process — and because the
   content is then data the test suite can run through the bundled linter.
