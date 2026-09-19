@@ -2,7 +2,7 @@
   "name": "abap2ui5",
   "displayName": "abap2UI5",
   "description": "Develop abap2UI5 apps in VS Code: F9 launches a z2ui5_if_app class in an embedded preview, reload on activation, static view checks, the abap2UI5 MCP server for AI agents, snippets.",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "publisher": "abap2ui5",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -233,6 +233,12 @@
         "icon": "$(file-code)"
       },
       {
+        "command": "abap2ui5.generateMock",
+        "category": "abap2UI5",
+        "title": "Generate Mock Data for This App",
+        "icon": "$(json)"
+      },
+      {
         "command": "abap2ui5.fixAll",
         "category": "abap2UI5",
         "title": "Fix All View Findings in This File"
@@ -288,6 +294,12 @@
         "category": "abap2UI5",
         "title": "Preview Actions",
         "icon": "$(play-circle)"
+      },
+      {
+        "command": "abap2ui5.applyModel",
+        "category": "abap2UI5",
+        "title": "Apply the Model Document to the Running App",
+        "icon": "$(json)"
       },
       {
         "command": "abap2ui5.updateRenderGate",
@@ -371,6 +383,14 @@
         },
         {
           "command": "abap2ui5.previewMenu",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.applyModel",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.generateMock",
           "when": "!isWeb"
         },
         {
@@ -517,6 +537,11 @@
           "group": "inline@3"
         },
         {
+          "command": "abap2ui5.generateMock",
+          "when": "view == abap2ui5.apps && viewItem == abap2ui5.app.view && !isWeb",
+          "group": "1_data"
+        },
+        {
           "command": "abap2ui5.copyAppName",
           "when": "view == abap2ui5.apps",
           "group": "9_copy"
@@ -553,6 +578,11 @@
           "command": "abap2ui5.showExamples",
           "group": "2_look@3",
           "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.generateMock",
+          "group": "2_look@4",
+          "when": "!isWeb && resourceLangId == abap"
         },
         {
           "command": "abap2ui5.checkViews",

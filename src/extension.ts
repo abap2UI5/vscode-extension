@@ -36,9 +36,10 @@ import { registerNavMap } from "./navview";
 import { registerPropertyEditor } from "./propview";
 import { takeScreenshot } from "./screenshot";
 import { formatTrafficLine, isRoundtrip } from "./traffic";
-import { registerModelView } from "./modelview";
+import { MODEL_SCHEME, registerModelView } from "./modelview";
+import { registerMockFile } from "./mockfile";
 import { DEVICE_WIDTHS } from "./webview";
-import { staleMessage } from "./previewcore";
+import { applyModelMessage, staleMessage } from "./previewcore";
 import {
   ALLOW_UNAUTHORIZED_KEY,
   CONFIG_SECTION,
@@ -47,6 +48,7 @@ import {
   TEMPLATE_KEY,
 } from "./session";
 import {
+  modelRootsOf,
   movePreview,
   postToShownApp,
   PreviewViewProvider,
@@ -413,6 +415,11 @@ export function activate(context: vscode.ExtensionContext): void {
           run: () => vscode.commands.executeCommand("abap2ui5.screenshot"),
         },
         {
+          label: "$(json) Apply the Model Document to the Running App",
+          description: "edited values into the app, without touching ABAP",
+          run: () => vscode.commands.executeCommand("abap2ui5.applyModel"),
+        },
+        {
           label: "$(plug) Check System Connection",
           run: () => vscode.commands.executeCommand("abap2ui5.checkConnection"),
         },
@@ -426,6 +433,63 @@ export function activate(context: vscode.ExtensionContext): void {
         matchOnDescription: true,
       });
       await pick?.run();
+    }),
+    /*
+     * The model's other direction. The `{ }` button dumps the running app's
+     * model into a read-only document; the pin restores a captured model
+     * after a reload. This is the missing third: edit values in that dump
+     * and push them into the running app - a table filled with test rows, a
+     * flag flipped - without changing a line of ABAP. Two steps because the
+     * dump is read-only: on the dump it opens an editable copy, on a JSON
+     * document it sends the document through the pin's restore path.
+     */
+    vscode.commands.registerCommand("abap2ui5.applyModel", async () => {
+      const editor = vscode.window.activeTextEditor;
+      const doc = editor?.document;
+      if (!doc || !["json", "jsonc"].includes(doc.languageId)) {
+        vscode.window.showInformationMessage(
+          "abap2UI5: open the model document first - the { } button in the " +
+            "preview toolbar dumps the running app's model."
+        );
+        return;
+      }
+      if (doc.uri.scheme === MODEL_SCHEME) {
+        const copy = await vscode.workspace.openTextDocument({
+          language: "jsonc",
+          content: doc.getText(),
+        });
+        await vscode.window.showTextDocument(copy, { preview: false });
+        vscode.window.setStatusBarMessage(
+          "abap2UI5: edit the values, then run the command again to apply them",
+          8000
+        );
+        return;
+      }
+      const target = session.currentTarget;
+      if (!target || (!session.appPanel && !provider.isShowing)) {
+        vscode.window.showInformationMessage(
+          "abap2UI5: no app is running in the preview - press F9 in an app class first."
+        );
+        return;
+      }
+      const result = applyModelMessage(doc.getText(), modelRootsOf(target.className));
+      if ("error" in result) {
+        vscode.window.showWarningMessage(`abap2UI5: cannot apply the model - ${result.error}`);
+        return;
+      }
+      postToShownApp(session, result.message);
+      const applied = Object.keys(result.message.data);
+      log(
+        `model-apply: ${target.className} <- ${applied.join(", ")}` +
+          (result.dropped.length ? ` (dropped: ${result.dropped.join(", ")})` : "")
+      );
+      vscode.window.setStatusBarMessage(
+        `abap2UI5: applied ${applied.join(", ")} to ${target.className}` +
+          (result.dropped.length
+            ? ` - ${result.dropped.length} key(s) the class does not bind were dropped`
+            : ""),
+        6000
+      );
     }),
     // Reinstall the render gate on demand - and say first what is installed:
     // the pinned linter commit and the remembered bundle digest are what a
@@ -568,6 +632,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerViewCheck(context, log, showLog);
   registerXmlPreview(context, log, findingsNow);
   registerViewPreview(context, log);
+  registerMockFile(context, log);
   registerQuickFix(context, log);
   registerLanguageFeatures(context, log);
   registerCodeLens(context);

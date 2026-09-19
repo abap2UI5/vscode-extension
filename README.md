@@ -125,6 +125,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Preview View (No System) | `abap2ui5.previewView` |  |
 | Compare View Preview with HEAD | `abap2ui5.previewDiff` |  |
 | Show Reconstructed XML View | `abap2ui5.showReconstructedXml` |  |
+| Generate Mock Data for This App | `abap2ui5.generateMock` |  |
 | Fix All View Findings in This File | `abap2ui5.fixAll` |  |
 | Install Render Gate | `abap2ui5.installRenderGate` |  |
 | Refresh the App List | `abap2ui5.refreshApps` |  |
@@ -135,6 +136,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Turn a View-Check Rule Off | `abap2ui5.disableRule` |  |
 | Copy Diagnostics for a Bug Report | `abap2ui5.copyDiagnostics` |  |
 | Preview Actions | `abap2ui5.previewMenu` |  |
+| Apply the Model Document to the Running App | `abap2ui5.applyModel` |  |
 | Update Render Gate | `abap2ui5.updateRenderGate` |  |
 | Show MCP Status | `abap2ui5.showMcpStatus` |  |
 | Add All Findings of This Rule to the Baseline | `abap2ui5.baselineRule` |  |

@@ -826,6 +826,17 @@ ${BASE_CSS}
       rtEl.classList.toggle('slow', msg.ms >= 1000);
       return;
     }
+    if (msg.type === 'applyModel') {
+      // An edited model document, pushed into the running page - the
+      // pin's restore path, on demand. The host has already reduced it to
+      // the class's own roots; it is filtered here once more, so the page
+      // only ever receives what a restore may carry, whoever composed it.
+      if (body.dataset.state !== 'ready') { showToast('No app is loaded yet'); return; }
+      const data = filteredRestore(JSON.stringify(msg.data || null));
+      if (!data) { showToast('Nothing of the app\'s model in that document'); return; }
+      postToApp({ __abap2ui5Cmd: 'restore', data: data });
+      return;
+    }
     if (msg.type !== 'load') { return; }
     const switched = msg.className && msg.className !== nameEl.textContent;
     frameUrl = msg.frameUrl;

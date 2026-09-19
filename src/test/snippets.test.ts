@@ -84,10 +84,20 @@ const indent = (expanded: string, pad = "    "): string =>
     .map((line, i) => (i === 0 || line === "" ? line : `${pad}${line}`))
     .join("\n");
 
+/** A snippet meant for the `*.clas.testclasses.abap` include: local test
+ *  classes that make up a whole file by themselves, not a piece of an app
+ *  class. Recognised by the `FOR TESTING` no other snippet writes - such a
+ *  snippet is checked as the file it is, never wrapped into a class. */
+const isTestClasses = (expanded: string): boolean =>
+  /\bFOR TESTING\b/i.test(expanded);
+
 /** Wraps one expanded snippet into a complete class file, by its shape - a
  *  FILE, ending in a newline: the linter judges what it is handed, and a
  *  wrapper missing one would report the harness rather than the snippet. */
 function wrap(expanded: string): string {
+  if (isTestClasses(expanded)) {
+    return file(expanded); // a whole testclasses include (z2ui5test)
+  }
   if (/^CLASS\b/i.test(expanded)) {
     return file(expanded); // already a whole class (z2ui5app)
   }
@@ -151,6 +161,61 @@ test("every shipped snippet passes the bundled linter", () => {
       `snippet ${snippet.prefix} does not pass the linter it ships with`
     );
   }
+});
+
+test("the test-class snippet is a complete testclasses include", () => {
+  // abaplint is not part of this suite, so the contract is held here: the
+  // pieces a *.clas.testclasses.abap needs, consistent with the app
+  // template's lifecycle (main dispatches on the client's check_on_* reads).
+  const snippet = loadSnippets().find((s) => s.prefix === "z2ui5test");
+  assert.ok(snippet, "the z2ui5test snippet went missing");
+  const expanded = expand(snippet.body);
+  assert.ok(isTestClasses(expanded));
+  assert.ok(
+    loadSnippets().filter((s) => isTestClasses(expand(s.body))).length === 1,
+    "only the test-class snippet is checked as a whole file"
+  );
+  // the double: the client interface, partially, answering the lifecycle
+  // reads from attributes and recording what the app displays
+  assert.match(expanded, /^CLASS ltd_client DEFINITION FINAL FOR TESTING\.$/m);
+  assert.match(expanded, /INTERFACES z2ui5_if_client PARTIALLY IMPLEMENTED\./);
+  for (const method of [
+    "check_on_init",
+    "check_on_navigated",
+    "check_on_event",
+    "get_event",
+    "view_display",
+    "message_toast_display",
+  ]) {
+    assert.match(
+      expanded,
+      new RegExp(`METHOD z2ui5_if_client~${method}\\.`),
+      `the double does not implement ${method}`
+    );
+    assert.ok(
+      clientMethod(method) && !clientMethod(method)?.obsolete,
+      `${method} is not a current z2ui5_if_client method`
+    );
+  }
+  // the parameter names the double reads are the interface's own
+  assert.match(clientMethod("check_on_event")?.signature ?? "", /\bval\b/);
+  assert.match(clientMethod("view_display")?.signature ?? "", /\bval\b/);
+  assert.match(clientMethod("message_toast_display")?.signature ?? "", /\btext\b/);
+  // the test class and its one test
+  assert.match(
+    expanded,
+    /^CLASS ltcl_app DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS DURATION SHORT\.$/m
+  );
+  assert.match(expanded, /METHODS \w+ FOR TESTING RAISING cx_static_check\./);
+  assert.match(expanded, /client->mv_event = `BUTTON_CLICK`\./);
+  assert.match(expanded, /app->z2ui5_if_app~main\( client \)\./);
+  assert.match(expanded, /cl_abap_unit_assert=>assert_equals\(/);
+  // every class opened is closed, every method too
+  const count = (re: RegExp) => (expanded.match(re) ?? []).length;
+  assert.equal(count(/^CLASS\b/gm), count(/^ENDCLASS\./gm));
+  assert.equal(count(/^\s*METHOD\b/gm), count(/^\s*ENDMETHOD\./gm));
+  // and the linter's ABAP rules see a clean file
+  assert.deepEqual(gatingFindings(wrap(expanded)), []);
 });
 
 test("the app template passes the bundled linter", () => {

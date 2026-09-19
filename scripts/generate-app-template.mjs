@@ -52,10 +52,21 @@ const RAW = (file) => `https://raw.githubusercontent.com/${REPO}/main/${file}`;
 /*
  * WHICH files is not decided here either. app-template describes itself in
  * `template.json` - `files.shared` is every file a new project can take from
- * it UNCHANGED, and `files.named` / `files.templateOwn` are the ones that
- * carry a name or belong to the template. This snapshot takes `files.shared`,
- * because the named ones are exactly what `src/scaffold.ts` writes itself,
- * where the project name and the class name are known.
+ * it UNCHANGED, `files.named` the ones that carry a name (the starter class,
+ * its sidecar and its test include, the abapGit and package descriptors) and
+ * `files.templateOwn` what belongs to the template. This snapshot takes the
+ * first two: the shared files to copy, the named ones AS THE TEMPLATE HAS
+ * THEM - placeholder class and all - for `src/scaffold.ts` to substitute the
+ * way `template.json`'s `substitutions` describe, which is what the
+ * template's own `rename.mjs` and mcp-server's `scaffold_app` execute. The
+ * scaffold used to write the named files itself, and the day the template
+ * grew a test include and a `WITH_UNIT_TESTS` flag, a project created from
+ * the IDE had neither.
+ *
+ * abapGit serializes its XML with a UTF-8 BOM, and the template's `.xml`
+ * files carry it. The snapshot holds TEXT - the BOM is stripped here and the
+ * scaffold puts it back when it writes (`bom: true`), where the test suite
+ * can see the decision.
  *
  * Two of the shared files are here to be READ, not copied: the scaffold takes
  * the dependency versions and the shared scripts out of `package.json` and the
@@ -165,21 +176,24 @@ if (invokedDirectly(import.meta.url)) {
   /* The template's own description first - it says which files to take. */
   const spec = JSON.parse(await read(SPEC_FILE));
   const FILES = spec.files?.shared;
+  const NAMED = spec.files?.named;
   requireShape({
-    problems:
-      Array.isArray(FILES) && FILES.length
+    problems: [
+      ...(Array.isArray(FILES) && FILES.length
         ? []
-        : [
-            `${TOOL}: ${SPEC_FILE} has no files.shared[] - the template no longer says what a project takes from it`,
-          ],
+        : [`${TOOL}: ${SPEC_FILE} has no files.shared[] - the template no longer says what a project takes from it`]),
+      ...(Array.isArray(NAMED) && NAMED.length
+        ? []
+        : [`${TOOL}: ${SPEC_FILE} has no files.named[] - the template no longer says which files carry a name`]),
+    ],
   });
 
   const files = {};
-  for (const file of FILES) {
+  for (const file of [...FILES, ...NAMED]) {
     // readUpstream normalises the line endings: the template commits LF
     // (.gitattributes), and a CRLF checkout on Windows must not produce a
-    // different snapshot.
-    files[file] = await read(file);
+    // different snapshot. The BOM goes too - see the header.
+    files[file] = (await read(file)).replace(/^\uFEFF/, "");
   }
 
   /* Fail loudly rather than write a snapshot the scaffold silently cannot use:
@@ -232,6 +246,28 @@ if (invokedDirectly(import.meta.url)) {
         'package.json\'s "check" script is missing or runs files under scripts/ - the scaffold drops such scripts, so a new project would lose `npm run check`'
       );
     }
+    /* The named files are SUBSTITUTED, not copied, and the scaffold executes
+     * the description literally: the placeholder class in the listed files
+     * and paths, in the listed cases. A spec that stopped saying any of it
+     * would scaffold the template's own class name into every project. */
+    const cls = spec.substitutions?.class;
+    if (typeof spec.placeholderClass !== "string" || !spec.placeholderClass) {
+      missing.push(`${SPEC_FILE} has no placeholderClass - the scaffold cannot know what to rename`);
+    }
+    if (!Array.isArray(cls?.files) || !Array.isArray(cls?.cases)) {
+      missing.push(`${SPEC_FILE} has no substitutions.class.files/.cases - the scaffold cannot rename the class`);
+    }
+    if (!NAMED.some((f) => /\.clas\.abap$/.test(f))) {
+      missing.push(`${SPEC_FILE} files.named lists no *.clas.abap - a project would get no starter class`);
+    }
+    for (const named of NAMED) {
+      // a named ABAP file the class substitution does not reach keeps the
+      // placeholder name: an object abapGit imports under one name and ABAP
+      // activates under another, which is what template.json exists to rule out
+      if (/\.abap$/.test(named) && cls?.files && !cls.files.includes(named)) {
+        missing.push(`${SPEC_FILE} files.named lists ${named}, which substitutions.class.files does not rename`);
+      }
+    }
     /* And the same trap one hop further out: a KEPT script chaining via
      * `npm run` into a DROPPED one is a script that exists and cannot run. */
     for (const { name, target, reason } of danglingScriptRefs(pkg?.scripts)) {
@@ -252,7 +288,7 @@ if (invokedDirectly(import.meta.url)) {
 
   const json = `${JSON.stringify(
     {
-      note: "abap2UI5/app-template's project-independent files, copied verbatim for the New Project scaffold, plus that repository's own template.json - which says which files those are. Generated by scripts/generate-app-template.mjs - do not edit.",
+      note: "abap2UI5/app-template's files for the New Project scaffold: the project-independent ones (files.shared) copied verbatim, the name-carrying ones (files.named) as the template has them, placeholder class and all, for the scaffold to substitute; plus that repository's own template.json, which says which files those are and what to substitute. Generated by scripts/generate-app-template.mjs - do not edit.",
       source: REPO,
       template: spec,
       files,
@@ -267,7 +303,7 @@ if (invokedDirectly(import.meta.url)) {
     check,
     stale:
       "app-template.json is STALE against abap2UI5/app-template - a project created from the IDE is not the project the template hands out. Run `npm run app-template` and commit.",
-    upToDate: `app-template.json: up to date (${FILES.length} files)`,
-    wrote: `app-template.json: ${FILES.length} files from ${local ? local : `${REPO}@main`}`,
+    upToDate: `app-template.json: up to date (${FILES.length} shared + ${NAMED.length} named files)`,
+    wrote: `app-template.json: ${FILES.length} shared + ${NAMED.length} named files from ${local ? local : `${REPO}@main`}`,
   });
 }

@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  applyModelMessage,
   isNewer,
   loadMessage,
+  modelDocumentJson,
   modelRootsOfSource,
   nextRecentApps,
   resolveReloadTrigger,
@@ -148,4 +150,39 @@ test("a class without the builder has no model roots", () => {
 
 test("broken source yields no roots instead of throwing", () => {
   assert.deepEqual(modelRootsOfSource("not abap at all {{{"), []);
+});
+
+// ---------------------------------------------------------------------------
+// applyModelMessage - an edited model document into the running app
+// ---------------------------------------------------------------------------
+
+test("the dump's header comment is stripped, a // inside a value is not", () => {
+  const text = '// ZCL_X - model as of 2026-09-19\n{ "MV_URL": "https://x" }\n';
+  assert.deepEqual(JSON.parse(modelDocumentJson(text)), { MV_URL: "https://x" });
+});
+
+test("only the class's roots travel, in the class's spelling", () => {
+  const text = '{ "mv_title": "Hi", "MT_ROWS": [{ "ID": "1" }], "_ROUNDTRIP": 3 }';
+  const result = applyModelMessage(text, ["MV_TITLE", "MT_ROWS"]);
+  assert.ok("message" in result);
+  assert.deepEqual(result.message, {
+    type: "applyModel",
+    data: { MV_TITLE: "Hi", MT_ROWS: [{ ID: "1" }] },
+  });
+  assert.deepEqual(result.dropped, ["_ROUNDTRIP"]);
+});
+
+test("invalid JSON, a non-object and unknown roots are refused with a reason", () => {
+  assert.match((applyModelMessage("{ nope", ["A"]) as { error: string }).error, /valid JSON/);
+  assert.match((applyModelMessage("[1, 2]", ["A"]) as { error: string }).error, /object/);
+  assert.match(
+    (applyModelMessage('{ "B": 1 }', ["A"]) as { error: string }).error,
+    /none of the document's keys/
+  );
+});
+
+test("without known roots the document is not pushed", () => {
+  const result = applyModelMessage('{ "A": 1 }', []);
+  assert.ok("error" in result);
+  assert.match(result.error, /open the app's class/);
 });

@@ -462,3 +462,24 @@ test("a capped scan says the map may be incomplete", () => {
     html.includes("The scan stopped at its file cap - apps beyond it may be missing.")
   );
 });
+
+test("an applied model document goes into the app through the restore path", () => {
+  const html = previewHtml({
+    frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
+    externalUrl: "https://host:44300/sap/bc/z2ui5?app_start=ZCL_X",
+    className: "ZCL_X",
+    theme: "",
+    language: "",
+    modelRoots: ["MT_ITEMS"],
+    nonce: "n0nce",
+  });
+  // the host's message, handled after the "fromApp" refusal - the app frame
+  // must not be able to push a model into itself through the preview
+  const at = html.indexOf("msg.type === 'applyModel'");
+  assert.ok(at > 0, "the applyModel message is not handled");
+  assert.ok(html.lastIndexOf("if (fromApp) { return; }", at) > 0);
+  // filtered to the class's roots once more, then the hook's restore command
+  const branch = html.slice(at, at + 700);
+  assert.ok(branch.includes("filteredRestore("));
+  assert.ok(branch.includes("__abap2ui5Cmd: 'restore'"));
+});

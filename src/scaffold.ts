@@ -28,21 +28,37 @@
  * no guarantee of network. An offline, deterministic scaffold is also
  * testable, which the rest of this extension is built to be.
  *
+ * The files that carry a NAME - the starter class, its abapGit sidecar and
+ * its ABAP Unit test include, `.abapgit.xml`, `package.devc.xml` - come out
+ * of the snapshot too (`files.named`, as the template has them, placeholder
+ * class and all) and are SUBSTITUTED the way `template.json`'s
+ * `substitutions` block describes: the placeholder class in the listed files
+ * and paths in the listed cases, one XML element for the package text, one
+ * for the repository name. That block is what the template's own
+ * `scripts/rename.mjs` and mcp-server's `scaffold_app` execute, so a project
+ * created here is the project created there - and a named file the template
+ * adds (the test include was one) reaches a new project without an edit
+ * here. The scaffold used to write those files itself; the day the template
+ * grew the test include and the sidecar's `WITH_UNIT_TESTS`, a project from
+ * the IDE had neither. It also means the starter class is the TEMPLATE's
+ * starter class, not one of the gallery's: the test include asserts on that
+ * class's own attributes, and the gallery stays with "New App from Template",
+ * which adds a class to a repository that already exists.
+ *
  * What is still WRITTEN here, and why: everything that has to know the
- * project's name or the class's name - README, `.abapgit.xml`,
- * `package.devc.xml`, `package.json`, the AGENTS.md header, the CI workflow
- * (the template's own runs a `scripts/check-pin.mjs` this scaffold does not
- * write). Those files take their moving parts - dependency versions, shared
- * script bodies, the linter action's pin, the framework pin - out of the
- * snapshot rather than repeating them, so there is nothing left to drift.
+ * project's name in a way the substitutions do not describe - README,
+ * `package.json`, the AGENTS.md header, the CI workflow (the template's own
+ * runs a `scripts/check-pin.mjs` this scaffold does not write). Those files
+ * take their moving parts - dependency versions, shared script bodies, the
+ * linter action's pin, the framework pin - out of the snapshot rather than
+ * repeating them, so there is nothing left to drift.
  * `src/test/scaffold.test.ts` is the gate over exactly that.
  *
- * `vscode`-free on purpose: the content is data, so the test suite runs every
+ * `vscode`-free on purpose: the content is data, so the test suite runs the
  * generated class through the bundled linter the same way it does the
  * single-class templates.
  */
 
-import { AppTemplate, templateSource } from "./template";
 import appTemplate from "./data/app-template.json";
 
 /** app-template's files, exactly as that repository has them. */
@@ -68,6 +84,115 @@ export const VERBATIM_FILES: string[] = TEMPLATE_SPEC.files.shared.filter(
   (f: string) => !COMPOSED.has(f)
 );
 
+/** The template's name-carrying files, substituted from the snapshot - see
+ *  the header. Composed files are never among them; if the template ever
+ *  listed one here, the composed version would still win. */
+export const NAMED_FILES: string[] = TEMPLATE_SPEC.files.named.filter(
+  (f: string) => !COMPOSED.has(f)
+);
+
+/** The class the template's named files are written for. */
+export const PLACEHOLDER_CLASS: string = TEMPLATE_SPEC.placeholderClass;
+
+// ---------------------------------------------------------------------------
+// The substitutions template.json describes - mirrored from app-template's
+// scripts/lib/substitute.mjs, one function each, so the three executors make
+// the same edits. Pure functions of text: where it comes from and goes is the
+// caller's.
+// ---------------------------------------------------------------------------
+
+/** The class, in the cases the spec lists: `lower` is how the ABAP writes
+ *  it, `upper` how the sidecar's CLSNAME does - and renaming one spelling
+ *  without the other produces an object abapGit imports under one name and
+ *  ABAP activates under another. Every occurrence. */
+export function applyClass(
+  text: string,
+  oldClass: string,
+  newClass: string,
+  cases: readonly string[] = ["lower", "upper"]
+): string {
+  let out = text;
+  for (const spelling of cases) {
+    const from = spelling === "upper" ? oldClass.toUpperCase() : oldClass.toLowerCase();
+    const to = spelling === "upper" ? newClass.toUpperCase() : newClass.toLowerCase();
+    out = out.split(from).join(to);
+  }
+  return out;
+}
+
+/** One XML element's text - `<CTEXT>abap2UI5 app</CTEXT>` - replaced in
+ *  place, first occurrence: the descriptors carry each element once. */
+export function applyElement(text: string, element: string, value: string): string {
+  return text.replace(
+    new RegExp(`<${element}>[^<]*</${element}>`),
+    `<${element}>${value}</${element}>`
+  );
+}
+
+/** One top-level JSON string key - `"name": "app-template"` - replaced as
+ *  text, so the file's formatting survives. */
+export function applyJsonKey(text: string, key: string, value: string): string {
+  return text.replace(new RegExp(`"${key}":\\s*"[^"]*"`), `"${key}": "${value}"`);
+}
+
+/** The class is in the FILE names too: `src/zcl_app_001.clas.abap` becomes
+ *  `src/zcl_my_app.clas.abap` - when the spec says so. */
+export function substitutePath(rel: string, newClass: string): string {
+  const cls = TEMPLATE_SPEC.substitutions.class;
+  return cls.renamesPath ? rel.split(PLACEHOLDER_CLASS).join(newClass.toLowerCase()) : rel;
+}
+
+/**
+ * The whole personalisation of one named file, as template.json describes
+ * it: `rel` is the file's path in the template, the result the content a
+ * project gets under `substitutePath(rel)`. A file no substitution names
+ * comes back unchanged.
+ */
+export function substituteText(
+  rel: string,
+  text: string,
+  names: { className: string; projectName: string }
+): string {
+  const subs = TEMPLATE_SPEC.substitutions;
+  let out = text;
+  if (subs.class.files.includes(rel)) {
+    out = applyClass(out, PLACEHOLDER_CLASS, names.className.toLowerCase(), subs.class.cases);
+  }
+  for (const t of subs.packageText) {
+    if (t.file === rel) {
+      out = applyElement(out, t.element, names.projectName);
+    }
+  }
+  for (const t of subs.repo as Array<{ file: string; element?: string; jsonKey?: string }>) {
+    if (t.file !== rel) {
+      continue;
+    }
+    out = t.element
+      ? applyElement(out, t.element, names.projectName)
+      : t.jsonKey
+        ? applyJsonKey(out, t.jsonKey, names.projectName)
+        : out;
+  }
+  return out;
+}
+
+/** The named files a project gets, substituted: path and content. abapGit
+ *  serializes its XML with a UTF-8 BOM (the template's own carry one, the
+ *  snapshot holds the text), so the writer puts it back on every `.xml`. */
+export function namedFiles(projectName: string, className: string): ScaffoldFile[] {
+  return NAMED_FILES.map((rel) => ({
+    path: substitutePath(rel, className),
+    content: substituteText(rel, TEMPLATE_FILES[rel], { className, projectName }),
+    ...(rel.endsWith(".xml") ? { bom: true } : {}),
+  }));
+}
+
+/** The starter class as a project gets it - the template's, renamed. */
+export function starterClassSource(className: string): string {
+  const rel = NAMED_FILES.find((f) => /\.clas\.abap$/.test(f));
+  return rel ? substituteText(rel, TEMPLATE_FILES[rel], { className, projectName: "" }) : "";
+}
+
 /** Everything from this line down in app-template's AGENTS.md is the mirrored
  *  app-building guide - repo-independent, and what a new project needs most. */
 export const GUIDE_MARKER = "> **Provenance:**";
@@ -80,26 +205,6 @@ export interface ScaffoldFile {
    *  back changed on the first pull - for everyone. */
   bom?: boolean;
 }
-
-/** abapGit derives the object name from the file name, so it has to match. */
-const sidecar = (className: string): string =>
-  `<?xml version="1.0" encoding="utf-8"?>
-<abapGit version="v1.0.0" serializer="LCL_OBJECT_CLAS" serializer_version="v1.0.0">
- <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
-  <asx:values>
-   <VSEOCLASS>
-    <CLSNAME>${className.toUpperCase()}</CLSNAME>
-    <LANGU>E</LANGU>
-    <DESCRIPT>abap2UI5 app</DESCRIPT>
-    <STATE>1</STATE>
-    <CLSCCINCL>X</CLSCCINCL>
-    <FIXPT>X</FIXPT>
-    <UNICODE>X</UNICODE>
-   </VSEOCLASS>
-  </asx:values>
- </asx:abap>
-</abapGit>
-`;
 
 /** The framework release app-template pins abaplint's clone to - named in the
  *  scaffolded AGENTS.md so the reader installs the release the lint assumes. */
@@ -153,6 +258,7 @@ LICENSE and a pin gate) and is where all of this is maintained.
 | --- | --- |
 | \`src/\` | The app classes (abapGit project, \`STARTING_FOLDER=/src/\`, \`FOLDER_LOGIC=PREFIX\`) — one class per app, named \`ZCL_*\` |
 | \`src/${className}.clas.abap\` | The starter app — copy it for your next app (keep the \`.clas.xml\` sidecar's \`CLSNAME\` in sync) |
+| \`src/${className}.clas.testclasses.abap\` | ABAP Unit tests for the starter app: a test double for \`z2ui5_if_client\` drives \`main( )\` through the first start, a \`SAVE\` event and a navigated roundtrip. Runs on the system (ADT \`Ctrl+Shift+F10\`); the local gates check it statically |
 | \`package.json\` | The two gates as devDependencies (\`@abaplint/cli\`, \`@abap2ui5/linter\` + \`@abap2ui5/render-runtime\`) and the \`npm run check*\` scripts. **Commit the \`package-lock.json\` the first install writes** — it is what makes CI and your machine run the same versions, and CI's \`npm ci\` needs it |
 | \`abaplint.jsonc\` | abaplint config; abaplint clones the abap2UI5 framework for dependency resolution, pinned to release tag \`${frameworkPin()}\` (\`"branch"\` — abaplint passes it to \`git clone --branch\`, which takes a tag; there is no \`"tag"\` key). Bump the pin when you need a newer API, and run \`npm run check\` |
 | \`abap2ui5lint.jsonc\` | [abap2UI5-linter](https://github.com/abap2UI5/linter) config (paths, UI5 floor, distribution, rule severities, fail level) — CLI flags override it, and **the VS Code extension reads this same file**, so the editor and CI judge your views by the same rules |
@@ -409,46 +515,12 @@ const PACKAGE_JSON = (projectName: string): string => {
  * @param projectName  repository/npm name, e.g. `my-app`
  * @param className    the app class, lower case, e.g. `zcl_my_app`
  */
-export function scaffoldFiles(
-  projectName: string,
-  className: string,
-  template: AppTemplate
-): ScaffoldFile[] {
+export function scaffoldFiles(projectName: string, className: string): ScaffoldFile[] {
   const cls = className.toLowerCase();
   return [
-    { path: `src/${cls}.clas.abap`, content: `${templateSource(template, cls)}\n` },
-    { path: `src/${cls}.clas.xml`, content: sidecar(cls), bom: true },
-    {
-      path: "src/package.devc.xml",
-      bom: true,
-      content: `<?xml version="1.0" encoding="utf-8"?>
-<abapGit version="v1.0.0" serializer="LCL_OBJECT_DEVC" serializer_version="v1.0.0">
- <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
-  <asx:values>
-   <DEVC>
-    <CTEXT>${projectName}</CTEXT>
-   </DEVC>
-  </asx:values>
- </asx:abap>
-</abapGit>
-`,
-    },
-    {
-      path: ".abapgit.xml",
-      bom: true,
-      content: `<?xml version="1.0" encoding="utf-8"?>
-<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
- <asx:values>
-  <DATA>
-   <NAME>${projectName}</NAME>
-   <MASTER_LANGUAGE>E</MASTER_LANGUAGE>
-   <STARTING_FOLDER>/src/</STARTING_FOLDER>
-   <FOLDER_LOGIC>PREFIX</FOLDER_LOGIC>
-  </DATA>
- </asx:values>
-</asx:abap>
-`,
-    },
+    // The template's own starter class, sidecar, test include and abapGit
+    // descriptors, renamed the way template.json says - see the header.
+    ...namedFiles(projectName, cls),
     // Verbatim from app-template - see the header. These are the files that
     // decide what a project is checked by, and there is one source for them:
     // app-template's template.json says which they are, so a file added over

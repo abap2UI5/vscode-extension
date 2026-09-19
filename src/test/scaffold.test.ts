@@ -1,16 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { APP_TEMPLATES } from "../template";
 import {
   GUIDE_MARKER,
+  NAMED_FILES,
+  PLACEHOLDER_CLASS,
   TEMPLATE_FILES,
   TEMPLATE_SPEC,
   VERBATIM_FILES,
+  applyClass,
+  applyElement,
+  applyJsonKey,
   frameworkPin,
   guideSection,
   linterActionRef,
   scaffoldFiles,
   scaffoldScripts,
+  scaffoldText,
+  starterClassSource,
+  substitutePath,
 } from "../scaffold";
 
 /*
@@ -34,9 +41,8 @@ import {
  * AGENTS.md at all, which is the one file an AI assistant opens first.
  */
 
-const FIRST = APP_TEMPLATES[0];
 const files = (): ReturnType<typeof scaffoldFiles> =>
-  scaffoldFiles("my-app", "zcl_my_app", FIRST);
+  scaffoldFiles("my-app", "zcl_my_app");
 const contentOf = (path: string): string => {
   const file = files().find((f) => f.path === path);
   assert.ok(file, `the scaffold writes ${path}`);
@@ -234,11 +240,120 @@ test("a scaffolded project carries the app-building guide, verbatim", () => {
 test("the snapshot has nothing in it nobody reads", () => {
   // A file added to scripts/generate-app-template.mjs and then never used is a
   // silent claim that the scaffold copies more than it does.
-  const read = new Set(TEMPLATE_SPEC.files.shared);
+  const read = new Set([...TEMPLATE_SPEC.files.shared, ...TEMPLATE_SPEC.files.named]);
   assert.deepEqual(
     Object.keys(TEMPLATE_FILES).sort(),
     [...read].sort(),
-    "every snapshot file is one the scaffold copies or reads a value out of"
+    "every snapshot file is one the scaffold copies, substitutes or reads a value out of"
+  );
+});
+
+/*
+ * The named files: app-template's own, renamed the way its template.json
+ * says. The scaffold used to write these itself, which is how a project
+ * from the IDE came to lack the test include and the sidecar's
+ * WITH_UNIT_TESTS the template had grown - the same drift as the configs,
+ * one release later.
+ */
+test("every named file of the template reaches the project, under its renamed path", () => {
+  const paths = files().map((f) => f.path);
+  assert.ok(NAMED_FILES.length >= 5, "the template still names its starter files");
+  for (const rel of NAMED_FILES) {
+    const renamed = substitutePath(rel, "zcl_my_app");
+    assert.ok(paths.includes(renamed), `the scaffold writes ${renamed} (from ${rel})`);
+    assert.ok(!renamed.includes(PLACEHOLDER_CLASS), `${renamed} carries the chosen name`);
+  }
+  // the ones this change is about, by name
+  for (const needed of [
+    "src/zcl_my_app.clas.abap",
+    "src/zcl_my_app.clas.xml",
+    "src/zcl_my_app.clas.testclasses.abap",
+    ".abapgit.xml",
+    "src/package.devc.xml",
+  ]) {
+    assert.ok(paths.includes(needed), `the scaffold writes ${needed}`);
+  }
+});
+
+test("the class is renamed in both spellings, in every file the spec names", () => {
+  const cls = TEMPLATE_SPEC.substitutions.class;
+  assert.deepEqual([...cls.cases].sort(), ["lower", "upper"]);
+  for (const rel of cls.files) {
+    if (!NAMED_FILES.includes(rel)) {
+      continue; // AGENTS.md is composed here, its head names the class itself
+    }
+    const content = files().find((f) => f.path === substitutePath(rel, "zcl_my_app"))!.content;
+    assert.ok(!/zcl_app_001/i.test(content), `${rel}: no placeholder name survives`);
+    assert.equal(
+      content,
+      applyClass(TEMPLATE_FILES[rel], PLACEHOLDER_CLASS, "zcl_my_app"),
+      `${rel} is the template's file with the class renamed and nothing else`
+    );
+  }
+  // the ABAP writes it lower case, the sidecar's CLSNAME upper case
+  assert.match(contentOf("src/zcl_my_app.clas.abap"), /^CLASS zcl_my_app DEFINITION PUBLIC\./m);
+  assert.match(contentOf("src/zcl_my_app.clas.xml"), /<CLSNAME>ZCL_MY_APP<\/CLSNAME>/);
+  // the test include tests THIS class
+  assert.match(contentOf("src/zcl_my_app.clas.testclasses.abap"), /TYPE REF TO zcl_my_app\b/);
+});
+
+test("the sidecar says the class has unit tests, because the project has them", () => {
+  const sidecar = contentOf("src/zcl_my_app.clas.xml");
+  assert.match(sidecar, /<UNICODE>X<\/UNICODE>\s*<WITH_UNIT_TESTS>X<\/WITH_UNIT_TESTS>/);
+  const include = contentOf("src/zcl_my_app.clas.testclasses.abap");
+  assert.match(include, /FOR TESTING/);
+  assert.match(include, /INTERFACES z2ui5_if_client PARTIALLY IMPLEMENTED/);
+});
+
+test("the descriptors carry the project's name, and only that changes", () => {
+  const repo = TEMPLATE_SPEC.substitutions.repo.find((t) => t.file === ".abapgit.xml");
+  assert.ok(repo?.element, "the repository name is one XML element of .abapgit.xml");
+  assert.match(contentOf(".abapgit.xml"), /<NAME>my-app<\/NAME>/);
+  assert.equal(
+    contentOf(".abapgit.xml"),
+    applyElement(TEMPLATE_FILES[".abapgit.xml"], repo!.element!, "my-app")
+  );
+  const pkg = TEMPLATE_SPEC.substitutions.packageText.find((t) => t.file === "src/package.devc.xml");
+  assert.ok(pkg, "the package text is one XML element of package.devc.xml");
+  assert.match(contentOf("src/package.devc.xml"), /<CTEXT>my-app<\/CTEXT>/);
+  // the composed package.json carries the name too - the spec's jsonKey
+  // substitution says which key, and the composed file agrees with it
+  const json = TEMPLATE_SPEC.substitutions.repo.find((t) => t.file === "package.json");
+  assert.equal(json?.jsonKey, "name");
+  assert.equal(JSON.parse(contentOf("package.json")).name, "my-app");
+});
+
+test("the substitutions are the template's own, edit for edit", () => {
+  // mirrored from app-template's scripts/lib/substitute.mjs
+  assert.equal(applyClass("zcl_app_001 ZCL_APP_001 zcl_app_0011", "zcl_app_001", "zcl_x"), "zcl_x ZCL_X zcl_x1");
+  assert.equal(applyClass("a A", "a", "b", ["upper"]), "a B");
+  assert.equal(applyElement("<X><NAME>old</NAME><NAME>old</NAME></X>", "NAME", "new"), "<X><NAME>new</NAME><NAME>old</NAME></X>");
+  assert.equal(applyJsonKey('{\n  "name":   "old",\n  "x": "name"\n}', "name", "new"), '{\n  "name": "new",\n  "x": "name"\n}');
+  assert.equal(substitutePath("src/zcl_app_001.clas.xml", "ZCL_New"), "src/zcl_new.clas.xml");
+  assert.equal(substitutePath("package.json", "zcl_new"), "package.json");
+});
+
+test("the abapGit XML gets its BOM back - the snapshot holds text", () => {
+  for (const rel of NAMED_FILES) {
+    assert.notEqual(TEMPLATE_FILES[rel].charCodeAt(0), 0xfeff, `${rel}: no BOM in the snapshot`);
+  }
+  const named = new Set(NAMED_FILES.map((rel) => substitutePath(rel, "zcl_my_app")));
+  for (const file of files().filter((f) => named.has(f.path))) {
+    assert.equal(
+      scaffoldText(file).charCodeAt(0) === 0xfeff,
+      file.path.endsWith(".xml"),
+      `${file.path}: a BOM exactly on the abapGit XML`
+    );
+  }
+});
+
+test("the starter class is the template's, so New App's gallery is not it", () => {
+  const { APP_TEMPLATES } = require("../template") as typeof import("../template");
+  const source = starterClassSource("zcl_my_app");
+  assert.equal(source, contentOf("src/zcl_my_app.clas.abap"));
+  assert.ok(
+    !APP_TEMPLATES.some((t) => t.source.replace(/zcl_my_app/g, "zcl_x") === source.replace(/zcl_my_app/g, "zcl_x")),
+    "the project's class comes from the snapshot, not from a copy kept in template.ts"
   );
 });
 
@@ -263,38 +378,34 @@ test("the scaffolded class passes the scaffolded config", () => {
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "a2ui5-scaffold-gate-"));
   try {
-    for (const template of APP_TEMPLATES) {
-      const written = scaffoldFiles("my-app", "zcl_my_app", template);
-      const file = path.join(dir, "abap2ui5lint.jsonc");
-      fs.writeFileSync(
-        file,
-        written.find((f) => f.path === "abap2ui5lint.jsonc")!.content
-      );
-      const config = loadConfig(file);
-      const source = written.find((f) => f.path === "src/zcl_my_app.clas.abap")!.content;
-      const findings = runGate(source, "zcl_my_app.clas.abap", false, {
-        minUi5: String(config.ui5 ?? "1.71"),
-        distribution: String(config.distribution ?? "sapui5"),
-        allow: [],
-        rules: config.rules as Record<string, unknown>,
-      }).findings.filter((f) => f.severity !== "hint");
-      assert.deepEqual(
-        findings.map((f) => `${f.type} line ${f.line ?? "?"}`),
-        [],
-        `template "${template.id}": a project scaffolded from it fails its own first check`
-      );
-    }
+    const written = files();
+    const file = path.join(dir, "abap2ui5lint.jsonc");
+    fs.writeFileSync(
+      file,
+      written.find((f) => f.path === "abap2ui5lint.jsonc")!.content
+    );
+    const config = loadConfig(file);
+    const source = written.find((f) => f.path === "src/zcl_my_app.clas.abap")!.content;
+    const findings = runGate(source, "zcl_my_app.clas.abap", false, {
+      minUi5: String(config.ui5 ?? "1.71"),
+      distribution: String(config.distribution ?? "sapui5"),
+      allow: [],
+      rules: config.rules as Record<string, unknown>,
+    }).findings.filter((f) => f.severity !== "hint");
+    assert.deepEqual(
+      findings.map((f) => `${f.type} line ${f.line ?? "?"}`),
+      [],
+      "a project scaffolded from the template fails its own first check"
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("every template still scaffolds the same project around its class", () => {
-  for (const template of APP_TEMPLATES) {
-    const paths = scaffoldFiles("my-app", "zcl_my_app", template).map((f) => f.path);
-    for (const needed of [...VERBATIM, "AGENTS.md", "README.md", "package.json"]) {
-      assert.ok(paths.includes(needed), `${template.id}: the scaffold writes ${needed}`);
-    }
-    assert.equal(new Set(paths).size, paths.length, `${template.id}: no path written twice`);
+test("the scaffold writes every file once", () => {
+  const paths = files().map((f) => f.path);
+  for (const needed of [...VERBATIM, "AGENTS.md", "README.md", "package.json"]) {
+    assert.ok(paths.includes(needed), `the scaffold writes ${needed}`);
   }
+  assert.equal(new Set(paths).size, paths.length, "no path written twice");
 });
