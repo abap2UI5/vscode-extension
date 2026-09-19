@@ -227,6 +227,18 @@ export function linterActionRef(): string {
   return m ? m[1].trim() : "abap2UI5/linter@v0";
 }
 
+/** The mcp-server action reference (SHA pin + tag comment) app-template's
+ *  own workflow runs the unit tests through - taken from there for the same
+ *  reason `linterActionRef` is. Null when the template has no unit job (an
+ *  older snapshot): the scaffolded workflow then has none either, rather
+ *  than a job on a guessed pin. */
+export function unitActionRef(): string | null {
+  const m = /^\s*uses:\s*(abap2UI5\/mcp-server@.*)$/m.exec(
+    TEMPLATE_FILES[".github/workflows/check.yml"]
+  );
+  return m ? m[1].trim() : null;
+}
+
 /** The mirrored app-building guide out of app-template's AGENTS.md. */
 export function guideSection(): string {
   const text = TEMPLATE_FILES["AGENTS.md"];
@@ -263,7 +275,7 @@ LICENSE and a pin gate) and is where all of this is maintained.
 | \`package.json\` | The two gates as devDependencies (\`@abaplint/cli\`, \`@abap2ui5/linter\` + \`@abap2ui5/render-runtime\`) and the \`npm run check*\` scripts. **Commit the \`package-lock.json\` the first install writes** — it is what makes CI and your machine run the same versions, and CI's \`npm ci\` needs it |
 | \`abaplint.jsonc\` | abaplint config; abaplint clones the abap2UI5 framework for dependency resolution, pinned to release tag \`${frameworkPin()}\` (\`"branch"\` — abaplint passes it to \`git clone --branch\`, which takes a tag; there is no \`"tag"\` key). Bump the pin when you need a newer API, and run \`npm run check\` |
 | \`abap2ui5lint.jsonc\` | [abap2UI5-linter](https://github.com/abap2UI5/linter) config (paths, UI5 floor, distribution, rule severities, fail level) — CLI flags override it, and **the VS Code extension reads this same file**, so the editor and CI judge your views by the same rules |
-| \`.github/workflows/check.yml\` | CI: abaplint from the lockfile, then the abap2UI5-linter through its own action for the static gate + headless render of every view |
+| \`.github/workflows/check.yml\` | CI: abaplint from the lockfile, then the abap2UI5-linter through its own action for the static gate + headless render of every view, and the app's ABAP Unit tests in the transpiled backend (no system) |
 
 ## Build & verify — run before every commit
 
@@ -365,7 +377,36 @@ jobs:
       - name: Job summary
         if: always()
         run: npx abap2ui5lint --no-render --advisory --no-progress --format markdown >> "$GITHUB_STEP_SUMMARY"
+${unitJob()}`;
+
+/** The ABAP Unit job app-template's workflow carries - the same action pin,
+ *  and nothing when the template has none. */
+const unitJob = (): string => {
+  const ref = unitActionRef();
+  if (!ref) {
+    return "";
+  }
+  return `
+  # The ABAP Unit tests of the app classes, without a SAP system: the
+  # mcp-server's runner clones the framework at the release abaplint.jsonc
+  # pins, downloads that release's transpiled backend (or builds it once, a
+  # few minutes, cached per pin), transpiles every class under src/ with its
+  # *.clas.testclasses.abap into it and runs the tests through the open-abap
+  # runtime. The step summary names every test method and the first failure.
+  # Locally: \`npm run test:unit\`. A PARTIALLY IMPLEMENTED test double has to
+  # implement every method the code under test calls - the runtime generates
+  # no empty stubs, a system does.
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: abap2UI5 unit tests (transpiled backend, no system)
+        uses: ${ref}
+        with:
+          paths: src
 `;
+};
 
 const README = (projectName: string, className: string): string =>
   `# ${projectName}

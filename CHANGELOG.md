@@ -7,6 +7,12 @@ finding, mock data from the class, editing the running app's model, and a
 test skeleton - and "New Project from Template" now writes the template's
 whole project.
 
+- **The scaffolded CI workflow runs the app's ABAP Unit tests without a
+  system.** app-template's `check.yml` gained a `unit` job (the
+  `abap2UI5/mcp-server` action: the framework at the pinned release, its
+  transpiled backend, the tests through the open-abap runtime), and the
+  workflow "New Project from Template" writes carries the same job on the
+  same pin, plus `npm run test:unit` for the terminal.
 - **"New Project from Template" hands out app-template's named files too.**
   The starter class, its abapGit sidecar and the new ABAP Unit test include
   (`src/<class>.clas.testclasses.abap`, a test double for `z2ui5_if_client`

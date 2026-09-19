@@ -13,6 +13,7 @@ import {
   frameworkPin,
   guideSection,
   linterActionRef,
+  unitActionRef,
   scaffoldFiles,
   scaffoldScripts,
   scaffoldText,
@@ -185,6 +186,18 @@ test("no scaffolded file names a linter version of its own", () => {
       assert.equal(found, want, `${file.path} names linter ${found}, app-template says ${want}`);
     }
   }
+});
+
+test("the CI workflow runs the app's unit tests through the same pinned mcp-server action app-template runs", () => {
+  const ref = unitActionRef();
+  assert.ok(ref, "app-template's workflow carries the unit job, so the scaffold's must too");
+  assert.match(ref!, /^abap2UI5\/mcp-server@[0-9a-f]{40} # v\d+$/, "pinned to a commit, the major tag in the comment");
+  const workflow = contentOf(".github/workflows/check.yml");
+  assert.ok(workflow.includes(`uses: ${ref}`), "the scaffolded workflow runs the same pin");
+  assert.match(workflow, /^  unit:\n    runs-on: ubuntu-latest/m, "as a job of its own");
+  assert.match(workflow, /paths: src/);
+  // and the local form is a script a project keeps: npx, not a template-only file
+  assert.match(contentOf("package.json"), /"test:unit": "npx --yes -p @abap2ui5\/mcp-server abap2ui5-unit src"/);
 });
 
 test("the CI workflow runs the same pinned linter action app-template runs", () => {
