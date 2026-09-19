@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import * as os from "os";
 import { mcpStatus, registerMcp } from "./mcp";
+import { compatLine, readCompat } from "./compat";
+import { registerCompatCheck } from "./compatcheck";
 import { createSystemMcpServer } from "./mcpsystem";
 import {
   installRenderGate,
@@ -105,6 +107,10 @@ export function activate(context: vscode.ExtensionContext): void {
   log(
     `extension ${String(context.extension.packageJSON.version ?? "?")} activated`
   );
+  // Second line: which framework line the bundled linter understands - the
+  // answer to "why does the check flag a call my release does not have".
+  const compat = readCompat();
+  log(`compat: ${compatLine(compat)}`);
 
   // Every request the embedded app makes goes through the proxy - log it
   // with its full roundtrip time, and feed the toolbar's badge with the
@@ -606,6 +612,7 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       }
       log(`mcp: status - system server: ${system}`);
+      log(`mcp: status - ${compatLine(compat)}`);
       void vscode.window
         .showInformationMessage(
           `abap2UI5 MCP - stdio server: ${stdio}; system server: ${system}. ` +
@@ -630,6 +637,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerNavMap(context, log);
   registerPropertyEditor(context, log);
   registerViewCheck(context, log, showLog);
+  registerCompatCheck(context, compat, log);
   registerXmlPreview(context, log, findingsNow);
   registerViewPreview(context, log);
   registerMockFile(context, log);

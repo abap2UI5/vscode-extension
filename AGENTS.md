@@ -48,6 +48,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401; authorized by the token in its own url |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
+| `src/compat.ts` | `vscode`-free: the bundled linter's compatibility record (`@abap2ui5/linter/compat`, copied next to the bundle by `esbuild.js` like the snapshot; null when the pin ships none) and what it says about a workspace's framework pin - the one parser of `abaplint.jsonc`'s `dependencies[].branch` (`scaffold.ts` uses it too), `compareRelease`, `compatVerdict`, the activation line |
+| `src/compatcheck.ts` | The framework-pin check's plumbing: a warning on the `branch` line of an open `abaplint.jsonc` pinned below what the bundled linter assumes, on open and save |
 | `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability, the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written |
 | `src/childproc.ts` | `vscode`-free: the ONE way a checker is started - shell quoting of program AND arguments, timeout, kill of the whole process tree, "nobody is waiting any more" |
 | `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
@@ -127,7 +129,7 @@ not committed.
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
-`checkcore.ts` and `webview.ts` (HTML strings only — the state it renders is
+`checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
 Node, and an accidental import turns a unit test into a module-not-found
 error. Put the interesting logic
@@ -343,6 +345,14 @@ Facts an agent cannot see from the code but will trip over:
   `icon-too-new` and `icon-removed` simply never fired in the editor while CI
   reported them. `data/` is build output — gitignored, and packaged into the
   `.vsix` because `.vscodeignore` does not exclude it.
+  The fourth data file is the linter's **`data/compat.json`** (its `./compat`
+  export), copied to `dist/compat.json` (and `dist-test/`) by the same
+  `copyCompat()` - `compat.ts` reads it there. A linter pin from before the
+  record ships none: then nothing is copied, a copy from an earlier build is
+  removed, and the extension logs "the bundled linter ships no compatibility
+  record" instead of comparing against a stale one. `compat.test.ts` tests
+  the verdict over a fixture for that reason, and only checks the real file's
+  shape when one is there.
 - **`gate.ts` is a second CALLER of the linter's pipeline, never a second
   pipeline.** It exists because the two hosts feed the metadata snapshot in
   differently (desktop reads a file, the browser gets text through

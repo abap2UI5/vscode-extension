@@ -62,7 +62,8 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
 - **Static view checks while you type** — the linter's property gate in
   process, the abap2UI5 rules with it, the render gate on demand. Quick fixes,
   waivers that CI honours, and a findings view grouping the repository's
-  findings by rule.
+  findings by rule. An open `abaplint.jsonc` whose abap2UI5 pin is below the
+  release the bundled linter assumes gets a warning on its `branch` line.
 - **The whole UI5 API in completion and hover**, plus the binding paths your
   class's model actually has, and the `client->` API with its ABAP signature.
 - **Write the view faster**: Format Document repairs a chain's indentation,

@@ -18,6 +18,15 @@ whole project.
   the template's starter class, the project wizard no longer offers the
   gallery pick; "New App from Template" keeps it.
 
+- **A warning when the framework pin is older than the linter assumes.** The
+  bundled linter now states which abap2UI5 release its rules assume, and the
+  extension compares the `"branch"` of the abap2UI5 dependency in an open
+  `abaplint.jsonc` against it: a pin below that minimum gets a warning on the
+  `branch` line naming the pin, the minimum and the remedy (bump the pin, run
+  `npm run check`), on open and on save. The abap2UI5 output channel says at
+  activation which release line the bundled linter understands and which UI5
+  snapshot it carries ("Show MCP Status" repeats the line) - or that the
+  bundled linter ships no such record yet, in which case nothing is compared.
 - **Quick fix for `event-without-handler`: "Add a WHEN branch".** The
   lightbulb on a raised event nothing handles now offers to write the
   handler branch into the class's `CASE client->get_event( )` (or

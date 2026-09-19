@@ -60,6 +60,7 @@
  */
 
 import appTemplate from "./data/app-template.json";
+import { frameworkPinOf } from "./compat";
 
 /** app-template's files, exactly as that repository has them. */
 export const TEMPLATE_FILES: Record<string, string> = appTemplate.files;
@@ -209,8 +210,8 @@ export interface ScaffoldFile {
 /** The framework release app-template pins abaplint's clone to - named in the
  *  scaffolded AGENTS.md so the reader installs the release the lint assumes. */
 export function frameworkPin(): string {
-  const m = /"branch":\s*"([^"]+)"/.exec(TEMPLATE_FILES["abaplint.jsonc"]);
-  return m ? m[1] : "";
+  // the one parser of that file - `compat.ts` reads a workspace's pin with it
+  return frameworkPinOf(TEMPLATE_FILES["abaplint.jsonc"]);
 }
 
 /** The linter action reference (SHA pin + tag comment) app-template's own
