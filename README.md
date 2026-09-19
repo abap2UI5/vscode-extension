@@ -72,6 +72,11 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   into ABAP.
 - **See the view without a system** — *Preview View (No System)* renders what
   the class builds, with a device matrix and a compare-with-HEAD mode.
+- **Test without a system** — *Run Unit Tests (No System)* runs the app's
+  ABAP Unit tests in the transpiled abap2UI5 backend through
+  [mcp-server](https://github.com/abap2UI5/mcp-server)'s `abap2ui5-unit`, in
+  a terminal, for one class or the whole `src/`: the editor's counterpart of
+  `npm run test:unit` in a project from app-template.
 - **Navigate an app**: the view hierarchy in the Outline pane, Go to Definition
   between an event and its `WHEN`, F2 renaming every literal an app is wired
   together with, and a navigation map of the workspace's apps.
@@ -127,6 +132,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Compare View Preview with HEAD | `abap2ui5.previewDiff` |  |
 | Show Reconstructed XML View | `abap2ui5.showReconstructedXml` |  |
 | Generate Mock Data for This App | `abap2ui5.generateMock` |  |
+| Run Unit Tests (No System) | `abap2ui5.runUnitTests` |  |
 | Fix All View Findings in This File | `abap2ui5.fixAll` |  |
 | Install Render Gate | `abap2ui5.installRenderGate` |  |
 | Refresh the App List | `abap2ui5.refreshApps` |  |

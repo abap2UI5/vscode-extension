@@ -13,6 +13,24 @@ whole project.
   transpiled backend, the tests through the open-abap runtime), and the
   workflow "New Project from Template" writes carries the same job on the
   same pin, plus `npm run test:unit` for the terminal.
+- **New command "Run Unit Tests (No System)"** (`abap2ui5.runUnitTests`, in
+  the palette, the editor's abap2UI5 menu and the apps tree, and as a
+  "Run unit tests" lens above a class that has a `*.clas.testclasses.abap`
+  next to it). It runs the same `abap2ui5-unit` the scaffolded CI job and
+  `npm run test:unit` run - the framework at the release the project's
+  `abaplint.jsonc` pins, its transpiled backend, the tests through the
+  open-abap runtime - in an integrated terminal named "abap2UI5 unit tests",
+  reused from run to run, so the log and the per-method summary arrive live.
+  Invoked on a class (or its test include) only that class runs; from the
+  palette the project's `src/` does. An `mcp-server` checkout under
+  `abap2ui5.mcp.reposRoot` runs from disk with the same `*_HOME` variables
+  the MCP registration passes, and an `abap2UI5` checkout there is handed
+  over as the framework; without them `npx` fetches the published package and
+  the runner clones the pinned release into `~/.abap2ui5-mcp` - the terminal
+  says so up front, because that first run takes minutes and every later one
+  seconds. The settings that choose the program are the MCP server's
+  restricted ones, and in Restricted Mode the command does not run at all:
+  the tests are the repository's code.
 - **"New Project from Template" hands out app-template's named files too.**
   The starter class, its abapGit sidecar and the new ABAP Unit test include
   (`src/<class>.clas.testclasses.abap`, a test double for `z2ui5_if_client`

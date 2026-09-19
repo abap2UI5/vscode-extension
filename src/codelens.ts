@@ -1,9 +1,11 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
 import { classDefinitionOffset, usesBuilder } from "./abap";
 import { CONFIG_SECTION } from "./settings";
 import { isAppSource } from "./appclasses";
 import { eventRaises, whenBranches } from "./context";
 import { fixableCount } from "./quickfix";
+import { testIncludeFor } from "./unitrunner";
 
 /*
  * The things you do to an app class, offered where the class is declared.
@@ -38,7 +40,8 @@ class AppCodeLens implements vscode.CodeLensProvider {
     const text = doc.getText();
     const app = isAppSource(text);
     const builder = usesBuilder(text);
-    if (!app && !builder) {
+    const tested = hasTestInclude(doc);
+    if (!app && !builder && !tested) {
       return [];
     }
     const anchor = doc.positionAt(classDefinitionOffset(text));
@@ -69,7 +72,41 @@ class AppCodeLens implements vscode.CodeLensProvider {
       lenses.push(...fixLens(range, doc));
       lenses.push(...whenLenses(doc, text));
     }
+    if (tested) {
+      lenses.push(
+        new vscode.CodeLens(range, {
+          title: "$(beaker) Run unit tests",
+          tooltip:
+            "Run this class's ABAP Unit tests in the transpiled abap2UI5 backend - no system needed",
+          command: "abap2ui5.runUnitTests",
+          arguments: [{ uri: doc.uri }],
+        })
+      );
+    }
     return lenses;
+  }
+}
+
+/**
+ * Whether a `<class>.clas.testclasses.abap` sits next to the class file - the
+ * one condition for the test lens. Not gated on the class being an app: the
+ * runner runs every class with a test include, and a helper class with tests
+ * is exactly the kind of class that has nothing else to offer up here. A
+ * synchronous `existsSync`, because a CodeLens provider cannot await, and
+ * one stat per lens pass is what the autofix lens already costs.
+ */
+function hasTestInclude(doc: vscode.TextDocument): boolean {
+  if (doc.uri.scheme !== "file") {
+    return false;
+  }
+  const include = testIncludeFor(doc.uri.fsPath);
+  if (!include) {
+    return false;
+  }
+  try {
+    return fs.existsSync(include);
+  } catch {
+    return false;
   }
 }
 

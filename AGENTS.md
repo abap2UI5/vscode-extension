@@ -79,8 +79,10 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/appview.ts` | The "abap2UI5 Apps" tree: every z2ui5_if_app class with run/preview/check |
 | `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
-| `src/codelens.ts` | Run / Activate & reload / Check views / Autofix above the class definition |
-| `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window |
+| `src/codelens.ts` | Run / Activate & reload / Check views / Autofix / Run unit tests (when a `*.clas.testclasses.abap` sits beside the class) above the class definition |
+| `src/unitrunner.ts` | `vscode`-free: what "Run Unit Tests (No System)" decides - the runner (mcp-server's `scripts/ci-unit.mjs` from a checkout under `mcp.reposRoot`, else `npx -p @abap2ui5/mcp-server abap2ui5-unit`), its arguments (`src` or the class's folder, `--class`, `--home`), the shell-quoted terminal line, the banner |
+| `src/unittests.ts` | The command's plumbing: the one reused "abap2UI5 unit tests" terminal (recreated when cwd or the `*_HOME` env changed), the class from the tree node / lens / active editor, the Restricted Mode refusal |
+| `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`) |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
@@ -128,6 +130,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`,
+`unitrunner.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain

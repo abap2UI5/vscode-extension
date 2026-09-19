@@ -40,6 +40,7 @@ import { takeScreenshot } from "./screenshot";
 import { formatTrafficLine, isRoundtrip } from "./traffic";
 import { MODEL_SCHEME, registerModelView } from "./modelview";
 import { registerMockFile } from "./mockfile";
+import { registerUnitTests } from "./unittests";
 import { DEVICE_WIDTHS } from "./webview";
 import { applyModelMessage, staleMessage } from "./previewcore";
 import {
@@ -641,6 +642,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerXmlPreview(context, log, findingsNow);
   registerViewPreview(context, log);
   registerMockFile(context, log);
+  registerUnitTests(context, log);
   registerQuickFix(context, log);
   registerLanguageFeatures(context, log);
   registerCodeLens(context);
