@@ -14,7 +14,10 @@ import { safeFileStem } from "./previewcore";
  * Every dump replaces the document's content in place - the tab stays.
  */
 
-const SCHEME = "abap2ui5-model";
+/** The dump document's scheme - what "Apply the Model Document" recognises
+ *  as the read-only dump it has to copy before anything can be edited. */
+export const MODEL_SCHEME = "abap2ui5-model";
+const SCHEME = MODEL_SCHEME;
 
 const contents = new Map<string, string>();
 

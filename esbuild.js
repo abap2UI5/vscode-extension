@@ -48,6 +48,28 @@ function copySnapshot() {
     path.join(data, "icons.json"),
     path.join("data", "icons.json")
   );
+  copyCompat(data, "dist");
+}
+
+/** The linter's compatibility record (`data/compat.json`, its `./compat`
+ *  export) travels next to the bundle like the snapshot does - `compat.ts`
+ *  reads it there. It is the newest of the data files, so a linter pin may
+ *  not ship it yet: then nothing is copied and a copy from an earlier build
+ *  is removed, so the extension reports "no compatibility record" instead of
+ *  a stale one. */
+function copyCompat(data, outDir) {
+  let source;
+  try {
+    source = require.resolve("@abap2ui5/linter/compat");
+  } catch {
+    source = path.join(data, "compat.json");
+  }
+  const target = path.join(outDir, "compat.json");
+  if (fs.existsSync(source)) {
+    fs.copyFileSync(source, target);
+  } else {
+    fs.rmSync(target, { force: true });
+  }
 }
 
 /** The linter commit this build pins (package-lock.json resolved URL) -
@@ -104,6 +126,11 @@ async function buildTests() {
   fs.copyFileSync(
     path.join("dist", "properties.json"),
     path.join("dist-test", "properties.json")
+  );
+  // and compat.test.ts reads the record from there, when the pin ships one
+  copyCompat(
+    path.join(path.dirname(require.resolve("@abap2ui5/linter/properties")), "..", "data"),
+    "dist-test"
   );
 }
 

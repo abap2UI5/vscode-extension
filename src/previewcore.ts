@@ -122,3 +122,79 @@ export function isNewer(a: string, b: string): boolean {
   }
   return a !== b;
 }
+
+// ---------------------------------------------------------------------------
+// Applying an edited model document to the running app
+// ---------------------------------------------------------------------------
+
+/**
+ * The model text with the dump's own `//` header lines removed - the dump
+ * document is JSONC (its first line names the class and the time), and a
+ * copy of it is what gets edited. Only full-line comments are stripped: a
+ * `//` inside a string value is data.
+ */
+export function modelDocumentJson(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join("\n");
+}
+
+/** What the host posts to the preview, which forwards it into the app. */
+export interface ApplyModelMessage {
+  type: "applyModel";
+  data: Record<string, unknown>;
+}
+
+export type ApplyModelResult =
+  | { message: ApplyModelMessage; dropped: string[] }
+  | { error: string };
+
+/**
+ * An edited model document, reduced to what may go into the running app:
+ * the class's own model roots, exactly as the pin's restore filters them.
+ * Everything else in the dump - the framework's bookkeeping, a path the
+ * class does not declare - is dropped and named, so a typo in a root does
+ * not vanish silently. Root names are matched case-blind and written in the
+ * class's spelling: the runtime model's keys are the attribute names
+ * upper-cased, and a hand-edited `mv_title` means the same field.
+ *
+ * With no roots known there is nothing to judge against, and the answer is
+ * to open the class rather than to push the whole document: the dump holds
+ * the framework's own state too, and writing that back is not "edit a
+ * value".
+ */
+export function applyModelMessage(text: string, roots: string[]): ApplyModelResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(modelDocumentJson(text));
+  } catch (err) {
+    return { error: `the document is not valid JSON - ${String((err as Error).message ?? err)}` };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { error: "the document has to be a JSON object with the model's root paths as keys" };
+  }
+  if (!roots.length) {
+    return {
+      error:
+        "the class's model paths are not known - open the app's class in the editor, so the values can be matched against it",
+    };
+  }
+  const byUpper = new Map(roots.map((root) => [root.toUpperCase(), root]));
+  const data: Record<string, unknown> = {};
+  const dropped: string[] = [];
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    const root = byUpper.get(key.toUpperCase());
+    if (root === undefined) {
+      dropped.push(key);
+      continue;
+    }
+    data[root] = value;
+  }
+  if (!Object.keys(data).length) {
+    return {
+      error: `none of the document's keys is a model path of the class (${roots.join(", ")})`,
+    };
+  }
+  return { message: { type: "applyModel", data }, dropped };
+}

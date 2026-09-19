@@ -6,6 +6,7 @@ import { PropertyFinding } from "@abap2ui5/linter/properties";
 import { RENDER_RULE } from "@abap2ui5/linter/findings";
 import { addToBaseline } from "./baselinefile";
 import { directiveLine, plannedFixes, suppressionEdits } from "./checkcore";
+import { handlerStub } from "./handlerstub";
 import { plural } from "./text";
 import { clearBaselineCache } from "./lintconfig";
 import { CONFIG_SECTION } from "./settings";
@@ -27,6 +28,12 @@ import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck"
  * suppression that writes the linter's own `abap2ui5lint-disable-next-line`
  * directive - the escape hatch CI honours too, rather than a setting only
  * this editor knows about.
+ *
+ * One correction is composed here rather than taken from the linter:
+ * `event-without-handler` carries no fix, because the linter judges the
+ * class and not the editor's buffer, and the WHEN branch that resolves it
+ * is a placement decision (`handlerstub.ts`), offered only when the class
+ * has a `CASE client->get_event( )` to put it in.
  */
 
 
@@ -192,6 +199,9 @@ class ViewCheckActions implements vscode.CodeActionProvider {
      * diagnostics of one rule at the cursor would offer two identical
      * entries, so it is offered once per rule. */
     const offOffered = new Set<string>();
+    /* The WHEN branch is scoped to the EVENT: a name raised twice on one
+     * line gets one branch, not two identical offers. */
+    const stubOffered = new Set<string>();
     for (const diagnostic of context.diagnostics) {
       if (diagnostic.source !== DIAG_SOURCE) {
         continue;
@@ -199,6 +209,32 @@ class ViewCheckActions implements vscode.CodeActionProvider {
       const rule = ruleOf(diagnostic);
       if (!rule || rule === RENDER_RULE) {
         continue; // the render gate is switched off wholesale, not per line
+      }
+
+      // --- a WHEN branch for an event nothing handles -----------------------
+      // Only the finding on the diagnostic's own line, as for the baseline
+      // below: its `value` is the event name, and the branch is placed in
+      // the class's own dispatcher, spelt the way this raise spells it.
+      if (rule === EVENT_WITHOUT_HANDLER) {
+        const finding = findingOnLine(findings, rule, diagnostic.range.start.line);
+        const stub =
+          finding?.value && !stubOffered.has(finding.value.toUpperCase())
+            ? handlerStub(doc.getText(), finding.value, finding.offset)
+            : undefined;
+        if (stub) {
+          stubOffered.add(stub.name.toUpperCase());
+          const branch = new vscode.CodeAction(
+            `abap2UI5: add a WHEN branch for '${stub.name}'`,
+            vscode.CodeActionKind.QuickFix
+          );
+          branch.edit = new vscode.WorkspaceEdit();
+          branch.edit.set(doc.uri, [
+            vscode.TextEdit.insert(doc.positionAt(stub.offset), stub.text),
+          ]);
+          branch.diagnostics = [diagnostic];
+          branch.isPreferred = true;
+          actions.push(branch);
+        }
       }
       const action = new vscode.CodeAction(
         `abap2UI5: suppress ${rule} on this line`,
@@ -252,12 +288,7 @@ class ViewCheckActions implements vscode.CodeActionProvider {
       // the diagnostics were published, the action is simply not offered
       // until the next check.
       if (baselineFile) {
-        const finding = findings.find(
-          (f) =>
-            f.type === rule &&
-            typeof f.line === "number" &&
-            f.line - 1 === diagnostic.range.start.line
-        );
+        const finding = findingOnLine(findings, rule, diagnostic.range.start.line);
         if (finding) {
           const baseline = new vscode.CodeAction(
             `abap2UI5: add ${rule} to ${path.basename(baselineFile)}`,
@@ -276,6 +307,22 @@ class ViewCheckActions implements vscode.CodeActionProvider {
 
     return actions;
   }
+}
+
+/** The rule whose correction is composed here - see the header. */
+const EVENT_WITHOUT_HANDLER = "event-without-handler";
+
+/** The finding of `rule` reported on a document line (0-based), if the
+ *  published diagnostics still match the buffer - else nothing, until the
+ *  next check. */
+function findingOnLine(
+  findings: PropertyFinding[],
+  rule: string,
+  line: number
+): PropertyFinding | undefined {
+  return findings.find(
+    (f) => f.type === rule && typeof f.line === "number" && f.line - 1 === line
+  );
 }
 
 /**

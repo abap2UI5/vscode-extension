@@ -1,5 +1,92 @@
 # Changelog
 
+## 0.29.0
+
+Four additions around the dev loop: a fix for the most common dead-control
+finding, mock data from the class, editing the running app's model, and a
+test skeleton - and "New Project from Template" now writes the template's
+whole project.
+
+- **The scaffolded CI workflow runs the app's ABAP Unit tests without a
+  system.** app-template's `check.yml` gained a `unit` job (the
+  `abap2UI5/mcp-server` action: the framework at the pinned release, its
+  transpiled backend, the tests through the open-abap runtime), and the
+  workflow "New Project from Template" writes carries the same job on the
+  same pin, plus `npm run test:unit` for the terminal.
+- **New command "Run Unit Tests (No System)"** (`abap2ui5.runUnitTests`, in
+  the palette, the editor's abap2UI5 menu and the apps tree, and as a
+  "Run unit tests" lens above a class that has a `*.clas.testclasses.abap`
+  next to it). It runs the same `abap2ui5-unit` the scaffolded CI job and
+  `npm run test:unit` run - the framework at the release the project's
+  `abaplint.jsonc` pins, its transpiled backend, the tests through the
+  open-abap runtime - in an integrated terminal named "abap2UI5 unit tests",
+  reused from run to run, so the log and the per-method summary arrive live.
+  Invoked on a class (or its test include) only that class runs; from the
+  palette the project's `src/` does. An `mcp-server` checkout under
+  `abap2ui5.mcp.reposRoot` runs from disk with the same `*_HOME` variables
+  the MCP registration passes, and an `abap2UI5` checkout there is handed
+  over as the framework; without them `npx` fetches the published package and
+  the runner clones the pinned release into `~/.abap2ui5-mcp` - the terminal
+  says so up front, because that first run takes minutes and every later one
+  seconds. The settings that choose the program are the MCP server's
+  restricted ones, and in Restricted Mode the command does not run at all:
+  the tests are the repository's code.
+- **"New Project from Template" hands out app-template's named files too.**
+  The starter class, its abapGit sidecar and the new ABAP Unit test include
+  (`src/<class>.clas.testclasses.abap`, a test double for `z2ui5_if_client`
+  driving `main( )`), `.abapgit.xml` and `package.devc.xml` come out of the
+  app-template snapshot and are renamed the way the template's own
+  `template.json` describes - the sidecar carries `WITH_UNIT_TESTS`, the
+  include names the chosen class. The scaffold used to write those files
+  itself and a project from the IDE had no test. Because that test asserts on
+  the template's starter class, the project wizard no longer offers the
+  gallery pick; "New App from Template" keeps it.
+
+- **A warning when the framework pin is older than the linter assumes.** The
+  bundled linter now states which abap2UI5 release its rules assume, and the
+  extension compares the `"branch"` of the abap2UI5 dependency in an open
+  `abaplint.jsonc` against it: a pin below that minimum gets a warning on the
+  `branch` line naming the pin, the minimum and the remedy (bump the pin, run
+  `npm run check`), on open and on save. The abap2UI5 output channel says at
+  activation which release line the bundled linter understands and which UI5
+  snapshot it carries ("Show MCP Status" repeats the line) - or that the
+  bundled linter ships no such record yet, in which case nothing is compared.
+- **Quick fix for `event-without-handler`: "Add a WHEN branch".** The
+  lightbulb on a raised event nothing handles now offers to write the
+  handler branch into the class's `CASE client->get_event( )` (or
+  `CASE client->get( )-event`) - before `WHEN OTHERS.` when there is one,
+  otherwise before `ENDCASE.`, indented like the neighbouring branches and
+  in their quote and keyword case, with a `" handle NAME` placeholder line.
+  The name is spelt the way the view raises it, because `get_event( )`
+  compares letter for letter. A class without such a CASE gets no offer -
+  where a handler belongs in an IF-shaped dispatcher would be a guess.
+- **New command "Generate Mock Data for This App"** (`abap2ui5.generateMock`,
+  in the editor's abap2UI5 menu and the apps tree). It writes the
+  `<class>.mock.json` that *Preview View (No System)* and the linter's
+  `--screenshot` read, from the model shape the linter derives out of the
+  class: a readable sample per string, `0`, `false`, two example rows per
+  table, nested structures filled recursively. It asks before replacing an
+  existing file, opens the result beside the class, and names the roots
+  typed outside the class (a DDIC structure) that it had to leave empty.
+  For a class opened through ADT there is no "beside", so the skeleton
+  opens as an untitled document to save into the workspace.
+- **New command "Apply the Model Document to the Running App"**
+  (`abap2ui5.applyModel`, also in *Preview Actions*). The `{ }` button dumps
+  the running app's model, the pin restores a captured model after a reload
+  - this is the direction that was missing: on the dump it opens an editable
+  copy; on that JSON it pushes the values into the running app through the
+  same restore path the pin uses, so a table can be filled or a flag flipped
+  without changing ABAP. Only the class's own model paths travel (matched
+  case-blind, framework state and unknown keys are dropped and named), and
+  the app's class has to be open in the editor for the paths to be known.
+- **New snippet `z2ui5test`**: an ABAP Unit skeleton for the
+  `*.clas.testclasses.abap` include - a `ltd_client` test double
+  implementing `z2ui5_if_client` partially (answers `check_on_init` /
+  `check_on_navigated` / `check_on_event` / `get_event` from attributes,
+  records the displayed view XML and every toast) and a `ltcl_app` test
+  class with one test that sets an event, runs `main( )` and asserts the
+  toast. Like every shipped snippet it is held to the bundled linter.
+
 ## 0.28.0
 
 A review round: every module read against the linter it ships and against

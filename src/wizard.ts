@@ -114,6 +114,13 @@ export function registerNewApp(context: vscode.ExtensionContext): void {
  * not. The file that matters is `abap2ui5lint.jsonc` - without it the view
  * check falls back to VS Code settings, and the first CI run in that new
  * repository disagrees with everything the editor has been telling you.
+ *
+ * The project is abap2UI5/app-template's project: its starter class with
+ * its ABAP Unit test include and its gates, renamed. There is no gallery
+ * pick here - the template's test include asserts on the template's own
+ * class, so a gallery class in its place would fail the project's first
+ * `npm run check` - and the gallery stays with "New App from Template",
+ * which adds a class to a repository once it exists.
  */
 export async function newProjectWizard(): Promise<void> {
   const folders = await vscode.window.showOpenDialog({
@@ -135,11 +142,9 @@ export async function newProjectWizard(): Promise<void> {
   // without an edit here.
   const guarded = [
     ...new Set(
-      scaffoldFiles(
-        projectNameFrom("probe"),
-        "zcl_probe",
-        APP_TEMPLATES[0]
-      ).map((file) => file.path.split("/")[0])
+      scaffoldFiles(projectNameFrom("probe"), "zcl_probe").map(
+        (file) => file.path.split("/")[0]
+      )
     ),
   ];
   const conflicts = async (): Promise<string[]> => {
@@ -169,16 +174,12 @@ export async function newProjectWizard(): Promise<void> {
     return;
   }
 
-  const template = await pickTemplate("abap2UI5: New Project from Template");
-  if (!template) {
-    return;
-  }
   const className = await askClassName();
   if (!className) {
     return;
   }
 
-  // Again, right before writing: the probe above ran BEFORE the two prompts,
+  // Again, right before writing: the probe above ran BEFORE the prompt,
   // and a folder can grow a package.json while a picker is open - the check
   // is a handful of stats, and overwriting somebody's file is not undoable.
   const now = await conflicts();
@@ -188,11 +189,7 @@ export async function newProjectWizard(): Promise<void> {
   }
 
   const folderName = root.path.split("/").filter(Boolean).pop() ?? "abap2ui5-app";
-  const files = scaffoldFiles(
-    projectNameFrom(folderName),
-    className.toLowerCase(),
-    template
-  );
+  const files = scaffoldFiles(projectNameFrom(folderName), className.toLowerCase());
   let written = 0;
   for (const file of files) {
     const target = vscode.Uri.joinPath(root, ...file.path.split("/"));
@@ -229,7 +226,7 @@ export async function newProjectWizard(): Promise<void> {
   // the window) - the project is right there, so open its starter class.
   if (vscode.workspace.getWorkspaceFolder(root)) {
     void vscode.window.showInformationMessage(created);
-    const cls = files.find((f) => f.path.endsWith(".clas.abap"));
+    const cls = files.find((f) => /\.clas\.abap$/.test(f.path));
     if (cls) {
       const doc = await vscode.workspace.openTextDocument(
         vscode.Uri.joinPath(root, ...cls.path.split("/"))

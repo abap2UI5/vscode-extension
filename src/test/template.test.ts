@@ -132,35 +132,36 @@ test("the wizard renames the class case-insensitively and everywhere", () => {
  */
 test("the project scaffold writes what a project needs", () => {
   const { scaffoldFiles } = require("../scaffold") as typeof import("../scaffold");
-  for (const template of APP_TEMPLATES) {
-    const files = scaffoldFiles("my-app", "zcl_my_app", template);
-    const paths = files.map((f) => f.path);
-    for (const needed of [
-      "abap2ui5lint.jsonc",   // the one the extension searches for
-      "abaplint.jsonc",
-      "package.json",
-      ".abapgit.xml",
-      "src/package.devc.xml",
-      "src/zcl_my_app.clas.abap",
-      "src/zcl_my_app.clas.xml",
-      ".github/workflows/check.yml",
-    ]) {
-      assert.ok(paths.includes(needed), `${template.id}: scaffold has ${needed}`);
-    }
-
-    const xml = files.find((f) => f.path === "src/zcl_my_app.clas.xml")!;
-    assert.match(xml.content, /<CLSNAME>ZCL_MY_APP<\/CLSNAME>/,
-      `${template.id}: the sidecar names the class its file is named after`);
-    assert.equal(xml.bom, true, `${template.id}: abapGit XML is written with a BOM`);
-
-    const cfg = files.find((f) => f.path === "abap2ui5lint.jsonc")!.content;
-    assert.match(cfg, /"render":\s*true/,
-      `${template.id}: the render gate is ASKED for, so a missing runtime fails`);
-
-    const pkg = JSON.parse(files.find((f) => f.path === "package.json")!.content);
-    assert.ok(pkg.scripts.check, `${template.id}: there is one command that runs the gates`);
-    assert.ok(pkg.devDependencies["@abap2ui5/linter"], `${template.id}: the linter is pinned`);
+  const files = scaffoldFiles("my-app", "zcl_my_app");
+  const paths = files.map((f) => f.path);
+  for (const needed of [
+    "abap2ui5lint.jsonc",   // the one the extension searches for
+    "abaplint.jsonc",
+    "package.json",
+    ".abapgit.xml",
+    "src/package.devc.xml",
+    "src/zcl_my_app.clas.abap",
+    "src/zcl_my_app.clas.xml",
+    "src/zcl_my_app.clas.testclasses.abap",
+    ".github/workflows/check.yml",
+  ]) {
+    assert.ok(paths.includes(needed), `scaffold has ${needed}`);
   }
+
+  const xml = files.find((f) => f.path === "src/zcl_my_app.clas.xml")!;
+  assert.match(xml.content, /<CLSNAME>ZCL_MY_APP<\/CLSNAME>/,
+    "the sidecar names the class its file is named after");
+  assert.match(xml.content, /<WITH_UNIT_TESTS>X<\/WITH_UNIT_TESTS>/,
+    "the sidecar says the test include exists");
+  assert.equal(xml.bom, true, "abapGit XML is written with a BOM");
+
+  const cfg = files.find((f) => f.path === "abap2ui5lint.jsonc")!.content;
+  assert.match(cfg, /"render":\s*true/,
+    "the render gate is ASKED for, so a missing runtime fails");
+
+  const pkg = JSON.parse(files.find((f) => f.path === "package.json")!.content);
+  assert.ok(pkg.scripts.check, "there is one command that runs the gates");
+  assert.ok(pkg.devDependencies["@abap2ui5/linter"], "the linter is pinned");
 });
 
 /* The generated CONFIG is the half nothing checked. `snippets.test.ts` lints
@@ -180,8 +181,9 @@ test("the scaffolded configs are ones the tools accept", () => {
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "a2ui5-scaffold-"));
   try {
-    for (const template of APP_TEMPLATES) {
-      const files = scaffoldFiles("my-app", "zcl_my_app", template);
+    // the configs do not depend on the class, so one scaffold answers for all
+    for (const template of [{ id: "starter" }]) {
+      const files = scaffoldFiles("my-app", "zcl_my_app");
 
       const lintFile = path.join(dir, "abap2ui5lint.jsonc");
       fs.writeFileSync(lintFile, files.find((f) => f.path === "abap2ui5lint.jsonc")!.content);
@@ -232,21 +234,19 @@ test("the scaffolded configs are ones the tools accept", () => {
   }
 });
 
-test("the scaffolded class is the same class the templates are", () => {
+test("the scaffolded class is held to the bar the gallery templates are", () => {
   const { scaffoldFiles } = require("../scaffold") as typeof import("../scaffold");
-  for (const template of APP_TEMPLATES) {
-    const files = scaffoldFiles("my-app", "zcl_my_app", template);
-    const source = files.find((f) => f.path === "src/zcl_my_app.clas.abap")!.content;
-    assert.ok(isAppClass(source), `${template.id}: scaffolded class implements z2ui5_if_app`);
-    assert.ok(usesBuilder(source), `${template.id}: scaffolded class uses the current builder`);
-    assert.ok(source.includes("zcl_my_app"), `${template.id}: the class carries the chosen name`);
-    assert.ok(!source.includes("zcl_my_app".toUpperCase() + " DEFINITION"),
-      `${template.id}: the ABAP keeps the lower-case name the file is named after`);
-    // the same reconstruction bar the single-class templates are held to
-    const prep = prepareAbap(source);
-    assert.ok(prep.usesBuilder && prep.nodes.length > 0,
-      `${template.id}: the view check can reconstruct what the scaffold writes`);
-  }
+  const files = scaffoldFiles("my-app", "zcl_my_app");
+  const source = files.find((f) => f.path === "src/zcl_my_app.clas.abap")!.content;
+  assert.ok(isAppClass(source), "scaffolded class implements z2ui5_if_app");
+  assert.ok(usesBuilder(source), "scaffolded class uses the current builder");
+  assert.ok(source.includes("zcl_my_app"), "the class carries the chosen name");
+  assert.ok(!source.includes("zcl_my_app".toUpperCase() + " DEFINITION"),
+    "the ABAP keeps the lower-case name the file is named after");
+  // the same reconstruction bar the single-class templates are held to
+  const prep = prepareAbap(source);
+  assert.ok(prep.usesBuilder && prep.nodes.length > 0,
+    "the view check can reconstruct what the scaffold writes");
 });
 
 /*
@@ -257,7 +257,7 @@ test("the scaffolded class is the same class the templates are", () => {
  */
 test("the abapGit XML carries a BOM and nothing else does", () => {
   const { scaffoldFiles, scaffoldText } = require("../scaffold") as typeof import("../scaffold");
-  const files = scaffoldFiles("my-app", "zcl_my_app", APP_TEMPLATES[0]);
+  const files = scaffoldFiles("my-app", "zcl_my_app");
   const withBom = files.filter((f) => scaffoldText(f).charCodeAt(0) === 0xfeff);
   assert.deepEqual(
     withBom.map((f) => f.path).sort(),

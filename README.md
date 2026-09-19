@@ -62,7 +62,8 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
 - **Static view checks while you type** — the linter's property gate in
   process, the abap2UI5 rules with it, the render gate on demand. Quick fixes,
   waivers that CI honours, and a findings view grouping the repository's
-  findings by rule.
+  findings by rule. An open `abaplint.jsonc` whose abap2UI5 pin is below the
+  release the bundled linter assumes gets a warning on its `branch` line.
 - **The whole UI5 API in completion and hover**, plus the binding paths your
   class's model actually has, and the `client->` API with its ABAP signature.
 - **Write the view faster**: Format Document repairs a chain's indentation,
@@ -71,6 +72,11 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   into ABAP.
 - **See the view without a system** — *Preview View (No System)* renders what
   the class builds, with a device matrix and a compare-with-HEAD mode.
+- **Test without a system** — *Run Unit Tests (No System)* runs the app's
+  ABAP Unit tests in the transpiled abap2UI5 backend through
+  [mcp-server](https://github.com/abap2UI5/mcp-server)'s `abap2ui5-unit`, in
+  a terminal, for one class or the whole `src/`: the editor's counterpart of
+  `npm run test:unit` in a project from app-template.
 - **Navigate an app**: the view hierarchy in the Outline pane, Go to Definition
   between an event and its `WHEN`, F2 renaming every literal an app is wired
   together with, and a navigation map of the workspace's apps.
@@ -125,6 +131,8 @@ reference is generated from `package.json` with `npm run commands`, and
 | Preview View (No System) | `abap2ui5.previewView` |  |
 | Compare View Preview with HEAD | `abap2ui5.previewDiff` |  |
 | Show Reconstructed XML View | `abap2ui5.showReconstructedXml` |  |
+| Generate Mock Data for This App | `abap2ui5.generateMock` |  |
+| Run Unit Tests (No System) | `abap2ui5.runUnitTests` |  |
 | Fix All View Findings in This File | `abap2ui5.fixAll` |  |
 | Install Render Gate | `abap2ui5.installRenderGate` |  |
 | Refresh the App List | `abap2ui5.refreshApps` |  |
@@ -135,6 +143,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Turn a View-Check Rule Off | `abap2ui5.disableRule` |  |
 | Copy Diagnostics for a Bug Report | `abap2ui5.copyDiagnostics` |  |
 | Preview Actions | `abap2ui5.previewMenu` |  |
+| Apply the Model Document to the Running App | `abap2ui5.applyModel` |  |
 | Update Render Gate | `abap2ui5.updateRenderGate` |  |
 | Show MCP Status | `abap2ui5.showMcpStatus` |  |
 | Add All Findings of This Rule to the Baseline | `abap2ui5.baselineRule` |  |

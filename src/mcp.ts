@@ -110,6 +110,14 @@ export function mcpStatus(): {
   };
 }
 
+/** The *_HOME variables for the checkouts under `mcp.reposRoot` - what the
+ *  stdio server is started with, and what "Run Unit Tests (No System)"
+ *  (unittests.ts) hands the same package's runner, so both find the same
+ *  clones. */
+export function checkoutEnv(): Record<string, string> {
+  return serverEnv();
+}
+
 function serverEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   const root = config().get<string>("mcp.reposRoot", "").trim();

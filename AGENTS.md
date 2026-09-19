@@ -32,7 +32,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/preview.ts` | The preview surfaces: panel view provider, editor tab, webview message handling, moving the app between tab and panel |
 | `src/launch.ts` | F9 (`runApp`), the Ctrl+F3 activate-and-reload command, the proxy-status watch, the connect-system flow, the connection check command |
 | `src/connectcheck.ts` | `vscode`-free: what the connection check's probes MEAN - launch-URL shape, DNS/TCP/TLS failure and HTTP-status classification, bootstrap-page detection - behind "Check System Connection" |
-| `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list |
+| `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list, and what an edited model document may push into the running app (`applyModelMessage`) |
 | `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
 | `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only - including the navigation map, the Control Properties view and the findings tree (fed by `webFindingsNow`, no baseline machinery) |
 | `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, repo config through `workspace.fs` (no render gate) |
@@ -43,16 +43,19 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/ui5detect.ts` | Reads the system's `sap-ui-version.json` and offers to align the view-check settings |
 | `src/appsearch.ts` | "Run an App from the System": QuickPick over the ADT quick search |
 | `src/inspect.ts` | Inspect mode's matcher: runtime control chain -> outline node (the builder call to jump to) |
-| `src/modelview.ts` | The live-model document the preview's `{ }` button fills |
+| `src/modelview.ts` | The live-model document the preview's `{ }` button fills; "Apply the Model Document to the Running App" (registered in `extension.ts`) copies it for editing and pushes the edited JSON back through the pin's restore path |
 | `src/webview.ts` | HTML for the preview and the welcome screen (theme variables, CSP nonce, theme/language pickers, the open-mode-aware empty state) |
 | `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401; authorized by the token in its own url |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
+| `src/compat.ts` | `vscode`-free: the bundled linter's compatibility record (`@abap2ui5/linter/compat`, copied next to the bundle by `esbuild.js` like the snapshot; null when the pin ships none) and what it says about a workspace's framework pin - the one parser of `abaplint.jsonc`'s `dependencies[].branch` (`scaffold.ts` uses it too), `compareRelease`, `compatVerdict`, the activation line |
+| `src/compatcheck.ts` | The framework-pin check's plumbing: a warning on the `branch` line of an open `abaplint.jsonc` pinned below what the bundled linter assumes, on open and save |
 | `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability, the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written |
 | `src/childproc.ts` | `vscode`-free: the ONE way a checker is started - shell quoting of program AND arguments, timeout, kill of the whole process tree, "nobody is waiting any more" |
 | `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
-| `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, and "add to baseline" |
+| `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, "add to baseline", and the one correction composed here - the WHEN branch for `event-without-handler` |
+| `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE |
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
 | `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
 | `src/clientapi.ts` | The bundled `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion |
@@ -61,6 +64,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `scripts/generate-client-api.mjs` | Regenerates `src/data/client-api.json` from `z2ui5_if_client.intf.abap` (local checkout or GitHub raw) |
 | `src/bindingpaths.ts` | Binding-path offers from the model shape the linter derives (`prepareAbap( ).modelShape`) |
 | `src/viewpreview.ts` | "Preview View (No System)": runs the linter's `--screenshot` over the buffer and shows the PNGs in a panel that re-renders on save |
+| `src/mockgen.ts` | `vscode`-free: a `<class>.mock.json` skeleton out of `prepareAbap( ).modelShape` - sample strings, 0, false, two rows per table, structures recursively, undeclared (DDIC) roots left `{}` and named |
+| `src/mockfile.ts` | "Generate Mock Data for This App": writes the skeleton beside the class (asking before it replaces one), or opens it untitled for an ADT document |
 | `src/xmlpreview.ts` | "Show Reconstructed XML View": virtual document + live refresh |
 | `src/xmlformat.ts` | Pretty-printer for the reconstructed view trees (`prepareAbap( ).nodes`) |
 | `src/renamewires.ts` | `vscode`-free: where a control id and a bound attribute are written - both ends of the strings an app is wired with, for F2 |
@@ -74,8 +79,10 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/appview.ts` | The "abap2UI5 Apps" tree: every z2ui5_if_app class with run/preview/check |
 | `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
-| `src/codelens.ts` | Run / Activate & reload / Check views / Autofix above the class definition |
-| `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window |
+| `src/codelens.ts` | Run / Activate & reload / Check views / Autofix / Run unit tests (when a `*.clas.testclasses.abap` sits beside the class) above the class definition |
+| `src/unitrunner.ts` | `vscode`-free: what "Run Unit Tests (No System)" decides - the runner (mcp-server's `scripts/ci-unit.mjs` from a checkout under `mcp.reposRoot`, else `npx -p @abap2ui5/mcp-server abap2ui5-unit`), its arguments (`src` or the class's folder, `--class`, `--home`), the shell-quoted terminal line, the banner |
+| `src/unittests.ts` | The command's plumbing: the one reused "abap2UI5 unit tests" terminal (recreated when cwd or the `*_HOME` env changed), the class from the tree node / lens / active editor, the Restricted Mode refusal |
+| `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`) |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
@@ -83,9 +90,9 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/colors.ts` | Colour spans for colour-typed property values (the swatch/picker provider's logic) |
 | `src/xmltoabap.ts` | "Convert XML View to Builder Chain": XML parser + corpus-style chain emitter |
 | `src/convert.ts` | The convert command's plumbing (source pick, result document) |
-| `src/wizard.ts` | "New App from Template" and "New Project from Template": template gallery pick, class name input, writing the project |
-| `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's own files copied from `src/data/app-template.json`, the name-carrying ones written here |
-| `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
+| `src/wizard.ts` | "New App from Template" (gallery pick, class name input) and "New Project from Template" (class name input, writing app-template's project - the gallery stays with the former, because the template's test include asserts on the template's own starter class) |
+| `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's shared files copied from `src/data/app-template.json`, its named files (starter class, sidecar, test include, abapGit descriptors) substituted from the same snapshot the way `template.json`'s `substitutions` describe, and the three composed files written here |
+| `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` (the template's `files.shared` and `files.named`, BOM stripped, plus its `template.json`) from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
 | `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot |
 | `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/mcp-server's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
 | `scripts/generate-settings.mjs` | Regenerates the settings table in `README.md` from `contributes.configuration`; `--check` fails when it is stale (`src/test/settings.test.ts`) |
@@ -122,9 +129,10 @@ not committed.
 `abapscan.ts`, `appindex.ts`, `settings.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
-`abbreviation.ts`, `connectcheck.ts`,
+`abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`,
+`unitrunner.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
-`checkcore.ts` and `webview.ts` (HTML strings only — the state it renders is
+`checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
 Node, and an accidental import turns a unit test into a module-not-found
 error. Put the interesting logic
@@ -135,7 +143,10 @@ bugs (`INTERFACES:`, a class name inside a comment) testable at all.
 and the app template are corpus too: `src/test/snippets.test.ts` expands
 each snippet, wraps it in a class and runs the linter's ABAP rules (plus the
 full gate where a view is built) — zero error/warning findings, enforced by
-`npm test`. API conventions come from the linter's rules and the
+`npm test`. A snippet that is a whole `*.clas.testclasses.abap` include
+(`z2ui5test`, recognised by its `FOR TESTING`) is checked as that file
+instead of being wrapped, and its structure is pinned in the same test
+because abaplint is not part of the suite. API conventions come from the linter's rules and the
 `z2ui5_if_client` abapdoc (the `obsolete` flags in `src/data/client-api.json`
 are parsed from it), never from assumption: a method existing with the right
 parameters says nothing about whether the ecosystem still wants it called —
@@ -337,6 +348,14 @@ Facts an agent cannot see from the code but will trip over:
   `icon-too-new` and `icon-removed` simply never fired in the editor while CI
   reported them. `data/` is build output — gitignored, and packaged into the
   `.vsix` because `.vscodeignore` does not exclude it.
+  The fourth data file is the linter's **`data/compat.json`** (its `./compat`
+  export), copied to `dist/compat.json` (and `dist-test/`) by the same
+  `copyCompat()` - `compat.ts` reads it there. A linter pin from before the
+  record ships none: then nothing is copied, a copy from an earlier build is
+  removed, and the extension logs "the bundled linter ships no compatibility
+  record" instead of comparing against a stale one. `compat.test.ts` tests
+  the verdict over a fixture for that reason, and only checks the real file's
+  shape when one is there.
 - **`gate.ts` is a second CALLER of the linter's pipeline, never a second
   pipeline.** It exists because the two hosts feed the metadata snapshot in
   differently (desktop reads a file, the browser gets text through
@@ -395,9 +414,12 @@ Facts an agent cannot see from the code but will trip over:
   from a snapshot.** `src/data/app-template.json` carries that repository's
   `abaplint.jsonc`, `abap2ui5lint.jsonc`, `.claude/settings.json`,
   `.gitattributes`, `.gitignore`, `dependabot.yml`, `AGENTS.md`, its
-  `package.json` and its `check.yml`; `scaffold.ts` writes the first six
-  verbatim and reads the dependency versions, the framework pin, the linter
-  action's pin and the app-building guide out of the rest. A snapshot rather
+  `package.json` and its `check.yml` - and, since 0.29.0, its named files
+  (the starter class, its sidecar, its test include, `.abapgit.xml`,
+  `package.devc.xml`) with the placeholder class as the template has it;
+  `scaffold.ts` writes the shared files verbatim, the named ones substituted
+  (next bullet), and reads the dependency versions, the framework pin, the
+  linter action's pin and the app-building guide out of the rest. A snapshot rather
   than a clone because `abap2ui5.newProject` is registered in the WEB entry
   too and vscode.dev has neither git nor a child process — and because the
   content is then data the test suite can run through the bundled linter.
@@ -419,9 +441,18 @@ Facts an agent cannot see from the code but will trip over:
   files (`appTemplate.template`), the generator takes its file list from it,
   and `VERBATIM_FILES` in `scaffold.ts` is `files.shared` minus the three the
   scaffold composes around values it reads (`package.json`,
-  `.github/workflows/check.yml`, `AGENTS.md`). So a file added to app-template
-  reaches a new project here without an edit. mcp-server's `scaffold_app` executes
-  the same description; the three executors differ, the description does not.
+  `.github/workflows/check.yml`, `AGENTS.md`). The NAMED files come out of the
+  same snapshot: `NAMED_FILES` is `files.named`, and `substituteText` /
+  `substitutePath` execute the spec's `substitutions` block literally - the
+  placeholder class in the listed files and paths in the listed cases, one XML
+  element for the package text, one element or JSON key for the repository
+  name - mirroring app-template's `scripts/lib/substitute.mjs`. The scaffold
+  used to write the starter class, sidecar and descriptors itself, and the day
+  the template grew a `.clas.testclasses.abap` and `WITH_UNIT_TESTS` in the
+  sidecar, a project from the IDE had neither. So a file added to app-template,
+  shared or named, reaches a new project here without an edit. mcp-server's
+  `scaffold_app` executes the same description; the three executors differ,
+  the description does not.
 - **The sibling-checkout naming is mcp-server's, snapshotted here.** The MCP
   registration (`src/mcp.ts`), the view checker (`src/viewcheck.ts`) and the
   example catalogues (`src/exampleview.ts`) all probe a repos root by

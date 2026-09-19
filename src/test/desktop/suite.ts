@@ -45,6 +45,7 @@ const EXPECTED_COMMANDS = [
   "abap2ui5.checkWorkspace",
   "abap2ui5.screenshot",
   "abap2ui5.showTraffic",
+  "abap2ui5.runUnitTests",
   // Shared with the web host, but the desktop registration is a different
   // code path and has broken on its own before.
   "abap2ui5.checkViews",
