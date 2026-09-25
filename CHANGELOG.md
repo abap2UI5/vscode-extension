@@ -20,10 +20,9 @@ line with what that linter teaches, and the snippet set grows by five.
   compatibility record (`@abap2ui5/linter/compat`), so an `abaplint.jsonc`
   pinned to an abap2UI5 release below what the bundled linter assumes gets
   the warning on its `branch` line that 0.29.0 prepared and no pin could
-  trigger. The record also reaches the web build, where the enum-key table
-  the linter grew for the eight enums whose key and value differ is now
-  handed on like the other hidden tables - the gate on vscode.dev judges
-  those values as the desktop does.
+  trigger. On vscode.dev the enum-key table the linter grew for the eight
+  enums whose key and value differ is now handed on like the other hidden
+  tables, so the web gate judges those values as the desktop does.
 - **The gallery templates dispatch the way the app guide does.** "Form" and
   "Popup" lost the `check_on_init( )` arm that only repeated the
   `check_on_navigated( )` display (`redundant-init-display` - init implies
@@ -61,7 +60,24 @@ line with what that linter teaches, and the snippet set grows by five.
   roundtrip).
 - The bundled `client->` reference and the app-template snapshot are
   regenerated (`follow_up_action` and `_event` docs, the template's skills).
-<!-- language features: see the second agent -->
+- **The view outline and completion follow handle variables.** A class
+  written the way the starter template is - `DATA(page) = view->ele( \`Shell\`
+  )->ele( \`Page\` )`, then `page->ele( \`List\` )...`, then
+  `page->tag( \`Button\` )` - is now read the way the builder and the view
+  check read it: the Button is a child of the Page, not of the List above it.
+  Binding completion at Page level no longer offers the list row's fields
+  (which the check then reported as `unknown-binding-path`), and
+  `page->a( n = \`...\` )` offers the Page's members.
+- **Completion inside `client->_event( \`...\` )`.** The event names the class
+  already handles - its `WHEN` branches and `check_on_event( )` tests - come
+  first, then the names its other wires raise; a handler spelled differently
+  (`WHEN \`SAVE\`` for a `save` wire) is named in the entry, so the mismatch
+  `event-without-handler` reports later is avoided at the keystroke.
+- **Completion after `client->_bind( `, `_bind_edit( ` and `_bind_path( `.**
+  Offers the PUBLIC instance attributes of the class - the only data the
+  framework can bind - with tables marked as what an aggregation binds;
+  `CONSTANTS` and `CLASS-DATA`, which raise `BINDING_ERROR` at runtime, are
+  left out. Works for the `val =` form and in any spelling.
 - Internal: the gate parity test normalises line endings in the linter
   fixtures it reads, so the Windows CI job no longer fails on the CRLF an
   `autocrlf` checkout gives them.
