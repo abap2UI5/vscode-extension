@@ -1,0 +1,6 @@
+# The ABAP fixtures stand in for real sources and are judged by the bundled
+# linter, which reports a CRLF line ending as the abapGit round-trip defect it
+# is. A Windows clone with the default core.autocrlf=true would check them out
+# with CRLF and the gate parity test would then fail on `crlf-line-ending`
+# rather than on parity - so every checkout gets LF, on every platform.
+*.abap text eol=lf

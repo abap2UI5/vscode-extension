@@ -24,10 +24,11 @@ let failure: string | undefined;
  * Web build only: the snapshot arrives as text, read through
  * `vscode.workspace.fs` (there is no `fs` in a browser extension host).
  * Mirrors exactly what the linter's `loadSnapshot( )` does with the parsed
- * file - the enum table, the per-value `@since` of the enums and the UI5
- * version ride along non-enumerably. `snapshot.test.ts` holds the set of
- * hidden keys to `loadSnapshot`'s: the `__enumSince` table went missing here
- * once, and with it `enum-value-too-new` never fired on vscode.dev.
+ * file - the enum table, the per-value `@since` of the enums, the
+ * value-to-key table of the enums whose two differ, and the UI5 version ride
+ * along non-enumerably. `snapshot.test.ts` holds the set of hidden keys to
+ * `loadSnapshot`'s: the `__enumSince` table went missing here once, and with
+ * it `enum-value-too-new` never fired on vscode.dev.
  */
 export function setSnapshotText(raw: string): void {
   try {
@@ -35,6 +36,7 @@ export function setSnapshotText(raw: string): void {
       controls: Snapshot;
       enums?: Record<string, string[]>;
       enumSince?: Record<string, Record<string, string>>;
+      enumKeys?: Record<string, Record<string, string>>;
       ui5Version?: string;
     };
     Object.defineProperty(parsed.controls, "__enums", {
@@ -43,6 +45,10 @@ export function setSnapshotText(raw: string): void {
     });
     Object.defineProperty(parsed.controls, "__enumSince", {
       value: parsed.enumSince || {},
+      enumerable: false,
+    });
+    Object.defineProperty(parsed.controls, "__enumKeys", {
+      value: parsed.enumKeys || {},
       enumerable: false,
     });
     Object.defineProperty(parsed.controls, "__ui5Version", {

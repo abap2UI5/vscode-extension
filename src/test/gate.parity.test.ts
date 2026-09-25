@@ -272,8 +272,13 @@ ABAP_FIXTURES["a json bind on a scalar property (fix deletes the argument)"] =
  *  rules. `rowdefaults` is the boolFields case, at the floor its controls
  *  need. */
 const LINTER_FIXTURES = path.join(__dirname, "..", "src", "test", "fixtures", "linter");
+/* Line endings are normalised because the fixtures are checked out with
+ * core.autocrlf=true on the windows-latest runner (the same way the README
+ * arrives there, see generate-settings.mjs): the linter then correctly
+ * reports `crlf-line-ending` on both sides, and the deepEqual against `[]`
+ * fails for a reason that has nothing to do with the gate's parity. */
 const linterFixture = (name: string): string =>
-  fs.readFileSync(path.join(LINTER_FIXTURES, name), "utf8");
+  fs.readFileSync(path.join(LINTER_FIXTURES, name), "utf8").replace(/\r\n/g, "\n");
 ABAP_FIXTURES["a view that is built and never displayed (linter fixture nodisplay)"] =
   linterFixture("nodisplay.clas.abap");
 ABAP_FIXTURES["views built in helper methods, with flow defects (linter fixture flow)"] =

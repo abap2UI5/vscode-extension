@@ -15,10 +15,12 @@
       "    view->ele( n = `View` ns = `mvc`",
       "        )->a( n = `xmlns`     v = `sap.m`",
       "        )->a( n = `xmlns:mvc` v = `sap.ui.core.mvc`",
+      "",
       "        )->ele( n = `Page`",
-      "        )->a( n = `title` v = `${2:Hello abap2UI5}`",
-      "        )->tag( n = `Text`",
-      "        )->a( n = `text` v = `${3:My first app}` ).",
+      "            )->a( n = `title` v = `${2:Hello abap2UI5}`",
+      "",
+      "            )->tag( n = `Text`",
+      "                )->a( n = `text` v = `${3:My first app}` ).",
       "",
       "    client->view_display( view->stringify( ) ).",
       "",
@@ -33,16 +35,18 @@
     "body": [
       "tag( n = `${1:Text}`",
       "    )->a( n = `${2:text}` v = `${3:Hello}`",
-      "    )$0"
+      ")$0"
     ]
   },
   "abap2UI5 Container": {
     "prefix": "z2ui5ele",
-    "description": "A control that takes children - ele, fill, end",
+    "description": "A control that takes children - ele, one child, end in the column of the ele it closes",
     "body": [
       "ele( n = `${1:VBox}`",
-      "    )->$0",
-      "end( )"
+      "    )->tag( n = `${2:Text}`",
+      "        )->a( n = `${3:text}` v = `${4:Hello}`",
+      ")->end(",
+      ")$0"
     ]
   },
   "abap2UI5 Button": {
@@ -52,7 +56,7 @@
       "tag( n = `Button`",
       "    )->a( n = `text`  v = `${1:Press me}`",
       "    )->a( n = `press` v = client->_event( `${2:BUTTON_CLICK}` )",
-      "    )$0"
+      ")$0"
     ]
   },
   "abap2UI5 Input": {
@@ -61,7 +65,7 @@
     "body": [
       "tag( n = `Input`",
       "    )->a( n = `value` v = client->_bind( ${1:mv_value} )",
-      "    )$0"
+      ")$0"
     ]
   },
   "abap2UI5 Table": {
@@ -71,24 +75,29 @@
       "ele( n = `Table`",
       "    )->a( n = `items` v = client->_bind( ${1:mt_data} )",
       "    )->ele( n = `columns`",
-      "    )->ele( n = `Column`",
-      "    )->tag( n = `Text`",
-      "    )->a( n = `text` v = `${2:Column}`",
-      "    )->end( )->end(",
+      "        )->ele( n = `Column`",
+      "            )->tag( n = `Text`",
+      "                )->a( n = `text` v = `${2:Column}`",
+      "",
+      "        )->end(",
+      "    )->end(",
       "    )->ele( n = `items`",
-      "    )->ele( n = `ColumnListItem`",
-      "    )->ele( n = `cells`",
-      "    )->tag( n = `Text`",
-      "    )->a( n = `text` v = `{${3:FIELD}}`",
-      "    )->end( )->end( )->end(",
-      "    )$0"
+      "        )->ele( n = `ColumnListItem`",
+      "            )->ele( n = `cells`",
+      "                )->tag( n = `Text`",
+      "                    )->a( n = `text` v = `{${3:FIELD}}`",
+      "",
+      "            )->end(",
+      "        )->end(",
+      "    )->end(",
+      ")$0"
     ]
   },
   "abap2UI5 Event Handler": {
     "prefix": "z2ui5event",
     "description": "Dispatch on the event the view raised",
     "body": [
-      "CASE client->get( )-event.",
+      "CASE client->get_event( ).",
       "  WHEN `${1:BUTTON_CLICK}`.",
       "    $0",
       "ENDCASE."
@@ -131,14 +140,14 @@
       "    )->a( n = `xmlns` v = `sap.m`",
       "    )->a( n = `title` v = `${1:My Popup}`",
       "    )->ele( n = `content`",
-      "    )->tag( n = `Text`",
-      "    )->a( n = `text` v = `${2:Popup content}`",
+      "        )->tag( n = `Text`",
+      "            )->a( n = `text` v = `${2:Popup content}`",
+      "",
       "    )->end(",
       "    )->ele( n = `buttons`",
-      "    )->tag( n = `Button`",
-      "    )->a( n = `text`  v = `Close`",
-      "    )->a( n = `press` v = client->_event( `${3:POPUP_CLOSE}` )",
-      "    )->end( ).",
+      "        )->tag( n = `Button`",
+      "            )->a( n = `text`  v = `Close`",
+      "            )->a( n = `press` v = client->_event( `${3:POPUP_CLOSE}` ) ).",
       "",
       "client->popup_display( popup->stringify( ) ).",
       "$0"
@@ -157,8 +166,9 @@
       "popover->ele( n = `Popover`",
       "    )->a( n = `xmlns` v = `sap.m`",
       "    )->a( n = `title` v = `${1:Details}`",
+      "",
       "    )->tag( n = `Text`",
-      "    )->a( n = `text` v = `${2:Popover content}` ).",
+      "        )->a( n = `text` v = `${2:Popover content}` ).",
       "",
       "client->popover_display( xml   = popover->stringify( )",
       "                         by_id = `${3:openerId}` ).",
@@ -186,12 +196,59 @@
   "abap2UI5 Navigate Back": {
     "prefix": "z2ui5navback",
     "description": "Return to the calling app",
-    "body": ["client->nav_app_leave( client->get_app_prev( ) ).$0"]
+    "body": ["client->nav_app_leave( ).$0"]
   },
   "abap2UI5 Event Argument": {
     "prefix": "z2ui5eventarg",
-    "description": "Read an argument the event's t_arg carried",
-    "body": ["DATA(${1:lv_arg}) = client->get_event_arg( ${2:1} ).$0"]
+    "description": "Read the argument the event's arg / t_arg carried (the first one by default - pass an index from the second on)",
+    "body": ["DATA(${1:lv_arg}) = client->get_event_arg( ${2}).$0"]
+  },
+  "abap2UI5 Boolean Attribute": {
+    "prefix": "z2ui5bool",
+    "description": "An attribute rendered true/false from an ABAP flag - b instead of v",
+    "body": ["a( n = `${1:visible}` b = ${2:mv_flag}", ")$0"]
+  },
+  "abap2UI5 List (Press with Argument)": {
+    "prefix": "z2ui5list",
+    "description": "List over an internal table whose row press carries the row's key - read back with get_event_arg( )",
+    "body": [
+      "ele( n = `List`",
+      "    )->a( n = `items` v = client->_bind( ${1:mt_data} )",
+      "    )->tag( n = `StandardListItem`",
+      "        )->a( n = `title` v = `{${2:FIELD}}`",
+      "        )->a( n = `type`  v = `Active`",
+      "        )->a( n = `press` v = client->_event( val = `${3:PICK}` arg = `\\${${2:FIELD}}` )",
+      ")$0"
+    ]
+  },
+  "abap2UI5 Live Event": {
+    "prefix": "z2ui5liveevent",
+    "description": "An Input whose liveChange round-trips per keystroke - nothing lost, no busy overlay",
+    "body": [
+      "tag( n = `Input`",
+      "    )->a( n = `value`      v = client->_bind( ${1:mv_value} )",
+      "    )->a( n = `liveChange` v = client->_event( val = `${2:SEARCH}` s_ctrl = VALUE #( check_queue_last = abap_true check_no_busy = abap_true ) )",
+      ")$0"
+    ]
+  },
+  "abap2UI5 Back Button": {
+    "prefix": "z2ui5backbutton",
+    "description": "A Page's back button - shown only when there is an app to return to, leaving without a branch in main",
+    "body": [
+      "a( n = `showNavButton`  b = client->check_app_prev_stack( )",
+      ")->a( n = `navButtonPress` v = client->_event_nav_app_leave( )",
+      ")$0"
+    ]
+  },
+  "abap2UI5 Popup Close (No Roundtrip)": {
+    "prefix": "z2ui5popupclosewire",
+    "description": "A Close button that tears the popup down in the frontend, without a roundtrip",
+    "body": [
+      "tag( n = `Button`",
+      "    )->a( n = `text`  v = `${1:Close}`",
+      "    )->a( n = `press` v = client->follow_up_action( val = client->cs_event-popup_close )",
+      ")$0"
+    ]
   },
   "abap2UI5 Unit Test (testclasses)": {
     "prefix": "z2ui5test",

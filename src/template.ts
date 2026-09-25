@@ -6,10 +6,13 @@
  * extension's own checker then ignored.
  *
  * Every template follows the corpus recipe: `main` dispatches on
- * `check_on_init` / `check_on_event`, events are handled in a CASE, model
- * data lives in PUBLIC attributes bound with `client->_bind( )`, and
- * `model_init` goes last. The test suite runs each template through the
- * bundled linter, so a template cannot teach what the linter reports.
+ * `check_on_navigated` / `check_on_event` (with a `check_on_init` arm only
+ * where it seeds data - init implies navigated, so an init arm that only
+ * displays is what the linter's `redundant-init-display` reports), events
+ * are handled in a `CASE client->get_event( )`, model data lives in PUBLIC
+ * attributes bound with `client->_bind( )`, and `model_init` goes last. The
+ * test suite runs each template through the bundled linter, so a template
+ * cannot teach what the linter reports.
  *
  * Its own module so both entries (desktop and web) share it without the web
  * bundle dragging in the desktop plumbing.
@@ -144,9 +147,7 @@ CLASS zcl_my_app IMPLEMENTATION.
   METHOD z2ui5_if_app~main.
 
     me->client = client.
-    IF client->check_on_init( ).
-      view_display( ).
-    ELSEIF client->check_on_navigated( ).
+    IF client->check_on_navigated( ).
       view_display( ).
     ELSEIF client->check_on_event( ).
       on_event( ).
@@ -181,7 +182,7 @@ CLASS zcl_my_app IMPLEMENTATION.
 
   METHOD on_event.
 
-    CASE client->get( )-event.
+    CASE client->get_event( ).
       WHEN \`SAVE\`.
         client->message_toast_display( |Saved { mv_name }| ).
     ENDCASE.
@@ -240,7 +241,7 @@ CLASS zcl_my_app IMPLEMENTATION.
                     )->a( n = \`title\`       v = \`{TITLE}\`
                     )->a( n = \`description\` v = \`{DESCR}\`
                     )->a( n = \`type\`        v = \`Active\`
-                    )->a( n = \`press\`       v = client->_event( val = \`PICK\` t_arg = VALUE #( ( \`\${TITLE}\` ) ) )
+                    )->a( n = \`press\`       v = client->_event( val = \`PICK\` arg = \`\${TITLE}\` )
 
             )->end(
             )->ele( \`Panel\`
@@ -254,7 +255,7 @@ CLASS zcl_my_app IMPLEMENTATION.
 
   METHOD on_event.
 
-    CASE client->get( )-event.
+    CASE client->get_event( ).
       WHEN \`PICK\`.
         mv_selected = client->get_event_arg( ).
     ENDCASE.
@@ -289,9 +290,7 @@ CLASS zcl_my_app IMPLEMENTATION.
   METHOD z2ui5_if_app~main.
 
     me->client = client.
-    IF client->check_on_init( ).
-      view_display( ).
-    ELSEIF client->check_on_navigated( ).
+    IF client->check_on_navigated( ).
       view_display( ).
     ELSEIF client->check_on_event( ).
       on_event( ).
@@ -317,7 +316,7 @@ CLASS zcl_my_app IMPLEMENTATION.
 
   METHOD on_event.
 
-    CASE client->get( )-event.
+    CASE client->get_event( ).
       WHEN \`OPEN\`.
         popup_open( ).
       WHEN \`POPUP_CLOSE\`.
