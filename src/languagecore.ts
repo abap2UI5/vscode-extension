@@ -2,8 +2,13 @@ import {
   abapBindingContextAt,
   abapContextAt,
   abapNsMap,
+  bindableAttributes,
+  bindArgumentAt,
   BindingContext,
+  checkedEvents,
+  eventLiteralAt,
   eventRaises,
+  whenBranches,
   whenLiteralAt,
   WriteContext,
   xmlContextAt,
@@ -153,6 +158,58 @@ function bindingEntries(
 }
 
 /**
+ * What to offer inside the name literal of a `client->_event( )` at `at`:
+ * the events the class already handles - its `WHEN` branches and its
+ * `check_on_event( )` tests - first, then the names its OTHER wires raise.
+ * Spellings are kept apart on purpose: the runtime compares the raised name
+ * with the handler letter for letter, so `save` next to a `WHEN \`SAVE\`` is
+ * the wire that never fires, and picking the handler's spelling from this
+ * list is what stops it.
+ */
+function eventNameEntries(text: string, at: number): CompletionEntry[] {
+  const entries = new Map<string, CompletionEntry>();
+  const handled = new Map<string, string>(); // upper-cased -> as written
+  const add = (name: string, detail: string, group: string) => {
+    if (!entries.has(name)) {
+      entries.set(name, {
+        label: name,
+        kind: "events",
+        detail,
+        sortText: `${group}${name}`,
+      });
+    }
+  };
+  for (const branch of whenBranches(text)) {
+    add(branch.name, "handled by a WHEN branch", "0");
+    handled.set(branch.name.toUpperCase(), branch.name);
+  }
+  for (const name of checkedEvents(text)) {
+    add(name, "handled by a check_on_event( ) test", "0");
+    handled.set(name.toUpperCase(), name);
+  }
+  const raised = new Map<string, number>();
+  for (const raise of eventRaises(text)) {
+    if (raise.nameStart === at) {
+      continue; // the literal being written is not a second wire
+    }
+    raised.set(raise.name, (raised.get(raise.name) ?? 0) + 1);
+  }
+  for (const [name, count] of raised) {
+    const handler = handled.get(name.toUpperCase());
+    add(
+      name,
+      handler !== undefined && handler !== name
+        ? `raised ${count}× elsewhere in the view - its handler is spelled \`${handler}\``
+        : `raised ${count}× elsewhere in the view - no handler yet`,
+      "1"
+    );
+  }
+  return [...entries.values()].sort((a, b) =>
+    a.sortText!.localeCompare(b.sortText!)
+  );
+}
+
+/**
  * The completion offer at one position, or undefined when nothing is
  * completable there. `shapeOf` supplies the derived model shape lazily -
  * deriving it walks the whole source, and most positions never need it.
@@ -202,6 +259,33 @@ export function completionAt(
             // number the CodeLens words this way on the branch itself
             detail: `raised ${count}× in the view`,
           })),
+      };
+    }
+    // The reverse position: inside the name literal of a `client->_event( )`
+    // wire, the handlers the class already has. See `eventNameEntries`.
+    const raise = eventLiteralAt(text, offset);
+    if (raise) {
+      return {
+        start: raise.start,
+        end: raise.end,
+        entries: eventNameEntries(text, raise.start),
+      };
+    }
+    // After `client->_bind( `: the attributes the framework can bind at all
+    // - the PUBLIC instance DATA of the class. A CONSTANTS or CLASS-DATA
+    // named here raises BINDING_ERROR at runtime, so neither is on the list.
+    const bind = bindArgumentAt(text, offset);
+    if (bind) {
+      return {
+        start: bind.start,
+        end: bind.end,
+        entries: bindableAttributes(text).map((attribute) => ({
+          label: attribute.name,
+          kind: attribute.table ? "binding-table" : "binding-path",
+          detail: attribute.table
+            ? "PUBLIC table attribute - what an aggregation binds"
+            : "PUBLIC attribute",
+        })),
       };
     }
   }

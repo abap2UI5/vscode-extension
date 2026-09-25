@@ -18,7 +18,13 @@
  * and the test suite drives it directly.
  */
 
-import { abapSpans, blankComments, blankNonCode } from "./abapscan";
+import {
+  abapSpans,
+  abapStatements,
+  blankComments,
+  blankNonCode,
+  declaredNames,
+} from "./abapscan";
 
 /** Which of the three writable positions the cursor sits in. */
 export type ContextKind = "control" | "member" | "value" | "namespace";
@@ -359,6 +365,13 @@ function writtenName(args: string): string | undefined {
   );
 }
 
+/** One level of the builder's nesting: the `ele( )` opened there (none on
+ *  the root), and the child written last under it. */
+interface Frame<T> {
+  call?: T;
+  lastChild?: T;
+}
+
 /**
  * The rule that says which control an `a( )` call attaches to — the builder's
  * own (and the linter's reconstruction's): the last CHILD of the open
@@ -372,13 +385,60 @@ function writtenName(args: string): string | undefined {
  * attribute written at that point. Generic over what a "call" is so the
  * regex-scanning colour provider can walk its matches through the same rule
  * instead of keeping a second, lexical one.
+ *
+ * The second half of the rule is the HANDLE idiom every scaffolded class is
+ * written in: `DATA(page) = view->ele( \`Shell\` )->ele( \`Page\` )` keeps the
+ * element the chain ended on, and a later statement written on that variable
+ * - `page->tag( \`Button\` )` - continues from there, not from wherever the
+ * previous statement stopped. Read linearly, the Button landed inside the
+ * List the previous statement had opened, completion offered the list row's
+ * fields at Page level (which the gate then squiggled), and `page->a( )`
+ * offered the StandardListItem's members. `beginStatement` / `endStatement`
+ * are that idiom, the way the linter's reconstruction replays it: the
+ * assigned variable holds the levels open at the end of its chain, and a
+ * statement on it starts from a COPY of them - the levels are shared, so a
+ * child added under the handle's element is seen by every later statement on
+ * it, while an `ele( )` the statement descends into stays its own. A caller
+ * that never calls the two gets the plain linear walk.
  */
 export class ContainerStack<T> {
-  private stack: Array<{ call?: T; lastChild?: T }> = [{}];
+  private stack: Frame<T>[] = [{}];
+  /** Variable (lower-cased) -> the levels open where its chain ended. */
+  private handles = new Map<string, Frame<T>[]>();
+  /** The variable the statement under way assigns its chain to, if any. */
+  private assigns?: string;
+
+  /**
+   * A statement begins. `handle` is the variable it is written on
+   * (`page->…`), `assigns` the one it assigns its chain to (`DATA(page) = …`
+   * or `page = …`). A handle nothing was assigned to is not a builder - the
+   * walk simply continues, and what such a statement assigns is no handle
+   * either (`DATA(lv) = client->get( )` must not become one).
+   */
+  beginStatement(handle?: string, assigns?: string): void {
+    this.endStatement();
+    const held = handle ? this.handles.get(handle.toLowerCase()) : undefined;
+    if (held) {
+      this.stack = held.slice();
+    }
+    this.assigns =
+      assigns && (held || !handle) ? assigns.toLowerCase() : undefined;
+  }
+
+  /** The statement under way ends: what it assigned now holds its levels. */
+  endStatement(): void {
+    if (this.assigns !== undefined) {
+      this.handles.set(this.assigns, this.stack);
+      // the next statement must not move the handle's levels along with it
+      this.stack = this.stack.slice();
+      this.assigns = undefined;
+    }
+  }
 
   /** One structural call: `verb` lower-cased (`ele`, `tag`, `end`, `factory`,
-   *  `stringify`; anything else is ignored). */
-  push(verb: string, call: T): void {
+   *  `stringify`; anything else is ignored). `call` is what `ele` / `tag`
+   *  open or add; the other verbs take none. */
+  push(verb: string, call?: T): void {
     if (verb === "factory" || verb === "stringify") {
       this.stack = [{}];
     } else if (verb === "ele") {
@@ -398,19 +458,140 @@ export class ContainerStack<T> {
     const top = this.stack[this.stack.length - 1];
     return top.lastChild ?? top.call;
   }
+
+  /** The container the chain points at - what an `ele( )` / `tag( )` written
+   *  now goes into. Undefined on the root. */
+  get top(): T | undefined {
+    return this.stack[this.stack.length - 1].call;
+  }
+
+  /** The `ele( )` containers still open, outermost first. */
+  get containers(): T[] {
+    const out: T[] = [];
+    for (let i = 1; i < this.stack.length; i++) {
+      const call = this.stack[i].call;
+      if (call !== undefined) {
+        out.push(call);
+      }
+    }
+    return out;
+  }
 }
 
-/** The control an `a( )` call at `before` attaches to - see
- *  {@link ContainerStack}. */
-function controlCallBefore(calls: Call[], before: number): Call | undefined {
+/**
+ * One ABAP statement of the source, with what it says about handles: the
+ * variable it is written on and the one it assigns its chain to. Every
+ * statement is listed - the walk below has to notice a statement boundary
+ * even between two that name no handle at all.
+ *
+ * Read over the BLANKED source: an `->` inside a literal or a comment names
+ * nothing. Both spellings of an assignment count, the inline `DATA(page) =`
+ * and a plain `page =`; the chain assigned is one starting on a variable or
+ * on a `factory( )`.
+ */
+interface ChainStatement {
+  start: number;
+  /** Offset of the delimiting period (or the end of the source). */
+  end: number;
+  handle?: string;
+  assigns?: string;
+}
+
+const ASSIGNED_CHAIN =
+  /^\s*(?:DATA\(\s*(\w+)\s*\)|(\w+))\s*=\s*(?:(\w+)\s*->|\w+\s*=>\s*factory\s*\()/i;
+const HANDLE_CHAIN = /^\s*(\w+)\s*->/;
+
+/** Same memo as the namespace map's: the statement table of a source is
+ *  asked for by both context calls of one completion and by the outline. */
+const STATEMENT_MEMO_SLOTS = 4;
+const statementMemo: Array<{ source: string; statements: ChainStatement[] }> =
+  [];
+
+function chainStatements(source: string): ChainStatement[] {
+  for (let i = 0; i < statementMemo.length; i++) {
+    if (statementMemo[i].source === source) {
+      const [entry] = statementMemo.splice(i, 1);
+      statementMemo.unshift(entry);
+      return entry.statements;
+    }
+  }
+  const statements = chainStatementsUncached(source);
+  statementMemo.unshift({ source, statements });
+  if (statementMemo.length > STATEMENT_MEMO_SLOTS) {
+    statementMemo.pop();
+  }
+  return statements;
+}
+
+function chainStatementsUncached(source: string): ChainStatement[] {
+  const code = blankNonCode(source);
+  return abapStatements(source).map((statement) => {
+    const end = statement.start + statement.text.length;
+    const text = code.slice(statement.start, end);
+    const assigned = ASSIGNED_CHAIN.exec(text);
+    if (assigned) {
+      return {
+        start: statement.start,
+        end,
+        assigns: assigned[1] ?? assigned[2],
+        ...(assigned[3] ? { handle: assigned[3] } : {}),
+      };
+    }
+    const handle = HANDLE_CHAIN.exec(text);
+    return handle
+      ? { start: statement.start, end, handle: handle[1] }
+      : { start: statement.start, end };
+  });
+}
+
+/**
+ * The statement side of a walk over the calls of `source`: the function
+ * returned is called with each call's offset, in source order, and begins
+ * the call's statement on `stack` whenever it is a new one. The index only
+ * ever moves forward, so a walk pays one pass over the statement table.
+ */
+function statementEntry<T>(
+  source: string,
+  stack: ContainerStack<T>
+): (offset: number) => void {
+  const statements = chainStatements(source);
+  let ix = -1;
+  return (offset) => {
+    let moved = false;
+    while (ix + 1 < statements.length && statements[ix + 1].start <= offset) {
+      ix++;
+      moved = true;
+    }
+    if (moved) {
+      stack.beginStatement(statements[ix].handle, statements[ix].assigns);
+    }
+  };
+}
+
+/**
+ * The container stack at `before`: every structural call in front of it
+ * walked through {@link ContainerStack}, statement by statement so a chain
+ * written on a handle starts where the handle points. The statement that
+ * contains `before` itself is begun too - the `a( )` being written may be
+ * the first call of `page->a( … )`, with nothing of its statement in front
+ * of it.
+ */
+function stackBefore(
+  source: string,
+  calls: Call[],
+  before: number
+): ContainerStack<Call> {
   const stack = new ContainerStack<Call>();
+  const enter = statementEntry(source, stack);
   for (const call of calls) {
     if (call.open >= before) {
       break;
     }
+    enter(call.open);
     stack.push(call.name.toLowerCase(), call);
   }
-  return stack.owner;
+  enter(before);
+  return stack;
 }
 
 /** Library-qualified control name of an `ele( )` / `tag( )` call. */
@@ -494,29 +675,6 @@ function bindCallPathOf(args: string): string | undefined {
   return "/" + m[1].replace(/^me->/i, "").replace(/-/g, "/").toUpperCase();
 }
 
-/**
- * The `ele( )` containers still open around `before`, outermost first.
- * Mirrors the builder's own nesting: `ele` pushes a level, `end` pops it,
- * `tag` never nests, and a fresh `factory( )` starts over.
- */
-function openContainersBefore(calls: Call[], before: number): Call[] {
-  const stack: Call[] = [];
-  for (const call of calls) {
-    if (call.open >= before) {
-      break;
-    }
-    const name = call.name.toLowerCase();
-    if (name === "factory" || name === "stringify") {
-      stack.length = 0;
-    } else if (name === "ele") {
-      stack.push(call);
-    } else if (name === "end") {
-      stack.pop();
-    }
-  }
-  return stack;
-}
-
 /** The calls that end one control's attribute run - the builder's structure,
  *  as opposed to the `a( )` calls hanging off it. One list, read by both
  *  readers of an attribute run below; it used to be written out twice. */
@@ -589,10 +747,13 @@ export function abapBindingContextAt(
 
   // The row context: bound aggregations of the enclosing containers. The
   // cursor's own control does not enclose itself - its aggregation binding
-  // applies to its children, not to its own attributes.
+  // applies to its children, not to its own attributes. Containers a handle
+  // statement left behind do not enclose the cursor either: `page->tag( )`
+  // written after the List chain sits under Page, outside the List's rows.
   const ns = abapNsMap(source);
-  const owner = controlCallBefore(calls, call.open);
-  const containers = openContainersBefore(calls, call.open).filter(
+  const levels = stackBefore(source, calls, call.open);
+  const owner = levels.owner;
+  const containers = levels.containers.filter(
     (container) => container !== owner
   );
   const aggregations: string[] = [];
@@ -642,30 +803,29 @@ export interface OutlineNode {
 /**
  * The view hierarchy of a class, as `z2ui5_cl_ui5_view_builder` itself would
  * nest it: `ele` pushes a level, `end` pops it, `tag` never nests,
- * `factory( )` starts a new document. A long view method reads as a tree again.
+ * `factory( )` starts a new document - and a statement written on a handle
+ * (`page->tag( \`Button\` )`) goes into the element the handle points at, see
+ * {@link ContainerStack}. A long view method reads as a tree again.
  */
 export function viewOutline(source: string): OutlineNode[] {
   const { calls } = scanAbap(source, source.length);
   const roots: OutlineNode[] = [];
-  const stack: OutlineNode[] = [];
-  let current: OutlineNode | undefined; // last ele/tag, for a( ) attributes
+  const stack = new ContainerStack<OutlineNode>();
+  const enter = statementEntry(source, stack);
 
-  const attach = (node: OutlineNode) => {
-    (stack.length ? stack[stack.length - 1].children : roots).push(node);
-  };
-  const closeAll = (at: number) => {
-    while (stack.length) {
-      const node = stack.pop()!;
-      node.end = Math.max(node.end, at);
+  const widenOpen = (at: number) => {
+    for (const open of stack.containers) {
+      open.end = Math.max(open.end, at);
     }
   };
 
   for (const call of calls) {
+    enter(call.open);
     const name = call.name.toLowerCase();
     const endOf = call.close ?? call.open;
     if (name === "factory" || name === "stringify") {
-      closeAll(endOf);
-      current = undefined;
+      widenOpen(endOf);
+      stack.push(name);
       continue;
     }
     if (name === "ele" || name === "tag") {
@@ -685,14 +845,12 @@ export function viewOutline(source: string): OutlineNode[] {
         container: name === "ele",
         children: [],
       };
-      attach(node);
-      current = node;
-      if (name === "ele") {
-        stack.push(node);
-      }
+      (stack.top?.children ?? roots).push(node);
+      stack.push(name, node);
       continue;
     }
     if (name === "a") {
+      const current = stack.owner;
       if (current) {
         const args = argsOf(source, call);
         if (argLiteral(args, "n")?.toLowerCase() === "id") {
@@ -700,20 +858,18 @@ export function viewOutline(source: string): OutlineNode[] {
         }
         current.end = Math.max(current.end, endOf);
       }
-      for (const open of stack) {
-        open.end = Math.max(open.end, endOf);
-      }
+      widenOpen(endOf);
       continue;
     }
     if (name === "end") {
-      const node = stack.pop();
-      if (node) {
-        node.end = Math.max(node.end, endOf);
+      const closing = stack.containers.pop();
+      if (closing) {
+        closing.end = Math.max(closing.end, endOf);
       }
-      current = stack[stack.length - 1];
+      stack.push(name);
     }
   }
-  closeAll(calls.length ? Math.max(...calls.map((c) => c.close ?? c.open)) : 0);
+  widenOpen(calls.length ? Math.max(...calls.map((c) => c.close ?? c.open)) : 0);
 
   // A parent must span its children - an unclosed container ends where its
   // last child does.
@@ -982,6 +1138,127 @@ export function eventNameAt(
   return name ? { name, start: literal.start, end: literal.end } : undefined;
 }
 
+/**
+ * The literal the cursor sits in when it is the EVENT NAME of a
+ * `client->_event( )` call - the positional argument or `val =`, in any
+ * spelling of the call - so completion can offer the names the class handles
+ * while the wire is being written. `_event_client( )` raises a CLIENT action
+ * and is left out; so is a literal that is some other argument of the call.
+ */
+export function eventLiteralAt(
+  source: string,
+  offset: number
+): { start: number; end: number } | undefined {
+  const { stack, literal } = scanAbap(source, offset);
+  const call = stack[stack.length - 1];
+  if (!literal || !call || !/^_event(?!_client$)\w*$/i.test(call.name)) {
+    return undefined;
+  }
+  const arg = argNameBefore(source, call.open + 1, literal.start - 1);
+  if (arg !== undefined && arg !== "val") {
+    return undefined;
+  }
+  return { start: literal.start, end: literal.end };
+}
+
+/** The event names the class asks `check_on_event( )` about - the other
+ *  way of handling one, next to a `WHEN` branch. */
+export function checkedEvents(source: string): string[] {
+  const out: string[] = [];
+  const re = /\bcheck_on_event\s*\(\s*(?:val\s*=\s*)?(['`])([\w-]+)\1/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(blankComments(source)))) {
+    out.push(m[2]);
+  }
+  return out;
+}
+
+/** The cursor sits on the argument of a `client->_bind( )`. */
+export interface BindArgument {
+  /** The identifier typed so far. */
+  prefix: string;
+  /** Span of that identifier - the range a completion replaces. */
+  start: number;
+  end: number;
+}
+
+/**
+ * The attribute being named in a `client->_bind( ‸ )` / `_bind_edit( )` /
+ * `_bind_path( )` call - positionally or as `val =`, a `me->` in front
+ * allowed - or undefined once the argument is complete (`_bind( name ‸`) or
+ * the cursor is on some other argument of the call.
+ */
+export function bindArgumentAt(
+  source: string,
+  offset: number
+): BindArgument | undefined {
+  const { stack, literal } = scanAbap(source, offset);
+  const call = stack[stack.length - 1];
+  if (literal || !call || !/^_bind(?:_edit|_path)?$/i.test(call.name)) {
+    return undefined;
+  }
+  const before = blankComments(source).slice(call.open + 1, offset);
+  const m = /^\s*(?:val\s*=\s*)?(?:me->)?(\w*)$/i.exec(before);
+  if (!m) {
+    return undefined;
+  }
+  const start = offset - m[1].length;
+  let end = offset;
+  while (end < source.length && /\w/.test(source[end])) {
+    end++;
+  }
+  return { prefix: m[1], start, end };
+}
+
+/** An attribute `client->_bind( )` may take. */
+export interface BindableAttribute {
+  name: string;
+  /** True for a table - what an aggregation binds. */
+  table: boolean;
+}
+
+/**
+ * The attributes a `_bind( )` can address: the instance `DATA` of the
+ * class's PUBLIC SECTION. That is the framework's own rule - it serializes
+ * exactly those, and a `CONSTANTS`, a `CLASS-DATA` or a reference raises
+ * BINDING_ERROR at runtime, so none of them is offered. Read statement by
+ * statement over the lexer's spans, like `annotations.ts` reads the same
+ * section for the roundtrip cost: a chained `DATA: a TYPE x, b TYPE y.`
+ * declares both, and a commented-out entry declares nothing.
+ */
+export function bindableAttributes(source: string): BindableAttribute[] {
+  const code = blankNonCode(source);
+  const start = /^\s*PUBLIC\s+SECTION\s*\./im.exec(code);
+  if (!start) {
+    return [];
+  }
+  const from = start.index + start[0].length;
+  const end = /^\s*(?:PROTECTED\s+SECTION|PRIVATE\s+SECTION|ENDCLASS)\s*\./im.exec(
+    code.slice(from)
+  );
+  const section = source.slice(from, end ? from + end.index : source.length);
+  const out: BindableAttribute[] = [];
+  for (const statement of abapStatements(section)) {
+    const text = blankNonCode(statement.text);
+    if (!/^\s*DATA\b/i.test(text)) {
+      continue;
+    }
+    for (const declared of declaredNames(statement.text)) {
+      if (declared.component) {
+        continue;
+      }
+      // the entry's own clause: up to the comma of a chained declaration
+      const comma = text.indexOf(",", declared.at);
+      const clause = text.slice(declared.at, comma < 0 ? text.length : comma);
+      if (/\bREF\s+TO\b/i.test(clause)) {
+        continue;
+      }
+      out.push({ name: declared.name, table: /\bTABLE\s+OF\b/i.test(clause) });
+    }
+  }
+  return out;
+}
+
 /** How far back the WHEN test reads. Wide enough for any real alternative
  *  chain (`WHEN 'A' OR 'B' OR …` across lines) - the old 200 silently lost
  *  completion and rename on the last literals of a long one - and bounded so
@@ -1190,7 +1467,7 @@ export function abapContextAt(
   }
 
   if (name === "a") {
-    const owner = controlCallBefore(calls, call.open);
+    const owner = stackBefore(source, calls, call.open).owner;
     const control = owner ? controlOf(source, owner, ns) : undefined;
     if (!control) {
       return undefined;
