@@ -32,3 +32,10 @@ dist/web/test.js
 # time than it used to be.
 .vscode-test-web/**
 .vscode-test/**
+
+# Claude Code's project folder: settings, skills and the agent worktrees it
+# checks out INSIDE the checkout (`.claude/worktrees/<agent>/`, a full copy of
+# the repository each). Packaged, a worktree adds hundreds of files - and its
+# copy of src/test/proxy.test.ts carries the fixture private key that vsce's
+# secret scan rightly refuses to ship.
+.claude/**

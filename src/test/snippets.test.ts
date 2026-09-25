@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
 import { checkAbapRules } from "@abap2ui5/linter/abap-rules";
+import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { annotate, severityOf } from "@abap2ui5/linter/findings";
 import { runGate } from "../gate";
 import { snapshot } from "../snapshot";
@@ -48,6 +49,10 @@ function expand(body: string[]): string {
     .replace(/\$\{\d+:([^}]*)\}/g, "$1")
     .replace(/\$\{\d+\}/g, "")
     .replace(/\$\d+/g, "")
+    // the snippet grammar's escapes: `\$`, `\}` and `\\` stand for the
+    // character itself (a `\${KEY}` body inserts the literal `${KEY}` an
+    // expression-binding argument is written as)
+    .replace(/\\([$}\\])/g, "$1")
     // A tab stop alone on its line (`    $0` - where the editor puts the
     // cursor) leaves its indentation behind. That is a caret position, not
     // shipped text, so it is not the snippet's trailing whitespace; trailing
@@ -65,6 +70,7 @@ const SCAFFOLD_HEAD = `CLASS zcl_snippet DEFINITION PUBLIC.
            END OF ty_s_row.
     DATA mt_data TYPE STANDARD TABLE OF ty_s_row WITH EMPTY KEY.
     DATA mv_value TYPE string.
+    DATA mv_flag TYPE abap_bool.
 ENDCLASS.
 CLASS zcl_snippet IMPLEMENTATION.`;
 
@@ -107,16 +113,24 @@ function wrap(expanded: string): string {
   }
   if (/^(ele|tag|a)\(/i.test(expanded)) {
     // a chain fragment - inserted where the corpus inserts it: after `)->`
-    // inside a view being built
+    // inside a view being built, one level below the Page it lands in. The
+    // editor prepends the cursor line's indentation to every continuation
+    // line, so the fragment is indented the same way here - and the wrapper
+    // itself is in the house layout, so `chain-house-layout` judges the
+    // snippet, not the harness. The fragment's last line is the `)` the
+    // user continues from; the wrapper ends the statement there.
     return file(`${SCAFFOLD_HEAD}
   METHOD z2ui5_if_app~main.
+
     DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
     view->ele( n = \`View\` ns = \`mvc\`
-        )->a( n = \`xmlns\` v = \`sap.m\`
+        )->a( n = \`xmlns\`     v = \`sap.m\`
         )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
         )->ele( n = \`Page\`
-        )->${expanded}->end( ).
+            )->${indent(expanded, "            ")}.
+
     client->view_display( view->stringify( ) ).
+
   ENDMETHOD.
 ${SCAFFOLD_FOOT}`);
   }
@@ -135,18 +149,25 @@ ${SCAFFOLD_FOOT}`);
 ${SCAFFOLD_FOOT}`);
 }
 
+/** The house layout is opt-in in the linter (it encodes one house style),
+ *  so it is switched on here the way `chainformat.ts` switches it on for
+ *  Format Document: a snippet whose chain Format Document would rewrite has
+ *  drifted from what the editor itself teaches. */
+const LAYOUT_RULES = { "chain-house-layout": "warning" };
+
 /** error/warning findings of a wrapped source - hints (advisories like
  *  missing-accessibility) do not fail a snippet, exactly as they do not
  *  fail CI. */
 function gatingFindings(source: string): string[] {
   const data = snapshot();
-  const findings = usesBuilder(source)
+  const findings: PropertyFinding[] = usesBuilder(source)
     ? runGate(source, "zcl_snippet.clas.abap", false, {
         minUi5: "1.71",
         distribution: "sapui5",
         allow: [],
+        rules: LAYOUT_RULES,
       }).findings
-    : annotate(checkAbapRules(source, { data }), source);
+    : annotate(checkAbapRules(source, { data, rules: LAYOUT_RULES }), source);
   return findings
     .filter((f) => (f.severity ?? severityOf(f)) !== "hint")
     .map((f) => `${f.type} (${f.member ?? f.value ?? f.control ?? ""})`);

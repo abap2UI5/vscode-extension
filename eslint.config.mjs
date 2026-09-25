@@ -27,6 +27,11 @@ export default tseslint.config(
       // that, they were only ever present after a local in-host run.
       ".vscode-test/**",
       ".vscode-test-web/**",
+      // Claude Code's agent worktrees are full checkouts INSIDE the checkout,
+      // each with its own tsconfig.json. Walked, they make typescript-eslint
+      // see several candidate tsconfig roots and refuse to parse a single
+      // file - `npm run lint` then reports every source as a parse error.
+      ".claude/worktrees/**",
     ],
   },
   ...tseslint.configs.recommended.map((config) => ({

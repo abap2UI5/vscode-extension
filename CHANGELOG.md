@@ -1,5 +1,87 @@
 # Changelog
 
+## 0.30.0
+
+The bundled linter moves to v0.7.0, the templates and snippets are brought in
+line with what that linter teaches, and the snippet set grows by five.
+
+- **The view check knows 23 more rules** - the bundled `@abap2ui5/linter`
+  moves from 0.6.1 to 0.7.0 (its metadata to OpenUI5 1.152.0). Among what the
+  editor now reports live and on save: `second-root` (a second root element
+  beside the `mvc:View`, the one chain shape that silently builds a broken
+  view), `message-box-removed-parameter`, `unbound-public-attribute`,
+  `client-handle-capture` (a `_bind( )` / `_event( )` handle captured into
+  a variable),
+  `event-arg-single-row-table`, `event-arg-default-index`,
+  `unescaped-text-in-attribute`, `redundant-serializable`,
+  `bound-aggregation-without-template` and `column-cell-count-mismatch`. Most
+  of them carry fixes, so they arrive as Quick Fixes and in Autofix too.
+- **The framework-pin warning is live.** The linter now ships its
+  compatibility record (`@abap2ui5/linter/compat`), so an `abaplint.jsonc`
+  pinned to an abap2UI5 release below what the bundled linter assumes gets
+  the warning on its `branch` line that 0.29.0 prepared and no pin could
+  trigger. On vscode.dev the enum-key table the linter grew for the eight
+  enums whose key and value differ is now handed on like the other hidden
+  tables, so the web gate judges those values as the desktop does.
+- **The gallery templates dispatch the way the app guide does.** "Form" and
+  "Popup" lost the `check_on_init( )` arm that only repeated the
+  `check_on_navigated( )` display (`redundant-init-display` - init implies
+  navigated); "List" and "Master & detail" keep theirs, because it seeds
+  data. All templates and the `z2ui5event` snippet dispatch on
+  `CASE client->get_event( ).` - the spelling the guide and the `z2ui5test`
+  double use, so a test written from the snippet actually reaches a `WHEN`
+  branch. "Master & detail" wires its one event argument as `arg = ...`
+  instead of a one-row `t_arg` table.
+- **Snippets follow the house chain layout.** `z2ui5app`, `z2ui5table`,
+  `z2ui5popup` and `z2ui5popover` had chains Format Document rewrote the
+  moment they were inserted (one call per line, four spaces per level, an
+  `end( )` in the column of the element it closes); they now insert what the
+  formatter would produce, `z2ui5ele` inserts a container with one child
+  closed in the container's column, and every chain snippet leaves the
+  cursor in the column of the control it just built, so the next `->tag( )`
+  is a sibling at the sibling's column. The suite now runs every snippet and
+  template through the linter with `chain-house-layout` switched on, so the
+  drift cannot come back.
+- **Three snippets corrected.** `z2ui5eventarg` inserts
+  `get_event_arg( )` (the index is an optional placeholder - the linter's
+  `event-arg-default-index` reports a spelled-out `1`), `z2ui5navback`
+  inserts the parameterless `nav_app_leave( )` the interface documents as
+  the return to the caller, and `z2ui5event` is the `get_event( )` form
+  above.
+- **Five new snippets for guide idioms:** `z2ui5bool` (an attribute rendered
+  `true`/`false` from an ABAP flag, `b =` instead of `v =`), `z2ui5list` (a
+  List whose row press carries the row's key as a single `arg`),
+  `z2ui5liveevent` (an Input whose `liveChange` round-trips per keystroke
+  with `check_queue_last` and `check_no_busy`, so nothing typed is lost and
+  no busy overlay flashes), `z2ui5backbutton` (`showNavButton` bound to
+  `check_app_prev_stack( )` plus `navButtonPress` wired to
+  `_event_nav_app_leave( )`) and `z2ui5popupclosewire` (a Close button whose
+  `follow_up_action( cs_event-popup_close )` tears the popup down without a
+  roundtrip).
+- The bundled `client->` reference and the app-template snapshot are
+  regenerated (`follow_up_action` and `_event` docs, the template's skills).
+- **The view outline and completion follow handle variables.** A class
+  written the way the starter template is - `DATA(page) = view->ele( \`Shell\`
+  )->ele( \`Page\` )`, then `page->ele( \`List\` )...`, then
+  `page->tag( \`Button\` )` - is now read the way the builder and the view
+  check read it: the Button is a child of the Page, not of the List above it.
+  Binding completion at Page level no longer offers the list row's fields
+  (which the check then reported as `unknown-binding-path`), and
+  `page->a( n = \`...\` )` offers the Page's members.
+- **Completion inside `client->_event( \`...\` )`.** The event names the class
+  already handles - its `WHEN` branches and `check_on_event( )` tests - come
+  first, then the names its other wires raise; a handler spelled differently
+  (`WHEN \`SAVE\`` for a `save` wire) is named in the entry, so the mismatch
+  `event-without-handler` reports later is avoided at the keystroke.
+- **Completion after `client->_bind( `, `_bind_edit( ` and `_bind_path( `.**
+  Offers the PUBLIC instance attributes of the class - the only data the
+  framework can bind - with tables marked as what an aggregation binds;
+  `CONSTANTS` and `CLASS-DATA`, which raise `BINDING_ERROR` at runtime, are
+  left out. Works for the `val =` form and in any spelling.
+- Internal: the gate parity test normalises line endings in the linter
+  fixtures it reads, so the Windows CI job no longer fails on the CRLF an
+  `autocrlf` checkout gives them.
+
 ## 0.29.0
 
 Four additions around the dev loop: a fix for the most common dead-control

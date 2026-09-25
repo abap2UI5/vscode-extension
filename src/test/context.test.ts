@@ -120,11 +120,17 @@ test("a control inside a comment is never the owner", () => {
 });
 
 test("a builder call quoted inside a string is not a call", () => {
+  // the quoted `->tag( )` sits between the Button and the attribute being
+  // written, in a value literal of the same chain - it must not become the
+  // owner. (An earlier version of this fixture put it in a `DATA(note) = …`
+  // statement of its own and continued with `view->a( )`: a statement on
+  // the ROOT handle, whose attribute the builder puts on the View - the
+  // handle rule made that fixture say the opposite of what it tested.)
   const context = abapAt(
     HEAD +
       "    )->tag( n = `Button` )\n" +
-      "    DATA(note) = `->tag( n = ~Table~ )`.\n".replace(/~/g, "'") +
-      "    view->a( n = `te‸` )"
+      "    )->a( n = `tooltip` v = `->tag( n = ~Table~ )`\n".replace(/~/g, "'") +
+      "    )->a( n = `te‸` )"
   );
   assert.equal(context?.control, "sap.m.Button");
 });
@@ -698,4 +704,262 @@ test("ContainerStack follows the builder's ownership rule", () => {
   assert.equal(stack.owner, "Page", "an end( ) too many does not pop the root");
   stack.push("factory", "factory");
   assert.equal(stack.owner, undefined, "a fresh factory( ) starts over");
+});
+
+// ---------------------------------------------------------------------------
+// Handle variables: a statement written on `page->` continues at Page
+// ---------------------------------------------------------------------------
+
+/** The scaffolded starter class's view method, shape for shape: the root
+ *  captured in `view`, the Page in `page`, and every later statement written
+ *  on the handle rather than chained on. */
+const STARTER =
+  "DATA(view) = z2ui5_cl_ui5_view_builder=>factory(\n" +
+  "    )->ele( n  = `View`\n" +
+  "            ns = `mvc`\n" +
+  "        )->a( n = `xmlns`     v = `sap.m`\n" +
+  "        )->a( n = `xmlns:mvc` v = `sap.ui.core.mvc` ).\n" +
+  "DATA(page) = view->ele( `Shell`\n" +
+  "    )->ele( `Page`\n" +
+  "        )->a( n = `title` v = `My abap2UI5 App` ).\n" +
+  "page->tag( `Input`\n" +
+  "    )->a( n = `value` v = client->_bind( name ) ).\n" +
+  "page->ele( `List`\n" +
+  "    )->a( n = `items` v = client->_bind( t_items )\n" +
+  "    )->ele( `items`\n" +
+  "        )->tag( `StandardListItem`\n" +
+  "            )->a( n = `title` v = `{PRODUCT}` ).\n" +
+  "page->tag( `Button`\n" +
+  "    )->a( n = `text`  v = `Save`\n" +
+  "    )->a( n = `press` v = client->_event( `SAVE` ) ).\n" +
+  "client->view_display( view->stringify( ) ).\n";
+
+type LabelNode = { label: string; children: LabelNode[] };
+
+/** The label tree of an outline, for a one-line comparison. */
+function labelTree(nodes: LabelNode[]): unknown {
+  return nodes.map((node) => ({ [node.label]: labelTree(node.children) }));
+}
+
+test("the outline follows a handle back to the element it holds", () => {
+  const { viewOutline } = require("../context") as typeof import("../context");
+  assert.deepEqual(labelTree(viewOutline(STARTER)), [
+    {
+      "mvc:View": [
+        {
+          Shell: [
+            {
+              Page: [
+                { Input: [] },
+                { List: [{ items: [{ StandardListItem: [] }] }] },
+                // written on `page->` after the List chain: a child of Page,
+                // not of the List the previous statement left open
+                { Button: [] },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ]);
+});
+
+test("the outline agrees with the linter's reconstruction of the starter class", () => {
+  // the real scaffolded class, and the tree the gate judges it by
+  const { viewOutline } = require("../context") as typeof import("../context");
+  const { prepareAbap } =
+    require("@abap2ui5/linter/reconstruct") as typeof import("@abap2ui5/linter/reconstruct");
+  const template = require("../data/app-template.json") as {
+    files: Record<string, string>;
+  };
+  const source = template.files["src/zcl_app_001.clas.abap"];
+  assert.ok(source, "the snapshot carries the starter class");
+  type Node = { name: string | null; ns: string | null; children: Node[] };
+  const linterTree = (nodes: Node[]): unknown =>
+    nodes.map((n) => ({
+      [n.ns ? `${n.ns}:${n.name}` : String(n.name)]: linterTree(n.children),
+    }));
+  const docs = prepareAbap(source).nodes as unknown as Node[];
+  assert.equal(docs.length, 1);
+  assert.deepEqual(labelTree(viewOutline(source)), linterTree(docs[0].children));
+});
+
+test("a member written on the handle belongs to the handle's element", () => {
+  // right after the capture, Page has no children yet: page->a( ) is Page's
+  const head = STARTER.slice(0, STARTER.indexOf("page->tag( `Input`"));
+  assert.equal(abapAt(head + "page->a( n = `‸` ).\n")?.control, "sap.m.Page");
+  // after a child was added, the builder attaches to that last child - the
+  // same rule as inside a chain, and the same answer the linter gives
+  assert.equal(
+    abapAt(STARTER + "page->a( n = `‸` ).\n")?.control,
+    "sap.m.Button"
+  );
+  // a chain on the handle: its own tag( ) owns the a( ), not the List's row
+  assert.equal(
+    abapAt(
+      STARTER.slice(0, STARTER.indexOf("page->tag( `Button`")) +
+        "page->tag( `Button` )->a( n = `‸` )"
+    )?.control,
+    "sap.m.Button"
+  );
+});
+
+test("a binding written on the handle is outside the List's row context", () => {
+  const isAggregation = (control: string, member: string) =>
+    control === "sap.m.List" && member === "items";
+  const before = STARTER.indexOf("page->tag( `Button`");
+  const button = at(
+    STARTER.slice(0, before) + "page->tag( `Button` )->a( n = `text` v = `{‸` )."
+  );
+  assert.deepEqual(
+    abapBindingContextAt(button.source, button.offset, isAggregation)?.aggregations,
+    [],
+    "Page level: no row is handed down here"
+  );
+  const row = at(STARTER.replace("`{PRODUCT}`", "`{‸`"));
+  assert.deepEqual(
+    abapBindingContextAt(row.source, row.offset, isAggregation)?.aggregations,
+    ["/T_ITEMS"],
+    "inside the List's template the bound table is the row"
+  );
+});
+
+test("a plain assignment captures a handle too, and an unknown one continues linearly", () => {
+  const { viewOutline } = require("../context") as typeof import("../context");
+  const src =
+    "DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).\n" +
+    "DATA box TYPE REF TO z2ui5_cl_ui5_view_builder.\n" +
+    "box = view->ele( `Page` )->ele( `VBox` ).\n" +
+    "box->tag( `Text` ).\n" +
+    "view->tag( `Bar` ).\n" +
+    "io_other->tag( `Late` ).\n";
+  assert.deepEqual(labelTree(viewOutline(src)), [
+    { Page: [{ VBox: [{ Text: [] }] }] },
+    // `view` still points at the root, so Bar is a second root element…
+    { Bar: [] },
+    // …and a variable nothing assigned a chain to is walked as before, from
+    // wherever the previous statement stopped
+    { Late: [] },
+  ]);
+});
+
+test("ContainerStack: a handle holds its levels, a statement on it works on a copy", () => {
+  const stack = new ContainerStack<string>();
+  stack.beginStatement(undefined, "view");
+  stack.push("factory");
+  stack.beginStatement("view", "page");
+  stack.push("ele", "Shell");
+  stack.push("ele", "Page");
+  stack.beginStatement("page");
+  stack.push("ele", "List");
+  stack.push("tag", "Item");
+  assert.deepEqual(stack.containers, ["Shell", "Page", "List"]);
+  assert.equal(stack.owner, "Item");
+  stack.beginStatement("page");
+  assert.deepEqual(stack.containers, ["Shell", "Page"], "back at the handle");
+  assert.equal(stack.owner, "List", "the child the previous statement added is Page's last");
+  stack.push("tag", "Button");
+  assert.equal(stack.owner, "Button");
+  stack.beginStatement("view");
+  assert.deepEqual(stack.containers, [], "the root handle");
+  assert.equal(stack.top, undefined);
+  // a variable nothing captured: the walk simply continues
+  stack.beginStatement("lo_unknown", "lv");
+  stack.push("tag", "X");
+  assert.equal(stack.owner, "X");
+  stack.beginStatement("lv");
+  assert.equal(stack.owner, "X", "what such a statement assigned is no handle");
+});
+
+// ---------------------------------------------------------------------------
+// The wire's other end: _event( `…` ) and _bind( … ) positions
+// ---------------------------------------------------------------------------
+
+test("the event name literal of _event( ) is a completable position", () => {
+  const { eventLiteralAt } = require("../context") as typeof import("../context");
+  const positional = at("v = client->_event( `S‸` )");
+  assert.deepEqual(eventLiteralAt(positional.source, positional.offset), {
+    start: positional.offset - 1,
+    end: positional.offset,
+  });
+  const named = at("v = client->_EVENT( VAL = `‸` t_arg = VALUE #( ( `x` ) ) )");
+  assert.ok(eventLiteralAt(named.source, named.offset), "val =, in any case");
+  const other = at("v = client->_event( val = `GO` arg = `‸` )");
+  assert.equal(eventLiteralAt(other.source, other.offset), undefined, "another argument");
+  const client = at("v = client->_event_client( val = `‸` )");
+  assert.equal(eventLiteralAt(client.source, client.offset), undefined, "a client action");
+  const nested = at("v = client->_event( t_arg = VALUE #( ( `‸` ) ) val = `GO` )");
+  assert.equal(eventLiteralAt(nested.source, nested.offset), undefined, "an argument row");
+});
+
+test("checkedEvents reads the names check_on_event( ) tests for", () => {
+  const { checkedEvents } = require("../context") as typeof import("../context");
+  const src =
+    "IF client->check_on_event( `SAVE` ).\n" +
+    "ELSEIF client->check_on_event( val = 'CANCEL' ).\n" +
+    "\" client->check_on_event( `OLD` ).\n" +
+    "ENDIF.\n";
+  assert.deepEqual(checkedEvents(src), ["SAVE", "CANCEL"]);
+});
+
+test("the argument of _bind( ) is a completable position until it is complete", () => {
+  const { bindArgumentAt } = require("../context") as typeof import("../context");
+  const open = at("v = client->_bind( ‸");
+  assert.deepEqual(bindArgumentAt(open.source, open.offset), {
+    prefix: "",
+    start: open.offset,
+    end: open.offset,
+  });
+  const named = at("v = client->_BIND( VAL = na‸me )");
+  assert.deepEqual(bindArgumentAt(named.source, named.offset), {
+    prefix: "na",
+    start: named.offset - 2,
+    end: named.offset + 2,
+  });
+  const me = at("v = client->_bind_edit( me->t_‸ )");
+  assert.equal(bindArgumentAt(me.source, me.offset)?.prefix, "t_");
+  const path = at("v = client->_bind_path( ‸ )");
+  assert.ok(bindArgumentAt(path.source, path.offset));
+  const done = at("v = client->_bind( name ‸");
+  assert.equal(bindArgumentAt(done.source, done.offset), undefined, "argument complete");
+  const flag = at("v = client->_bind( val = name path = ‸");
+  assert.equal(bindArgumentAt(flag.source, flag.offset), undefined, "another argument");
+  const literal = at("v = client->_bind( `‸` )");
+  assert.equal(bindArgumentAt(literal.source, literal.offset), undefined, "a literal is no attribute");
+  const elsewhere = at("v = client->_event( ‸ )");
+  assert.equal(bindArgumentAt(elsewhere.source, elsewhere.offset), undefined);
+});
+
+test("bindableAttributes lists the PUBLIC instance DATA and nothing else", () => {
+  const { bindableAttributes } = require("../context") as typeof import("../context");
+  const src =
+    "CLASS zcl_app DEFINITION PUBLIC.\n" +
+    "  PUBLIC SECTION.\n" +
+    "    INTERFACES z2ui5_if_app.\n" +
+    "    TYPES: BEGIN OF ty_s_item,\n" +
+    "             product TYPE string,\n" +
+    "           END OF ty_s_item.\n" +
+    "    CONSTANTS c_title TYPE string VALUE `x`.\n" +
+    "    CLASS-DATA gv_count TYPE i.\n" +
+    "    DATA t_items TYPE STANDARD TABLE OF ty_s_item WITH EMPTY KEY.\n" +
+    "    DATA name    TYPE string.\n" +
+    "    DATA: mv_a TYPE string,\n" +
+    "          \" mv_old TYPE string,\n" +
+    "          mt_b TYPE TABLE OF string,\n" +
+    "          mo_c TYPE REF TO zcl_other.\n" +
+    "    DATA: BEGIN OF ms_head,\n" +
+    "            id TYPE string,\n" +
+    "          END OF ms_head.\n" +
+    "  PROTECTED SECTION.\n" +
+    "    DATA client TYPE REF TO z2ui5_if_client.\n" +
+    "    DATA mv_hidden TYPE string.\n" +
+    "ENDCLASS.\n";
+  assert.deepEqual(bindableAttributes(src), [
+    { name: "t_items", table: true },
+    { name: "name", table: false },
+    { name: "mv_a", table: false },
+    { name: "mt_b", table: true },
+    { name: "ms_head", table: false },
+  ]);
+  assert.deepEqual(bindableAttributes("REPORT z.\n"), [], "no PUBLIC SECTION, nothing");
 });
