@@ -38,7 +38,7 @@ real system, so it is worth being precise about what it does with both:
 - **The linter it bundles reads source; it never executes it.** The property
   gate parses ABAP and XML statically. The render gate, which does load a view
   in a browser, is not part of the extension — it lives in
-  `@abap2ui5/render-runtime` and is fetched separately.
+  `@abap2ui5/linter-render` and is fetched separately.
 
 ## Out of scope
 
