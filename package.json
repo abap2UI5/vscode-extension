@@ -1105,7 +1105,7 @@
     "commands:check": "node scripts/generate-commands.mjs --check"
   },
   "devDependencies": {
-    "@abap2ui5/linter": "github:abap2UI5/linter#35404df6a7e17a20ce2c627d4b3f64a5284a7f02",
+    "@abap2ui5/linter": "github:abap2UI5/linter#09bd158cdd77aefb6a9d06403dd5a161f23ce733",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.3",
     "@types/vscode": "^1.101.0",
