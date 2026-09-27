@@ -150,6 +150,21 @@ test("the dependency versions are the template's, not a second copy of them", ()
   }
 });
 
+test("AGENTS.md names the packages the scaffolded package.json installs", () => {
+  // The row used to be typed here, so a package renamed upstream
+  // (`@abap2ui5/render-runtime` -> `@abap2ui5/linter-render`) left the
+  // briefing naming one package and the manifest installing another.
+  const { devDependencies } = JSON.parse(contentOf("package.json")) as {
+    devDependencies: Record<string, string>;
+  };
+  const row = contentOf("AGENTS.md")
+    .split("\n")
+    .find((line) => line.startsWith("| `package.json` |"));
+  assert.ok(row, "AGENTS.md has a package.json row");
+  const named = [...row.matchAll(/`(@[\w.-]+\/[\w.-]+)`/g)].map((m) => m[1]);
+  assert.deepEqual(named, Object.keys(devDependencies));
+});
+
 test("a script that chains into a dropped one is rewritten, not shipped broken", () => {
   // app-template's own shape: `check:all` chains through `check:pin`, which
   // runs a file out of its scripts/ directory and is therefore not scaffolded.

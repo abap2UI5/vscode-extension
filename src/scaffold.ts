@@ -246,6 +246,17 @@ export function guideSection(): string {
   return at === -1 ? "" : text.slice(at);
 }
 
+/** The package names app-template's package.json installs, as the
+ *  AGENTS.md head lists them - read rather than typed, so the row follows a
+ *  renamed package (`@abap2ui5/render-runtime` became
+ *  `@abap2ui5/linter-render`) when the snapshot does, not before. */
+function devDependencyNames(): string[] {
+  const template = JSON.parse(TEMPLATE_FILES["package.json"]) as {
+    devDependencies?: Record<string, string>;
+  };
+  return Object.keys(template.devDependencies ?? {});
+}
+
 /*
  * The AGENTS.md a new project gets. The HEAD is written here because it
  * describes THIS project (its class, its scripts, the extension that made
@@ -272,7 +283,9 @@ LICENSE and a pin gate) and is where all of this is maintained.
 | \`src/\` | The app classes (abapGit project, \`STARTING_FOLDER=/src/\`, \`FOLDER_LOGIC=PREFIX\`) — one class per app, named \`ZCL_*\` |
 | \`src/${className}.clas.abap\` | The starter app — copy it for your next app (keep the \`.clas.xml\` sidecar's \`CLSNAME\` in sync) |
 | \`src/${className}.clas.testclasses.abap\` | ABAP Unit tests for the starter app: a test double for \`z2ui5_if_client\` drives \`main( )\` through the first start, a \`SAVE\` event and a navigated roundtrip. Runs on the system (ADT \`Ctrl+Shift+F10\`); the local gates check it statically |
-| \`package.json\` | The two gates as devDependencies (\`@abaplint/cli\`, \`@abap2ui5/linter\` + \`@abap2ui5/render-runtime\`) and the \`npm run check*\` scripts. **Commit the \`package-lock.json\` the first install writes** — it is what makes CI and your machine run the same versions, and CI's \`npm ci\` needs it |
+| \`package.json\` | The two gates as devDependencies (${devDependencyNames()
+  .map((name) => `\`${name}\``)
+  .join(", ")}) and the \`npm run check*\` scripts. **Commit the \`package-lock.json\` the first install writes** — it is what makes CI and your machine run the same versions, and CI's \`npm ci\` needs it |
 | \`abaplint.jsonc\` | abaplint config; abaplint clones the abap2UI5 framework for dependency resolution, pinned to release tag \`${frameworkPin()}\` (\`"branch"\` — abaplint passes it to \`git clone --branch\`, which takes a tag; there is no \`"tag"\` key). Bump the pin when you need a newer API, and run \`npm run check\` |
 | \`abap2ui5lint.jsonc\` | [abap2UI5-linter](https://github.com/abap2UI5/linter) config (paths, UI5 floor, distribution, rule severities, fail level) — CLI flags override it, and **the VS Code extension reads this same file**, so the editor and CI judge your views by the same rules |
 | \`.github/workflows/check.yml\` | CI: abaplint from the lockfile, then the abap2UI5-linter through its own action for the static gate + headless render of every view, and the app's ABAP Unit tests in the transpiled backend (no system) |
@@ -528,8 +541,9 @@ const PACKAGE_JSON = (projectName: string): string => {
     devDependencies: Record<string, string>;
     engines?: Record<string, string>;
     /** app-template carries an `overrides` block while the published linter's
-     *  peer range is narrower than the render-runtime it is released beside -
-     *  without it `npm ci` refuses the very pairing the template documents.
+     *  peer range is narrower than the render runtime (`@abap2ui5/linter-render`,
+     *  formerly `@abap2ui5/render-runtime`) it is released beside - without it
+     *  `npm ci` refuses the very pairing the template documents.
      *  Copied rather than judged: it is a fact about the registry, and the
      *  template is where it is decided and where it will be removed. */
     overrides?: Record<string, unknown>;
