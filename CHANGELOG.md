@@ -2,7 +2,7 @@
 
 ## 0.30.0
 
-The bundled linter moves to v0.7.0, the templates and snippets are brought in
+The bundled linter moves to v0.8.1, the templates and snippets are brought in
 line with what that linter teaches, and the snippet set grows by five.
 
 - **The view check knows 23 more rules** - the bundled `@abap2ui5/linter`
@@ -16,6 +16,17 @@ line with what that linter teaches, and the snippet set grows by five.
   `unescaped-text-in-attribute`, `redundant-serializable`,
   `bound-aggregation-without-template` and `column-cell-count-mismatch`. Most
   of them carry fixes, so they arrive as Quick Fixes and in Autofix too.
+- **Fewer false positives - the pin moves on to the linter's v0.8.1
+  release.** `handler-without-event` counts only the `WHEN`s of a `CASE` over
+  the event and knows the `onClose` options and `hash_attach_changed`;
+  `unbound-public-attribute` reports the right line after a `TYPES BEGIN OF`
+  and no longer reports a `TYPE REF TO` attribute; a literal
+  `b = abap_false` is read as false; `smart-variant-without-init` accepts
+  `filter_bar_variant_init`; `frontend-action-as-backend-event` ignores a
+  class-local `cs_event`; `missing-on-navigated-branch` no longer fires on a
+  sub-app; and the `unused-namespace-declaration` Quick Fix handles the last
+  declaration of a chain. A disable directive written for one of those is now
+  reported as `unused-directive`.
 - **The framework-pin warning is live.** The linter now ships its
   compatibility record (`@abap2ui5/linter/compat`), so an `abaplint.jsonc`
   pinned to an abap2UI5 release below what the bundled linter assumes gets
