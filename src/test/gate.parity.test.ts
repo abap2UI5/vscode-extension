@@ -247,6 +247,16 @@ ABAP_FIXTURES["a class on the frozen cc builder"] = FROZEN_CLASS.replace(
   "z2ui5_cl_xml_view=>factory",
   "z2ui5_cl_xml_view_cc=>factory"
 );
+/** The one rule that still reads a frozen-builder class: the old builder's
+ *  obsolete companion helpers (`_z2ui5( )->timer( )` & co.) are method names,
+ *  so `checkAbapSource` reports `obsolete-custom-control` beside
+ *  `frozen-view-builder` (linter 0.8.2), and the gate has to as well. */
+ABAP_FIXTURES["a class on the frozen builder with an obsolete helper"] =
+  FROZEN_CLASS.replace(
+    "    view->page( title = `old` )->stringify( ).",
+    "    view->_z2ui5( )->timer( finished = client->_event( `TICK` ) ).\n" +
+      "    view->page( title = `old` )->stringify( )."
+  );
 
 /** The classes below carry a FIX on the linter's side - the did-you-mean
  *  rewrite of a misspelt control and the deletion of a `json = abap_true` on
@@ -443,6 +453,13 @@ test("the rules the missing inputs used to silence are reachable through the gat
     ),
     "frozen-view-builder is missing - the gate answered 'nothing to check' " +
       "for a class on the frozen builder, which CI reports"
+  );
+  assert.ok(
+    typesOf(
+      ABAP_FIXTURES["a class on the frozen builder with an obsolete helper"]
+    ).has("obsolete-custom-control"),
+    "obsolete-custom-control is missing - obsoleteCcHelperFindings is not " +
+      "reaching the gate's frozen-builder branch"
   );
   assert.ok(
     new Set(
