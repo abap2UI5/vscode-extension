@@ -12,6 +12,7 @@ import {
   checkAbapRules,
   elementBoundSlots,
   namedModels,
+  obsoleteCcHelperFindings,
 } from "@abap2ui5/linter/abap-rules";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import {
@@ -187,16 +188,20 @@ export function runGate(
   } else {
     const prep = options.prep ?? prepareAbap(text);
     if (!prep.usesBuilder) {
-      /* A class on a FROZEN builder gets the one finding `checkAbapSource`
+      /* A class on a FROZEN builder gets the findings `checkAbapSource`
        * gives it and nothing else - the other rules are written for the
        * current dialect. Answering "nothing to check" here while CI reported
-       * `frozen-view-builder` was an editor/CI divergence. */
+       * `frozen-view-builder` was an editor/CI divergence. The one rule that
+       * still reads such a class is `obsolete-custom-control`: the old
+       * builder's `_z2ui5( )->timer( )` & co. are method names, and a Timer
+       * stays obsolete on the frozen builder too. */
       const frozen = FROZEN_FACTORY_RES.find((f) => f.re.test(text));
       if (frozen) {
         const at = text.search(frozen.re);
         return {
           findings: settled([
             { type: "frozen-view-builder", value: frozen.name, offset: at < 0 ? 0 : at },
+            ...obsoleteCcHelperFindings(text),
           ]),
           renderable: false,
           helperNote: "",

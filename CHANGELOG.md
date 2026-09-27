@@ -2,7 +2,7 @@
 
 ## 0.30.0
 
-The bundled linter moves to v0.8.1, the templates and snippets are brought in
+The bundled linter moves to v0.8.2, the templates and snippets are brought in
 line with what that linter teaches, and the snippet set grows by five.
 
 - **The view check knows 23 more rules** - the bundled `@abap2ui5/linter`
@@ -27,6 +27,19 @@ line with what that linter teaches, and the snippet set grows by five.
   sub-app; and the `unused-namespace-declaration` Quick Fix handles the last
   declaration of a chain. A disable directive written for one of those is now
   reported as `unused-directive`.
+- **Obsolete companion controls are errors - the pin moves on to v0.8.2.**
+  The new rule `obsolete-custom-control` reports the eight `z2ui5.cc`
+  controls abap2UI5 marks obsolete - `Timer`, `Focus`, `Scrolling`, `Title`,
+  `LPTitle`, `Favicon`, `Info` and `History` - and names the frontend event
+  or client call that replaces each (a `Timer` becomes
+  `follow_up_action( val = client->cs_event-start_timer … )`). It reads a
+  builder chain, an XML view and, on a class still on the frozen
+  `z2ui5_cl_xml_view`, the old `_z2ui5( )->timer( )` helpers, which the
+  editor now reports beside `frozen-view-builder` exactly as CI does. The
+  render check also knows `InputExt`, `UploadSetExt` and
+  `SmartMultiInputExt`: a view using them renders instead of failing to load
+  the control, and a misspelt attribute on a companion control is reported
+  with a did-you-mean (`inputmode` → `inputMode`).
 - **The framework-pin warning is live.** The linter now ships its
   compatibility record (`@abap2ui5/linter/compat`), so an `abaplint.jsonc`
   pinned to an abap2UI5 release below what the bundled linter assumes gets
