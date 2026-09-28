@@ -2,7 +2,7 @@
 
 ## 0.30.0
 
-The bundled linter moves to v0.8.2, the templates and snippets are brought in
+The bundled linter moves to v0.8.3, the templates and snippets are brought in
 line with what that linter teaches, and the snippet set grows by five.
 
 - **The view check knows 23 more rules** - the bundled `@abap2ui5/linter`
@@ -40,6 +40,13 @@ line with what that linter teaches, and the snippet set grows by five.
   `SmartMultiInputExt`: a view using them renders instead of failing to load
   the control, and a misspelt attribute on a companion control is reported
   with a did-you-mean (`inputmode` → `inputMode`).
+- **A variable typed outside the class no longer breaks the render check -
+  the pin moves on to v0.8.3.** A bound attribute whose type the class does
+  not declare (a DDIC type, or one another class owns, such as
+  `zcl_x=>ty_t_token`) used to reach the render check as an empty string,
+  and a property that is not a string rejected it: the view failed to load
+  in the editor although it runs. It is now left out, and the control keeps
+  its default.
 - **The framework-pin warning is live.** The linter now ships its
   compatibility record (`@abap2ui5/linter/compat`), so an `abaplint.jsonc`
   pinned to an abap2UI5 release below what the bundled linter assumes gets
