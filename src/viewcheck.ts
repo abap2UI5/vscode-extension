@@ -245,7 +245,21 @@ async function runRenderGate(
 
   const checker = checkerCommand();
   const useShell = checker.cmd !== "node" && process.platform === "win32";
-  const args = [...checker.args, scratch, "--json", "--advisory", "--no-properties"];
+  /* `--no-config`: the CLI is run over a SCRATCH COPY in the temp directory,
+   * and its config discovery walks up from cwd (the workspace) and from the
+   * scratch file's path. Two things follow from that, both unwanted here.
+   * The workspace's own `abap2ui5lint.jsonc` would be discovered and its
+   * `badge` written on every save/on-demand check - the editor silently
+   * clobbering a repository's committed shields.io badge with a one-file
+   * verdict. And a config sitting anywhere above the world-writable temp
+   * directory (or above the home directory, the ADT fallback cwd) would be
+   * honoured for a file that is not in that tree at all. The extension does
+   * not need the CLI to read the config: `optionsFor` discovers it from the
+   * real document's own folder, and `settleRenderErrors` re-applies
+   * `rules['render-error']` over the real file precisely because the CLI's
+   * scratch-copy application is unreliable. So the render half runs in
+   * isolation and the repository's config governs it through the extension. */
+  const args = [...checker.args, scratch, "--json", "--advisory", "--no-properties", "--no-config"];
   const cwd = checkerCwd(
     vscode.workspace.getWorkspaceFolder(doc.uri)?.uri,
     os.homedir(),

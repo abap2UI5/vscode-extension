@@ -19,6 +19,13 @@
   endings, and on an already-formatted CRLF file it reported edits that
   stripped the `\r` off every chain line. The formatter now writes the
   fixes in the document's own line ending.
+- **The view check no longer rewrites a repository's badge file.** The render
+  gate and the systemless view preview run over a scratch copy of the buffer,
+  and the checker discovered the repository's `abap2ui5lint.jsonc` from the
+  working directory - so a config with a `badge` had that badge overwritten
+  with a one-file verdict on every save, and a config anywhere above the
+  temporary directory could steer the run. Both now pass `--no-config`; the
+  repository's rules still govern the check, applied by the extension itself.
 
 ## 0.30.0
 
