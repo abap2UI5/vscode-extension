@@ -323,7 +323,11 @@ async function runRenderGate(
         parsed.reason === "no-json"
           ? `view-check: render gate produced no JSON` +
               (outcome.stderr ? ` - stderr: ${outcome.stderr.slice(0, 400)}` : "")
-          : `view-check: render gate returned broken JSON - ${parsed.detail}`
+          : parsed.reason === "not-rendered"
+            ? "view-check: render gate did not render the view - the checker " +
+              "has no UI5 runtime (@abap2ui5/linter-render); only the property " +
+              "gate's findings stand"
+            : `view-check: render gate returned broken JSON - ${parsed.detail}`
       );
       return { outcome: "no-report" };
     }

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.30.1
+
+- **The MCP server starts again without a local checkout.** The default
+  command was `npx --yes @abap2ui5/mcp-server`; since the server's 0.2.0
+  release the package has two commands, and npx stopped with "could not
+  determine executable to run". The extension now starts
+  `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp`, which works for every
+  release.
+- **The view check no longer calls a view "rendered" that was not.** A
+  checker without its UI5 runtime (`@abap2ui5/linter-render`) skips the render
+  gate silently and reports a clean result. The extension now reads the
+  report's counters and says that the render half did not run, instead of
+  showing the view as passed.
+
 ## 0.30.0
 
 The bundled linter moves to v0.8.3, the templates and snippets are brought in

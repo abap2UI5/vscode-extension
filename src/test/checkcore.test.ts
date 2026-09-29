@@ -189,6 +189,29 @@ test("an empty result set still parses to a clean answer", () => {
   assert.deepEqual(parsed.result, { renderErrors: [], skippedRender: false });
 });
 
+test("a view the checker could not render is not a clean answer", () => {
+  // what the linter prints without @abap2ui5/linter-render: the gate is
+  // skipped silently, the result looks clean, only the stats give it away
+  const parsed = parseRenderReport(
+    '{"stats":{"documents":1,"rendered":0,"renderSkipped":0},' +
+      '"results":[{"renderErrors":[],"skippedRender":false}]}'
+  );
+  assert.deepEqual(parsed, { ok: false, reason: "not-rendered" });
+});
+
+test("a rendered view, and a class without a view, stay clean", () => {
+  const rendered = parseRenderReport(
+    '{"stats":{"documents":1,"rendered":1,"renderSkipped":0},' +
+      '"results":[{"renderErrors":[],"skippedRender":false}]}'
+  );
+  assert.ok(rendered.ok);
+  const noView = parseRenderReport(
+    '{"stats":{"documents":0,"rendered":0,"renderSkipped":0},' +
+      '"results":[{"renderErrors":[],"skippedRender":false}]}'
+  );
+  assert.ok(noView.ok);
+});
+
 test("no JSON at all is told apart from broken JSON", () => {
   assert.deepEqual(parseRenderReport("npm ERR! something"), {
     ok: false,
