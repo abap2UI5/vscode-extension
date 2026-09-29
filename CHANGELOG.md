@@ -13,6 +13,12 @@
   gate silently and reports a clean result. The extension now reads the
   report's counters and says that the render half did not run, instead of
   showing the view as passed.
+- **Format Document keeps a file's CRLF line endings.** The builder-chain
+  formatter applied the linter's layout fixes verbatim, and those always use
+  `\n`; on a CRLF file that left the re-indented chain lines with mixed line
+  endings, and on an already-formatted CRLF file it reported edits that
+  stripped the `\r` off every chain line. The formatter now writes the
+  fixes in the document's own line ending.
 
 ## 0.30.0
 

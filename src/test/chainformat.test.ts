@@ -59,6 +59,44 @@ test("a scrambled chain is restored to the canonical shape", () => {
   assert.equal(formatted(scrambled), CANONICAL);
 });
 
+/*
+ * CRLF. The linter emits `\n` for the newline in a layout fix whatever the
+ * source's line ending is. Applied to a CRLF document that used to turn every
+ * re-indented chain line into a lone `\n` (mixed endings, which abapGit and
+ * git flag) and - worse - to report edits for an ALREADY-canonical CRLF file,
+ * whose `\r\n…` never equals the fix's `\n…`, stripping the `\r`. The formatter
+ * has to keep the document's own ending.
+ */
+const CANONICAL_CRLF = CANONICAL.replace(/\n/g, "\r\n");
+
+test("a canonically formatted CRLF chain produces no edits", () => {
+  // the bug: every chain line's \r\n differs from the fix's \n, so a correctly
+  // formatted file was rewritten to LF on those lines
+  assert.deepEqual(chainFormatEdits(CANONICAL_CRLF), []);
+});
+
+test("a scrambled CRLF chain keeps CRLF, never mixed endings", () => {
+  const scrambled = CANONICAL_CRLF.split("\r\n")
+    .map((line, i) =>
+      /^\s*\)->/.test(line) ? `${" ".repeat((i * 3) % 7)}${line.trimStart()}` : line
+    )
+    .join("\r\n");
+  const out = applyChainEdits(scrambled, chainFormatEdits(scrambled));
+  assert.equal(out, CANONICAL_CRLF);
+  assert.ok(!/[^\r]\n/.test(out), "a lone \\n means a mixed-ending file");
+});
+
+test("an explicit LF ending is honoured over a CRLF-looking source", () => {
+  // the editor passes the document's own EndOfLine - a document VS Code holds
+  // as LF must be formatted with LF even if a stray \r\n is in the text
+  const scrambled = CANONICAL.split("\n")
+    .map((line, i) =>
+      /^\s*\)->/.test(line) ? `${" ".repeat((i * 3) % 7)}${line.trimStart()}` : line
+    )
+    .join("\n");
+  assert.equal(applyChainEdits(scrambled, chainFormatEdits(scrambled, "\n")), CANONICAL);
+});
+
 test("lines outside a chain are never edited", () => {
   const source = [
     "  METHOD anything.",
