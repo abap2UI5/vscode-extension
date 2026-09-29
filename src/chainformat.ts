@@ -45,25 +45,59 @@ export interface ChainEdit {
 const LAYOUT_RULES = { "chain-house-layout": {} };
 
 /**
+ * The line ending the source uses, so the fixes can be written in it.
+ *
+ * The linter's `chain-house-layout` fixes are whitespace runs that always use
+ * `\n` for the newline between chain segments, whatever the source's line
+ * ending is. Applied verbatim to a CRLF document that turned every re-indented
+ * chain line into a lone `\n` - mixed line endings in a file the rest of which
+ * is CRLF, which abapGit and git then flag on the round-trip - and, worse, on
+ * an ALREADY-canonical CRLF file the fix's `\n…` never equals the source's
+ * `\r\n…`, so Format Document reported edits for a correctly formatted file and
+ * stripped the `\r` off its chain lines. Matching the source's ending closes
+ * both: the fix then equals the slice on a canonical file (no edit) and keeps
+ * the file's own ending on a scrambled one.
+ */
+function eolOf(text: string): "\r\n" | "\n" {
+  // CRLF only when the source is consistently CRLF - a lone `\n` (a mixed or
+  // LF file) stays `\n`, the safer default that fabricates no `\r`.
+  return /\r\n/.test(text) && !/(^|[^\r])\n/.test(text) ? "\r\n" : "\n";
+}
+
+/**
  * The layout corrections for every builder chain in `text`, in order and
  * without overlaps. A chain already written canonically produces none.
+ *
+ * `eol` is the line ending the fixes are written in, defaulting to the
+ * source's own - the editor passes the document's `EndOfLine` so a CRLF file
+ * is not silently rewritten to mixed endings (see `eolOf`).
  */
-export function chainFormatEdits(text: string): ChainEdit[] {
+export function chainFormatEdits(
+  text: string,
+  eol: "\r\n" | "\n" = eolOf(text)
+): ChainEdit[] {
   const edits: ChainEdit[] = [];
   for (const finding of checkAbapRules(text, { rules: LAYOUT_RULES })) {
     if (finding.type !== "chain-house-layout") {
       continue;
     }
     for (const fix of (finding as { fixes?: ChainEdit[] }).fixes ?? []) {
+      // The rule emits `\n` for the newline in a whitespace run; rewrite it to
+      // the document's ending BEFORE the equality check, so a canonical CRLF
+      // file compares equal and produces no edit.
+      const fixText =
+        typeof fix?.text === "string" && eol === "\r\n"
+          ? fix.text.replace(/\r\n|\n/g, "\r\n")
+          : fix?.text;
       if (
         typeof fix?.start === "number" &&
         typeof fix?.end === "number" &&
-        typeof fix?.text === "string" &&
+        typeof fixText === "string" &&
         fix.start <= fix.end &&
         fix.end <= text.length &&
-        text.slice(fix.start, fix.end) !== fix.text
+        text.slice(fix.start, fix.end) !== fixText
       ) {
-        edits.push({ start: fix.start, end: fix.end, text: fix.text });
+        edits.push({ start: fix.start, end: fix.end, text: fixText });
       }
     }
   }

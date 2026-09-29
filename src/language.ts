@@ -556,8 +556,10 @@ class ChainFormatting implements vscode.DocumentFormattingEditProvider {
     }
     // Character spans, because that is what the linter's layout fixes are:
     // they normalise the whitespace BETWEEN chain segments, newline included,
-    // not just a line's indent.
-    return chainFormatEdits(text).map((edit) =>
+    // not just a line's indent. The document's own line ending goes with them:
+    // the rule emits `\n`, which on a CRLF file would leave mixed endings.
+    const eol = doc.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+    return chainFormatEdits(text, eol).map((edit) =>
       vscode.TextEdit.replace(
         new vscode.Range(doc.positionAt(edit.start), doc.positionAt(edit.end)),
         edit.text

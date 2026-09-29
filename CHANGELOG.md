@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.30.1
+
+- **The MCP server starts again without a local checkout.** The default
+  command was `npx --yes @abap2ui5/mcp-server`; since the server's 0.2.0
+  release the package has two commands, and npx stopped with "could not
+  determine executable to run". The extension now starts
+  `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp`, which works for every
+  release.
+- **The view check no longer calls a view "rendered" that was not.** A
+  checker without its UI5 runtime (`@abap2ui5/linter-render`) skips the render
+  gate silently and reports a clean result. The extension now reads the
+  report's counters and says that the render half did not run, instead of
+  showing the view as passed.
+- **Format Document keeps a file's CRLF line endings.** The builder-chain
+  formatter applied the linter's layout fixes verbatim, and those always use
+  `\n`; on a CRLF file that left the re-indented chain lines with mixed line
+  endings, and on an already-formatted CRLF file it reported edits that
+  stripped the `\r` off every chain line. The formatter now writes the
+  fixes in the document's own line ending.
+- **The view check no longer rewrites a repository's badge file.** The render
+  gate and the systemless view preview run over a scratch copy of the buffer,
+  and the checker discovered the repository's `abap2ui5lint.jsonc` from the
+  working directory - so a config with a `badge` had that badge overwritten
+  with a one-file verdict on every save, and a config anywhere above the
+  temporary directory could steer the run. Both now pass `--no-config`; the
+  repository's rules still govern the check, applied by the extension itself.
+- **No console windows on Windows.** The extension host has no console
+  there, so every command the extension ran - the view check, the unit
+  tests, the gates, and the `taskkill` that ends one - opened a console
+  window of its own for as long as it ran. They are started hidden.
+
 ## 0.30.0
 
 The bundled linter moves to v0.8.3, the templates and snippets are brought in

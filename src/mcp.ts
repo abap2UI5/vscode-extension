@@ -84,7 +84,14 @@ function resolveServerCommand(): { command: string[]; source: StdioSource } {
    * coupling that does not exist - and would then need a bump workflow and an
    * extension release to follow every server release. `latest` is also no
    * looser than what this line did before. */
-  return { command: ["npx", "--yes", "@abap2ui5/mcp-server"], source: "npx" };
+  /* `-p … abap2ui5-mcp`, not the bare package name: from 0.2.0 on the
+   * package has two bins (abap2ui5-mcp, abap2ui5-unit), and `npx <package>`
+   * then stops with "could not determine executable to run" - the server
+   * never started. Naming the bin works for every release. */
+  return {
+    command: ["npx", "--yes", "-p", "@abap2ui5/mcp-server", "abap2ui5-mcp"],
+    source: "npx",
+  };
 }
 
 /**

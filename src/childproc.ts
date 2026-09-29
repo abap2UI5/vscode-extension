@@ -72,10 +72,9 @@ export function killTree(
       // a taskkill that cannot be started emits "error" asynchronously - the
       // try/catch below does not see it, and unheard it is an uncaught
       // exception in the extension host
-      spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"]).on(
-        "error",
-        () => {}
-      );
+      spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        windowsHide: true,
+      }).on("error", () => {});
     } else {
       try {
         process.kill(-child.pid, "SIGKILL");
@@ -129,6 +128,10 @@ export function run(
         shell,
         // its own process group, so killTree can reach the grandchildren
         detached: platform !== "win32",
+        // the extension host has no console on Windows, so every console
+        // child - cmd.exe for a shell command, npx, node - opened a window
+        // of its own for as long as it ran
+        windowsHide: true,
       });
     } catch (err) {
       // spawn( ) validates its arguments synchronously: an empty program (a

@@ -490,7 +490,7 @@ export interface RenderResult {
 
 export type RenderReportParse =
   | { ok: true; result: RenderResult }
-  | { ok: false; reason: "no-json" | "broken-json"; detail?: string };
+  | { ok: false; reason: "no-json" | "broken-json" | "not-rendered"; detail?: string };
 
 /**
  * What became of the render half of one view check.
@@ -740,8 +740,28 @@ export function parseRenderReport(stdout: string): RenderReportParse {
   try {
     const report = JSON.parse(stdout.slice(start)) as {
       results?: Array<{ renderErrors?: string[]; skippedRender?: boolean }>;
+      stats?: { documents?: number; rendered?: number; renderSkipped?: number };
     };
     const r = report.results?.[0];
+    /* A linter without its render runtime (@abap2ui5/linter-render) does not
+     * fail when --render is not given - it skips the gate and reports a clean
+     * result: no renderErrors, skippedRender false. Read as it stands, that is
+     * "passed" for a view nothing rendered. The stats tell the two apart: a
+     * view (documents > 0) that was neither rendered nor skipped did not go
+     * through the gate. A report without the counters (an older linter) is
+     * read as before. */
+    const st = report.stats;
+    if (
+      st &&
+      typeof st.rendered === "number" &&
+      (st.documents ?? 0) > 0 &&
+      st.rendered === 0 &&
+      (st.renderSkipped ?? 0) === 0 &&
+      !r?.skippedRender &&
+      !(r?.renderErrors ?? []).length
+    ) {
+      return { ok: false, reason: "not-rendered" };
+    }
     return {
       ok: true,
       result: {

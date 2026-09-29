@@ -2,7 +2,7 @@
   "name": "abap2ui5",
   "displayName": "abap2UI5",
   "description": "Develop abap2UI5 apps in VS Code: F9 launches a z2ui5_if_app class in an embedded preview, reload on activation, static view checks, the abap2UI5 MCP server for AI agents, snippets.",
-  "version": "0.30.0",
+  "version": "0.30.1",
   "publisher": "abap2ui5",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -962,7 +962,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Command that starts the MCP server. Leave empty for the default: a local checkout under `#abap2ui5.mcp.reposRoot#` when present, otherwise `npx --yes @abap2ui5/mcp-server`.\n\nExample for a local clone: `node /home/me/mcp-server/server.mjs`\n\nThis setting names a program the extension starts, so it is read from your user settings only - a cloned repository cannot point it somewhere else."
+          "markdownDescription": "Command that starts the MCP server. Leave empty for the default: a local checkout under `#abap2ui5.mcp.reposRoot#` when present, otherwise `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp`.\n\nExample for a local clone: `node /home/me/mcp-server/server.mjs`\n\nThis setting names a program the extension starts, so it is read from your user settings only - a cloned repository cannot point it somewhere else."
         },
         "abap2ui5.mcp.reposRoot": {
           "type": "string",

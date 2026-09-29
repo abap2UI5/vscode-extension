@@ -199,6 +199,14 @@ async function render(
       viewport: config().get<string>("viewPreview.viewport", "1280x900"),
       model: source.mock,
     }),
+    /* `--no-config`: the picture is rendered from a scratch copy in the temp
+     * directory, and everything that steers it (theme, viewport, mock model)
+     * is passed explicitly above. A repository's `abap2ui5lint.jsonc` is not
+     * wanted here - and a config discovered from above the shared temp
+     * directory (or a broken one anywhere up the tree) would make the CLI
+     * exit with an error and turn the preview into "nothing could be
+     * rendered". So it renders the one file in isolation. */
+    "--no-config",
   ];
   log(`view-preview: ${checker.cmd} ${args.join(" ")}`);
 
