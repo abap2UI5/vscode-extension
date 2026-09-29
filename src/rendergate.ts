@@ -132,6 +132,7 @@ function runWithVsCodeNode(
     const child = spawn(process.execPath, args, {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", ...extraEnv },
       signal,
+      windowsHide: true, // no console window on Windows (childproc.ts)
     });
     let stderr = "";
     child.stdout.on("data", (c) => {

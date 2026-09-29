@@ -26,6 +26,10 @@
   with a one-file verdict on every save, and a config anywhere above the
   temporary directory could steer the run. Both now pass `--no-config`; the
   repository's rules still govern the check, applied by the extension itself.
+- **No console windows on Windows.** The extension host has no console
+  there, so every command the extension ran - the view check, the unit
+  tests, the gates, and the `taskkill` that ends one - opened a console
+  window of its own for as long as it ran. They are started hidden.
 
 ## 0.30.0
 
