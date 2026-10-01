@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import { classDefinitionOffset, usesBuilder } from "./abap";
 import { CONFIG_SECTION } from "./settings";
-import { isAppSource } from "./appclasses";
+import { isAppSource, onDidRefreshAppClasses } from "./appclasses";
 import { eventRaises, whenBranches } from "./context";
 import { fixableCount } from "./quickfix";
 import { testIncludeFor } from "./unitrunner";
@@ -214,6 +214,9 @@ export function registerCodeLens(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     provider,
     vscode.languages.registerCodeLensProvider({ language: "abap" }, provider),
+    // whether a class INHERITS the interface is the index's answer, and the
+    // index is rebuilt in the background
+    onDidRefreshAppClasses(() => provider.refresh()),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("abap2ui5.codeLens")) {
         provider.refresh();

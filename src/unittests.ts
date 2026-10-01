@@ -55,6 +55,12 @@ function terminalFor(
     cwd,
     env,
     message,
+    // The line is quoted for cmd.exe (`unitTestCommandLine` with win32) - the
+    // user's default shell there is PowerShell or Git Bash as often as not,
+    // and Git Bash ate the backslashes of every path in it
+    ...(process.platform === "win32"
+      ? { shellPath: process.env.ComSpec || "cmd.exe" }
+      : {}),
   });
   terminal = { handle, signature };
   return handle;

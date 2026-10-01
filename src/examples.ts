@@ -51,9 +51,12 @@ function callRe(control: string): RegExp {
   const local = control.includes(".") ? control.slice(control.lastIndexOf(".") + 1) : control;
   const name = local.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const quoted = String.raw`[\`'|]\s*(?:\w+:)?${name}\s*[\`'|]`;
+  // The keywords are ABAP (any case), the control name is UI5 (exact case):
+  // with one "i" flag over all of it, `sap.m.Label` counted every
+  // `ele( \`label\` )` - the FormElement aggregation - as a use of it.
   return new RegExp(
-    String.raw`\b(?:ele|tag)\s*\(\s*(?:n\s*=\s*)?${quoted}`,
-    "gi"
+    String.raw`\b(?:[eE][lL][eE]|[tT][aA][gG])\s*\(\s*(?:[nN]\s*=\s*)?${quoted}`,
+    "g"
   );
 }
 

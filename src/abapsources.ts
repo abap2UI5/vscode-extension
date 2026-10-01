@@ -94,14 +94,20 @@ const CACHE_TTL_MS = 30000;
 const CACHE_MAX_FILES = 4000;
 
 const fileCache = new Map<string, { at: number; text: string }>();
+/** Bumped by every invalidation. A read that was in flight while one landed
+ *  may hold the text from BEFORE the change - stored, it was trusted for the
+ *  whole TTL, and the rescan the same change scheduled read it back. */
+let invalidations = 0;
 
 /** Called by the shared watcher: this file's text is no longer what we read. */
 function forgetFile(uri: vscode.Uri): void {
+  invalidations++;
   fileCache.delete(uri.toString());
 }
 
 /** Everything is suspect - a folder came or went. */
 function forgetAllFiles(): void {
+  invalidations++;
   fileCache.clear();
 }
 
@@ -177,8 +183,12 @@ async function readFile(uri: vscode.Uri, now: number): Promise<string | undefine
   if (cached && now - cached.at < CACHE_TTL_MS) {
     return cached.text;
   }
+  const before = invalidations;
   try {
     const text = DECODER.decode(await vscode.workspace.fs.readFile(uri));
+    if (before !== invalidations) {
+      return text; // possibly older than the change - answer, do not keep
+    }
     if (fileCache.size >= CACHE_MAX_FILES) {
       fileCache.clear();
     }

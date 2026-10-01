@@ -254,3 +254,11 @@ test("an unquoted attribute is dropped WITH a warning", () => {
   // a quoted value holding an `=` is not mistaken for one
   assert.deepEqual(parseXml(`<Text text="a=b" tooltip='c=d'/>`).warnings, []);
 });
+
+test("a warning about an unreadable tag stays on one line", () => {
+  // every warning becomes a one-line `" TODO:` comment in the result
+  const { warnings } = parseXml("<Page><= more\n  </Page\n></Page>");
+  const unreadable = warnings.filter((w) => w.startsWith("skipped an unreadable tag"));
+  assert.equal(unreadable.length, 1);
+  assert.ok(!/\n/.test(unreadable[0]), unreadable[0]);
+});

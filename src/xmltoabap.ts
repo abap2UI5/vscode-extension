@@ -158,7 +158,9 @@ export function parseXml(text: string): ParsedXml {
     const body = selfClosing ? tag.slice(0, -1) : tag;
     const name = /^[\w:.-]+/.exec(body.trim())?.[0];
     if (!name) {
-      warnings.push(`skipped an unreadable tag: ${tag.slice(0, 40)}`);
+      // one line: every warning becomes a `" TODO:` comment in the result,
+      // and a line break in it left the rest of the tag there as code
+      warnings.push(`skipped an unreadable tag: ${tag.slice(0, 40).replace(/\s+/g, " ")}`);
       i = j + 1;
       continue;
     }

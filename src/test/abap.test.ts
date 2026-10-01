@@ -91,6 +91,22 @@ test("a DEFINITION DEFERRED is an announcement, not the definition", () => {
   );
 });
 
+test("a LOCAL FRIENDS statement does not name the include after the class", () => {
+  // the standard test include: opening it used to put ZCL_BASE (not an
+  // app) into the index in place of the real base class
+  const include = [
+    "CLASS ltcl_test DEFINITION DEFERRED.",
+    "CLASS zcl_base DEFINITION LOCAL FRIENDS ltcl_test.",
+    "CLASS ltcl_test DEFINITION FINAL FOR TESTING.",
+    "ENDCLASS.",
+  ].join("\n");
+  assert.equal(classNameOf(include, "zcl_base.clas.testclasses.abap"), "LTCL_TEST");
+  assert.equal(
+    classNameOf("CLASS zcl_base DEFINITION LOCAL FRIENDS ltcl_test.", "zcl_base.clas.testclasses.abap"),
+    "ZCL_BASE.CLAS.TESTCLASSES"
+  );
+});
+
 test("errorTokens pulls paths and quoted names out of an error text", () => {
   const { errorTokens } = require("../abap") as typeof import("../abap");
   const tokens = errorTokens(

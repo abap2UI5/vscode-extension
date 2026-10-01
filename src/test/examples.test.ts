@@ -148,3 +148,11 @@ test("a trailing comment does not end the attribute count", () => {
   assert.ok(hit);
   assert.equal(hit.attributes, 2);
 });
+
+test("an aggregation spelled like a control is not a use of it", () => {
+  const form = "view->ele( `FormElement` )->ele( `label` )->ele( `Label` )->a( n = `text` v = `x` )";
+  // the keyword is any case, the control name is not: `label` is the
+  // FormElement aggregation, `Label` the control
+  assert.equal(findControlUses(form, "sap.m.Label", WHERE).length, 1);
+  assert.equal(findControlUses("view->ELE( N = `Label` )", "Label", WHERE).length, 1);
+});

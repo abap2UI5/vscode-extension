@@ -118,6 +118,11 @@ async function remoteEntries(
     }
     const etag = res.headers.get("etag") ?? undefined;
     const entries = parseCatalogue(await res.text());
+    if (!entries.length) {
+      // a captive portal or a proxy's block page answers 200 too - cached,
+      // it read as "no examples" for a day and never offered a retry
+      throw new Error("the response held no catalogue entries");
+    }
     log(`examples: fetched ${repo} catalogue - ${entries.length} entries`);
     const value: CachedCatalogue = { at: now, entries, ...(etag ? { etag } : {}) };
     memoryCache.set(repo, value);

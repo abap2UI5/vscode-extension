@@ -136,6 +136,19 @@ export function applyJsonKey(text: string, key: string, value: string): string {
   return text.replace(new RegExp(`"${key}":\\s*"[^"]*"`), `"${key}": "${value}"`);
 }
 
+/** Why a valid ABAP class name is still not one a NEW PROJECT may take, or
+ *  undefined: app-template's own `abaplint.jsonc` names classes
+ *  `^ZCL_|^ZCX_`, and template.json states that as `substitutions.class.rule`.
+ *  `ycl_app` or `zmy_app` passed the wizard and failed the project's first
+ *  `npm run check`. */
+export function projectClassNameError(name: string): string | undefined {
+  const cls = TEMPLATE_SPEC.substitutions.class;
+  if (cls.rule && !new RegExp(cls.rule, "i").test(name.trim())) {
+    return `The project's abaplint naming rule expects ZCL_ (or ZCX_) followed by letters, digits or _ - "${name.trim()}" would fail its first check.`;
+  }
+  return undefined;
+}
+
 /** The class is in the FILE names too: `src/zcl_app_001.clas.abap` becomes
  *  `src/zcl_my_app.clas.abap` - when the spec says so. */
 export function substitutePath(rel: string, newClass: string): string {
