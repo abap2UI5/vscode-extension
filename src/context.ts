@@ -950,6 +950,24 @@ function argLiteralSpan(
   };
 }
 
+/**
+ * The `v = …` literal when it IS the value: nothing after it but the end of
+ * the arguments or the next named one. `v = \`sap-icon://\` && mv_icon`
+ * starts with a literal too, and was read as that literal alone - the
+ * property editor then rewrote the first operand and kept `&& mv_icon`.
+ */
+function valueLiteralSpan(
+  source: string,
+  call: Call
+): { start: number; end: number; quote: string } | undefined {
+  const literal = argLiteralSpan(source, call, "v");
+  if (!literal) {
+    return undefined;
+  }
+  const rest = argsOf(source, call).slice(literal.end + 1 - (call.open + 1));
+  return /^\s*(?:$|\w+\s*=)/.test(rest) ? literal : undefined;
+}
+
 /** The `v = …` argument when it is an expression, not a literal: its span
  *  from the first value character to the end of the call's arguments. */
 function argExpressionSpan(
@@ -962,9 +980,6 @@ function argExpressionSpan(
     return undefined;
   }
   const start = call.open + 1 + m.index + m[0].length;
-  if (`'"\``.includes(source[start])) {
-    return undefined; // a literal - argLiteralSpan's business
-  }
   let end = call.close ?? source.length;
   while (end > start && /\s/.test(source[end - 1])) {
     end--;
@@ -1010,7 +1025,7 @@ export function controlCallAt(
       if (!attrName) {
         continue;
       }
-      const literal = argLiteralSpan(source, a, "v");
+      const literal = valueLiteralSpan(source, a);
       const expression = literal ? undefined : argExpressionSpan(source, a);
       // Read unescaped, written escaped: the span covers the literal AS
       // WRITTEN (doubling included, so a rewrite replaces all of it), while
@@ -1596,13 +1611,16 @@ export function xmlContextAt(
       : undefined;
   }
 
-  // Attribute name position.
+  // Attribute name position. The span runs on past the cursor to the end of
+  // the name: ending it AT the cursor had hover on `te‸xt` ask about `te`,
+  // and a completion accepted mid-word keep the old name's tail behind it.
   const word = /([\w:.]*)$/.exec(attrs)?.[1] ?? "";
+  const rest = /^[\w:.]*/.exec(source.slice(offset))?.[0] ?? "";
   return {
     kind: "member",
     control,
     prefix: word,
     start: offset - word.length,
-    end: offset,
+    end: offset + rest.length,
   };
 }

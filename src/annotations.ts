@@ -21,7 +21,7 @@ import type { ViewNode } from "@abap2ui5/linter/reconstruct";
  * and the decorations around it are plumbing.
  */
 
-import { abapStatements, declaredNames } from "./abapscan";
+import { abapStatements, blankNonCode, declaredNames } from "./abapscan";
 import { formatBytes } from "./traffic";
 
 export interface Annotation {
@@ -209,7 +209,12 @@ export function publicAttributes(source: string): PublicAttribute[] {
    * and silently drops the rest.
    */
   for (const statement of statements(section)) {
-    if (!/^\s*(?:CLASS-)?DATA\b/i.test(statement.text)) {
+    // instance DATA only, the rule `bindableAttributes` follows: a
+    // CLASS-DATA is not part of the instance and a reference is not
+    // serialized at all, so neither travels - labelling them as shipped
+    // every roundtrip was the lie this annotation exists to avoid
+    const text = blankNonCode(statement.text);
+    if (!/^\s*DATA\b/i.test(text)) {
       continue;
     }
     // the names the statement DECLARES, not every word in it that is followed
@@ -219,6 +224,11 @@ export function publicAttributes(source: string): PublicAttribute[] {
     // declared names but not attributes - the structure is what is shipped.
     for (const declared of declaredNames(statement.text)) {
       if (declared.component) {
+        continue;
+      }
+      // the entry's own clause: up to the comma of a chained declaration
+      const comma = text.indexOf(",", declared.at);
+      if (/\bREF\s+TO\b/i.test(text.slice(declared.at, comma < 0 ? text.length : comma))) {
         continue;
       }
       out.push({

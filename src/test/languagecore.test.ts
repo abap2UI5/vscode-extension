@@ -332,6 +332,22 @@ test("without a shape the binding hover falls back to the member", () => {
   assert.ok(info.text.includes("property of `sap.m.Text`"));
 });
 
+test("hover on an attribute name in a view.xml explains the whole name", () => {
+  // regression: the span ended at the cursor, so hovering `te‸xt` asked
+  // about `te` - a member no control has - and showed nothing at all
+  const { source, offset } = at(
+    '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">\n  <Button te‸xt="Go"/>\n</mvc:View>'
+  );
+  const info = hoverAt(source, "main.view.xml", offset, data, noShape);
+  assert.ok(info, "the hover stayed silent");
+  assert.equal(source.slice(info.start, info.end), "text");
+  assert.ok(info.text.includes("`sap.m.Button`"), info.text);
+  // completing mid-word replaces the whole name, not just its first half
+  const offer = completionAt(source, "main.view.xml", offset, data, noShape);
+  assert.ok(offer);
+  assert.equal(source.slice(offer.start, offer.end), "text");
+});
+
 test("hover in dead space stays quiet", () => {
   const { source, offset } = at("DATA(x) = ‸1.");
   assert.equal(
