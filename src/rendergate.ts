@@ -19,9 +19,11 @@ import { bundleTrust } from "./checkcore";
  *
  * Bundle selection: the linter CI publishes every bundle twice - under a
  * rolling tag and under an immutable per-commit tag. This build uses the
- * bundle of exactly the linter commit it pins (LINTER_PIN, injected by
- * esbuild from the lockfile), so what the render gate executes is what this
- * release was tested with.
+ * bundle of exactly the linter release it bundles: `@abap2ui5/linter` is an
+ * exact npm version (LINTER_PIN), and package.json's `linterRelease` records
+ * the commit that version was published from (LINTER_COMMIT) - both injected
+ * by esbuild.js - so what the render gate executes is what this release was
+ * tested with.
  *
  * The rolling tag is NOT a fallback, and used to be. That made a merge to the
  * linter's main branch change what every already-installed extension
@@ -29,8 +31,8 @@ import { bundleTrust } from "./checkcore";
  * between a commit there and a checker running on somebody's machine here. It
  * is the one path in this ecosystem where merging reaches end users directly,
  * and it reached them silently. A missing per-commit bundle is now an error
- * that says what to do, because "the pinned build is unavailable" and "here is
- * a different build" are not the same answer.
+ * that says what to do, because "the bundled release's build is unavailable"
+ * and "here is a different build" are not the same answer.
  *
  * `abap2ui5.viewCheck.rollingBundle` opts back in, for somebody deliberately
  * testing an unreleased linter.
@@ -38,10 +40,14 @@ import { bundleTrust } from "./checkcore";
 
 const ROLLING_BUNDLE_URL =
   "https://github.com/abap2UI5/linter/releases/download/render-gate-bundle/view-check-bundle.tgz";
-// injected at build time by esbuild.js (define) from package-lock.json
+// injected at build time by esbuild.js (define): the bundled linter's npm
+// version (from package-lock.json) and the commit that version was published
+// from (package.json `linterRelease`) - the per-commit bundle tag is cut from
+// the latter, since the linter publishes no per-version bundle
 const LINTER_PIN = process.env.LINTER_PIN || "";
-const PINNED_BUNDLE_URL = LINTER_PIN
-  ? `https://github.com/abap2UI5/linter/releases/download/render-gate-bundle-${LINTER_PIN.slice(0, 12)}/view-check-bundle.tgz`
+const LINTER_COMMIT = process.env.LINTER_COMMIT || "";
+const PINNED_BUNDLE_URL = LINTER_COMMIT
+  ? `https://github.com/abap2UI5/linter/releases/download/render-gate-bundle-${LINTER_COMMIT.slice(0, 12)}/view-check-bundle.tgz`
   : undefined;
 
 let installing = false;
@@ -286,7 +292,9 @@ export async function installRenderGate(
           try {
             bundleUrl = PINNED_BUNDLE_URL;
             digest = await download(PINNED_BUNDLE_URL, tgz, aborter.signal);
-            log(`render-gate: bundle ${LINTER_PIN.slice(0, 12)} (matches the pinned linter)`);
+            log(
+              `render-gate: bundle ${LINTER_COMMIT.slice(0, 12)} (the release commit of the bundled linter ${LINTER_PIN})`
+            );
           } catch (e) {
             if (aborter.signal.aborted) {
               throw aborter.signal.reason instanceof Error
@@ -294,9 +302,9 @@ export async function installRenderGate(
                 : e;
             }
             throw new Error(
-              `no render-gate bundle published for linter commit ${LINTER_PIN.slice(0, 12)}, ` +
-                `which is the one this extension build was tested against. ` +
-                `Update the extension - a newer build pins a linter commit that has one - or set ` +
+              `no render-gate bundle published for linter ${LINTER_PIN} ` +
+                `(release commit ${LINTER_COMMIT.slice(0, 12)}), which is the one this extension build was tested against. ` +
+                `Update the extension - a newer build bundles a linter release that has one - or set ` +
                 `abap2ui5.viewCheck.rollingBundle to accept the linter's current main instead. ` +
                 `(${e instanceof Error ? e.message : String(e)})`
             );
@@ -306,8 +314,8 @@ export async function installRenderGate(
           digest = await download(ROLLING_BUNDLE_URL, tgz, aborter.signal);
           log(
             PINNED_BUNDLE_URL
-              ? "render-gate: rolling bundle (abap2ui5.viewCheck.rollingBundle) - this is the linter's current main, not the commit this build pins"
-              : "render-gate: rolling bundle - this build pins no linter commit"
+              ? "render-gate: rolling bundle (abap2ui5.viewCheck.rollingBundle) - this is the linter's current main, not the release this build bundles"
+              : "render-gate: rolling bundle - this build names no linter release commit"
           );
         }
 
@@ -423,15 +431,19 @@ export async function installRenderGate(
 
 /**
  * What "abap2UI5: Update Render Gate" reports before reinstalling: which
- * bundle URL is in effect (the pinned per-commit one, or the rolling tag),
- * the linter commit this build pins, whether a gate is installed at all, and
- * the digest remembered for that URL - the trust-on-first-use anchor
- * `verifyBundle` compares the next download against.
+ * bundle URL is in effect (the per-commit one of the bundled release, or the
+ * rolling tag), the linter release this build bundles, whether a gate is
+ * installed at all, and the digest remembered for that URL - the
+ * trust-on-first-use anchor `verifyBundle` compares the next download
+ * against.
  */
 export function renderGateStatus(context: vscode.ExtensionContext): {
   installed: boolean;
   bundleUrl: string;
-  /** The full SHA of the pinned linter commit; undefined in a dev build. */
+  /** The npm version of the bundled linter; undefined in a dev build. */
+  pinnedVersion?: string;
+  /** The full SHA of the commit that version was published from, which names
+   *  its render-gate bundle; undefined in a dev build. */
   pinnedCommit?: string;
   /** The remembered sha256 of the effective bundle URL, when one download
    *  from it has been verified before. */
@@ -445,7 +457,8 @@ export function renderGateStatus(context: vscode.ExtensionContext): {
   return {
     installed: renderGateCli(context) !== undefined,
     bundleUrl,
-    pinnedCommit: LINTER_PIN || undefined,
+    pinnedVersion: LINTER_PIN || undefined,
+    pinnedCommit: LINTER_COMMIT || undefined,
     storedDigest: context.globalState.get<string>(digestKey(bundleUrl)),
   };
 }

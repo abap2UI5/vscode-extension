@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.30.2
+
+The bundled linter moves to v0.8.5, and is now taken from its npm release
+rather than from a commit on its main branch.
+
+- **The view check runs abap2UI5-linter 0.8.5** (from 0.8.3). What that
+  brings to the editor: a builder attribute written as `a( v = … n = … )`
+  is reconstructed like `a( n = … v = … )` - its value, often a binding,
+  used to be dropped and was missing from every check of the class; and a
+  raw `*.view.xml` with a duplicate attribute, a mismatched or missing
+  closing tag is reported as `malformed-xml` instead of passing. The render
+  gate, in its matching bundle, renders a view that uses the framework's
+  `z2ui5/model/clipboard` module (`sap.m.plugins.CopyProvider`) instead of
+  failing to create it.
+- **The render gate downloads the bundle of exactly that release.** The
+  linter publishes its checker bundle per commit, so the extension records
+  the commit each bundled version was published from and fetches that
+  bundle. A build whose bundle is not published says which release it
+  wanted; *Update Render Gate* and the diagnostics report name the bundled
+  linter version and its commit instead of a bare commit hash.
+- Internal: `@abap2ui5/linter` is an exact npm devDependency, like in
+  every other repository of the ecosystem, instead of a `github:` commit
+  pin; the weekly bump follows the latest published version, and a test
+  holds the manifest, the lock and the recorded release commit together.
+
 ## 0.30.1
 
 - **The MCP server starts again without a local checkout.** The default

@@ -11,8 +11,8 @@ const desktopTests = process.argv.includes("--desktoptest");
 /** The UI5 metadata snapshot of the bundled view checker ships next to the
  *  bundle - the property gate reads it at runtime. The config-file schema
  *  travels the same way: `contributes.jsonValidation` points at the copy, so
- *  editing `abap2ui5lint.jsonc` validates against exactly the pinned linter's
- *  schema, offline.
+ *  editing `abap2ui5lint.jsonc` validates against exactly the bundled linter
+ *  release's schema, offline.
  *
  *  `data/icons.json` is the third, and it does NOT go next to the bundle: the
  *  icon rules are the one place the linter resolves its own data file itself,
@@ -53,8 +53,8 @@ function copySnapshot() {
 
 /** The linter's compatibility record (`data/compat.json`, its `./compat`
  *  export) travels next to the bundle like the snapshot does - `compat.ts`
- *  reads it there. It is the newest of the data files, so a linter pin may
- *  not ship it yet: then nothing is copied and a copy from an earlier build
+ *  reads it there. It is the newest of the data files, so a linter release
+ *  may not ship it yet: then nothing is copied and a copy from an earlier build
  *  is removed, so the extension reports "no compatibility record" instead of
  *  a stale one. */
 function copyCompat(data, outDir) {
@@ -72,27 +72,54 @@ function copyCompat(data, outDir) {
   }
 }
 
-/** The linter commit this build pins (package-lock.json resolved URL) -
- *  injected into the desktop bundle so the render gate can prefer the
- *  per-commit bundle release matching exactly this pin (see rendergate.ts). */
+/** The linter release this build bundles, stamped into the desktop bundle.
+ *
+ *  `@abap2ui5/linter` is an exact npm version in package.json, and the
+ *  VERSION comes from package-lock.json - the file `npm ci` installs from, so
+ *  the stamp names what is actually in node_modules. The render gate needs
+ *  more than that: the linter publishes its self-contained checker bundle
+ *  under immutable per-COMMIT release tags (`render-gate-bundle-<sha12>`,
+ *  its bundle.yml), never per version, and the npm tarball carries no commit.
+ *  So package.json records the release commit of that version under
+ *  `linterRelease` - written by bump-linter.yml from the registry's
+ *  `gitHead`, which is the commit the `v<version>` tag names - and it is
+ *  stamped only while it speaks for the version the lock installs. A record
+ *  that lags behind the lock would otherwise point the render gate at the
+ *  bundle of a linter this build was not tested with; `linterpin.test.ts`
+ *  fails on the lag, this merely refuses to stamp it.
+ *
+ *  A dev build without either runs the render gate off the rolling tag
+ *  (see rendergate.ts). */
 function linterPin() {
+  let version = "";
+  let commit = "";
   try {
     const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
-    const resolved =
-      lock.packages?.["node_modules/@abap2ui5/linter"]?.resolved || "";
-    const m = /#([0-9a-f]{40})$/.exec(resolved);
-    return m ? m[1] : "";
+    version = lock.packages?.["node_modules/@abap2ui5/linter"]?.version || "";
+    const release = JSON.parse(fs.readFileSync("package.json", "utf8")).linterRelease;
+    if (
+      version &&
+      release?.version === version &&
+      /^[0-9a-f]{40}$/.test(release?.commit || "")
+    ) {
+      commit = release.commit;
+    }
   } catch {
-    return "";
+    // no manifests to read from - a dev build with nothing stamped
   }
+  return { version, commit };
 }
 
 /* Shared with the test build: the linter's ESM modules use import.meta.url,
  * which does not exist in a CJS bundle. */
+const LINTER = linterPin();
 const ESM_IN_CJS = {
   define: {
     "import.meta.url": "import_meta_url",
-    "process.env.LINTER_PIN": JSON.stringify(linterPin()),
+    // the bundled linter's npm version, and the release commit whose
+    // render-gate bundle matches it (rendergate.ts, diagnosticsreport.ts)
+    "process.env.LINTER_PIN": JSON.stringify(LINTER.version),
+    "process.env.LINTER_COMMIT": JSON.stringify(LINTER.commit),
   },
   inject: ["scripts/import-meta-url-shim.mjs"],
 };
@@ -127,7 +154,7 @@ async function buildTests() {
     path.join("dist", "properties.json"),
     path.join("dist-test", "properties.json")
   );
-  // and compat.test.ts reads the record from there, when the pin ships one
+  // and compat.test.ts reads the record from there, when the release ships one
   copyCompat(
     path.join(path.dirname(require.resolve("@abap2ui5/linter/properties")), "..", "data"),
     "dist-test"

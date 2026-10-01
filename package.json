@@ -2,7 +2,7 @@
   "name": "abap2ui5",
   "displayName": "abap2UI5",
   "description": "Develop abap2UI5 apps in VS Code: F9 launches a z2ui5_if_app class in an embedded preview, reload on activation, static view checks, the abap2UI5 MCP server for AI agents, snippets.",
-  "version": "0.30.1",
+  "version": "0.30.2",
   "publisher": "abap2ui5",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -804,7 +804,7 @@
         "abap2ui5.viewCheck.rollingBundle": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Download the render gate from the linter's **rolling** bundle instead of the immutable one published for the linter commit this extension build pins.\n\nOff by default, and worth leaving off: the rolling bundle is rebuilt on every merge to the linter's main branch, so the checker running on your machine can then change without this extension being updated. Turn it on only to try an unreleased linter."
+          "markdownDescription": "Download the render gate from the linter's **rolling** bundle instead of the immutable one published for the release commit of the linter version this extension build bundles.\n\nOff by default, and worth leaving off: the rolling bundle is rebuilt on every merge to the linter's main branch, so the checker running on your machine can then change without this extension being updated. Turn it on only to try an unreleased linter."
         },
         "abap2ui5.viewCheck.allow": {
           "type": "array",
@@ -1105,7 +1105,7 @@
     "commands:check": "node scripts/generate-commands.mjs --check"
   },
   "devDependencies": {
-    "@abap2ui5/linter": "github:abap2UI5/linter#ed0dbf5da99f47b89df83a1cabd9daa833f33229",
+    "@abap2ui5/linter": "0.8.5",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.3",
     "@types/vscode": "^1.101.0",
@@ -1117,5 +1117,9 @@
     "tar": "^7.5.22",
     "typescript": "^5.3.0",
     "typescript-eslint": "^8.70.1"
+  },
+  "linterRelease": {
+    "version": "0.8.5",
+    "commit": "41e3fbde14281181d81a121f629eb96164deb961"
   }
 }

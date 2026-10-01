@@ -116,7 +116,8 @@ export function registerDiagnosticsReport(
         renderGate: {
           installed: !!cli,
           cli,
-          pin: (process.env.LINTER_PIN || "").slice(0, 12) || undefined,
+          // the bundled linter's npm version, stamped by esbuild.js
+          pin: process.env.LINTER_PIN || undefined,
         },
         systems: {
           configured: allSystems().length,

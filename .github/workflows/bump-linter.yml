@@ -1,9 +1,14 @@
-# The linter is a git dependency pinned to a commit in BOTH manifests, so a
-# new finding type is invisible in the editor until the pin moves (see
-# AGENTS.md, "Toolchain & supply chain"). This workflow moves it: once a week
-# it re-resolves the dependency against the linter's main, runs the full
-# gate, and opens a PR with the change - the human review stays, the
-# remembering-to-do-it goes away.
+# The linter is the npm release `@abap2ui5/linter`, pinned to an EXACT version
+# in package.json and recorded with its release commit under `linterRelease`
+# (see AGENTS.md, "Toolchain & supply chain"). A new finding type is
+# invisible in the editor until that pin moves. This workflow moves it: once
+# a week it looks up the latest published version, installs it, records the
+# commit it was published from, runs the full gate, and opens a PR with the
+# change - the human review stays, the remembering-to-do-it goes away.
+#
+# It tracks `latest` the way abap2UI5's own bump-linter.yaml does, not a
+# range: the gate below runs before the PR exists, so a release that changes
+# the editor's verdict fails this workflow instead of landing on main.
 #
 # The mechanics live in bump-snapshot.yml, shared with the three snapshot
 # bumps. This file is the part that is specific to the linter pin.
@@ -33,45 +38,63 @@ jobs:
     # default token.
     secrets: inherit
     with:
-      label: the pinned abap2UI5-linter commit
-      # This one re-resolves the linter's full tree (all @openui5/* packages
-      # plus playwright) as well as building the vsix and the web suite.
-      timeout-minutes: 45
-      # `npm install` above has already populated node_modules with the newly
+      label: the bundled abap2UI5-linter release
+      # `npm install` below has already populated node_modules with the newly
       # resolved tree; an `npm ci` would reinstall from the lockfile and is
       # simply wasted time here.
       needs-npm-ci: false
       paths: |
         package.json
         package-lock.json
-      # Re-resolve the git dependency. The SHA lives in BOTH manifests - the
-      # spec in package.json carries `#<sha>` so a plain `npm install` cannot
-      # drift to whatever main happens to be, and package-lock.json records
-      # the same commit for `npm ci`. `npm install` rewrites the spec to the
-      # bare form, so it is written back explicitly here; both files then move
-      # together, and both are committed.
+      # Three things move together, and all three live in the two manifests:
+      # the exact version in package.json, the matching entry in
+      # package-lock.json (what `npm ci` installs), and `linterRelease` in
+      # package.json - the commit the version was published from, which is
+      # the only handle on the render-gate bundle: the linter publishes those
+      # under per-COMMIT tags (its bundle.yml), and the npm tarball carries no
+      # commit. `src/test/linterpin.test.ts` fails when any of the three lags.
       regenerate: |
-        npm install @abap2ui5/linter@github:abap2UI5/linter
-        sha=$(node -p "
-          const l = require('./package-lock.json');
-          const k = Object.keys(l.packages).find(k => k.endsWith('@abap2ui5/linter'));
-          l.packages[k].resolved.replace(/^.*#/, '')
-        ")
-        node -e "
-          const fs = require('fs');
-          const t = fs.readFileSync('package.json', 'utf8');
-          fs.writeFileSync('package.json', t.replace(
-            /(\"@abap2ui5\/linter\": \"github:abap2UI5\/linter)(#[0-9a-f]{40})?\"/,
-            '\$1#$sha\"'));
-        "
-        node -e "require('./package.json')"   # it still has to parse
+        set -euo pipefail
+        # Resolved first and checked: `npm view` prints nothing and still
+        # exits 0 when a package has no `latest` dist-tag, and installing
+        # `@abap2ui5/linter@` would then resolve to whatever npm felt like.
+        VERSION=$(npm view @abap2ui5/linter version)
+        test -n "$VERSION"
+        # `gitHead` is the commit the registry recorded at publish - the one
+        # the `v<version>` tag names, since release.yml publishes from the
+        # tagged checkout.
+        COMMIT=$(npm view "@abap2ui5/linter@$VERSION" gitHead)
+        [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]
+        # The render gate will download this; a release whose bundle is not
+        # there yet (bundle.yml still running, or failed) is not one to ship.
+        # One byte by GET: the download redirects to a signed CDN URL that
+        # answers a HEAD with 401, so `curl -I` would fail for every bundle.
+        curl -fsSL -r 0-0 -o /dev/null \
+          "https://github.com/abap2UI5/linter/releases/download/render-gate-bundle-${COMMIT:0:12}/view-check-bundle.tgz"
+        npm install --save-dev --save-exact "@abap2ui5/linter@$VERSION"
+        VERSION="$VERSION" COMMIT="$COMMIT" node - <<'JS'
+          const fs = require("fs");
+          const t = fs.readFileSync("package.json", "utf8");
+          const out = t.replace(
+            /("linterRelease": \{\s*"version": ")[^"]*(",\s*"commit": ")[0-9a-f]*(")/,
+            `$1${process.env.VERSION}$2${process.env.COMMIT}$3`
+          );
+          const rec = JSON.parse(out).linterRelease;
+          if (rec?.version !== process.env.VERSION || rec?.commit !== process.env.COMMIT) {
+            throw new Error("package.json has no linterRelease block to rewrite");
+          }
+          fs.writeFileSync("package.json", out);
+        JS
       branch: bump-linter
-      title: "chore: bump the pinned abap2UI5-linter commit"
+      title: "chore: bump the bundled abap2UI5-linter release"
       body: |
-        Weekly re-resolve of the `@abap2ui5/linter` git dependency against
-        the linter's main. New rules, fixes and metadata land in the
-        editor only when this pin moves.
+        Weekly move of the `@abap2ui5/linter` devDependency to the latest
+        npm release, with `linterRelease` in package.json pointing at the
+        commit it was published from. New rules, fixes and metadata land in
+        the editor only when this pin moves.
 
-        Read the diff before merging: both manifests have to name the same
-        commit, and a new rule can turn a clean workspace red for everyone
-        using the extension.
+        Read the diff before merging: the three places that name the
+        release (the devDependency, the lock entry, `linterRelease`) have to
+        agree, and a new rule can turn a clean workspace red for everyone
+        using the extension. The linter's changelog for the versions in
+        between is what the next CHANGELOG.md entry here should summarise.

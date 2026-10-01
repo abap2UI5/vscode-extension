@@ -499,15 +499,15 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     }),
     // Reinstall the render gate on demand - and say first what is installed:
-    // the pinned linter commit and the remembered bundle digest are what a
-    // bug report about a render-gate finding needs.
+    // the bundled linter release, its commit and the remembered bundle digest
+    // are what a bug report about a render-gate finding needs.
     vscode.commands.registerCommand("abap2ui5.updateRenderGate", async () => {
       const status = renderGateStatus(context);
       log(
         `render-gate: ${status.installed ? "installed" : "not installed"} - ` +
-          `pinned linter commit ${
-            status.pinnedCommit ? status.pinnedCommit.slice(0, 12) : "none (dev build)"
-          }, stored bundle digest ${
+          `bundled linter ${status.pinnedVersion ?? "none (dev build)"}` +
+          `${status.pinnedCommit ? ` (release commit ${status.pinnedCommit.slice(0, 12)})` : ""}` +
+          `, stored bundle digest ${
             status.storedDigest
               ? `${status.storedDigest.slice(0, 12)}…`
               : "none (nothing downloaded from this URL yet)"

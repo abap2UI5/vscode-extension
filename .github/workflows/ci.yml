@@ -35,10 +35,10 @@ jobs:
           # expensive downloads are handled by the two cache steps below.
           cache: npm
 
-      # `cache: npm` above does not cover this: the linter's tree pulls in
-      # playwright, whose postinstall fetches a Chromium into ~/.cache. That
-      # is a browser-sized download on every single run, and it only changes
-      # when the lockfile does.
+      # `cache: npm` above does not cover this: @vscode/test-web's tree pulls
+      # in playwright, whose postinstall fetches a Chromium into ~/.cache.
+      # That is a browser-sized download on every single run, and it only
+      # changes when the lockfile does.
       - name: Cache the playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

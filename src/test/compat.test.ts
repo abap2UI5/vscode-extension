@@ -15,8 +15,8 @@ import {
 import { TEMPLATE_FILES, frameworkPin } from "../scaffold";
 
 /*
- * The record is a FIXTURE here, deliberately: the bundled linter may be
- * pinned to a commit older than `data/compat.json`, and then `readCompat( )`
+ * The record is a FIXTURE here, deliberately: the bundled linter release may
+ * be older than `data/compat.json`, and then `readCompat( )`
  * answers null - which is a contract of its own (last test), not a reason
  * for these to go quiet. The shape is the linter's `./compat` export:
  * `{ note, linter, framework: { minimum, mirrored }, ui5: { floor, snapshot } }`.
@@ -175,7 +175,7 @@ test("compatOf accepts the export's shape and nothing less", () => {
 });
 
 test("readCompat answers the bundled record or null, never a throw", () => {
-  // The test bundle gets `dist-test/compat.json` from the pinned linter when
+  // The test bundle gets `dist-test/compat.json` from the bundled linter when
   // that pin ships one, and nothing otherwise - both are valid states of
   // this repository, and the second is what every older pin looks like.
   const real = readCompat();
