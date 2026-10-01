@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { isShadowScheme } from "./abap";
 import { compatFinding, CompatRecord } from "./compat";
 import { DIAG_SOURCE } from "./diagnostics";
 
@@ -19,7 +20,8 @@ import { DIAG_SOURCE } from "./diagnostics";
 const PIN_FILE_RE = /(^|[\\/])abaplint\.jsonc?$/i;
 
 export function isPinFile(doc: vscode.TextDocument): boolean {
-  return PIN_FILE_RE.test(doc.fileName);
+  // an old revision of the file in a diff is not the pin in effect
+  return !isShadowScheme(doc.uri.scheme) && PIN_FILE_RE.test(doc.fileName);
 }
 
 export function registerCompatCheck(

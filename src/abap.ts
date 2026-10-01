@@ -310,6 +310,12 @@ const SHADOW_SCHEMES = new Set([
   "debug",
 ]);
 
+/** Whether a document under this scheme only shows a COPY of a file (see
+ *  `SHADOW_SCHEMES`) - nothing to index, check or fix. */
+export function isShadowScheme(scheme: string): boolean {
+  return SHADOW_SCHEMES.has(scheme.toLowerCase());
+}
+
 /** Whether a document is ABAP source this window should know about - by
  *  language id first, because an ADT document's path may carry no extension
  *  worth testing; never for a scheme that only shows a copy of a class. */

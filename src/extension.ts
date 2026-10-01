@@ -15,7 +15,7 @@ import {
   recheckOpenDocuments,
   registerViewCheck,
 } from "./viewcheck";
-import { addToBaseline } from "./baselinefile";
+import { addAllToBaseline } from "./baselinefile";
 import { clearBaselineCache } from "./lintconfig";
 import { registerXmlPreview } from "./xmlpreview";
 import { registerQuickFix } from "./quickfix";
@@ -664,7 +664,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // the desktop-only baseline machinery, injected so the view itself stays
     // web-safe (see findingsview.ts)
     baselineFileFor,
-    addToBaseline,
+    addAllToBaseline,
     clearBaselineCache,
     recheckOpenDocuments,
   });

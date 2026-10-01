@@ -3,7 +3,7 @@ import * as assert from "node:assert";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { addToBaseline, readBaseline, rebuildBaseline } from "../baselinefile";
+import { addAllToBaseline, addToBaseline, readBaseline, rebuildBaseline } from "../baselinefile";
 
 const FINDING = {
   type: "control-too-new",
@@ -65,6 +65,27 @@ test("addToBaseline keeps the existing entries and counts repeats", () => {
     2,
     "the same finding again raises the count"
   );
+});
+
+test("addAllToBaseline writes many findings once, counted like one at a time", () => {
+  const dir = tmp();
+  const file = path.join(dir, "abap2ui5lint-baseline.json");
+  fs.writeFileSync(file, JSON.stringify({ findings: { "keep|me||": 1 } }));
+  const a = path.join(dir, "a.clas.abap");
+  const b = path.join(dir, "b.clas.abap");
+  const keys = addAllToBaseline(file, [
+    { file: a, findings: [FINDING, FINDING] },
+    { file: b, findings: [FINDING] },
+  ]);
+  assert.equal(keys.length, 3);
+  const after = JSON.parse(fs.readFileSync(file, "utf8")).findings;
+  assert.equal(after["keep|me||"], 1);
+  assert.equal(after[keys[0]], 2, "two findings with one key count twice");
+  assert.equal(after[keys[2]], 1);
+  // nothing to add, nothing written
+  const before = fs.statSync(file).mtimeMs;
+  assert.deepEqual(addAllToBaseline(file, [{ file: a, findings: [] }]), []);
+  assert.equal(fs.statSync(file).mtimeMs, before);
 });
 
 // ---------------------------------------------------------------------------

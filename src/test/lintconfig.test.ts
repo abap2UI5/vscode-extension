@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+  configGeneration,
   applyBaselineTo,
   clearConfigCache,
   describeOptions,
@@ -167,7 +168,14 @@ test("a change in an extended base config is noticed without touching the extend
   // report the same one for a write this close to the read
   const later = new Date(Date.now() + 5_000);
   fs.utimesSync(base, later, later);
+  const before = configGeneration();
   assert.equal(resolveOptions(dir, SETTINGS).minUi5, "1.120");
+  // and the caches of what was checked against the old floor learn of it:
+  // the watcher that clears them only knows the abap2ui5lint.json[c] names
+  assert.ok(configGeneration() > before, "the re-read did not bump the generation");
+  const settled = configGeneration();
+  resolveOptions(dir, SETTINGS);
+  assert.equal(configGeneration(), settled, "an unchanged chain bumped it");
 });
 
 test("an unset distribution is described as undecided, not as a distribution", () => {

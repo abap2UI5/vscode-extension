@@ -411,11 +411,18 @@ export function registerQuickFix(
         return;
       }
       const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-      const rules = { ...(cfg.get<Record<string, unknown>>("viewCheck.rules") ?? {}) };
-      rules[rule] = false;
       const target = vscode.workspace.workspaceFolders?.length
         ? vscode.ConfigurationTarget.Workspace
         : vscode.ConfigurationTarget.Global;
+      // The value AT the scope written to - `get` answers with the user and
+      // workspace objects merged, and writing that back copied the user's
+      // own rules into .vscode/settings.json, where Undo left them behind.
+      const inspected = cfg.inspect<Record<string, unknown>>("viewCheck.rules");
+      const previous =
+        target === vscode.ConfigurationTarget.Workspace
+          ? inspected?.workspaceValue
+          : inspected?.globalValue;
+      const rules = { ...(previous ?? {}), [rule]: false };
       try {
         await cfg.update("viewCheck.rules", rules, target);
       } catch (err) {
@@ -433,12 +440,8 @@ export function registerQuickFix(
         undo
       );
       if (picked === undo) {
-        delete rules[rule];
-        await cfg.update(
-          "viewCheck.rules",
-          Object.keys(rules).length ? rules : undefined,
-          target
-        );
+        // exactly what was there - a rule that was "warning" before stays so
+        await cfg.update("viewCheck.rules", previous, target);
       }
     }),
 

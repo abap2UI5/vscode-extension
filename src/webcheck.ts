@@ -5,7 +5,7 @@ import { frozenBuilderOf, GateOptions, runGate, VIEW_XML_RE } from "./gate";
 import { preparedAbapOf } from "./language";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
 import { plural } from "./text";
-import { usesBuilder } from "./abap";
+import { isShadowScheme, usesBuilder } from "./abap";
 import type { CheckOptions, SettingsOptions } from "./lintconfig";
 import {
   applyBaselineMap,
@@ -78,13 +78,22 @@ function settings(): SettingsOptions {
  * ------------------------------------------------------------------------ */
 
 /** path -> parsed config, or the error that says why it is not applied. */
-const configs = new Map<string, { raw?: ParsedLintConfig; error?: string }>();
+const liveConfigs = new Map<string, { raw?: ParsedLintConfig; error?: string }>();
 /** Baseline file path -> key/count map, loaded with the config that names it. */
-const baselines = new Map<string, Map<string, number> | null>();
+const liveBaselines = new Map<string, Map<string, number> | null>();
 
-async function readWorkspaceConfigs(log: (m: string) => void): Promise<void> {
-  configs.clear();
-  baselines.clear();
+/** Bumped per read: one watcher event per touched file, a git pull touches
+ *  a config and its baseline at once, and two reads interleaving across
+ *  their awaits used to leave checks running against a half-filled map -
+ *  and a deleted config's read error behind for good. */
+let readGeneration = 0;
+
+/** Reads every config into fresh maps and swaps them in only when no newer
+ *  read started meanwhile. */
+async function readWorkspaceConfigs(log: (m: string) => void): Promise<boolean> {
+  const gen = ++readGeneration;
+  const configs = new Map<string, { raw?: ParsedLintConfig; error?: string }>();
+  const baselines = new Map<string, Map<string, number> | null>();
   const found = await vscode.workspace.findFiles(
     `**/{${CONFIG_FILE_NAMES.join(",")}}`,
     "**/node_modules/**"
@@ -129,11 +138,23 @@ async function readWorkspaceConfigs(log: (m: string) => void): Promise<void> {
       configs.set(uri.path, { error: err instanceof Error ? err.message : String(err) });
     }
   }
+  if (gen !== readGeneration) {
+    return false;
+  }
+  liveConfigs.clear();
+  liveBaselines.clear();
+  for (const [key, value] of configs) {
+    liveConfigs.set(key, value);
+  }
+  for (const [key, value] of baselines) {
+    liveBaselines.set(key, value);
+  }
   log(
     configs.size
       ? `web: ${configs.size} abap2ui5lint config(s) found - ${[...configs.keys()].join(", ")}`
       : "web: no abap2ui5lint.jsonc in this workspace - checking against the VS Code settings"
   );
+  return true;
 }
 
 /** The options one path is checked with - its nearest repo config over the
@@ -141,11 +162,11 @@ async function readWorkspaceConfigs(log: (m: string) => void): Promise<void> {
  *  resolve a file it read without opening it as a document. */
 function optionsForPath(path: string): CheckOptions {
   const base = settings();
-  const file = nearestConfig(path, [...configs.keys()]);
+  const file = nearestConfig(path, [...liveConfigs.keys()]);
   if (!file) {
     return base;
   }
-  const entry = configs.get(file);
+  const entry = liveConfigs.get(file);
   if (!entry?.raw) {
     return { ...base, configFile: file, error: entry?.error };
   }
@@ -173,7 +194,7 @@ function applyBaselineForPath(
   path: string,
   findings: PropertyFinding[]
 ): number {
-  const map = options.baseline ? baselines.get(options.baseline) : undefined;
+  const map = options.baseline ? liveBaselines.get(options.baseline) : undefined;
   return map && options.baseline
     ? applyBaselineMap(findings, map, options.baseline, path)
     : 0;
@@ -365,6 +386,10 @@ async function sweepWorkspaceWeb(
 }
 
 function isCheckable(doc: vscode.TextDocument): boolean {
+  // a diff's revision side is a copy - see the desktop isCheckable
+  if (isShadowScheme(doc.uri.scheme)) {
+    return false;
+  }
   if (VIEW_XML_RE.test(doc.fileName)) {
     return true;
   }
@@ -578,7 +603,7 @@ export function registerWebCheck(
    * watcher the desktop build keeps.
    *
    * The baseline files the configs name are watched with them: they are read
-   * once into `baselines` and nothing else re-reads them, so a pull that
+   * once into `liveBaselines` and nothing else re-reads them, so a pull that
    * updated or emptied one left the editor waiving findings CI reports for
    * the rest of the session - the editor/CI drift this module exists to
    * prevent. Desktop re-reads per check and notices by itself. */
@@ -586,7 +611,14 @@ export function registerWebCheck(
     `**/{${CONFIG_FILE_NAMES.join(",")},*baseline*.json}`
   );
   const reload = async () => {
-    await readWorkspaceConfigs(log);
+    try {
+      if (!(await readWorkspaceConfigs(log))) {
+        return; // a newer read owns the result
+      }
+    } catch (err) {
+      log(`web: could not read the abap2ui5lint configs - ${String(err)}`);
+      return;
+    }
     memos.clear();
     recheckOpen();
   };
