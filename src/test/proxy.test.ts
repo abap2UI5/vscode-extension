@@ -560,6 +560,34 @@ test("a one-shot url authorizes exactly one request", async () => {
   }
 });
 
+test("a one-shot page's relative follow-ups reach the system's own paths", async () => {
+  // the roundtrip POST goes to the page's location.href and relative
+  // resources resolve against it - both still carry the spent token's
+  // segment, and were forwarded with it
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const page = proxy.singleUseUrl(`${proxy.origin}/sap/bc/z2ui5?app_start=ZCL_X`);
+    const pagePath = new URL(page).pathname + new URL(page).search;
+    const shot = await rawGet(proxy, pagePath);
+    const cookie = shot.setCookie
+      .find((c) => c.startsWith("__abap2ui5_proxy_"))!
+      .split(";")[0];
+    const prefix = new URL(page).pathname.replace(/\/sap\/bc\/z2ui5$/, "");
+    const follow = await rawGet(proxy, `${prefix}/sap/bc/z2ui5?app_start=ZCL_X`, { cookie });
+    assert.equal(follow.status, 200);
+    assert.equal(system.seen[1].path, "/sap/bc/z2ui5?app_start=ZCL_X");
+    // without the cookie, the spent segment authorizes nothing
+    const bare = await rawGet(proxy, `${prefix}/sap/bc/z2ui5`);
+    assert.equal(bare.status, 404);
+    assert.equal(system.seen.length, 2);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
 test("a one-shot token is never accepted out of a cookie", async () => {
   const system = await recordingSystem();
   const proxy = new SapProxy();
@@ -1722,5 +1750,51 @@ test("ADT answers arrive entity-escaped and are decoded", () => {
       `<adtcore:objectReference adtcore:type="CLAS/OC" adtcore:name="ZCL_A" adtcore:description="a &bogus; b &#; c"/>`
     )[0].description,
     "a &bogus; b &#; c"
+  );
+});
+
+test("frame-ancestors is dropped from each of two CSP headers, nothing else", async () => {
+  // Node joins duplicate CSP headers with ", "; split on ";" alone, the
+  // second policy's first directive went with the first one's
+  // frame-ancestors
+  const server = http.createServer((_req, res) => {
+    res.setHeader("content-security-policy", [
+      "default-src 'self'; frame-ancestors 'self'",
+      "script-src 'self'; frame-ancestors 'none'",
+    ]);
+    res.end("ok");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(origin, "user", "pass");
+    const csp = await new Promise<string>((resolve, reject) => {
+      http
+        .get(`${proxy.origin}/x`, (res) => {
+          res.resume();
+          resolve(String(res.headers["content-security-policy"] ?? ""));
+        })
+        .on("error", reject);
+    });
+    assert.equal(csp, "default-src 'self', script-src 'self'");
+  } finally {
+    await proxy.stop();
+    server.close();
+  }
+});
+
+test("a document without a header charset is read by its <meta charset>", () => {
+  const body = Buffer.from('<html><head><meta charset="ISO-8859-1"></head>Prüfen</html>', "latin1");
+  assert.match(decodeBody(body, "text/html"), /Prüfen/);
+  const equiv = Buffer.from(
+    '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">Größe',
+    "latin1"
+  );
+  assert.match(decodeBody(equiv, "text/html"), /Größe/);
+  // the header still wins over the meta
+  assert.match(
+    decodeBody(Buffer.from('<meta charset="iso-8859-1">Prüfen', "utf8"), "text/html; charset=utf-8"),
+    /Prüfen/
   );
 });

@@ -71,6 +71,7 @@ import {
   clearCredentials,
   pickSystem,
   storeTemplate,
+  activateTemplate,
 } from "./systems";
 
 /** Where the screenshot Save As dialog last saved to, per window. */
@@ -244,7 +245,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!template) {
         return;
       }
-      await storeTemplate(active?.name ?? shortUrl(template), template);
+      await storeTemplate(active?.name ?? shortUrl(template), template, active?.template);
+      await activateTemplate(context, template);
       vscode.window.showInformationMessage(
         `abap2UI5: launch URL of ${active?.name ?? shortUrl(template)} saved.`
       );

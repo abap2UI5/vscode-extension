@@ -372,7 +372,16 @@ function charsetOf(contentType: string): string {
  * those pages into replacement characters.
  */
 export function decodeBody(body: Buffer, contentType: string): string {
-  const charset = charsetOf(contentType);
+  // A header without a charset leaves it to the document's own
+  // `<meta charset>` / `http-equiv` - and the body leaves under a header that
+  // says UTF-8, which outranks that meta. Read as UTF-8 regardless, an
+  // ISO-8859-1 logon page lost every umlaut it had rendered with before.
+  const charset =
+    charsetOf(contentType) ||
+    /<meta[^>]+charset\s*=\s*["']?([\w-]+)/i
+      .exec(body.subarray(0, 1024).toString("latin1"))?.[1]
+      ?.toLowerCase() ||
+    "";
   const latin1 =
     charset === "iso-8859-1" ||
     charset === "iso8859-1" ||
@@ -733,9 +742,20 @@ export class SapProxy {
     );
 
     try {
+      const server = this.server;
       await new Promise<void>((resolve, reject) => {
-        this.server!.once("error", reject);
-        this.server!.listen(0, "127.0.0.1", resolve);
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", () => {
+          // The start-up handler would otherwise also take the first error
+          // of a LISTENING server (an accept failing with EMFILE) and leave
+          // none for the second - an unhandled "error" on a server takes the
+          // whole extension host down.
+          server.off("error", reject);
+          server.on("error", () => {
+            // a failed accept costs that one connection, not the proxy
+          });
+          resolve();
+        });
       });
     } catch (err) {
       // a proxy that never got its port must not LOOK started: the
@@ -848,9 +868,24 @@ export class SapProxy {
       .split(";")
       .map((part) => part.trim())
       .find((part) => part.startsWith(`${this.cookieName}=`));
-    return cookie && tokensEqual(cookie.slice(this.cookieName.length + 1), token)
-      ? url
-      : undefined;
+    if (!cookie || !tokensEqual(cookie.slice(this.cookieName.length + 1), token)) {
+      return undefined;
+    }
+    // A page loaded through a ONE-SHOT url (the screenshot, MCP's
+    // run_app_on_system) resolves its relative requests - `resources/...`,
+    // and the roundtrip POST to its own `location.href` - against that url,
+    // so they carry the spent token's segment. The cookie authorizes them;
+    // forwarded with the segment, the system answered 404 to the app's
+    // first roundtrip.
+    if (url.startsWith(root)) {
+      const rest = url.slice(root.length);
+      const end = rest.search(/[/?]/);
+      if (end === -1) {
+        return "/";
+      }
+      return rest[end] === "?" ? "/" + rest.slice(end) : rest.slice(end);
+    }
+    return url;
   }
 
   /**
@@ -1265,11 +1300,20 @@ export class SapProxy {
       ]) {
         const csp = outHeaders[key];
         if (typeof csp === "string") {
+          // Node joins two CSP headers with ", " - each is a policy of its
+          // own. Split on ";" alone, the directive after the comma went with
+          // the dropped frame-ancestors, weakening the second policy.
           const cleaned = csp
-            .split(";")
-            .filter((d) => !/^\s*frame-ancestors/i.test(d))
-            .join(";")
-            .trim();
+            .split(",")
+            .map((policy) =>
+              policy
+                .split(";")
+                .filter((d) => !/^\s*frame-ancestors/i.test(d))
+                .join(";")
+                .trim()
+            )
+            .filter(Boolean)
+            .join(", ");
           if (cleaned) {
             outHeaders[key] = cleaned;
           } else {
@@ -1377,9 +1421,17 @@ export class SapProxy {
         logTraffic(0, 0);
         return;
       }
-      if (!res.headersSent) {
-        res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+      if (res.headersSent) {
+        // Mid-body (a reset upstream, the inactivity timeout during a slow
+        // stream): the status and part of the body are already out. Ending
+        // the response with an error text appended made a truncated script
+        // or page look complete - cacheable, and logged as a 502 it was not.
+        // Destroying it lets the browser see the failure for what it is.
+        logTraffic(res.statusCode, 0);
+        res.destroy(err);
+        return;
       }
+      res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
       logTraffic(502, 0);
       res.end("abap2UI5 proxy error: " + err.message);
     });
@@ -1445,6 +1497,19 @@ export class SapProxy {
       headers,
       rejectUnauthorized: !this.allowUnauthorized,
     });
+    // A system that accepts the connection and never answers the upgrade
+    // held both sockets until stop( ) - the plain path has had this limit
+    // all along. A timer, not proxyReq.setTimeout: that one is an idle
+    // timeout on the socket the tunnel goes on to use.
+    const unanswered = setTimeout(
+      () => proxyReq.destroy(new Error(`no answer within ${FORWARD_TIMEOUT_MS} ms`)),
+      FORWARD_TIMEOUT_MS
+    );
+    unanswered.unref();
+    const answered = () => clearTimeout(unanswered);
+    proxyReq.once("upgrade", answered);
+    proxyReq.once("response", answered);
+    proxyReq.once("close", answered);
 
     // A client that leaves before the system has answered takes the pending
     // request with it. A FIN counts as leaving: the http server hands the
