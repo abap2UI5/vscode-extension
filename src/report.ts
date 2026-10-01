@@ -194,7 +194,7 @@ export function buildReport(input: ReportInput): string {
     row([
       "render gate",
       input.renderGate.installed
-        ? `installed${input.renderGate.pin ? ` (pin ${input.renderGate.pin})` : ""}`
+        ? `installed${input.renderGate.pin ? ` (linter ${input.renderGate.pin})` : ""}`
         : "not installed",
     ])
   );

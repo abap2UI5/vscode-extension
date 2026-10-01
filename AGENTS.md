@@ -313,23 +313,33 @@ identity (see Conventions).
 
 Facts an agent cannot see from the code but will trip over:
 
-- **The linter is a git devDependency pinned to a COMMIT — in BOTH manifests.**
-  `package.json` carries the spec with the SHA appended
-  (`"github:abap2UI5/linter#<sha>"`), so a plain `npm install` cannot drift to
-  whatever the linter's main happens to be that day, and `package-lock.json`
-  records the same commit for `npm ci` (as a `git+ssh://` URL — `npm ci` can
-  fail in HTTPS-only/tokenless environments, and it pulls the linter's full
-  tree: all `@openui5/*` packages plus playwright, hundreds of MB. In a sandbox
-  without the playwright CDN, `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci`).
+- **The linter is the npm release `@abap2ui5/linter`, pinned to an EXACT
+  version — and its release commit is recorded next to it.** `package.json`
+  carries `"@abap2ui5/linter": "0.8.5"` (no caret: the bundle SHIPS this
+  release, so what a fresh install resolves must be what the tests ran
+  against), `package-lock.json` the registry tarball for `npm ci`, and the
+  `linterRelease` block in `package.json` the commit that version was
+  published from. That third thing exists for the render gate: the linter
+  publishes its checker bundle under immutable per-COMMIT release tags
+  (`render-gate-bundle-<sha12>`, its `bundle.yml`), never per version, and
+  the npm tarball carries no commit — so without the record a build would
+  have nothing to download but the rolling tag. `esbuild.js` stamps the
+  version (`LINTER_PIN`) from the lock and the commit (`LINTER_COMMIT`) from
+  the record, and only while the record speaks for the version the lock
+  installs; `src/test/linterpin.test.ts` fails when the three disagree.
   Consequences: a new linter finding type is **invisible in the editor until
-  the pin is bumped** — bump deliberately with
-  `npm install @abap2ui5/linter@github:abap2UI5/linter`, which rewrites the
-  spec to the BARE form, so append the resolved SHA back into `package.json`
-  and commit both files. `bump-linter.yml` does exactly that once a week; it
-  used to commit the lockfile alone, which would have left the two manifests
-  naming different commits.
-  This is the release lever: it tracks the linter's `main`, not its npm
-  releases, so a rule reaches the editor before it reaches a version number.
+  the pin is bumped** — bump with
+  `npm install --save-dev --save-exact @abap2ui5/linter@<version>` and set
+  `linterRelease` to that version and
+  `npm view @abap2ui5/linter@<version> gitHead`, then commit both files.
+  `bump-linter.yml` does exactly that once a week against the latest
+  published version (it also checks that the per-commit bundle exists before
+  it opens a PR). Until 0.30.2 the dependency was a `github:` spec pinned to
+  a commit on the linter's main, the one consumer in the ecosystem that
+  followed main; it now takes releases like everyone else, so a rule reaches
+  the editor when the linter cuts a version. The sandbox note stays: the tree
+  still pulls playwright, now through `@vscode/test-web`, so without the
+  playwright CDN use `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci`.
 - **`esbuild.js` carries two load-bearing hacks** — do not "clean them up":
   the `import.meta.url` define + `scripts/import-meta-url-shim.mjs` inject
   (ESM linter modules bundled into CJS), and `copySnapshot()`, which copies
@@ -350,10 +360,10 @@ Facts an agent cannot see from the code but will trip over:
   `.vsix` because `.vscodeignore` does not exclude it.
   The fourth data file is the linter's **`data/compat.json`** (its `./compat`
   export), copied to `dist/compat.json` (and `dist-test/`) by the same
-  `copyCompat()` - `compat.ts` reads it there. A linter pin from before the
-  record ships none: then nothing is copied, a copy from an earlier build is
-  removed, and the extension logs "the bundled linter ships no compatibility
-  record" instead of comparing against a stale one. `compat.test.ts` tests
+  `copyCompat()` - `compat.ts` reads it there. A linter release from before
+  the record ships none: then nothing is copied, a copy from an earlier build
+  is removed, and the extension logs "the bundled linter ships no
+  compatibility record" instead of comparing against a stale one. `compat.test.ts` tests
   the verdict over a fixture for that reason, and only checks the real file's
   shape when one is there.
 - **`gate.ts` is a second CALLER of the linter's pipeline, never a second
@@ -397,13 +407,24 @@ Facts an agent cannot see from the code but will trip over:
   node's `crypto` module - that one import used to be what kept every webview
   out of the web host. Desktop-only commands are hidden from the web palette
   with `"when": "!isWeb"` entries under `menus.commandPalette`.
-- **The render gate is downloaded at runtime**, not bundled:
-  `src/rendergate.ts` fetches `view-check-bundle.tgz` from the linter's
-  rolling prerelease tag `render-gate-bundle` (published by the linter's
-  `bundle.yml` on every merge to its main). What installed extensions
-  execute for the render gate therefore changes without any release of this
-  extension — when debugging a render-gate report, check what the bundle
-  currently contains, not only the pinned package.
+- **The render gate is downloaded at runtime**, not bundled, and from the
+  bundle of the linter release this build ships: `src/rendergate.ts` fetches
+  `view-check-bundle.tgz` from the linter's immutable per-commit prerelease
+  tag `render-gate-bundle-<sha12>`, where the SHA is `LINTER_COMMIT` — the
+  release commit `linterRelease` records (previous bullet). The linter's
+  `bundle.yml` publishes every bundle twice, under that per-commit tag and
+  under the rolling tag `render-gate-bundle`, which follows its main. The
+  rolling tag is **not** a fallback: a missing per-commit bundle is an error
+  that names the release and says to update the extension, because
+  "unavailable" and "a different build" are not the same answer. Only
+  `abap2ui5.viewCheck.rollingBundle` (off by default) switches to the rolling
+  tag, for somebody deliberately testing an unreleased linter, and a dev
+  build with nothing stamped uses it too. `verifyBundle` treats the two
+  apart: a per-commit URL whose bytes change is refused, the rolling one is
+  allowed to move. So what an installed extension executes for the render
+  gate changes only with a release of this extension — when debugging a
+  render-gate report, "Update Render Gate" logs the release, the commit and
+  the bundle URL in effect.
 - **The editor/CI divergence is closed, keep it closed.** `src/lintconfig.ts`
   discovers the workspace's `abap2ui5lint.jsonc` through the linter's own
   `findConfigFrom`/`loadConfig` and lets it win over the VS Code settings, and
@@ -498,5 +519,5 @@ Facts an agent cannot see from the code but will trip over:
 | [abap2UI5](https://github.com/abap2UI5/abap2UI5) | Core framework |
 | [samples](https://github.com/abap2UI5/samples) | Sample applications |
 | [samples-controls](https://github.com/abap2UI5/samples-controls) | Ported demo-kit samples (formerly `abap2UI5-api`, before that `ai-demokit` — where this extension used to live, until 0.6.0) |
-| [abap2UI5-linter](https://github.com/abap2UI5/linter) | The view checker behind `src/viewcheck.ts` (SHA-pinned package) and `src/rendergate.ts` (runtime bundle download) |
+| [abap2UI5-linter](https://github.com/abap2UI5/linter) | The view checker behind `src/viewcheck.ts` (the npm release, pinned exactly) and `src/rendergate.ts` (runtime download of that release's bundle) |
 | [mcp-server](https://github.com/abap2UI5/mcp-server) | The MCP server `src/mcp.ts` registers for MCP clients in the window |

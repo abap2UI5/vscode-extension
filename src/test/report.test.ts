@@ -93,7 +93,7 @@ const INPUT: ReportInput = {
     },
   ],
   settings: { "viewCheck.minUi5": "1.71" },
-  renderGate: { installed: true, pin: "3b98c3095674" },
+  renderGate: { installed: true, pin: "0.8.5" },
   systems: { configured: 2, active: "DEV", proxyRunning: true },
   relatedExtensions: ["murbani.vscode-abap-remote-fs 1.2.3"],
   recentLog: ["2026-08-18 06:00:00  view-check: zcl_x - 0 finding(s)"],
