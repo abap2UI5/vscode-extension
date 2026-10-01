@@ -84,7 +84,11 @@ export function navCallsOf(source: string): NavCall[] {
       // - taken for the target, `CAST z2ui5_if_app( NEW zcl_x( ) )` drew an
       // edge to the interface instead of to zcl_x
       const isCastType = afterTypeOperator;
-      afterTypeOperator = TYPE_OPERATORS.has(lower);
+      // `CAST #( … )` / `CONV #( … )` name no type - the next word is the
+      // target, and skipping it dropped the edge
+      afterTypeOperator =
+        TYPE_OPERATORS.has(lower) &&
+        !/^\s*#/.test(arg.slice((word.index ?? 0) + word[0].length));
       if (isCastType || NOT_A_CLASS.has(lower)) {
         continue;
       }

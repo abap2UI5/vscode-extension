@@ -378,6 +378,48 @@ function declares(lexed: Lexed, name: string): boolean {
   });
 }
 
+/** The offsets of every `BEGIN OF … END OF` component a declaration names -
+ *  a TYPES row field included, which `declares( )` never looks at. */
+function componentOffsets(lexed: Lexed): Set<number> {
+  const out = new Set<number>();
+  const blanked = lexed.blanked;
+  lexed.statements.forEach((statement, index) => {
+    const head = blanked.slice(statement.start, statement.start + statement.text.length);
+    if (!/^\s*(?:CLASS-DATA|DATA|CONSTANTS|TYPES)\b/i.test(head)) {
+      return;
+    }
+    for (const declared of lexed.declaredIn(index)) {
+      if (declared.component) {
+        out.add(statement.start + declared.at);
+      }
+    }
+  });
+  return out;
+}
+
+/**
+ * Does the word at `at` stand on its own, or behind a selector that may
+ * address this class's attribute? A component selector (`ls_row-name`) takes
+ * no blank in ABAP, so `a - name` stays the subtraction it is; the class and
+ * interface selectors are read across blanks, the way the chain style writes
+ * them.
+ *
+ * `->` is renamed whatever the receiver: the type of `r_result` is not known
+ * here, and the factory method that fills its own new instance
+ * (`r_result->mv_text = i_text`) is the common case - skipped, the rename
+ * left that line naming an attribute that no longer exists.
+ */
+function ownMember(code: string, at: number, ownClasses: Set<string>): boolean {
+  if (code[at - 1] === "-") {
+    return false;
+  }
+  const selector = /(\w*)\s*(->|=>|~)\s*$/.exec(code.slice(Math.max(0, at - 200), at));
+  if (!selector || selector[2] === "->") {
+    return true;
+  }
+  return selector[2] === "=>" && ownClasses.has(selector[1].toUpperCase());
+}
+
 /** Is this offset inside one of the source's string literals? */
 function insideLiteral(all: readonly Literal[], offset: number): boolean {
   return all.some((literal) => offset >= literal.start && offset < literal.end);
@@ -429,12 +471,27 @@ export function attributeSpans(source: string, name: string): AttributeSpan[] {
   const inComment = (at: number) =>
     lexed.comments.some(([from, to]) => at >= from && at < to);
   const out: AttributeSpan[] = [];
+  const components = componentOffsets(lexed);
+  const ownClasses = new Set(
+    [...lexed.blanked.matchAll(/\bCLASS\s+(\w+)\s+DEFINITION\b/gi)].map((m) =>
+      m[1].toUpperCase()
+    )
+  );
 
   // the ABAP identifier, outside literals and comments
   const identifier = new RegExp(String.raw`\b${name}\b`, "gi");
   for (const match of source.matchAll(identifier)) {
     const at = match.index ?? 0;
     if (insideLiteral(lexed.literals, at) || inComment(at)) {
+      continue;
+    }
+    /*
+     * The same word is not always this attribute: the field of a row type
+     * (`TYPES: BEGIN OF ty_row, name TYPE …`), `ls_row-name`, another
+     * class's `zcl_other=>name` or an interface's `lif_x~name`. Renaming
+     * them along with it broke the class.
+     */
+    if (components.has(at) || !ownMember(lexed.blanked, at, ownClasses)) {
       continue;
     }
     out.push({

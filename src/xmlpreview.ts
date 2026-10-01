@@ -67,6 +67,11 @@ let lastOffsetsFor: string | undefined;
 /** Source uri + version of the last render - `prepareAbap` over an
  *  unchanged buffer (tab switches, provider re-fires) is pure cost. */
 let lastRenderKey: string | undefined;
+/** The document object `lastRenderKey` was computed for: a closed and
+ *  reopened document (a reused `Untitled-1`, a file changed on disk while
+ *  closed) starts again at version 1, and the uri@version key alone served
+ *  the previous content for it. */
+let lastRenderDoc: vscode.TextDocument | undefined;
 
 /** A source the preview can follow: an ABAP buffer that builds views. */
 function isFollowable(doc: vscode.TextDocument): boolean {
@@ -148,7 +153,7 @@ export function registerXmlPreview(
 
   function render(source: vscode.TextDocument): string {
     const key = `${source.uri.toString()}@${source.version}`;
-    if (key === lastRenderKey && lastContent !== undefined) {
+    if (key === lastRenderKey && source === lastRenderDoc && lastContent !== undefined) {
       // same buffer, same version - re-mirror (the findings may be newer),
       // but do not reconstruct again
       if (lastOffsets && lastOffsetsFor === source.uri.toString()) {
@@ -169,6 +174,7 @@ export function registerXmlPreview(
       lastOffsets = undefined;
       lastOffsetsFor = undefined;
       lastRenderKey = key;
+      lastRenderDoc = source;
       diagnostics.delete(PREVIEW_URI);
       return empty;
     }
@@ -177,6 +183,7 @@ export function registerXmlPreview(
     lastOffsets = formatted.lineOffsets;
     lastOffsetsFor = source.uri.toString();
     lastRenderKey = key;
+    lastRenderDoc = source;
     mirrorFindings(source, formatted.lineOffsets, formatted.text.split("\n"));
     return formatted.text;
   }

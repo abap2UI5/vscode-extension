@@ -13,6 +13,7 @@ import {
   frameworkPin,
   guideSection,
   linterActionRef,
+  projectClassNameError,
   unitActionRef,
   scaffoldFiles,
   scaffoldScripts,
@@ -436,4 +437,13 @@ test("the scaffold writes every file once", () => {
     assert.ok(paths.includes(needed), `the scaffold writes ${needed}`);
   }
   assert.equal(new Set(paths).size, paths.length, "no path written twice");
+});
+
+test("a new project's class name follows the template's naming rule", () => {
+  // template.json's substitutions.class.rule mirrors the project's
+  // abaplint object_naming - a name the wizard took used to fail there
+  assert.equal(projectClassNameError("zcl_my_app"), undefined);
+  assert.equal(projectClassNameError("ZCX_MY_ERROR"), undefined);
+  assert.match(projectClassNameError("ycl_app") ?? "", /ZCL_/);
+  assert.match(projectClassNameError("zmy_app") ?? "", /ZCL_/);
 });

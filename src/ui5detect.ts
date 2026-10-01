@@ -125,6 +125,12 @@ export async function suggestSystemUi5(
           break;
         }
       }
+      if (status === 401 || status === 403) {
+        // background probes do not trip the proxy's 401 breaker - with a
+        // wrong password, trying the remaining paths only adds failed
+        // logons on every launch
+        break;
+      }
     } catch {
       // network trouble - the launch already surfaces that where it matters
     }

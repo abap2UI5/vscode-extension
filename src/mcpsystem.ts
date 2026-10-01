@@ -490,13 +490,19 @@ export function createSystemMcpServer(
             });
           });
           server = srv;
-          srv.once("error", (err) => {
+          const onStartError = (err: Error) => {
             if (server === srv) {
               server = undefined;
             }
             reject(err);
-          });
+          };
+          srv.once("error", onStartError);
           srv.listen(0, "127.0.0.1", () => {
+            // From here an error belongs to a LISTENING server: run through
+            // the start-up handler it forgot the server while it kept
+            // listening, so stop( ) could no longer close the endpoint.
+            srv.off("error", onStartError);
+            srv.on("error", (err) => deps.log(`mcp-system: ${String(err)}`));
             if (server !== srv) {
               srv.close();
               reject(new Error("the system MCP server was stopped while starting"));

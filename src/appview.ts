@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { classNameOf, usesBuilder } from "./abap";
-import { isAppSource } from "./appclasses";
+import { isAppSource, onDidRefreshAppClasses } from "./appclasses";
 import {
   abapSources,
   invalidateAbapSource,
@@ -37,9 +37,13 @@ class AppTree implements vscode.TreeDataProvider<AppNode> {
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changed.event;
   private cache: AppNode[] | undefined;
+  /** Bumped by every refresh: a scan that started before the latest one
+   *  must not store its older list over the newer one's. */
+  private generation = 0;
 
   refresh(): void {
     this.cache = undefined;
+    this.generation++;
     this.changed.fire();
   }
 
@@ -51,10 +55,15 @@ class AppTree implements vscode.TreeDataProvider<AppNode> {
     if (node) {
       return [];
     }
-    if (!this.cache) {
-      this.cache = await scan();
+    if (this.cache) {
+      return this.cache;
     }
-    return this.cache;
+    const generation = this.generation;
+    const nodes = await scan();
+    if (generation === this.generation) {
+      this.cache = nodes;
+    }
+    return nodes;
   }
 
   getTreeItem(node: AppNode): vscode.TreeItem {
@@ -151,6 +160,9 @@ export function registerAppView(context: vscode.ExtensionContext): void {
     // create / change / delete on disk, and a workspace folder coming or
     // going - all of it through the one shared watcher
     onDidChangeAbapSources(refresh),
+    // the app-class index rebuilt in the background - a subclass of a base
+    // class it did not know before is an app now
+    onDidRefreshAppClasses(refresh),
     // a saved class can BECOME an app (or stop being one) - the tree follows.
     // The save may reach the cache before the watcher does, so the file's
     // remembered text is dropped here as well.

@@ -72,6 +72,17 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
+/** Bumped whenever a config already read is found changed - through any file
+ *  of its chain. The caches of what was CHECKED against it (the view check's
+ *  memos and its sweep cache) compare it: they are cleared by the watcher
+ *  over `abap2ui5lint.json[c]`, and an `extends` base under any other name
+ *  changed the rules without anything clearing them. */
+let generation = 0;
+
+export function configGeneration(): number {
+  return generation;
+}
+
 /** Forget everything — the config file changed on disk. */
 export function clearConfigCache(): void {
   cache.clear();
@@ -142,6 +153,9 @@ function readConfig(file: string): CacheEntry {
   const cached = cache.get(file);
   if (cached && stampOf(cached.chain) === cached.stamp) {
     return cached;
+  }
+  if (cached) {
+    generation++;
   }
   const chain = configChain(file);
   const stamp = stampOf(chain);

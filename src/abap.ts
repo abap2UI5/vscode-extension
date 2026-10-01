@@ -159,7 +159,10 @@ const CLASS_DEF_RE = /^[ \t]*class\s+(\S+)\s+definition\b/gim;
  * DEFERRED.` in front of the real definition is only an announcement - taking
  * it for the definition returned the wrong class name and, worse, no
  * superclass at all, so an app inheriting the interface behind such a line
- * went unrecognised.
+ * went unrecognised. `CLASS zcl_x DEFINITION LOCAL FRIENDS ltcl_test.` - the
+ * standard opening of a test include - is no definition either: read as one,
+ * the include claimed the class's own name, and opening it replaced the real
+ * class in the app index (an app inheriting from it lost F9 and its lens).
  *
  * Takes the BLANKED source (`blankNonCode`): a `CLASS x DEFINITION.` at the
  * start of a line inside a multi-line string template - an app that generates
@@ -173,7 +176,7 @@ function classDefinitionIn(
   for (const m of code.matchAll(CLASS_DEF_RE)) {
     const dot = code.indexOf(".", m.index);
     const statement = code.slice(m.index, dot < 0 ? code.length : dot);
-    if (/\bdeferred\b/i.test(statement)) {
+    if (/\bdeferred\b|\blocal\s+friends\b/i.test(statement)) {
       continue;
     }
     return { name: m[1], index: m.index, statement };
@@ -306,6 +309,12 @@ const SHADOW_SCHEMES = new Set([
   "search-editor",
   "debug",
 ]);
+
+/** Whether a document under this scheme only shows a COPY of a file (see
+ *  `SHADOW_SCHEMES`) - nothing to index, check or fix. */
+export function isShadowScheme(scheme: string): boolean {
+  return SHADOW_SCHEMES.has(scheme.toLowerCase());
+}
 
 /** Whether a document is ABAP source this window should know about - by
  *  language id first, because an ADT document's path may carry no extension

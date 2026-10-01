@@ -169,6 +169,24 @@ test("a nested CASE's WHEN OTHERS does not steer the placement", () => {
   );
 });
 
+test("the CASE of TO UPPER CASE or IGNORING CASE opens no block", () => {
+  // regression: each was counted as a nested CASE, the dispatcher's own
+  // ENDCASE then closed that one instead, and the quick fix disappeared
+  const source = classWith(`    CASE client->get_event( ).
+      WHEN \`OPEN\`.
+        TRANSLATE mv_name TO UPPER CASE.
+        mv_name = to_lower( mv_name ).
+        FIND \`x\` IN mv_name IGNORING CASE.
+        REPLACE ALL OCCURRENCES OF \`a\` IN mv_name WITH \`b\` RESPECTING CASE.
+        SET LOCALE LANGUAGE sy-langu. TRANSLATE mv_name TO LOWER CASE.
+    ENDCASE.`);
+  const out = applied(source, "SAVE");
+  assert.ok(
+    out.includes("LOWER CASE.\n      WHEN `SAVE`.\n        \" handle SAVE\n    ENDCASE."),
+    out
+  );
+});
+
 test("a dispatcher inside a comment is not one", () => {
   const source = classWith(`    " CASE client->get_event( ).
     "   WHEN OTHERS.

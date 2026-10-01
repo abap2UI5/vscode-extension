@@ -210,3 +210,15 @@ test("a CAST around the NEW names the class, not the type it is cast to", () => 
     ["ZCL_DETAIL", "ZCL_OTHER", "ZCL_THIRD"]
   );
 });
+
+test("CAST # and CONV # name no type - the next class is the target", () => {
+  const { navCallsOf: calls } = require("../navmap") as typeof import("../navmap");
+  assert.deepEqual(
+    calls("client->nav_app_call( CAST #( zcl_next=>factory( ) ) ).").map((c) => c.target),
+    ["ZCL_NEXT"]
+  );
+  assert.deepEqual(
+    calls("client->nav_app_call( CAST z2ui5_if_app( NEW zcl_x( ) ) ).").map((c) => c.target),
+    ["ZCL_X"]
+  );
+});

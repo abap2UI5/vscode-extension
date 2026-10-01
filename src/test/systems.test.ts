@@ -30,6 +30,7 @@ const {
   enteredUser,
   keysFor,
   legacyAdoption,
+  replaceTemplateIn,
   uniqueName,
   withUniqueNames,
 } = require("../systems") as typeof import("../systems");
@@ -117,4 +118,27 @@ test("the SAP user is stored trimmed, and a blank answer is a cancel", () => {
   assert.equal(enteredUser("   "), undefined);
   assert.equal(enteredUser(""), undefined);
   assert.equal(enteredUser(undefined), undefined);
+});
+
+test("editing a launch URL replaces that profile in place, matched by URL", () => {
+  const twins = [
+    { name: "DEV", url: "https://a/x?app_start={class}" },
+    { name: "DEV", url: "https://b/x?app_start={class}" },
+  ];
+  // the second twin (shown as "DEV (2)") is edited - the first one stays,
+  // where matching by name dropped both
+  assert.deepEqual(
+    replaceTemplateIn(twins, "https://b/x?app_start={class}", "https://c/x?app_start={class}"),
+    [
+      { name: "DEV", url: "https://a/x?app_start={class}" },
+      { name: "DEV", url: "https://c/x?app_start={class}" },
+    ]
+  );
+  // an unnamed entry keeps having no name; order is kept
+  assert.deepEqual(
+    replaceTemplateIn([{ url: " https://a/x " }, { name: "Q", url: "https://q/x" }], "https://a/x", "https://n/x"),
+    [{ url: "https://n/x" }, { name: "Q", url: "https://q/x" }]
+  );
+  // nothing in the list carries it - the caller looks elsewhere
+  assert.equal(replaceTemplateIn(twins, "https://z/x", "https://n/x"), undefined);
 });

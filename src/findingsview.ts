@@ -41,12 +41,12 @@ import {
 export interface FindingsBaseline {
   /** The baseline file the repo config names for this document, if any. */
   baselineFileFor(doc: vscode.TextDocument): string | undefined;
-  /** Appends one finding; returns the written key. Throws on I/O errors. */
-  addToBaseline(
+  /** Appends findings with one write per baseline file; returns the written
+   *  keys. Throws on I/O errors. */
+  addAllToBaseline(
     baselineFile: string,
-    sourceFile: string,
-    finding: PropertyFinding
-  ): string;
+    files: ReadonlyArray<{ file: string; findings: readonly PropertyFinding[] }>
+  ): string[];
   /** Drops the mtime-keyed memo of a baseline file that was just written. */
   clearBaselineCache(file?: string): void;
   /** Re-checks the open documents after the baseline changed under them. */
@@ -266,6 +266,10 @@ export function registerFindingsView(
         let noBaseline = 0;
         let missed = 0;
         const touchedBaselines = new Set<string>();
+        const perBaseline = new Map<
+          string,
+          Array<{ file: string; findings: PropertyFinding[] }>
+        >();
         const files = [...new Set(node.entries.map((entry) => entry.file))];
         for (const file of files) {
           let doc: vscode.TextDocument;
@@ -292,24 +296,28 @@ export function registerFindingsView(
             missed++;
             continue; // an unparsable buffer mid-edit
           }
-          for (const finding of findings) {
-            if (
-              finding.type !== rule ||
-              typeof finding.line !== "number" ||
-              !lines.has(finding.line - 1)
-            ) {
-              continue;
-            }
-            try {
-              baseline.addToBaseline(baselineFile, doc.uri.fsPath, finding);
-              added++;
-              touchedBaselines.add(baselineFile);
-            } catch (err) {
-              vscode.window.showWarningMessage(
-                `abap2UI5: could not update ${baselineFile} - ${String(err)}`
-              );
-              return;
-            }
+          const matching = findings.filter(
+            (finding) =>
+              finding.type === rule &&
+              typeof finding.line === "number" &&
+              lines.has(finding.line - 1)
+          );
+          if (matching.length) {
+            const pending = perBaseline.get(baselineFile) ?? [];
+            pending.push({ file: doc.uri.fsPath, findings: matching });
+            perBaseline.set(baselineFile, pending);
+          }
+        }
+        // one write per baseline file, not per finding
+        for (const [baselineFile, pending] of perBaseline) {
+          try {
+            added += baseline.addAllToBaseline(baselineFile, pending).length;
+            touchedBaselines.add(baselineFile);
+          } catch (err) {
+            vscode.window.showWarningMessage(
+              `abap2UI5: could not update ${baselineFile} - ${String(err)}`
+            );
+            return;
           }
         }
         for (const baselineFile of touchedBaselines) {

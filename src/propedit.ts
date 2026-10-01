@@ -142,7 +142,7 @@ export function removeAttributeEdit(
     }
     return { start: previousClose + 1, end: attr.aClose + 1, text: "" };
   }
-  if (closeLineStart > lineStart) {
+  if (closeLineStart > lineStart && !source.slice(closeLineStart, attr.aClose).trim()) {
     // the usual chain shape: the call's own `)` opens the next line, so the
     // whole line (or lines, for a multi-line value) can go
     return { start: lineStart, end: closeLineStart, text: "" };
@@ -154,6 +154,10 @@ export function removeAttributeEdit(
    * exotic layout. The leading `)` still has to close the previous call and
    * whatever follows (`->end( ).`, the period) still has to run, so only the
    * `->a( … )` between them is cut out.
+   *
+   * The same holds when its arguments wrap and the `)` ends the wrapped line
+   * (`v = \`…\` ).`) instead of opening one: dropping the lines in front of
+   * it took the first line alone and left the `v = …` dangling in the chain.
    */
   const afterParen = lineStart + opener[0].indexOf(")") + 1;
   return { start: afterParen, end: attr.aClose + 1, text: "" };

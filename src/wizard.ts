@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { APP_TEMPLATES, templateSource } from "./template";
-import { projectNameFrom, scaffoldFiles, scaffoldText } from "./scaffold";
+import { projectClassNameError, projectNameFrom, scaffoldFiles, scaffoldText } from "./scaffold";
 
 /*
  * "New App from Template" - the template gallery behind abap2ui5.newApp.
@@ -53,13 +53,15 @@ async function pickTemplate(
 
 /** The class-name prompt both wizards share. The `my_app` half of the
  *  default is preselected, so typing replaces it straight away. */
-async function askClassName(): Promise<string | undefined> {
+async function askClassName(
+  validate: (value: string) => string | undefined = classNameError
+): Promise<string | undefined> {
   const value = await vscode.window.showInputBox({
     title: "abap2UI5: Class Name",
     value: "zcl_my_app",
     valueSelection: [4, 10],
     prompt: "Name of the app class (customer namespace, up to 30 characters)",
-    validateInput: classNameError,
+    validateInput: validate,
   });
   const name = value?.trim();
   return name || undefined;
@@ -174,7 +176,10 @@ export async function newProjectWizard(): Promise<void> {
     return;
   }
 
-  const className = await askClassName();
+  // a project additionally carries the template's abaplint naming rule
+  const className = await askClassName(
+    (value) => classNameError(value) ?? projectClassNameError(value)
+  );
   if (!className) {
     return;
   }

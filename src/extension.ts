@@ -15,7 +15,7 @@ import {
   recheckOpenDocuments,
   registerViewCheck,
 } from "./viewcheck";
-import { addToBaseline } from "./baselinefile";
+import { addAllToBaseline } from "./baselinefile";
 import { clearBaselineCache } from "./lintconfig";
 import { registerXmlPreview } from "./xmlpreview";
 import { registerQuickFix } from "./quickfix";
@@ -71,6 +71,7 @@ import {
   clearCredentials,
   pickSystem,
   storeTemplate,
+  activateTemplate,
 } from "./systems";
 
 /** Where the screenshot Save As dialog last saved to, per window. */
@@ -92,8 +93,18 @@ export function activate(context: vscode.ExtensionContext): void {
   // Ctrl+F3: the user is in the editor - they just activated a class - and a
   // loading app grabbing focus would yank them out of it on exactly the
   // reload this extension exists to automate.
-  session.reloadShown = (reason) =>
+  // Where the focus goes back to is where the user is NOW: the position
+  // remembered at the last F9 sent the cursor back there - another line,
+  // another file - on every activation the watch noticed.
+  session.reloadShown = (reason) => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor) {
+      session.rememberSource(editor);
+    } else {
+      session.forgetSource();
+    }
     reloadShownApp(session, reason, { bounceFocus: true });
+  };
   session.notifyShown = (message) => postToShownApp(session, message);
   const log = (message: string) => session.log(message);
   // What a "Show Log" button on a message does - the channel the message's
@@ -244,7 +255,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!template) {
         return;
       }
-      await storeTemplate(active?.name ?? shortUrl(template), template);
+      await storeTemplate(active?.name ?? shortUrl(template), template, active?.template);
+      await activateTemplate(context, template);
       vscode.window.showInformationMessage(
         `abap2UI5: launch URL of ${active?.name ?? shortUrl(template)} saved.`
       );
@@ -652,7 +664,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // the desktop-only baseline machinery, injected so the view itself stays
     // web-safe (see findingsview.ts)
     baselineFileFor,
-    addToBaseline,
+    addAllToBaseline,
     clearBaselineCache,
     recheckOpenDocuments,
   });

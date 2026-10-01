@@ -82,8 +82,14 @@ function config() {
 
 function disposeWorkDir(): void {
   if (workDir) {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    const dir = workDir;
     workDir = undefined;
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // a just-killed Chromium can still hold a PNG on Windows (EBUSY) - a
+      // leftover temp directory is not worth failing the refresh over
+    }
   }
 }
 
@@ -341,7 +347,10 @@ function committedText(doc: vscode.TextDocument): Promise<string | undefined> {
   // repository under `C:\\Users\\John Smith\\...` used to break the compare
   // mode outright), and a git that never answers is killed rather than
   // holding the preview open for the rest of the session.
-  return run("git", ["show", `HEAD:${relative}`], {
+  // `./`: relative to the cwd. A bare `HEAD:<path>` is read from the
+  // REPOSITORY root, so a workspace folder below it (`repo/app1/`) found no
+  // committed version of anything.
+  return run("git", ["show", `HEAD:./${relative}`], {
     cwd: folder.uri.fsPath,
     env: spawnEnv(),
     shell: process.platform === "win32",

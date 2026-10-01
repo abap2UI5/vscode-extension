@@ -144,19 +144,75 @@ export async function askForTemplate(current: string): Promise<string | undefine
   return answer || undefined;
 }
 
-/** Stores a launch URL: into the profile list when one is already in use
- *  (replacing the entry of the given name), into the single setting
- *  otherwise - so the simple case stays simple. */
-export async function storeTemplate(name: string, template: string): Promise<void> {
+type RawProfile = { name?: string; url?: string };
+
+/**
+ * The profile list with one entry's URL replaced, or undefined when no entry
+ * carries `replacing`. Matched by URL, not by name: the name the picker shows
+ * may be numbered (`DEV (2)`) or derived from the URL of an entry that has
+ * none, and matching by it either missed - a new entry appended next to the
+ * one being edited, which stayed active - or, for two entries configured with
+ * one name, dropped BOTH and kept only the edited one.
+ */
+export function replaceTemplateIn(
+  list: readonly RawProfile[],
+  replacing: string,
+  template: string
+): RawProfile[] | undefined {
+  const at = list.findIndex((entry) => (entry?.url ?? "").trim() === replacing);
+  if (at < 0) {
+    return undefined;
+  }
+  const next = [...list];
+  next[at] = { ...list[at], url: template };
+  return next;
+}
+
+/** Stores a launch URL. Editing (`replacing` = the edited system's current
+ *  URL) changes that profile in place, wherever it lives - the list or the
+ *  single setting. A new URL goes into the profile list when one is already
+ *  in use, into the single setting otherwise - so the simple case stays
+ *  simple. */
+export async function storeTemplate(
+  name: string,
+  template: string,
+  replacing?: string
+): Promise<void> {
   const cfg = config();
-  const list = cfg.get<Array<{ name?: string; url?: string }>>(SYSTEMS_KEY, []) ?? [];
+  const list = cfg.get<RawProfile[]>(SYSTEMS_KEY, []) ?? [];
+  if (replacing !== undefined) {
+    const edited = replaceTemplateIn(list, replacing, template);
+    if (edited) {
+      await cfg.update(SYSTEMS_KEY, edited, vscode.ConfigurationTarget.Global);
+      return;
+    }
+    if (cfg.get<string>(TEMPLATE_KEY, "").trim() === replacing) {
+      await cfg.update(TEMPLATE_KEY, template, vscode.ConfigurationTarget.Global);
+      return;
+    }
+  }
   if (list.length) {
-    const next = list.filter((entry) => entry?.name !== name);
-    next.push({ name, url: template });
-    await cfg.update(SYSTEMS_KEY, next, vscode.ConfigurationTarget.Global);
+    await cfg.update(
+      SYSTEMS_KEY,
+      [...list, { name, url: template }],
+      vscode.ConfigurationTarget.Global
+    );
     return;
   }
   await cfg.update(TEMPLATE_KEY, template, vscode.ConfigurationTarget.Global);
+}
+
+/** Makes the system with this URL the active one - after an edit that may
+ *  have changed the name it is remembered by (an unnamed profile is called
+ *  after its URL). */
+export async function activateTemplate(
+  context: vscode.ExtensionContext,
+  template: string
+): Promise<void> {
+  const system = allSystems().find((s) => s.template === template);
+  if (system) {
+    await setActive(context, system);
+  }
 }
 
 /** The launch URL of the active system, asking for one when nothing is

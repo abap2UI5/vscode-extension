@@ -242,7 +242,6 @@ export function planExtract(
         "`)->tag( )` that should become the first line of the new method.",
     };
   }
-  const head = source.slice(statement.start, boundary);
   const tail = source.slice(boundary, statement.end);
   if (!CHAIN_CALL.test(tail)) {
     return { error: "There is no chain call left after the cursor to extract." };
@@ -296,15 +295,21 @@ export function planExtract(
 
   /* The head has to end up in a variable, because that variable is what the
    * new method is handed. A chain already captured into one keeps its name -
-   * re-capturing it would leave two handles for one chain. */
-  const captured = /^\s*(?:DATA\(\s*([\w]+)\s*\)|([\w]+))\s*=\s/i.exec(head);
+   * re-capturing it would leave two handles for one chain. Both are read
+   * from the blanked head: the raw one starts with any comment line above
+   * the chain, which hid the capture and put `DATA(content) = ` in front of
+   * the comment. */
+  const headCode = code.slice(statement.start, boundary);
+  const captured = /^\s*(?:DATA\(\s*([\w]+)\s*\)|([\w]+))\s*=\s/i.exec(headCode);
   const handle = captured ? (captured[1] ?? captured[2]) : "content";
-  const indent = /^[ \t]*/.exec(head.replace(/^\n+/, ""))?.[0] ?? "    ";
+  // where the statement's code begins, and the indent of that line
+  const at = statement.start + (headCode.length - headCode.trimStart().length);
+  const indent =
+    /^[ \t]*/.exec(source.slice(source.lastIndexOf("\n", at - 1) + 1, at))?.[0] ?? "    ";
 
   const edits: ExtractEdit[] = [];
   if (!captured) {
     // `view->ele( … )` becomes `DATA(content) = view->ele( … )`
-    const at = statement.start + (head.length - head.trimStart().length);
     edits.push({
       start: at,
       end: at,

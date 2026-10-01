@@ -65,11 +65,14 @@ function eventCaseRegion(code: string): CaseRegion | undefined {
   const inner: Array<[number, number]> = [];
   let depth = 1;
   let open: number | undefined;
-  const re = /\b(CASE|ENDCASE)\b/gi;
+  // only a CASE that starts a statement opens a block - the one in
+  // `TO UPPER CASE` or `IGNORING CASE` is part of another statement, and
+  // counting it let the dispatcher's own ENDCASE close it instead
+  const re = /(?<=(?:^|[.:,])\s*)\b(CASE)\b|\b(ENDCASE)\b/gi;
   re.lastIndex = bodyAt;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code))) {
-    if (m[1].toUpperCase() === "CASE") {
+    if (m[1]) {
       depth++;
       if (depth === 2) {
         open = m.index;

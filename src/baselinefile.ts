@@ -120,10 +120,30 @@ export function addToBaseline(
   sourceFile: string,
   finding: PropertyFinding
 ): string {
+  return addAllToBaseline(baselineFile, [{ file: sourceFile, findings: [finding] }])[0];
+}
+
+/**
+ * Appends many findings with ONE read and ONE write. "Add all findings of
+ * this rule" used to call `addToBaseline` per finding - a full parse, sort
+ * and rewrite each time, and every write fired the baseline watcher, which
+ * re-checks every open document. Returns the keys added, in order.
+ */
+export function addAllToBaseline(
+  baselineFile: string,
+  files: ReadonlyArray<{ file: string; findings: readonly PropertyFinding[] }>
+): string[] {
   const raw = readBaseline(baselineFile);
   const findings: Record<string, number> = raw.findings ?? {};
-  const key = baselineKeys(baselineFile, sourceFile, [finding])[0];
-  findings[key] = (findings[key] ?? 0) + 1;
-  writeBaseline(baselineFile, raw.note, findings);
-  return key;
+  const added: string[] = [];
+  for (const { file, findings: fileFindings } of files) {
+    for (const key of baselineKeys(baselineFile, file, fileFindings)) {
+      findings[key] = (findings[key] ?? 0) + 1;
+      added.push(key);
+    }
+  }
+  if (added.length) {
+    writeBaseline(baselineFile, raw.note, findings);
+  }
+  return added;
 }

@@ -15,7 +15,7 @@ import {
 } from "./rendergate";
 import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
-import { usesBuilder } from "./abap";
+import { isShadowScheme, usesBuilder } from "./abap";
 import {
   configRelative,
   frozenBuilderOf,
@@ -50,6 +50,7 @@ import {
   CheckOptions,
   clearBaselineCache,
   clearConfigCache,
+  configGeneration,
   describeOptions,
   resolveOptions,
 } from "./lintconfig";
@@ -123,6 +124,12 @@ function distributionSetting(): string | null {
 
 /** See `isCheckableSource` - this is only the document unwrapping. */
 export function isCheckable(doc: vscode.TextDocument): boolean {
+  // the revision side of a git diff is the same class again: checked, every
+  // finding showed twice, and "fix all" put read-only edits into its one
+  // WorkspaceEdit
+  if (isShadowScheme(doc.uri.scheme)) {
+    return false;
+  }
   return isCheckableSource(doc.fileName, doc.languageId, doc.getText());
 }
 
@@ -241,7 +248,14 @@ async function runRenderGate(
     path.join(os.tmpdir(), "abap2ui5-viewcheck-")
   );
   const scratch = path.join(scratchDir, scratchFileName(doc.fileName));
-  fs.writeFileSync(scratch, doc.getText());
+  try {
+    fs.writeFileSync(scratch, doc.getText());
+  } catch (err) {
+    // before the try/finally below owns the directory - a full disk must not
+    // leave it behind
+    fs.rmSync(scratchDir, { recursive: true, force: true });
+    throw err;
+  }
 
   const checker = checkerCommand();
   const useShell = checker.cmd !== "node" && process.platform === "win32";
@@ -383,8 +397,26 @@ export function recheckOpenDocuments(): void {
   recheckAll();
 }
 
+/** The config generation the memos and the sweep cache were filled under -
+ *  see `configGeneration`. */
+let cachedUnderConfig = configGeneration();
+
+/** Drops both result caches when a config changed under them - called right
+ *  after options were resolved, which is when a changed chain is noticed. */
+function dropCachesIfConfigChanged(): void {
+  const now = configGeneration();
+  if (now !== cachedUnderConfig) {
+    cachedUnderConfig = now;
+    memos.clear();
+    sweepCache.clear();
+  }
+}
+
 export function findingsNow(doc: vscode.TextDocument): PropertyFinding[] {
   const key = doc.uri.toString();
+  // a change some other check's option lookup noticed - cheap, unlike
+  // resolving the options on every code-action request
+  dropCachesIfConfigChanged();
   const memo = memos.get(key);
   if (memo && memo.version === doc.version) {
     return memo.findings;
@@ -452,7 +484,9 @@ function schedule(
     key,
     setTimeout(() => {
       timers.delete(key);
-      void checkDocument(doc, diagnostics, log, request);
+      checkDocument(doc, diagnostics, log, request).catch((err) =>
+        log(`view-check: ${String(err)}`)
+      );
     }, delay)
   );
 }
@@ -870,6 +904,7 @@ async function sweepWorkspace(
       // a document with no path on disk has no directory to discover a config
       // from - the workspace's own config governs it, as it does on the live path
       const opts = resolveOptions(discoveryDirOf(uri), sweepSettings);
+      dropCachesIfConfigChanged();
       /* Only what the CLI's walk would reach, judged from the directory it
        * walks: the governing config's, or the workspace folder when the
        * settings govern. A file under a dot-directory or one a config
@@ -1103,6 +1138,12 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
            * different characters now, and applying them rewrites the wrong
            * span. Skipping is the only safe answer; the next run picks it up. */
           if (file.version !== undefined && doc.version !== file.version) {
+            moved++;
+            continue;
+          }
+          // Gated from DISK, but opened (and typed in) since: there is no
+          // version to compare, the text itself has to match.
+          if (file.version === undefined && file.text !== undefined && doc.getText() !== file.text) {
             moved++;
             continue;
           }

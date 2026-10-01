@@ -301,3 +301,17 @@ test("a multi-line value keeps its continuation lines together", () => {
     ].join("\n")
   );
 });
+
+test("removing an a-call whose arguments run onto a second line takes both", () => {
+  // regression: its `)` ends the second line instead of opening it, but the
+  // edit dropped only the first line and left `v = … ).` dangling in the chain
+  const source = [
+    "    view->tag( `Text`",
+    "        )->a( n = `text`",
+    "              v = `a long value` ).",
+  ].join("\n");
+  const call = controlCallAt(source, source.indexOf("Text`"))!;
+  const edit = removeAttributeEdit(source, call, "text");
+  assert.ok(edit, "the edit is offered");
+  assert.equal(apply(source, edit!), "    view->tag( `Text`\n        ).");
+});

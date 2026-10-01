@@ -58,6 +58,15 @@ let scheduled: NodeJS.Timeout | undefined;
  *  scanning every open document per inheritance hop on every CodeLens pass. */
 const openByName = new Map<string, vscode.TextDocument>();
 
+/** Fires when a background rebuild has replaced the index. The apps tree and
+ *  the CodeLens ask `isAppSource` synchronously, and their own debounced
+ *  refreshes usually run BEFORE the rebuild a `git pull` or the activation
+ *  started has finished - so a subclass of a base class that just arrived
+ *  stayed out of the tree, and without its lens, until some unrelated event
+ *  asked again. */
+const refreshed = new vscode.EventEmitter<void>();
+export const onDidRefreshAppClasses = refreshed.event;
+
 /** What an open document last told us about itself, keyed on the document so
  *  a closed one falls away with it. Re-derived only when the version moved. */
 const docNames = new WeakMap<
@@ -119,6 +128,7 @@ export async function refreshAppClasses(): Promise<void> {
     }
     const contributed = openDocuments(next);
     index.replace(next, contributed);
+    refreshed.fire();
   })();
   try {
     await refreshing;
@@ -218,6 +228,7 @@ export function registerAppClasses(context: vscode.ExtensionContext): void {
   };
 
   context.subscriptions.push(
+    refreshed,
     {
       dispose: () => {
         if (scheduled) {

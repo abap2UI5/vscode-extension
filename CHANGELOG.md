@@ -20,6 +20,53 @@ rather than from a commit on its main branch.
   bundle. A build whose bundle is not published says which release it
   wanted; *Update Render Gate* and the diagnostics report name the bundled
   linter version and its commit instead of a bare commit hash.
+- **Fixes from a review of the whole extension:**
+  - *Preview and activation.* An app's screenshot (and MCP's
+    `run_app_on_system`) no longer fails its first roundtrip with a 404.
+    Ctrl+F3 whose activation failed no longer reloads and stops watching -
+    the preview keeps its "not activated" badge and reloads once the
+    activation does happen; a reload without an activation command, or after
+    re-entering credentials, keeps the watch too. The watch's reload returns
+    the cursor to where you are, not to where you pressed F9. *Set Launch
+    URL* edits the active system in place - it used to drop a same-named
+    second system or add a duplicate.
+  - *Proxy.* A connection that breaks mid-download aborts the resource
+    instead of completing it with an error text; a WebSocket the system
+    never answers times out; a page that declares its charset only in
+    `<meta>` keeps its umlauts; a second Content-Security-Policy keeps all of
+    its directives. A wrong password no longer costs extra failed logons
+    through the UI5-version probe.
+  - *View check.* The read-only side of a git diff is no longer checked
+    (findings showed twice, and *Fix All* tried to edit it). A change to a
+    base config pulled in through `extends` is picked up without touching
+    the extending file. *Turn off rule* writes only the workspace's own
+    rules, and *Undo* restores them exactly. *Add all findings to the
+    baseline* writes the file once instead of once per finding. *Preview
+    Diff* finds the committed version when the workspace folder is below
+    the repository root. A proxy's block page downloaded instead of the
+    render-gate bundle no longer blocks the real bundle afterwards, and two
+    windows installing the gate at once no longer break each other's
+    install.
+  - *Editing.* *Extract to View Method* no longer breaks the class when a
+    comment sits above the chain. Removing an attribute whose value wraps
+    onto a second line removes all of it. The property editor no longer
+    treats `` `sap-icon://` && mv_icon `` as an editable literal. Renaming an
+    attribute (F2) leaves same-named structure components alone. The quick
+    fix for an unhandled event is offered when a handler uses `IGNORING
+    CASE` or `TO UPPER CASE`. Hover in an XML view works over the whole
+    attribute name. `CLASS-DATA` and `REF TO` attributes no longer get a
+    roundtrip-cost annotation.
+  - *Apps tree, CodeLens and navigation.* Opening a test include no longer
+    makes subclasses of that class lose their CodeLens and their entry in
+    the apps tree, and both update once a newly pulled base class is
+    indexed. The navigation map follows `CAST #( … )` and `CONV #( … )`.
+    *Show Examples* no longer counts a `label` aggregation as a use of
+    `Label`, and a broken catalogue download is retried instead of cached as
+    empty for a day. *New Project from Template* refuses class names the new
+    project's own abaplint rejects (it expects `ZCL_`/`ZCX_`). On Windows
+    the unit tests run in `cmd.exe`, the shell their command line is quoted
+    for. *Convert XML View* keeps a warning about an unreadable tag from
+    spilling into the generated ABAP.
 - Internal: `@abap2ui5/linter` is an exact npm devDependency, like in
   every other repository of the ecosystem, instead of a `github:` commit
   pin; the weekly bump follows the latest published version, and a test

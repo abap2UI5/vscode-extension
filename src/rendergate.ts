@@ -235,8 +235,49 @@ async function verifyBundle(
     throw new Error(decision.message);
   }
   log(decision.log);
+}
+
+/** Remembers the digest of a bundle that INSTALLED - not of one that merely
+ *  downloaded: a proxy's 200 block page was accepted as the first install,
+ *  failed to extract, and its hash then refused the real bundle at that url
+ *  for good ("changed since it was last installed"). */
+async function rememberBundle(
+  context: vscode.ExtensionContext,
+  url: string,
+  actual: string
+): Promise<void> {
   await context.globalState.update(digestKey(url), actual);
 }
+
+/** Install leftovers of a window that crashed mid-install - each can be a
+ *  third of a gigabyte. Only old ones: a younger one may be another
+ *  window's install in progress. */
+async function removeStaleStaging(dir: string): Promise<void> {
+  const parent = path.dirname(dir);
+  const prefix = `${path.basename(dir)}.installing`;
+  let names: string[];
+  try {
+    names = await fs.promises.readdir(parent);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix)) {
+      continue;
+    }
+    const full = path.join(parent, name);
+    try {
+      const { mtimeMs } = await fs.promises.stat(full);
+      if (Date.now() - mtimeMs > STALE_STAGING_MS) {
+        await fs.promises.rm(full, { recursive: true, force: true });
+      }
+    } catch {
+      // gone already, or not ours to remove
+    }
+  }
+}
+
+const STALE_STAGING_MS = 24 * 60 * 60 * 1000;
 
 /** Download the checker bundle and Chromium into global storage. Returns
  *  true when the gate is ready afterwards. `showLog` reveals the output
@@ -257,7 +298,10 @@ export async function installRenderGate(
   // working gate: installing over the top used to delete the installation
   // first, so re-running the command offline left the user with no gate at
   // all instead of the one they already had.
-  const staging = `${dir}.installing`;
+  // Unique per attempt: global storage is shared by every window, and two
+  // windows installing at once (both accepted the offer) removed and
+  // overwrote each other's download under one fixed name.
+  const staging = `${dir}.installing-${process.pid}-${Date.now().toString(36)}`;
   const previous = `${dir}.previous`;
   const aborter = new AbortController();
   const timeout = setTimeout(
@@ -279,7 +323,7 @@ export async function installRenderGate(
         log(`render-gate: installing to ${dir}`);
         // rm/promises: the leftovers can be a third of a gigabyte (Chromium
         // included), and a sync removal blocks the whole extension host
-        await fs.promises.rm(staging, { recursive: true, force: true });
+        await removeStaleStaging(dir);
         fs.mkdirSync(staging, { recursive: true });
         const tgz = path.join(staging, "bundle.tgz");
         const allowRolling = vscode.workspace
@@ -368,6 +412,7 @@ export async function installRenderGate(
           throw err;
         }
         await fs.promises.rm(previous, { recursive: true, force: true });
+        await rememberBundle(context, bundleUrl, digest);
 
         log("render-gate: installed");
         /* There is a working gate now, so whatever failed to start before is
