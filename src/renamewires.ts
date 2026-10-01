@@ -398,24 +398,26 @@ function componentOffsets(lexed: Lexed): Set<number> {
 }
 
 /**
- * Does the word at `at` stand on its own, or behind a selector that names
- * this class? A component selector (`ls_row-name`) takes no blank in ABAP,
- * so `a - name` stays the subtraction it is; the object and class selectors
- * are read across blanks, the way the chain style writes them.
+ * Does the word at `at` stand on its own, or behind a selector that may
+ * address this class's attribute? A component selector (`ls_row-name`) takes
+ * no blank in ABAP, so `a - name` stays the subtraction it is; the class and
+ * interface selectors are read across blanks, the way the chain style writes
+ * them.
+ *
+ * `->` is renamed whatever the receiver: the type of `r_result` is not known
+ * here, and the factory method that fills its own new instance
+ * (`r_result->mv_text = i_text`) is the common case - skipped, the rename
+ * left that line naming an attribute that no longer exists.
  */
 function ownMember(code: string, at: number, ownClasses: Set<string>): boolean {
   if (code[at - 1] === "-") {
     return false;
   }
   const selector = /(\w*)\s*(->|=>|~)\s*$/.exec(code.slice(Math.max(0, at - 200), at));
-  if (!selector) {
+  if (!selector || selector[2] === "->") {
     return true;
   }
-  const receiver = selector[1].toUpperCase();
-  if (selector[2] === "->") {
-    return receiver === "ME";
-  }
-  return selector[2] === "=>" && ownClasses.has(receiver);
+  return selector[2] === "=>" && ownClasses.has(selector[1].toUpperCase());
 }
 
 /** Is this offset inside one of the source's string literals? */
@@ -486,9 +488,8 @@ export function attributeSpans(source: string, name: string): AttributeSpan[] {
     /*
      * The same word is not always this attribute: the field of a row type
      * (`TYPES: BEGIN OF ty_row, name TYPE …`), `ls_row-name`, another
-     * object's `lo_other->name` or `zcl_other=>name`. Renaming them along
-     * with it broke the class. Only `me->` and this class's own `=>` still
-     * address the attribute.
+     * class's `zcl_other=>name` or an interface's `lif_x~name`. Renaming
+     * them along with it broke the class.
      */
     if (components.has(at) || !ownMember(lexed.blanked, at, ownClasses)) {
       continue;

@@ -535,8 +535,9 @@ test("a same-named component or another object's member is not the attribute", (
   /*
    * regression: with the attribute declared, every `\bname\b` outside
    * literals and comments was renamed - the field of an unrelated row type,
-   * `ls_row-name` and another object's `->name` with it, which then no longer
-   * compiled.
+   * `ls_row-name` and another class's `=>name` with it, which then no longer
+   * compiled. An object reference stays renamed: `r_result->name` in a
+   * factory is this class's own attribute.
    */
   const source = `CLASS zcl_app DEFINITION PUBLIC.
   PUBLIC SECTION.
@@ -566,6 +567,7 @@ ENDCLASS.`;
     "DATA|name",
     "ls_row-name =|name",
     "me->|name",
+    "me->name = lo_other->|name",
     "DATA(lv_rest) = strlen(|name",
     "DATA(lv_rest) = strlen( name ) -|name",
     "view->tag( n = `Text` )->a( n = `text` v = `{/|NAME",
