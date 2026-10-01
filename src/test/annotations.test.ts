@@ -180,6 +180,22 @@ ENDCLASS.`;
   assert.deepEqual(names, ["ms_head", "mv_x"]);
 });
 
+test("a static or reference attribute is not labelled as shipped", () => {
+  // regression: CLASS-DATA and a REF TO got "sent every roundtrip", though
+  // the framework serializes neither - the same rule `_bind( )` completion
+  // already follows
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    CLASS-DATA gv_count TYPE i.
+    DATA mo_helper TYPE REF TO zcl_helper.
+    DATA: mv_x TYPE string,
+          mr_data TYPE REF TO data,
+          mt_rows TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
+ENDCLASS.`;
+  const names = publicAttributes(source).map((a) => a.name);
+  assert.deepEqual(names, ["mv_x", "mt_rows"]);
+});
+
 test("a measured attribute says its size, an unknown one says it is sent", () => {
   const found = costAnnotations(
     SOURCE,

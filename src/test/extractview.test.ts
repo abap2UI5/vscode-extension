@@ -341,3 +341,61 @@ test("a method name may start with an underscore, like the framework's own", () 
   const plan = planExtract(SOURCE, SOURCE.indexOf(")->tag("), "_render_button");
   assert.ok(!("error" in plan), "error" in plan ? plan.error : "");
 });
+
+test("a comment above the chain is not part of the head", () => {
+  /*
+   * regression: the head is the raw text after the previous period, so it
+   * began with the comment line. The capture test did not match, and
+   * `DATA(content) = ` went in front of the comment - into it, for a `"`
+   * comment - so a chain already captured as `view` was captured a second
+   * time and the statement no longer compiled.
+   */
+  const source = [
+    "CLASS zcl_x DEFINITION PUBLIC.",
+    "  PUBLIC SECTION.",
+    "    INTERFACES z2ui5_if_app.",
+    "ENDCLASS.",
+    "",
+    "CLASS zcl_x IMPLEMENTATION.",
+    "  METHOD z2ui5_if_app~main.",
+    "    \" the main view",
+    "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory(",
+    "      )->ele( `Page`",
+    "      )->tag( `Button`",
+    "      )->a( n = `text` v = `Go` ).",
+    "    client->view_display( view->stringify( ) ).",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\n");
+  const plan = planAt(source, ")->tag(", "build_button");
+  assert.equal(plan.handle, "view");
+  const out = apply(source, plan);
+  assert.ok(out.includes("    \" the main view\n    DATA(view) = z2ui5_cl_ui5_view_builder"));
+  assert.ok(!out.includes("DATA(content)"));
+  assert.ok(out.includes("\n    build_button( view )."));
+});
+
+test("an uncaptured chain is captured below its comment, also with CRLF", () => {
+  const source = [
+    "CLASS zcl_x DEFINITION PUBLIC.",
+    "  PUBLIC SECTION.",
+    "    INTERFACES z2ui5_if_app.",
+    "ENDCLASS.",
+    "",
+    "CLASS zcl_x IMPLEMENTATION.",
+    "  METHOD z2ui5_if_app~main.",
+    "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).",
+    "* the page",
+    "    view->ele( `Page`",
+    "      )->tag( `Button`",
+    "      )->a( n = `text` v = `Go` ).",
+    "    client->view_display( view->stringify( ) ).",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\r\n");
+  const out = apply(source, planAt(source, ")->tag(", "build_button"));
+  assert.ok(out.includes("* the page\r\n    DATA(content) = view->ele( `Page`"));
+  // the call keeps the statement's indent - the `\r` a CRLF line break left
+  // in front of it used to make that the empty string
+  assert.ok(/\n    build_button\( content \)\./.test(out));
+});

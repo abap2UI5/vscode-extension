@@ -688,6 +688,23 @@ test("a literal in a call's arguments never spans lines, as in the lexer", () =>
   );
 });
 
+test("a literal joined to more by && is an expression, not the value", () => {
+  // regression: the value was read as the literal `sap-icon://` alone, and
+  // the property editor then rewrote that first operand and kept `&& mv_icon`
+  const source =
+    "    view->tag( n = `Icon` )->a( n = `src` v = `sap-icon://` && mv_icon ).";
+  const call = controlCallAt(source, source.indexOf("Icon` )"));
+  const attr = call?.attrs.find((a) => a.name === "src");
+  assert.ok(attr, "the attribute was not read at all");
+  assert.equal(attr.literal, false);
+  assert.equal(attr.value, "`sap-icon://` && mv_icon");
+  // a literal followed by another named argument still is one
+  const reversed = "    view->tag( n = `Icon` )->a( v = `sap-icon://home` n = `src` ).";
+  const plain = controlCallAt(reversed, reversed.indexOf("Icon` )"))?.attrs[0];
+  assert.equal(plain?.literal, true);
+  assert.equal(plain?.value, "sap-icon://home");
+});
+
 test("ContainerStack follows the builder's ownership rule", () => {
   const stack = new ContainerStack<string>();
   assert.equal(stack.owner, undefined);

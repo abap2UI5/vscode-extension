@@ -530,3 +530,44 @@ ENDCLASS.`;
   assert.ok(spans.some((s) => s.kind === "path" && source.slice(s.start, s.end) === "MS_DATA"));
   assert.ok(spans.some((s) => s.kind === "identifier" && source.slice(s.start, s.end) === "ms_data"));
 });
+
+test("a same-named component or another object's member is not the attribute", () => {
+  /*
+   * regression: with the attribute declared, every `\bname\b` outside
+   * literals and comments was renamed - the field of an unrelated row type,
+   * `ls_row-name` and another object's `->name` with it, which then no longer
+   * compiled.
+   */
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    TYPES: BEGIN OF ty_row,
+             name TYPE string,
+           END OF ty_row.
+    DATA name TYPE string.
+ENDCLASS.
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA ls_row TYPE ty_row.
+    ls_row-name = name.
+    me->name = lo_other->name && zcl_other=>name && lif_x~name.
+    DATA(lv_rest) = strlen( name ) - name.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->tag( n = \`Text\` )->a( n = \`text\` v = \`{/NAME}\` ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const spans = attributeSpans(source, "name");
+  const lines = spans.map((s) => {
+    const lineStart = source.lastIndexOf("\n", s.start) + 1;
+    return `${source.slice(lineStart, s.start).trim()}|${source.slice(s.start, s.end)}`;
+  });
+  assert.deepEqual(lines, [
+    "DATA|name",
+    "ls_row-name =|name",
+    "me->|name",
+    "DATA(lv_rest) = strlen(|name",
+    "DATA(lv_rest) = strlen( name ) -|name",
+    "view->tag( n = `Text` )->a( n = `text` v = `{/|NAME",
+  ]);
+});
