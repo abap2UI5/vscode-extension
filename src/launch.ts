@@ -10,7 +10,8 @@ import {
   SystemProfile,
 } from "./systems";
 import { FOCUS_BOUNCE_MS, PreviewSurface, Session } from "./session";
-import { reloadShownApp, showInTab } from "./preview";
+import { postToShownApp, reloadShownApp, showInTab } from "./preview";
+import { staleMessage } from "./previewcore";
 import { describeRejection } from "./proxy";
 import { redactQueryCredentials } from "./report";
 import {
@@ -212,7 +213,10 @@ export async function activateAndReload(session: Session): Promise<void> {
       "abap2UI5: no ABAP extension with an activation command found - activate the class in your ABAP tooling, the preview only reloads."
     );
     if (session.currentTarget) {
-      reloadShownApp(session, "Reloaded");
+      // nothing was activated, so a watch waiting for the activation the
+      // message asks for has to keep waiting - stopped here, it missed the
+      // very activation done in the other tooling a moment later
+      reloadShownApp(session, "Reloaded", { keepWatch: true });
     }
     return;
   }
@@ -245,8 +249,32 @@ export async function activateAndReload(session: Session): Promise<void> {
     return;
   }
 
-  if (!session.currentTarget) {
+  const target = session.currentTarget;
+  if (!target) {
     return;
+  }
+  // The tooling resolves even when the activation failed (an inactive
+  // dependency, a syntax error) - reloading then cleared the badge and
+  // stopped the watch, so the activation that finally worked, through the
+  // tooling's own button, reloaded nothing. One look at the server decides;
+  // without an answer (no proxy, no ADT) the reload goes ahead as before.
+  if (session.proxy.isRunning) {
+    try {
+      const state = await session.proxy.fetchClassState(
+        target.className,
+        sapClientOf(target.externalUrl)
+      );
+      if (state.version === "inactive" && session.currentTarget === target) {
+        session.log(
+          `activation: ${target.className} is still inactive on the server - not reloading, watching for the activation`
+        );
+        postToShownApp(session, staleMessage("Not activated - the server still has an inactive version"));
+        session.watch.start();
+        return;
+      }
+    } catch {
+      // no verdict - reload as before
+    }
   }
   // Keep focus in the code in case the reloading app tries to grab it. The
   // window starts here: activating can take a moment.
@@ -514,7 +542,9 @@ export function watchProxyStatus(session: Session): void {
           }
           await session.proxy.start(origin, creds.user, creds.pass);
           session.lastAuthPrompt = 0;
-          reloadShownApp(session, "Reloaded with new credentials");
+          // same server state as before the logon failed - an activation
+          // watch that was waiting keeps waiting
+          reloadShownApp(session, "Reloaded with new credentials", { keepWatch: true });
         } catch (err) {
           // the same start( ) F9 reports on - a rejection here had nowhere
           // to land, so a system that refused the reconnect said nothing

@@ -30,9 +30,12 @@ export function openAbapDocs(className?: string): vscode.TextDocument[] {
 }
 
 /** `modelRootsOfSource` runs the linter's whole preparation over the class -
- *  too much to repeat for every reload of an unchanged document. */
-const modelRootsCache = new Map<string, { version: number; roots: string[] }>();
-const MODEL_ROOTS_CACHE_MAX = 20;
+ *  too much to repeat for every reload of an unchanged document. Keyed on the
+ *  document OBJECT: a closed and reopened document starts at version 1 again,
+ *  and a uri@version key served the roots of what it held before (a pull in
+ *  between changed the attributes the pin's restore filters against). A
+ *  closed document falls out of the WeakMap with nothing to evict. */
+const modelRootsCache = new WeakMap<vscode.TextDocument, { version: number; roots: string[] }>();
 
 /** The class's own top-level model paths - see `modelRootsOfSource`. */
 export function modelRootsOf(className: string): string[] {
@@ -40,19 +43,12 @@ export function modelRootsOf(className: string): string[] {
   if (!doc) {
     return [];
   }
-  const key = doc.uri.toString();
-  const hit = modelRootsCache.get(key);
+  const hit = modelRootsCache.get(doc);
   if (hit && hit.version === doc.version) {
     return hit.roots;
   }
   const roots = modelRootsOfSource(doc.getText());
-  if (modelRootsCache.size >= MODEL_ROOTS_CACHE_MAX && !modelRootsCache.has(key)) {
-    const oldest = modelRootsCache.keys().next().value;
-    if (oldest !== undefined) {
-      modelRootsCache.delete(oldest);
-    }
-  }
-  modelRootsCache.set(key, { version: doc.version, roots });
+  modelRootsCache.set(doc, { version: doc.version, roots });
   return roots;
 }
 

@@ -620,6 +620,9 @@ ${BASE_CSS}
   }
 
   function doLoad(url, message) {
+    // a capture still pending belongs to the load this one replaces - its
+    // timeout or late reply would otherwise load the PREVIOUS app's url
+    awaitingCapture = null;
     beginLoad(message);
     body.dataset.stale = 'false'; // whatever is loading now is the current active version
     setErrorCount(0); // errors of the previous load are history now
