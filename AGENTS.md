@@ -85,7 +85,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`, and the app tools below) |
-| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the transport through the auth proxy (endpoint, start-location rewrite, CSRF handshake, `sap-contextid` per draft, cookies), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client |
+| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the client's `transport` through the auth proxy (endpoint, CSRF handshake, `sap-contextid` per draft, cookies) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client |
 | `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
 | `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
@@ -517,13 +517,19 @@ Facts an agent cannot see from the code but will trip over:
   <commit>`), never in the copy - and update the hand-written `.d.ts` beside
   it when an export changes shape. What is the extension's own lives in
   `src/agentapps.ts`: the transport through the auth proxy and the system
-  rules around the client. The vendored client's local-backend bits are
-  neutralised there, not patched: `generation` is not used (drafts live on
-  the system), the start request's ORIGIN/PATHNAME/SEARCH are set to the
-  system's endpoint in the transport (the client derives them from its
-  `baseUrl`, and the proxy url with its token must never reach the backend,
-  which stores them), and the one hint naming mcp-server's `backend` tool is
-  reworded (`systemMessage`).
+  rules around the client. Every local-backend assumption of the client is
+  an OPTION of mcp-server's `createAppClient` (its `docs/agent-snapshot.md`,
+  "Embedding the client"), and the extension sets them instead of wrapping
+  the client: `transport` (`createSystemTransport` - one roundtrip through
+  the proxy, the CSRF resend inside it, `sap-contextid` keyed by the
+  request's `draftId`), `location` (`systemLocation` - the start's
+  ORIGIN/PATHNAME/SEARCH are the system's launch URL; the proxy url with its
+  token must never reach the backend, which stores them), no `generation`
+  (drafts live on the system, so no restart detection) and `backendHint`
+  (`SYSTEM_HINT`, the connection check instead of mcp-server's `backend`
+  tool). No `baseUrl`, no request rewriting, no message patching - a new
+  local-backend assumption upstream belongs behind a new option there, not
+  behind a wrapper here.
 - **The four weekly bump workflows share one implementation.**
   `.github/workflows/bump-snapshot.yml` holds the shape (regenerate → diff →
   gate → open a pull request) and is called through `workflow_call`; the four

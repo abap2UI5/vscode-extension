@@ -12,13 +12,17 @@
  * scripts/vendor-agent.mjs. What this module adds is what only the extension
  * has:
  *
- *   - the TRANSPORT: every roundtrip goes through the extension's auth proxy
- *     (the credentials stay in the proxy, the traffic shows in its log, a
- *     401 trips its breaker), with the frontend's handshakes for a real
- *     system - a CSRF token layer in front of the backend, a stateful
- *     session's `sap-contextid`, the system's cookies - and the start
- *     request's location (ORIGIN/PATHNAME/SEARCH) set to the system's launch
- *     URL rather than the proxy's, which must never reach the backend;
+ *   - the TRANSPORT (the client's `transport` option): every roundtrip goes
+ *     through the extension's auth proxy (the credentials stay in the proxy,
+ *     the traffic shows in its log, a 401 trips its breaker), with the
+ *     frontend's handshakes for a real system - a CSRF token layer in front
+ *     of the backend, a stateful session's `sap-contextid`, the system's
+ *     cookies;
+ *   - the LOCATION (the `location` option): the start request's
+ *     ORIGIN/PATHNAME/SEARCH are the system's launch URL, never the proxy's,
+ *     which must never reach the backend; no `generation` (drafts live on
+ *     the system, not in a process this extension restarts), and a
+ *     `backendHint` that points at this extension's connection check;
  *   - the SYSTEM: the active one, as for run_app_on_system, with an optional
  *     `system` argument that must name it (nothing here switches systems);
  *     a session remembers the system it was started on;
@@ -36,7 +40,8 @@ import {
   AgentError,
   createAppClient,
   type AppClient,
-  type FetchLike,
+  type AppLocation,
+  type AppTransport,
 } from "./vendor/agent/appclient";
 import type { AgentSnapshot } from "./vendor/agent/snapshot";
 import { textResult, type McpTool, type McpToolResult } from "./mcprpc";
@@ -233,9 +238,23 @@ const validContextId = (id: string | undefined): id is string =>
 const CONTEXT_MAX = 200;
 
 /**
- * The client's `fetch`, on a real system: every POST the vendored client
- * makes goes to the system's abap2UI5 endpoint through the auth proxy, and
- * does there what the browser frontend does around it (core/Server.js):
+ * The start request's location on a real system: the endpoint's origin and
+ * path, and its query (sap-client, theme, language) with the class added as
+ * `app_start` - what the browser sends from the launch URL. The backend
+ * builds URLs out of it and keeps it with the app's session.
+ */
+export function systemLocation(endpoint: string, app: string): AppLocation {
+  const url = new URL(endpoint);
+  const query = new URLSearchParams(url.search);
+  query.set("app_start", app);
+  return { origin: url.origin, pathname: url.pathname, search: `?${query}` };
+}
+
+/**
+ * The client's `transport`, on a real system: every roundtrip the vendored
+ * client makes goes to the system's abap2UI5 endpoint through the auth
+ * proxy, and does there what the browser frontend does around it
+ * (core/Server.js):
  *
  *   - `sap-contextid-accept: header` on every POST (the client sets it), the
  *     `sap-contextid` a response hands out sent back with the next roundtrip
@@ -245,10 +264,7 @@ const CONTEXT_MAX = 200;
  *     of the backend) answered by `HEAD` + `X-CSRF-Token: Fetch` and ONE
  *     re-send with the token - the backend never saw the refused attempt;
  *   - the system's cookies kept and sent back, as a browser would (the token
- *     layer above binds its token to a session cookie);
- *   - a start request's ORIGIN/PATHNAME/SEARCH rewritten to the system's
- *     endpoint: the backend builds URLs out of them and keeps them with the
- *     app's session, and the client only knows the url it was given.
+ *     layer above binds its token to a session cookie).
  *
  * Credentials never pass through here: the proxy injects them.
  */
@@ -258,7 +274,7 @@ export function createSystemTransport(options: {
   /** The proxy's base url when it currently forwards to `origin`. */
   proxyBase: (origin: string) => string | undefined;
   request: SystemRequest;
-}): FetchLike {
+}): AppTransport {
   const cookies = new Map<string, string>();
   const contexts = new Map<string, string>();
   let csrfToken = "";
@@ -296,7 +312,7 @@ export function createSystemTransport(options: {
     }
   };
 
-  const headersFor = (base: Record<string, string>, draftId?: string) => {
+  const headersFor = (base: Record<string, string>, draftId: string | null) => {
     const headers: Record<string, string> = { ...base };
     const context = draftId ? contexts.get(draftId) : undefined;
     if (validContextId(context)) {
@@ -311,7 +327,7 @@ export function createSystemTransport(options: {
     return headers;
   };
 
-  return async (_url, init) => {
+  return async ({ body, headers, signal, draftId }) => {
     const endpoint = new URL(options.endpoint());
     const base = options.proxyBase(endpoint.origin);
     if (!base) {
@@ -324,40 +340,12 @@ export function createSystemTransport(options: {
       throw new Error(`cannot route ${endpoint.host} through the auth proxy`);
     }
 
-    // the request body, with the start request's location made the system's
-    let body = init.body;
-    let draftId: string | undefined;
-    try {
-      const parsed = JSON.parse(init.body) as {
-        value?: { S_FRONT?: Record<string, unknown> };
-      };
-      const front = parsed.value?.S_FRONT;
-      if (front) {
-        draftId = typeof front.ID === "string" ? front.ID : undefined;
-        if (front.ORIGIN !== undefined) {
-          const query = new URLSearchParams(endpoint.search);
-          const cls = new URLSearchParams(String(front.SEARCH ?? "")).get(
-            "app_start"
-          );
-          if (cls) {
-            query.set("app_start", cls);
-          }
-          front.ORIGIN = endpoint.origin;
-          front.PATHNAME = endpoint.pathname;
-          front.SEARCH = query.toString() ? `?${query}` : "";
-          body = JSON.stringify(parsed);
-        }
-      }
-    } catch {
-      // not JSON: sent as it is - the backend says what it makes of it
-    }
-
     const post = () =>
       options.request(target, {
         method: "POST",
-        headers: headersFor(init.headers, draftId),
+        headers: headersFor(headers, draftId),
         body,
-        signal: init.signal,
+        signal,
       });
 
     let res = await post();
@@ -370,7 +358,7 @@ export function createSystemTransport(options: {
       const fetched = await options.request(target, {
         method: "HEAD",
         headers: { ...headersFor({}, draftId), "x-csrf-token": "Fetch" },
-        signal: init.signal,
+        signal,
       });
       keepCookies(fetched);
       const token = headerOf(fetched, "x-csrf-token");
@@ -386,8 +374,7 @@ export function createSystemTransport(options: {
       }
     }
 
-    const ok = res.status >= 200 && res.status < 300;
-    if (ok) {
+    if (res.status >= 200 && res.status < 300) {
       // the stateful session, carried on to the draft id this answer starts
       const given = headerOf(res, "sap-contextid");
       const context = validContextId(given)
@@ -409,7 +396,7 @@ export function createSystemTransport(options: {
         }
       }
     }
-    return { ok, status: res.status, text: async () => res.body };
+    return res;
   };
 }
 
@@ -447,17 +434,11 @@ export interface AgentAppsDeps {
   log(message: string): void;
 }
 
-/** The vendored client's one local-backend hint, said for a real system. */
-const LOCAL_HINT = ' - is it running? backend { action: "status" } says';
-
-/** A refusal of the vendored client, in this server's words: identical
- *  except for the hint that names mcp-server's `backend` tool. */
-export function systemMessage(message: string): string {
-  return message.replace(
-    LOCAL_HINT,
-    ' - is the system reachable? "abap2UI5: Check System Connection" says'
-  );
-}
+/** The client's `backendHint`: what follows "the backend did not answer
+ *  (...)" - this extension's connection check, not mcp-server's `backend`
+ *  tool. */
+export const SYSTEM_HINT =
+  'is the system reachable? "abap2UI5: Check System Connection" says';
 
 const REAL =
   "Runs FOR REAL on the active SAP system as the configured user, through " +
@@ -493,22 +474,24 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
     let client = clients.get(system.name);
     if (!client) {
       const name = system.name;
+      // read per request: theme and language may change between roundtrips,
+      // and the act handler has already refused a session whose system is
+      // no longer the active one
+      const endpoint = (): string => {
+        const active = deps.activeSystem();
+        if (!active || active.name !== name) {
+          throw new AgentError(`system '${name}' is no longer the active system`);
+        }
+        return endpointOf(active);
+      };
       client = createAppClient({
-        baseUrl: endpointOf(system),
-        fetchImpl: createSystemTransport({
-          // read per request: theme and language may change between
-          // roundtrips, and the act handler has already refused a session
-          // whose system is no longer the active one
-          endpoint: () => {
-            const active = deps.activeSystem();
-            if (!active || active.name !== name) {
-              throw new Error(`system '${name}' is no longer the active system`);
-            }
-            return endpointOf(active);
-          },
+        transport: createSystemTransport({
+          endpoint,
           proxyBase: (origin) => deps.proxyBase(origin),
           request,
         }),
+        location: (app) => systemLocation(endpoint(), app),
+        backendHint: SYSTEM_HINT,
         metadata: () => deps.metadata?.() ?? null,
       });
       clients.set(name, client);
@@ -529,10 +512,10 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
       return clients.get(active.name)!;
     }
     nobody ??= createAppClient({
-      baseUrl: "http://127.0.0.1/",
-      fetchImpl: async () => {
+      transport: async () => {
         throw new Error("no system");
       },
+      backendHint: SYSTEM_HINT,
     });
     return nobody;
   };
@@ -561,7 +544,7 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
       return textResult(JSON.stringify(snapshot));
     } catch (err) {
       if (err instanceof AgentError) {
-        return textResult(systemMessage(err.message), true);
+        return textResult(err.message, true);
       }
       throw err;
     }

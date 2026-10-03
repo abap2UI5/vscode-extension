@@ -10,7 +10,8 @@ import {
   createSystemTransport,
   DISABLED_MESSAGE,
   ENABLE_APP_TOOLS_KEY,
-  systemMessage,
+  SYSTEM_HINT,
+  systemLocation,
   type AgentAppsDeps,
   type SystemRequest,
   type SystemResponse,
@@ -283,10 +284,7 @@ test("a system that cannot be reached is said in the extension's words", async (
     /the backend did not answer \(connect ECONNREFUSED 127\.0\.0\.1:50123\) - is the system reachable\? "abap2UI5: Check System Connection" says/
   );
   assert.doesNotMatch(textOf(r), /backend \{ action/);
-  assert.equal(
-    systemMessage('x - is it running? backend { action: "status" } says'),
-    'x - is the system reachable? "abap2UI5: Check System Connection" says'
-  );
+  assert.equal(SYSTEM_HINT, 'is the system reachable? "abap2UI5: Check System Connection" says');
 });
 
 test("a backend error page is the refusal, with the backend's text", async () => {
@@ -379,23 +377,33 @@ test("agentEndpoint: the launch URL minus the class parameter and the hash", () 
   assert.ok("problem" in agentEndpoint("not a url"));
 });
 
+test("a launch URL with the class in its path is refused by the start's location, before anything is sent", async () => {
+  const h = harness();
+  h.setActive(system("DEV", "https://dev.example:44300/sap/bc/{class}/index.html?sap-client=100"));
+  const r = await h.call("app_start", { app: "zcl_app" });
+  assert.equal(r.isError, true);
+  assert.match(textOf(r), /^the launch URL template puts \{class\} into the path/);
+});
+
 // --------------------------------------------------- the transport ----
 
 const START_BODY = JSON.stringify({
-  value: { S_FRONT: { ORIGIN: "http://x", PATHNAME: "/", SEARCH: "?app_start=zcl_app" } },
+  value: { S_FRONT: { ORIGIN: "https://dev.example", PATHNAME: "/sap/bc/z2ui5", SEARCH: "?app_start=zcl_app" } },
 });
 const EVENT_BODY = (id: string) =>
   JSON.stringify({ value: { S_FRONT: { ID: id, EVENT: "SAVE" } } });
-const INIT = (body: string) => ({
-  method: "POST",
-  headers: { "content-type": "application/json", "sap-contextid-accept": "header" },
+/** One roundtrip as the vendored client hands it to its `transport`. */
+const ROUNDTRIP = (body: string, draftId: string | null = null) => ({
   body,
+  headers: { "content-type": "application/json", "sap-contextid-accept": "header" },
+  signal: AbortSignal.timeout(10_000),
+  draftId,
 });
 
 test("transport: a CSRF token layer is answered with HEAD + Fetch and ONE re-send", async () => {
   const sent: Sent[] = [];
   let posts = 0;
-  const fetchImpl = createSystemTransport({
+  const transport = createSystemTransport({
     endpoint: () => "https://dev.example:44300/sap/bc/z2ui5?sap-client=100",
     proxyBase: () => PROXY,
     request: async (url, init) => {
@@ -412,8 +420,8 @@ test("transport: a CSRF token layer is answered with HEAD + Fetch and ONE re-sen
         : json(200, { S_FRONT: { ID: "D1" } });
     },
   });
-  const res = await fetchImpl("ignored", INIT(START_BODY));
-  assert.equal(res.ok, true);
+  const res = await transport(ROUNDTRIP(START_BODY));
+  assert.equal(res.status, 200);
   assert.deepEqual(sent.map((s) => s.method), ["POST", "HEAD", "POST"]);
   assert.equal(sent[1].headers["x-csrf-token"], "Fetch");
   assert.equal(sent[1].headers.cookie, "SAP_SESSIONID_DEV_100=s1", "the proxy's own cookie is not kept");
@@ -426,7 +434,7 @@ test("transport: a CSRF token layer is answered with HEAD + Fetch and ONE re-sen
     request: async (_url, init) =>
       init.method === "HEAD" ? json(200, "", {}) : json(403, "no", { "x-csrf-token": "Required" }),
   });
-  const refused = await refusing("ignored", INIT(START_BODY));
+  const refused = await refusing(ROUNDTRIP(START_BODY));
   assert.equal(refused.status, 403);
 });
 
@@ -437,7 +445,7 @@ test("transport: a stateful session's sap-contextid follows its own draft ids", 
     json(200, { S_FRONT: { ID: "D2" } }),
     json(200, { S_FRONT: { ID: "E1" } }),
   ];
-  const fetchImpl = createSystemTransport({
+  const transport = createSystemTransport({
     endpoint: () => "https://dev.example/sap/bc/z2ui5",
     proxyBase: () => PROXY,
     request: async (url, init) => {
@@ -445,30 +453,42 @@ test("transport: a stateful session's sap-contextid follows its own draft ids", 
       return answers.shift()!;
     },
   });
-  await fetchImpl("ignored", INIT(START_BODY));
-  await fetchImpl("ignored", INIT(EVENT_BODY("D1")));
-  await fetchImpl("ignored", INIT(EVENT_BODY("D2")));
+  await transport(ROUNDTRIP(START_BODY));
+  await transport(ROUNDTRIP(EVENT_BODY("D1"), "D1"));
+  await transport(ROUNDTRIP(EVENT_BODY("D2"), "D2"));
   assert.equal(sent[0].headers["sap-contextid"], undefined, "a start has no session yet");
   assert.equal(sent[1].headers["sap-contextid"], "CTX-A");
   assert.equal(sent[2].headers["sap-contextid"], "CTX-A", "inherited by the next draft of the same session");
 });
 
-test("transport: the start's location is the system's endpoint; no proxy, no request", async () => {
+test("location: the start names the system's endpoint and the class, never the proxy", () => {
+  assert.deepEqual(
+    systemLocation("https://dev.example:44300/sap/bc/z2ui5?sap-client=100&sap-language=DE", "zcl_app"),
+    {
+      origin: "https://dev.example:44300",
+      pathname: "/sap/bc/z2ui5",
+      search: "?sap-client=100&sap-language=DE&app_start=zcl_app",
+    }
+  );
+  assert.deepEqual(systemLocation("https://dev.example/sap/bc/z2ui5", "/abc/cl_app"), {
+    origin: "https://dev.example",
+    pathname: "/sap/bc/z2ui5",
+    search: "?app_start=%2Fabc%2Fcl_app",
+  });
+});
+
+test("transport: the body goes out as the client built it; no proxy, no request", async () => {
   let body = "";
-  const fetchImpl = createSystemTransport({
-    endpoint: () => "https://dev.example:44300/sap/bc/z2ui5?sap-client=100&sap-language=DE",
+  const transport = createSystemTransport({
+    endpoint: () => "https://dev.example:44300/sap/bc/z2ui5?sap-client=100",
     proxyBase: () => PROXY,
     request: async (_url, init) => {
       body = init.body ?? "";
       return json(200, { S_FRONT: { ID: "D1" } });
     },
   });
-  await fetchImpl("ignored", INIT(START_BODY));
-  assert.deepEqual(JSON.parse(body).value.S_FRONT, {
-    ORIGIN: "https://dev.example:44300",
-    PATHNAME: "/sap/bc/z2ui5",
-    SEARCH: "?sap-client=100&sap-language=DE&app_start=zcl_app",
-  });
+  await transport(ROUNDTRIP(START_BODY));
+  assert.equal(body, START_BODY);
   const offline = createSystemTransport({
     endpoint: () => "https://dev.example/sap/bc/z2ui5",
     proxyBase: () => undefined,
@@ -476,7 +496,7 @@ test("transport: the start's location is the system's endpoint; no proxy, no req
       throw new Error("must not be called");
     },
   });
-  await assert.rejects(offline("ignored", INIT(START_BODY)), /auth proxy is not connected to dev\.example/);
+  await assert.rejects(offline(ROUNDTRIP(START_BODY)), /auth proxy is not connected to dev\.example/);
 });
 
 // ------------------------------------------- end to end, real proxy ----

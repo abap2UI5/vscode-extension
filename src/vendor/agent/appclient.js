@@ -1,6 +1,6 @@
 /*
  * VENDORED - do not edit. abap2UI5/mcp-server lib/appclient.mjs
- * at commit 4be038e9b2516387e04265994d8d5d205d71d1fe,
+ * at commit 9ca6cdf220acab2db938bcce123c81d6640c27ee,
  * copied by scripts/vendor-agent.mjs (`npm run agent-vendor`); the only
  * change is the sibling imports ending in .js. `npm run agent-vendor:check`
  * fails when this copy drifts from that commit. Change it upstream, then
@@ -129,39 +129,86 @@ const listOf = (items) => {
   return shown.join(', ') + (items.length > shown.length ? `, ... (${items.length - shown.length} more)` : '');
 };
 
+/** The hint after "the backend did not answer (...)" on the local backend. */
+export const LOCAL_BACKEND_HINT = 'is it running? backend { action: "status" } says';
+
+/** The transport over `fetch`: one POST of `body` to `baseUrl`. */
+export function fetchTransport({ baseUrl, fetchImpl = globalThis.fetch }) {
+  return async ({ body, headers, signal }) => {
+    const res = await fetchImpl(baseUrl, { method: 'POST', headers, body, signal });
+    return {
+      status: res.status,
+      headers: res.headers && typeof res.headers.entries === 'function' ? Object.fromEntries(res.headers.entries()) : {},
+      body: await res.text(),
+    };
+  };
+}
+
 /*
- * One client per backend. `baseUrl` is the backend's root
- * (http://127.0.0.1:<port>/); `generation()` names the running backend
- * process - a session started under another one is gone (its drafts lived
- * in that process), and is reported so instead of answering with a
- * backend error; `metadata()` hands the linter's UI5 control snapshot to
- * the snapshot builder when there is one.
+ * One client per backend. The defaults are the local backend's; every
+ * assumption about it is an option, so the same client (vendored, unchanged)
+ * runs against a real system (docs/agent-snapshot.md, "Embedding the
+ * client"):
+ *
+ *   baseUrl      the backend's root (http://127.0.0.1:<port>/) - where the
+ *                default transport POSTs and what the default location says
+ *   fetchImpl    the default transport's fetch
+ *   transport    ({ body, headers, signal, draftId }) => { status, headers?, body }:
+ *                ONE roundtrip - `body` is the serialized JSON request,
+ *                `headers` the two the frontend sends, `draftId` the
+ *                S_FRONT.ID the request continues (null for an app start);
+ *                a throw is "the backend did not answer". Replaces
+ *                baseUrl/fetchImpl.
+ *   location     (app) => { origin, pathname, search } (or a promise of
+ *                it): the start request's ORIGIN/PATHNAME/SEARCH - the
+ *                backend builds URLs out of them and keeps them with the
+ *                app's session, so on a real system they are its launch URL,
+ *                not a proxy's; `search` names the class (app_start=<app>).
+ *                A throw reaches the caller as it is (an AgentError is a
+ *                refusal). Default: baseUrl, '/', '?app_start=<app>'
+ *   generation   () => <id of the running backend process>: a session started
+ *                under another one is gone (its drafts lived in that
+ *                process) and is refused so instead of answered with a
+ *                backend error. Absent: no restart detection.
+ *   backendHint  what follows "the backend did not answer (...) - " ('' for
+ *                nothing); default: the local backend's `backend` tool
+ *   metadata     the linter's UI5 control snapshot for the snapshot builder
  */
 export function createAppClient({
   baseUrl,
   fetchImpl = globalThis.fetch,
-  generation = () => null,
+  transport,
+  location,
+  generation,
+  backendHint = LOCAL_BACKEND_HINT,
   metadata = () => null,
   maxSessions = 20,
   timeoutMs = 120_000,
 } = {}) {
   const sessions = [];
   const byId = new Map();
+  const roundtrip = transport || fetchTransport({ baseUrl, fetchImpl });
+  const locate = location || ((app) => ({
+    origin: String(baseUrl).replace(/\/$/, ''),
+    pathname: '/',
+    search: `?app_start=${encodeURIComponent(app)}`,
+  }));
+  const currentGeneration = () => (generation ? generation() : null);
 
   async function post(body) {
     let res;
     try {
-      res = await fetchImpl(baseUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'sap-contextid-accept': 'header' },
+      res = await roundtrip({
         body: JSON.stringify({ value: body }),
+        headers: { 'content-type': 'application/json', 'sap-contextid-accept': 'header' },
         signal: AbortSignal.timeout(timeoutMs),
+        draftId: body.S_FRONT && body.S_FRONT.ID ? String(body.S_FRONT.ID) : null,
       });
     } catch (e) {
-      throw new AgentError(`the backend did not answer (${(e && e.message) || e}) - is it running? backend { action: "status" } says`);
+      throw new AgentError(`the backend did not answer (${(e && e.message) || e})${backendHint ? ` - ${backendHint}` : ''}`);
     }
-    const text = await res.text();
-    if (!res.ok) throw new AgentError(`the backend refused the roundtrip - ${errorText(res.status, text)}`);
+    const text = String(res.body ?? '');
+    if (!(res.status >= 200 && res.status < 300)) throw new AgentError(`the backend refused the roundtrip - ${errorText(res.status, text)}`);
     let json;
     try {
       json = JSON.parse(text);
@@ -216,7 +263,7 @@ export function createAppClient({
       const known = sessions.map((x) => `${x.state.id} (${x.state.app})`);
       throw new AgentError(`unknown session '${sessionId}' - start one with app_start${known.length ? `; open sessions: ${listOf(known)}` : ''}`);
     }
-    if (s.generation !== generation()) {
+    if (generation && s.generation !== generation()) {
       throw new AgentError(`session '${sessionId}' was started on a backend that has since stopped or restarted - its drafts are gone; app_start ${s.state.app || 'the app'} again`);
     }
     if (s.state.id !== String(sessionId)) {
@@ -412,10 +459,11 @@ export function createAppClient({
     async start(app, { values, maxRows } = {}) {
       const cls = String(app || '').trim();
       if (!cls) throw new AgentError('pass `app` - the class to start, e.g. z2ui5_cl_smp_app_009 (app_list names the built ones)');
-      const response = await post({ S_FRONT: { ORIGIN: baseUrl.replace(/\/$/, ''), PATHNAME: '/', SEARCH: `?app_start=${encodeURIComponent(cls)}` } });
+      const where = await locate(cls);
+      const response = await post({ S_FRONT: { ORIGIN: where.origin, PATHNAME: where.pathname, SEARCH: where.search } });
       const session = {
         state: emptyState(), ids: new Set(), pending: { MAIN: new Map(), POPUP: new Map(), POPOVER: new Map() },
-        generation: generation(), maxRows: maxRows ?? DEFAULT_MAX_ROWS, lastIndex: null,
+        generation: currentGeneration(), maxRows: maxRows ?? DEFAULT_MAX_ROWS, lastIndex: null,
       };
       adopt(session, response);
       remember(session);
