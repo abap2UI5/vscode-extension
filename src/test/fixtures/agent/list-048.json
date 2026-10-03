@@ -1,0 +1,142 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_048",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_048",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_048"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_048",
+      "ID": "4A581D5A923D40049E26C855FC45A644",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\"><Shell><Page title=\"abap2UI5 - List - StandardListItem, Highlight and Events\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\"><MessageStrip text=\"A List of generic StandardListItems showing highlight bars, colored infoState and wrapping texts; the detail button and selection changes raise backend events with message boxes.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><List headerText=\"List Output\" items=\"{/T_TAB}\" mode=\"SingleSelectMaster\" selectionChange=\".eB(['SELCHANGE'])\"><StandardListItem title=\"{TITLE}\" description=\"{DESCR}\" icon=\"{ICON}\" iconInset=\"false\" highlight=\"{HIGHLIGHT}\" info=\"{INFO}\" infoState=\"{HIGHLIGHT}\" type=\"Detail\" wrapping=\"true\" selected=\"{SELECTED}\" detailPress=\".eB(['EDIT'], ${TITLE}, ${DESCR}, ${ICON}, ${HIGHLIGHT}, ${INFO}, ${SELECTED})\"/></List></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "T_TAB": [
+       {
+        "CHECKBOX": false,
+        "DESCR": "this is a description1 1234567890 1234567890",
+        "HIGHLIGHT": "Information",
+        "ICON": "sap-icon://badge",
+        "INFO": "Information",
+        "SELECTED": false,
+        "TITLE": "entry_01",
+        "VALUE": ""
+       },
+       {
+        "CHECKBOX": false,
+        "DESCR": "this is a description2 1234567890 1234567890",
+        "HIGHLIGHT": "Success",
+        "ICON": "sap-icon://favorite",
+        "INFO": "Success",
+        "SELECTED": false,
+        "TITLE": "entry_02",
+        "VALUE": ""
+       },
+       {
+        "CHECKBOX": false,
+        "DESCR": "this is a description3 1234567890 1234567890",
+        "HIGHLIGHT": "Warning",
+        "ICON": "sap-icon://employee",
+        "INFO": "Warning",
+        "SELECTED": false,
+        "TITLE": "entry_03",
+        "VALUE": ""
+       },
+       {
+        "CHECKBOX": false,
+        "DESCR": "this is a description4 1234567890 1234567890",
+        "HIGHLIGHT": "Error",
+        "ICON": "sap-icon://accept",
+        "INFO": "Error",
+        "SELECTED": false,
+        "TITLE": "entry_04",
+        "VALUE": ""
+       },
+       {
+        "CHECKBOX": false,
+        "DESCR": "this is a description5 1234567890 1234567890",
+        "HIGHLIGHT": "None",
+        "ICON": "sap-icon://activities",
+        "INFO": "None",
+        "SELECTED": false,
+        "TITLE": "entry_05",
+        "VALUE": ""
+       },
+       {
+        "CHECKBOX": false,
+        "DESCR": "this is a description6 1234567890 1234567890",
+        "HIGHLIGHT": "Information",
+        "ICON": "sap-icon://account",
+        "INFO": "Information",
+        "SELECTED": false,
+        "TITLE": "entry_06",
+        "VALUE": ""
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "EDIT",
+    "row": 2
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "4A581D5A923D40049E26C855FC45A644",
+      "EVENT": "EDIT",
+      "T_EVENT_ARG": [
+       "entry_03",
+       "this is a description3 1234567890 1234567890",
+       "sap-icon://employee",
+       "Warning",
+       "Warning",
+       false
+      ]
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_048",
+      "ID": "179A07E52C5448CCBB9FC017817B565E",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_CUSTOM": [
+        [
+         "MESSAGE_BOX",
+         "show",
+         "EDIT - entry_03",
+         {
+          "title": "Information"
+         }
+        ]
+       ]
+      }
+     }
+    }
+   }
+  }
+ ]
+}

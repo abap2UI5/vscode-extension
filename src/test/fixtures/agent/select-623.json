@@ -1,0 +1,1396 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples-controls Z2UI5_CL_SMPC_APP_623",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smpc_app_623",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smpc_app_623"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMPC_APP_623",
+      "ID": "10B40619D82E451EA9989F2FB3D8DFC3",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View xmlns=\"sap.m\" xmlns:l=\"sap.ui.layout\" xmlns:mvc=\"sap.ui.core.mvc\"><l:VerticalLayout class=\"sapUiContentPadding\" width=\"100%\"><l:content><Label text=\"Product not editable\" labelFor=\"InputNoEdit\"/><Input id=\"InputNoEdit\" class=\"sapUiSmallMarginBottom\" type=\"Text\" placeholder=\"Product\" enabled=\"true\" editable=\"false\"/><Label text=\"Product not enabled\" labelFor=\"InputDisabled\"/><Input id=\"InputDisabled\" class=\"sapUiSmallMarginBottom\" type=\"Text\" placeholder=\"Product\" enabled=\"false\"/><Label text=\"Product editable\" labelFor=\"InputEdit\"/><Input id=\"InputEdit\" class=\"sapUiSmallMarginBottom\" type=\"Text\" placeholder=\"Enter product\" enabled=\"true\" editable=\"true\"/><Label text=\"Product with Value Help\" labelFor=\"InputValueHelp\"/><Input id=\"InputValueHelp\" class=\"sapUiSmallMarginBottom\" type=\"Text\" placeholder=\"Enter product\" enabled=\"true\" editable=\"true\" showValueHelp=\"true\" value=\"{/VALUE_HELP}\" valueHelpRequest=\".eB(['VALUE_HELP'])\"/></l:content></l:VerticalLayout></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "VALUE_HELP": ""
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "VALUE_HELP"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "10B40619D82E451EA9989F2FB3D8DFC3",
+      "EVENT": "VALUE_HELP"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMPC_APP_623",
+      "ID": "505EB67E05D94914AE459E6B11F530BA",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "POPUP",
+         "<core:FragmentDefinition xmlns:core=\"sap.ui.core\" xmlns=\"sap.m\"><SelectDialog title=\"Products\" items=\"{/T_PRODUCTS}\" search=\".eB(['VH_SEARCH'], ${$parameters&gt;/value})\" confirm=\".eB(['VH_CONFIRM'], ${$parameters&gt;/selectedItem}.getTitle())\" cancel=\".eB(['VH_CANCEL'])\"><items><StandardListItem icon=\"{PICURL}\" iconDensityAware=\"false\" iconInset=\"false\" title=\"{NAME}\" description=\"{PRODUCTID}\"/></items></SelectDialog></core:FragmentDefinition>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "T_PRODUCTS": [
+       {
+        "NAME": "Notebook Basic 15",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1000.jpg",
+        "PRODUCTID": "HT-1000"
+       },
+       {
+        "NAME": "Notebook Basic 17",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1001.jpg",
+        "PRODUCTID": "HT-1001"
+       },
+       {
+        "NAME": "Notebook Basic 18",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1002.jpg",
+        "PRODUCTID": "HT-1002"
+       },
+       {
+        "NAME": "Notebook Basic 19",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1003.jpg",
+        "PRODUCTID": "HT-1003"
+       },
+       {
+        "NAME": "ITelO Vault",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1007.jpg",
+        "PRODUCTID": "HT-1007"
+       },
+       {
+        "NAME": "Notebook Professional 15",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1010.jpg",
+        "PRODUCTID": "HT-1010"
+       },
+       {
+        "NAME": "Notebook Professional 17",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1011.jpg",
+        "PRODUCTID": "HT-1011"
+       },
+       {
+        "NAME": "ITelO Vault Net",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1020.jpg",
+        "PRODUCTID": "HT-1020"
+       },
+       {
+        "NAME": "ITelO Vault SAT",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1021.jpg",
+        "PRODUCTID": "HT-1021"
+       },
+       {
+        "NAME": "Comfort Easy",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1022.jpg",
+        "PRODUCTID": "HT-1022"
+       },
+       {
+        "NAME": "Comfort Senior",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1023.jpg",
+        "PRODUCTID": "HT-1023"
+       },
+       {
+        "NAME": "Ergo Screen E-I",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1030.jpg",
+        "PRODUCTID": "HT-1030"
+       },
+       {
+        "NAME": "Ergo Screen E-II",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1031.jpg",
+        "PRODUCTID": "HT-1031"
+       },
+       {
+        "NAME": "Ergo Screen E-III",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1032.jpg",
+        "PRODUCTID": "HT-1032"
+       },
+       {
+        "NAME": "Flat Basic",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1035.jpg",
+        "PRODUCTID": "HT-1035"
+       },
+       {
+        "NAME": "Flat Future",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1036.jpg",
+        "PRODUCTID": "HT-1036"
+       },
+       {
+        "NAME": "Flat XL",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1037.jpg",
+        "PRODUCTID": "HT-1037"
+       },
+       {
+        "NAME": "Laser Professional Eco",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1040.jpg",
+        "PRODUCTID": "HT-1040"
+       },
+       {
+        "NAME": "Laser Basic",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1041.jpg",
+        "PRODUCTID": "HT-1041"
+       },
+       {
+        "NAME": "Laser Allround",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1042.jpg",
+        "PRODUCTID": "HT-1042"
+       },
+       {
+        "NAME": "Ultra Jet Super Color",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1050.jpg",
+        "PRODUCTID": "HT-1050"
+       },
+       {
+        "NAME": "Ultra Jet Mobile",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1051.jpg",
+        "PRODUCTID": "HT-1051"
+       },
+       {
+        "NAME": "Ultra Jet Super Highspeed",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1052.jpg",
+        "PRODUCTID": "HT-1052"
+       },
+       {
+        "NAME": "Multi Print",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1055.jpg",
+        "PRODUCTID": "HT-1055"
+       },
+       {
+        "NAME": "Multi Color",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1056.jpg",
+        "PRODUCTID": "HT-1056"
+       },
+       {
+        "NAME": "Cordless Mouse",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1060.jpg",
+        "PRODUCTID": "HT-1060"
+       },
+       {
+        "NAME": "Speed Mouse",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1061.jpg",
+        "PRODUCTID": "HT-1061"
+       },
+       {
+        "NAME": "Track Mouse",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1062.jpg",
+        "PRODUCTID": "HT-1062"
+       },
+       {
+        "NAME": "Ergonomic Keyboard",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1063.jpg",
+        "PRODUCTID": "HT-1063"
+       },
+       {
+        "NAME": "Internet Keyboard",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1064.jpg",
+        "PRODUCTID": "HT-1064"
+       },
+       {
+        "NAME": "Media Keyboard",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1065.jpg",
+        "PRODUCTID": "HT-1065"
+       },
+       {
+        "NAME": "Mousepad",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1066.jpg",
+        "PRODUCTID": "HT-1066"
+       },
+       {
+        "NAME": "Ergo Mousepad",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1067.jpg",
+        "PRODUCTID": "HT-1067"
+       },
+       {
+        "NAME": "Designer Mousepad",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1068.jpg",
+        "PRODUCTID": "HT-1068"
+       },
+       {
+        "NAME": "Universal card reader",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1069.jpg",
+        "PRODUCTID": "HT-1069"
+       },
+       {
+        "NAME": "Proctra X",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1070.jpg",
+        "PRODUCTID": "HT-1070"
+       },
+       {
+        "NAME": "Gladiator MX",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1071.jpg",
+        "PRODUCTID": "HT-1071"
+       },
+       {
+        "NAME": "Hurricane GX",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1072.jpg",
+        "PRODUCTID": "HT-1072"
+       },
+       {
+        "NAME": "Hurricane GX/LN",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1073.jpg",
+        "PRODUCTID": "HT-1073"
+       },
+       {
+        "NAME": "Photo Scan",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1080.jpg",
+        "PRODUCTID": "HT-1080"
+       },
+       {
+        "NAME": "Power Scan",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1081.jpg",
+        "PRODUCTID": "HT-1081"
+       },
+       {
+        "NAME": "Jet Scan Professional",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1082.jpg",
+        "PRODUCTID": "HT-1082"
+       },
+       {
+        "NAME": "Jet Scan Professional",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1083.jpg",
+        "PRODUCTID": "HT-1083"
+       },
+       {
+        "NAME": "Copymaster",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1085.jpg",
+        "PRODUCTID": "HT-1085"
+       },
+       {
+        "NAME": "Surround Sound",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1090.jpg",
+        "PRODUCTID": "HT-1090"
+       },
+       {
+        "NAME": "Blaster Extreme",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1091.jpg",
+        "PRODUCTID": "HT-1091"
+       },
+       {
+        "NAME": "Sound Booster",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1092.jpg",
+        "PRODUCTID": "HT-1092"
+       },
+       {
+        "NAME": "Lovely Sound 5.1 Wireless",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1095.jpg",
+        "PRODUCTID": "HT-1095"
+       },
+       {
+        "NAME": "Lovely Sound 5.1",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1096.jpg",
+        "PRODUCTID": "HT-1096"
+       },
+       {
+        "NAME": "Lovely Sound Stereo",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1097.jpg",
+        "PRODUCTID": "HT-1097"
+       },
+       {
+        "NAME": "Smart Office",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1100.jpg",
+        "PRODUCTID": "HT-1100"
+       },
+       {
+        "NAME": "Smart Design",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1101.jpg",
+        "PRODUCTID": "HT-1101"
+       },
+       {
+        "NAME": "Smart Network",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1102.jpg",
+        "PRODUCTID": "HT-1102"
+       },
+       {
+        "NAME": "Smart Multimedia",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1103.jpg",
+        "PRODUCTID": "HT-1103"
+       },
+       {
+        "NAME": "Smart Games",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1104.jpg",
+        "PRODUCTID": "HT-1104"
+       },
+       {
+        "NAME": "Smart Internet Antivirus",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1105.jpg",
+        "PRODUCTID": "HT-1105"
+       },
+       {
+        "NAME": "Smart Firewall",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1106.jpg",
+        "PRODUCTID": "HT-1106"
+       },
+       {
+        "NAME": "Smart Money",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1107.jpg",
+        "PRODUCTID": "HT-1107"
+       },
+       {
+        "NAME": "PC Lock",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1110.jpg",
+        "PRODUCTID": "HT-1110"
+       },
+       {
+        "NAME": "Notebook Lock",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1111.jpg",
+        "PRODUCTID": "HT-1111"
+       },
+       {
+        "NAME": "Web cam reality",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1112.jpg",
+        "PRODUCTID": "HT-1112"
+       },
+       {
+        "NAME": "Screen clean",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1113.jpg",
+        "PRODUCTID": "HT-1113"
+       },
+       {
+        "NAME": "Fabric bag professional",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1114.jpg",
+        "PRODUCTID": "HT-1114"
+       },
+       {
+        "NAME": "Wireless DSL Router",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1115.jpg",
+        "PRODUCTID": "HT-1115"
+       },
+       {
+        "NAME": "Wireless DSL Router / Repeater",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1116.jpg",
+        "PRODUCTID": "HT-1116"
+       },
+       {
+        "NAME": "Wireless DSL Router / Repeater and Print Server",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1117.jpg",
+        "PRODUCTID": "HT-1117"
+       },
+       {
+        "NAME": "USB Stick",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1118.jpg",
+        "PRODUCTID": "HT-1118"
+       },
+       {
+        "NAME": "Travel Adapter",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1119.jpg",
+        "PRODUCTID": "HT-1119"
+       },
+       {
+        "NAME": "Cordless Bluetooth Keyboard, english international",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1120.jpg",
+        "PRODUCTID": "HT-1120"
+       },
+       {
+        "NAME": "Flat XXL",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1137.jpg",
+        "PRODUCTID": "HT-1137"
+       },
+       {
+        "NAME": "Pocket Mouse",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1138.jpg",
+        "PRODUCTID": "HT-1138"
+       },
+       {
+        "NAME": "PC Power Station",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1210.jpg",
+        "PRODUCTID": "HT-1210"
+       },
+       {
+        "NAME": "Astro Laptop 1516",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1251.jpg",
+        "PRODUCTID": "HT-1251"
+       },
+       {
+        "NAME": "Astro Phone 6",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1252.jpg",
+        "PRODUCTID": "HT-1252"
+       },
+       {
+        "NAME": "Benda Laptop 1408",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1253.jpg",
+        "PRODUCTID": "HT-1253"
+       },
+       {
+        "NAME": "Bending Screen 21HD",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1254.jpg",
+        "PRODUCTID": "HT-1254"
+       },
+       {
+        "NAME": "Broad Screen 22HD",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1255.jpg",
+        "PRODUCTID": "HT-1255"
+       },
+       {
+        "NAME": "Cerdik Phone 7",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1256.jpg",
+        "PRODUCTID": "HT-1256"
+       },
+       {
+        "NAME": "Cepat Tablet 10.5",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1257.jpg",
+        "PRODUCTID": "HT-1257"
+       },
+       {
+        "NAME": "Cepat Tablet 8",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1258.jpg",
+        "PRODUCTID": "HT-1258"
+       },
+       {
+        "NAME": "Server Basic",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1500.jpg",
+        "PRODUCTID": "HT-1500"
+       },
+       {
+        "NAME": "Server Professional",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1501.jpg",
+        "PRODUCTID": "HT-1501"
+       },
+       {
+        "NAME": "Server Power Pro",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1502.jpg",
+        "PRODUCTID": "HT-1502"
+       },
+       {
+        "NAME": "Family PC Basic",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1600.jpg",
+        "PRODUCTID": "HT-1600"
+       },
+       {
+        "NAME": "Family PC Pro",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1601.jpg",
+        "PRODUCTID": "HT-1601"
+       },
+       {
+        "NAME": "Gaming Monster",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1602.jpg",
+        "PRODUCTID": "HT-1602"
+       },
+       {
+        "NAME": "Gaming Monster Pro",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1603.jpg",
+        "PRODUCTID": "HT-1603"
+       },
+       {
+        "NAME": "7\" Widescreen Portable DVD Player w MP3",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2000.jpg",
+        "PRODUCTID": "HT-2000"
+       },
+       {
+        "NAME": "10\" Portable DVD player",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2001.jpg",
+        "PRODUCTID": "HT-2001"
+       },
+       {
+        "NAME": "Portable DVD Player with 9\" LCD Monitor",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2002.jpg",
+        "PRODUCTID": "HT-2002"
+       },
+       {
+        "NAME": "CD/DVD case: 264 sleeves",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2025.jpg",
+        "PRODUCTID": "HT-2025"
+       },
+       {
+        "NAME": "Audio/Video Cable Kit - 4m",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2026.jpg",
+        "PRODUCTID": "HT-2026"
+       },
+       {
+        "NAME": "Removable CD/DVD Laser Labels",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2027.jpg",
+        "PRODUCTID": "HT-2027"
+       },
+       {
+        "NAME": "Beam Breaker B-1",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6100.jpg",
+        "PRODUCTID": "HT-6100"
+       },
+       {
+        "NAME": "Beam Breaker B-2",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6101.jpg",
+        "PRODUCTID": "HT-6101"
+       },
+       {
+        "NAME": "Beam Breaker B-3",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6102.jpg",
+        "PRODUCTID": "HT-6102"
+       },
+       {
+        "NAME": "Play Movie",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6110.jpg",
+        "PRODUCTID": "HT-6110"
+       },
+       {
+        "NAME": "Record Movie",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6111.jpg",
+        "PRODUCTID": "HT-6111"
+       },
+       {
+        "NAME": "ITelo MusicStick",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6120.jpg",
+        "PRODUCTID": "HT-6120"
+       },
+       {
+        "NAME": "ITelo Jog-Mate",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6121.jpg",
+        "PRODUCTID": "HT-6121"
+       },
+       {
+        "NAME": "Power Pro Player 40",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6122.jpg",
+        "PRODUCTID": "HT-6122"
+       },
+       {
+        "NAME": "Power Pro Player 80",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6123.jpg",
+        "PRODUCTID": "HT-6123"
+       },
+       {
+        "NAME": "Flat Watch HD32",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6130.jpg",
+        "PRODUCTID": "HT-6130"
+       },
+       {
+        "NAME": "Flat Watch HD37",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6131.jpg",
+        "PRODUCTID": "HT-6131"
+       },
+       {
+        "NAME": "Flat Watch HD41",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6132.jpg",
+        "PRODUCTID": "HT-6132"
+       },
+       {
+        "NAME": "Copperberry",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-7000.jpg",
+        "PRODUCTID": "HT-7000"
+       },
+       {
+        "NAME": "Silverberry",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-7010.jpg",
+        "PRODUCTID": "HT-7010"
+       },
+       {
+        "NAME": "Goldberry",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-7020.jpg",
+        "PRODUCTID": "HT-7020"
+       },
+       {
+        "NAME": "Platinberry",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-7030.jpg",
+        "PRODUCTID": "HT-7030"
+       },
+       {
+        "NAME": "ITelO FlexTop I4000",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-8000.jpg",
+        "PRODUCTID": "HT-8000"
+       },
+       {
+        "NAME": "ITelO FlexTop I6300c",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-8001.jpg",
+        "PRODUCTID": "HT-8001"
+       },
+       {
+        "NAME": "ITelO FlexTop I9100",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-8002.jpg",
+        "PRODUCTID": "HT-8002"
+       },
+       {
+        "NAME": "ITelO FlexTop I9800",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-8003.jpg",
+        "PRODUCTID": "HT-8003"
+       },
+       {
+        "NAME": "Smartphone Leather Case",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9991.jpg",
+        "PRODUCTID": "HT-9991"
+       },
+       {
+        "NAME": "Smartphone Alpha",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9992.jpg",
+        "PRODUCTID": "HT-9992"
+       },
+       {
+        "NAME": "Mini Tablet",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9993.jpg",
+        "PRODUCTID": "HT-9993"
+       },
+       {
+        "NAME": "Camcorder View",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9994.jpg",
+        "PRODUCTID": "HT-9994"
+       },
+       {
+        "NAME": "Tablet Pouch",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9995.jpg",
+        "PRODUCTID": "HT-9995"
+       },
+       {
+        "NAME": "Tablet Pouch",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9996.jpg",
+        "PRODUCTID": "HT-9996"
+       },
+       {
+        "NAME": "e-Book Reader ReadMe",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9997.jpg",
+        "PRODUCTID": "HT-9997"
+       },
+       {
+        "NAME": "Smartphone Beta",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9998.jpg",
+        "PRODUCTID": "HT-9998"
+       },
+       {
+        "NAME": "Maxi Tablet",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9999.jpg",
+        "PRODUCTID": "HT-9999"
+       },
+       {
+        "NAME": "Flyer",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/PF-1000.jpg",
+        "PRODUCTID": "PF-1000"
+       }
+      ],
+      "VALUE_HELP": ""
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "VH_SEARCH",
+    "args": [
+     "17"
+    ]
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "505EB67E05D94914AE459E6B11F530BA",
+      "EVENT": "VH_SEARCH",
+      "T_EVENT_ARG": [
+       "17"
+      ]
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMPC_APP_623",
+      "ID": "52BACFFE4EA045F2BBB5CED8493CD147",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "POPUP",
+         "<core:FragmentDefinition xmlns:core=\"sap.ui.core\" xmlns=\"sap.m\"><SelectDialog title=\"Products\" items=\"{/T_PRODUCTS}\" search=\".eB(['VH_SEARCH'], ${$parameters&gt;/value})\" confirm=\".eB(['VH_CONFIRM'], ${$parameters&gt;/selectedItem}.getTitle())\" cancel=\".eB(['VH_CANCEL'])\"><items><StandardListItem icon=\"{PICURL}\" iconDensityAware=\"false\" iconInset=\"false\" title=\"{NAME}\" description=\"{PRODUCTID}\"/></items></SelectDialog></core:FragmentDefinition>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "T_PRODUCTS": [
+       {
+        "NAME": "Notebook Basic 17",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1001.jpg",
+        "PRODUCTID": "HT-1001"
+       },
+       {
+        "NAME": "Notebook Professional 17",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1011.jpg",
+        "PRODUCTID": "HT-1011"
+       }
+      ],
+      "VALUE_HELP": ""
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "VH_CONFIRM",
+    "row": 0
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "52BACFFE4EA045F2BBB5CED8493CD147",
+      "EVENT": "VH_CONFIRM",
+      "T_EVENT_ARG": [
+       "Notebook Basic 17"
+      ]
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMPC_APP_623",
+      "ID": "2917D476BDD14E1BBFB47626C3338259",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "destroy",
+         "POPUP"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "T_PRODUCTS": [
+       {
+        "NAME": "Notebook Basic 15",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1000.jpg",
+        "PRODUCTID": "HT-1000"
+       },
+       {
+        "NAME": "Notebook Basic 17",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1001.jpg",
+        "PRODUCTID": "HT-1001"
+       },
+       {
+        "NAME": "Notebook Basic 18",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1002.jpg",
+        "PRODUCTID": "HT-1002"
+       },
+       {
+        "NAME": "Notebook Basic 19",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1003.jpg",
+        "PRODUCTID": "HT-1003"
+       },
+       {
+        "NAME": "ITelO Vault",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1007.jpg",
+        "PRODUCTID": "HT-1007"
+       },
+       {
+        "NAME": "Notebook Professional 15",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1010.jpg",
+        "PRODUCTID": "HT-1010"
+       },
+       {
+        "NAME": "Notebook Professional 17",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1011.jpg",
+        "PRODUCTID": "HT-1011"
+       },
+       {
+        "NAME": "ITelO Vault Net",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1020.jpg",
+        "PRODUCTID": "HT-1020"
+       },
+       {
+        "NAME": "ITelO Vault SAT",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1021.jpg",
+        "PRODUCTID": "HT-1021"
+       },
+       {
+        "NAME": "Comfort Easy",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1022.jpg",
+        "PRODUCTID": "HT-1022"
+       },
+       {
+        "NAME": "Comfort Senior",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1023.jpg",
+        "PRODUCTID": "HT-1023"
+       },
+       {
+        "NAME": "Ergo Screen E-I",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1030.jpg",
+        "PRODUCTID": "HT-1030"
+       },
+       {
+        "NAME": "Ergo Screen E-II",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1031.jpg",
+        "PRODUCTID": "HT-1031"
+       },
+       {
+        "NAME": "Ergo Screen E-III",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1032.jpg",
+        "PRODUCTID": "HT-1032"
+       },
+       {
+        "NAME": "Flat Basic",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1035.jpg",
+        "PRODUCTID": "HT-1035"
+       },
+       {
+        "NAME": "Flat Future",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1036.jpg",
+        "PRODUCTID": "HT-1036"
+       },
+       {
+        "NAME": "Flat XL",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1037.jpg",
+        "PRODUCTID": "HT-1037"
+       },
+       {
+        "NAME": "Laser Professional Eco",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1040.jpg",
+        "PRODUCTID": "HT-1040"
+       },
+       {
+        "NAME": "Laser Basic",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1041.jpg",
+        "PRODUCTID": "HT-1041"
+       },
+       {
+        "NAME": "Laser Allround",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1042.jpg",
+        "PRODUCTID": "HT-1042"
+       },
+       {
+        "NAME": "Ultra Jet Super Color",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1050.jpg",
+        "PRODUCTID": "HT-1050"
+       },
+       {
+        "NAME": "Ultra Jet Mobile",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1051.jpg",
+        "PRODUCTID": "HT-1051"
+       },
+       {
+        "NAME": "Ultra Jet Super Highspeed",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1052.jpg",
+        "PRODUCTID": "HT-1052"
+       },
+       {
+        "NAME": "Multi Print",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1055.jpg",
+        "PRODUCTID": "HT-1055"
+       },
+       {
+        "NAME": "Multi Color",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1056.jpg",
+        "PRODUCTID": "HT-1056"
+       },
+       {
+        "NAME": "Cordless Mouse",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1060.jpg",
+        "PRODUCTID": "HT-1060"
+       },
+       {
+        "NAME": "Speed Mouse",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1061.jpg",
+        "PRODUCTID": "HT-1061"
+       },
+       {
+        "NAME": "Track Mouse",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1062.jpg",
+        "PRODUCTID": "HT-1062"
+       },
+       {
+        "NAME": "Ergonomic Keyboard",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1063.jpg",
+        "PRODUCTID": "HT-1063"
+       },
+       {
+        "NAME": "Internet Keyboard",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1064.jpg",
+        "PRODUCTID": "HT-1064"
+       },
+       {
+        "NAME": "Media Keyboard",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1065.jpg",
+        "PRODUCTID": "HT-1065"
+       },
+       {
+        "NAME": "Mousepad",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1066.jpg",
+        "PRODUCTID": "HT-1066"
+       },
+       {
+        "NAME": "Ergo Mousepad",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1067.jpg",
+        "PRODUCTID": "HT-1067"
+       },
+       {
+        "NAME": "Designer Mousepad",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1068.jpg",
+        "PRODUCTID": "HT-1068"
+       },
+       {
+        "NAME": "Universal card reader",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1069.jpg",
+        "PRODUCTID": "HT-1069"
+       },
+       {
+        "NAME": "Proctra X",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1070.jpg",
+        "PRODUCTID": "HT-1070"
+       },
+       {
+        "NAME": "Gladiator MX",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1071.jpg",
+        "PRODUCTID": "HT-1071"
+       },
+       {
+        "NAME": "Hurricane GX",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1072.jpg",
+        "PRODUCTID": "HT-1072"
+       },
+       {
+        "NAME": "Hurricane GX/LN",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1073.jpg",
+        "PRODUCTID": "HT-1073"
+       },
+       {
+        "NAME": "Photo Scan",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1080.jpg",
+        "PRODUCTID": "HT-1080"
+       },
+       {
+        "NAME": "Power Scan",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1081.jpg",
+        "PRODUCTID": "HT-1081"
+       },
+       {
+        "NAME": "Jet Scan Professional",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1082.jpg",
+        "PRODUCTID": "HT-1082"
+       },
+       {
+        "NAME": "Jet Scan Professional",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1083.jpg",
+        "PRODUCTID": "HT-1083"
+       },
+       {
+        "NAME": "Copymaster",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1085.jpg",
+        "PRODUCTID": "HT-1085"
+       },
+       {
+        "NAME": "Surround Sound",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1090.jpg",
+        "PRODUCTID": "HT-1090"
+       },
+       {
+        "NAME": "Blaster Extreme",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1091.jpg",
+        "PRODUCTID": "HT-1091"
+       },
+       {
+        "NAME": "Sound Booster",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1092.jpg",
+        "PRODUCTID": "HT-1092"
+       },
+       {
+        "NAME": "Lovely Sound 5.1 Wireless",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1095.jpg",
+        "PRODUCTID": "HT-1095"
+       },
+       {
+        "NAME": "Lovely Sound 5.1",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1096.jpg",
+        "PRODUCTID": "HT-1096"
+       },
+       {
+        "NAME": "Lovely Sound Stereo",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1097.jpg",
+        "PRODUCTID": "HT-1097"
+       },
+       {
+        "NAME": "Smart Office",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1100.jpg",
+        "PRODUCTID": "HT-1100"
+       },
+       {
+        "NAME": "Smart Design",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1101.jpg",
+        "PRODUCTID": "HT-1101"
+       },
+       {
+        "NAME": "Smart Network",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1102.jpg",
+        "PRODUCTID": "HT-1102"
+       },
+       {
+        "NAME": "Smart Multimedia",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1103.jpg",
+        "PRODUCTID": "HT-1103"
+       },
+       {
+        "NAME": "Smart Games",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1104.jpg",
+        "PRODUCTID": "HT-1104"
+       },
+       {
+        "NAME": "Smart Internet Antivirus",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1105.jpg",
+        "PRODUCTID": "HT-1105"
+       },
+       {
+        "NAME": "Smart Firewall",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1106.jpg",
+        "PRODUCTID": "HT-1106"
+       },
+       {
+        "NAME": "Smart Money",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1107.jpg",
+        "PRODUCTID": "HT-1107"
+       },
+       {
+        "NAME": "PC Lock",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1110.jpg",
+        "PRODUCTID": "HT-1110"
+       },
+       {
+        "NAME": "Notebook Lock",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1111.jpg",
+        "PRODUCTID": "HT-1111"
+       },
+       {
+        "NAME": "Web cam reality",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1112.jpg",
+        "PRODUCTID": "HT-1112"
+       },
+       {
+        "NAME": "Screen clean",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1113.jpg",
+        "PRODUCTID": "HT-1113"
+       },
+       {
+        "NAME": "Fabric bag professional",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1114.jpg",
+        "PRODUCTID": "HT-1114"
+       },
+       {
+        "NAME": "Wireless DSL Router",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1115.jpg",
+        "PRODUCTID": "HT-1115"
+       },
+       {
+        "NAME": "Wireless DSL Router / Repeater",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1116.jpg",
+        "PRODUCTID": "HT-1116"
+       },
+       {
+        "NAME": "Wireless DSL Router / Repeater and Print Server",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1117.jpg",
+        "PRODUCTID": "HT-1117"
+       },
+       {
+        "NAME": "USB Stick",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1118.jpg",
+        "PRODUCTID": "HT-1118"
+       },
+       {
+        "NAME": "Travel Adapter",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1119.jpg",
+        "PRODUCTID": "HT-1119"
+       },
+       {
+        "NAME": "Cordless Bluetooth Keyboard, english international",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1120.jpg",
+        "PRODUCTID": "HT-1120"
+       },
+       {
+        "NAME": "Flat XXL",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1137.jpg",
+        "PRODUCTID": "HT-1137"
+       },
+       {
+        "NAME": "Pocket Mouse",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1138.jpg",
+        "PRODUCTID": "HT-1138"
+       },
+       {
+        "NAME": "PC Power Station",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1210.jpg",
+        "PRODUCTID": "HT-1210"
+       },
+       {
+        "NAME": "Astro Laptop 1516",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1251.jpg",
+        "PRODUCTID": "HT-1251"
+       },
+       {
+        "NAME": "Astro Phone 6",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1252.jpg",
+        "PRODUCTID": "HT-1252"
+       },
+       {
+        "NAME": "Benda Laptop 1408",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1253.jpg",
+        "PRODUCTID": "HT-1253"
+       },
+       {
+        "NAME": "Bending Screen 21HD",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1254.jpg",
+        "PRODUCTID": "HT-1254"
+       },
+       {
+        "NAME": "Broad Screen 22HD",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1255.jpg",
+        "PRODUCTID": "HT-1255"
+       },
+       {
+        "NAME": "Cerdik Phone 7",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1256.jpg",
+        "PRODUCTID": "HT-1256"
+       },
+       {
+        "NAME": "Cepat Tablet 10.5",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1257.jpg",
+        "PRODUCTID": "HT-1257"
+       },
+       {
+        "NAME": "Cepat Tablet 8",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1258.jpg",
+        "PRODUCTID": "HT-1258"
+       },
+       {
+        "NAME": "Server Basic",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1500.jpg",
+        "PRODUCTID": "HT-1500"
+       },
+       {
+        "NAME": "Server Professional",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1501.jpg",
+        "PRODUCTID": "HT-1501"
+       },
+       {
+        "NAME": "Server Power Pro",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1502.jpg",
+        "PRODUCTID": "HT-1502"
+       },
+       {
+        "NAME": "Family PC Basic",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1600.jpg",
+        "PRODUCTID": "HT-1600"
+       },
+       {
+        "NAME": "Family PC Pro",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1601.jpg",
+        "PRODUCTID": "HT-1601"
+       },
+       {
+        "NAME": "Gaming Monster",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1602.jpg",
+        "PRODUCTID": "HT-1602"
+       },
+       {
+        "NAME": "Gaming Monster Pro",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1603.jpg",
+        "PRODUCTID": "HT-1603"
+       },
+       {
+        "NAME": "7\" Widescreen Portable DVD Player w MP3",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2000.jpg",
+        "PRODUCTID": "HT-2000"
+       },
+       {
+        "NAME": "10\" Portable DVD player",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2001.jpg",
+        "PRODUCTID": "HT-2001"
+       },
+       {
+        "NAME": "Portable DVD Player with 9\" LCD Monitor",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2002.jpg",
+        "PRODUCTID": "HT-2002"
+       },
+       {
+        "NAME": "CD/DVD case: 264 sleeves",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2025.jpg",
+        "PRODUCTID": "HT-2025"
+       },
+       {
+        "NAME": "Audio/Video Cable Kit - 4m",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2026.jpg",
+        "PRODUCTID": "HT-2026"
+       },
+       {
+        "NAME": "Removable CD/DVD Laser Labels",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-2027.jpg",
+        "PRODUCTID": "HT-2027"
+       },
+       {
+        "NAME": "Beam Breaker B-1",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6100.jpg",
+        "PRODUCTID": "HT-6100"
+       },
+       {
+        "NAME": "Beam Breaker B-2",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6101.jpg",
+        "PRODUCTID": "HT-6101"
+       },
+       {
+        "NAME": "Beam Breaker B-3",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6102.jpg",
+        "PRODUCTID": "HT-6102"
+       },
+       {
+        "NAME": "Play Movie",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6110.jpg",
+        "PRODUCTID": "HT-6110"
+       },
+       {
+        "NAME": "Record Movie",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6111.jpg",
+        "PRODUCTID": "HT-6111"
+       },
+       {
+        "NAME": "ITelo MusicStick",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6120.jpg",
+        "PRODUCTID": "HT-6120"
+       },
+       {
+        "NAME": "ITelo Jog-Mate",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6121.jpg",
+        "PRODUCTID": "HT-6121"
+       },
+       {
+        "NAME": "Power Pro Player 40",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6122.jpg",
+        "PRODUCTID": "HT-6122"
+       },
+       {
+        "NAME": "Power Pro Player 80",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6123.jpg",
+        "PRODUCTID": "HT-6123"
+       },
+       {
+        "NAME": "Flat Watch HD32",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6130.jpg",
+        "PRODUCTID": "HT-6130"
+       },
+       {
+        "NAME": "Flat Watch HD37",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6131.jpg",
+        "PRODUCTID": "HT-6131"
+       },
+       {
+        "NAME": "Flat Watch HD41",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-6132.jpg",
+        "PRODUCTID": "HT-6132"
+       },
+       {
+        "NAME": "Copperberry",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-7000.jpg",
+        "PRODUCTID": "HT-7000"
+       },
+       {
+        "NAME": "Silverberry",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-7010.jpg",
+        "PRODUCTID": "HT-7010"
+       },
+       {
+        "NAME": "Goldberry",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-7020.jpg",
+        "PRODUCTID": "HT-7020"
+       },
+       {
+        "NAME": "Platinberry",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-7030.jpg",
+        "PRODUCTID": "HT-7030"
+       },
+       {
+        "NAME": "ITelO FlexTop I4000",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-8000.jpg",
+        "PRODUCTID": "HT-8000"
+       },
+       {
+        "NAME": "ITelO FlexTop I6300c",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-8001.jpg",
+        "PRODUCTID": "HT-8001"
+       },
+       {
+        "NAME": "ITelO FlexTop I9100",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-8002.jpg",
+        "PRODUCTID": "HT-8002"
+       },
+       {
+        "NAME": "ITelO FlexTop I9800",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-8003.jpg",
+        "PRODUCTID": "HT-8003"
+       },
+       {
+        "NAME": "Smartphone Leather Case",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9991.jpg",
+        "PRODUCTID": "HT-9991"
+       },
+       {
+        "NAME": "Smartphone Alpha",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9992.jpg",
+        "PRODUCTID": "HT-9992"
+       },
+       {
+        "NAME": "Mini Tablet",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9993.jpg",
+        "PRODUCTID": "HT-9993"
+       },
+       {
+        "NAME": "Camcorder View",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9994.jpg",
+        "PRODUCTID": "HT-9994"
+       },
+       {
+        "NAME": "Tablet Pouch",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9995.jpg",
+        "PRODUCTID": "HT-9995"
+       },
+       {
+        "NAME": "Tablet Pouch",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9996.jpg",
+        "PRODUCTID": "HT-9996"
+       },
+       {
+        "NAME": "e-Book Reader ReadMe",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9997.jpg",
+        "PRODUCTID": "HT-9997"
+       },
+       {
+        "NAME": "Smartphone Beta",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9998.jpg",
+        "PRODUCTID": "HT-9998"
+       },
+       {
+        "NAME": "Maxi Tablet",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-9999.jpg",
+        "PRODUCTID": "HT-9999"
+       },
+       {
+        "NAME": "Flyer",
+        "PICURL": "https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/PF-1000.jpg",
+        "PRODUCTID": "PF-1000"
+       }
+      ],
+      "VALUE_HELP": "Notebook Basic 17"
+     }
+    }
+   }
+  }
+ ]
+}

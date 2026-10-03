@@ -46,6 +46,14 @@ const RAW = `https://raw.githubusercontent.com/${REPO}/main/${SOURCE_FILE}`;
  *  editor session. */
 export const REQUIRED_KEYS = ["corpus", "samples", "samplesStack", "viewCheck", "server"];
 
+/** Keys taken when upstream carries them and left out when it does not -
+ *  for a repository mcp-server learns about after this extension does.
+ *  `cloudGui` is the abap-cloud-gui checkout "Migrate Classic Report to
+ *  abap2UI5" runs report2cloud from (src/report2cloud.ts); its module reads
+ *  an absent key as an empty list, so the reposRoot rung of that resolution
+ *  starts working the week the bump brings the key in, without an edit. */
+export const OPTIONAL_KEYS = ["cloudGui"];
+
 const TOOL = "generate-repo-dirs";
 
 if (invokedDirectly(import.meta.url)) {
@@ -70,7 +78,12 @@ if (invokedDirectly(import.meta.url)) {
 
   // Only what this extension consumes: the directory names. The env vars and
   // probe files are the server's business - it is the one that resolves.
-  const dirs = Object.fromEntries(REQUIRED_KEYS.map((k) => [k, repos[k].dirs]));
+  const dirs = Object.fromEntries([
+    ...REQUIRED_KEYS.map((k) => [k, repos[k].dirs]),
+    ...OPTIONAL_KEYS.filter((k) => Array.isArray(repos[k]?.dirs) && repos[k].dirs.length).map(
+      (k) => [k, repos[k].dirs]
+    ),
+  ]);
 
   const json = `${JSON.stringify(
     {
@@ -88,7 +101,7 @@ if (invokedDirectly(import.meta.url)) {
     check,
     stale:
       "repo-dirs.json is STALE against abap2UI5/mcp-server - a checkout the MCP server finds is one this extension would not. Run `npm run repo-dirs` and commit.",
-    upToDate: `repo-dirs.json: up to date (${REQUIRED_KEYS.length} repos)`,
-    wrote: `repo-dirs.json: ${REQUIRED_KEYS.length} repos from ${local ? local : `${REPO}@main`}`,
+    upToDate: `repo-dirs.json: up to date (${Object.keys(dirs).length} repos)`,
+    wrote: `repo-dirs.json: ${Object.keys(dirs).length} repos from ${local ? local : `${REPO}@main`}`,
   });
 }

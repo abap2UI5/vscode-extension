@@ -77,6 +77,11 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   [mcp-server](https://github.com/abap2UI5/mcp-server)'s `abap2ui5-unit`, in
   a terminal, for one class or the whole `src/`: the editor's counterpart of
   `npm run test:unit` in a project from app-template.
+- **Migrate a classic report** — *Migrate Classic Report to abap2UI5* turns a
+  `*.prog.abap` into an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui)
+  report class with its converter report2cloud, opens the class beside its
+  migration report and puts every statement it refuses into Problems
+  ([details](#migrating-a-classic-report)).
 - **Navigate an app**: the view hierarchy in the Outline pane, Go to Definition
   between an event and its `WHEN`, F2 renaming every literal an app is wired
   together with, and a navigation map of the workspace's apps.
@@ -87,12 +92,100 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server) registered for
   every MCP client in the window, plus a second, in-extension server holding
   what only the extension has — the configured systems, the credentials and the
-  proxy (`list_systems`, `search_apps`, `run_app_on_system`). The setup for
+  proxy (`list_systems`, `search_apps`, `run_app_on_system`), and, once you
+  allow it, the [app tools](#agent-app-tools-on-the-system) that let an agent
+  operate an app on the system through its JSON protocol. The setup for
   every agent, the Claude Code plugin among them, is on the
   [AI page](https://abap2ui5.github.io/docs/get_started/ai.html) of the
   documentation.
 - **Works in the browser** — vscode.dev, github.dev and browser-based SAP
   Business Application Studio get the language half.
+
+## Agent app tools on the system
+
+The **abap2UI5 System** MCP server offers four tools that operate an
+abap2UI5 app *semantically* on the active SAP system: an agent fills fields by
+model path or label and fires events by name, over the same JSON protocol the
+browser frontend speaks - no browser, no CSS selector, no screenshot. Every
+answer is an **agent snapshot v1**: the fields with their values and whether
+they are editable, the actions with their arguments, the tables, the
+messages, some static text.
+
+| Tool | What it does |
+| --- | --- |
+| `app_list` | Class names on the system, from the ADT quick search (`filter`: the start of the name, `*` as wildcard, default `Z`; at most 50). A name search: whether a class implements `z2ui5_if_app` is not checked. |
+| `app_start` | Starts `app` and answers with its snapshot; optional `values` become pending edits, `max_rows` sizes the tables (default 20, max 200). |
+| `app_describe` | The current snapshot of a `session`, from memory - nothing is sent. |
+| `app_act` | Fills `values` and fires `event` (a name or an action id) with `args`/`row`, then answers with the new snapshot. Without `event` the values stay pending, as typing does in the browser. |
+
+They are the same tools, with the same input, snapshot and refusals, as the
+sandbox tools of the [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server)
+(see its [`docs/agent-snapshot.md`](https://github.com/abap2UI5/mcp-server/blob/ea4e9fa8f6eaeca8f9c975a1c4fbd532c44ff76c/docs/agent-snapshot.md), at the vendored commit):
+an event that is not on the screen, a field that is not editable, a choice
+outside its values is refused with what *is* allowed, and nothing is sent.
+The code behind the snapshot is that server's own, vendored into
+`src/vendor/agent/` (see [Development](#development)). What differs on a
+real system:
+
+- **They act for real, as the configured user.** An event may save, post or
+  delete data. So the tools answer only while
+  `abap2ui5.agent.enableAppTools` is on - off by default, and settable in your
+  User settings only, never by a workspace. While it is off they stay listed
+  and answer with how to switch them on, without contacting the system.
+- **The active system.** Like `run_app_on_system` they work on the system
+  *Select System* made active, through the auth proxy (the credentials stay
+  there; the requests show in the traffic log). The optional `system`
+  argument of `app_list`/`app_start` must name that system - the tools never
+  switch. A session remembers its system, and `app_act` refuses it while
+  another system is active.
+- **The launch URL** must carry the class as a query parameter
+  (`…/sap/bc/z2ui5?app_start={class}&sap-client=100`): the tools post to that
+  endpoint without the class, as the browser posts to its own page. They
+  handle what a browser would - a CSRF token layer in front of the system, a
+  stateful session's `sap-contextid`, the system's cookies.
+- `app_start` also accepts a namespaced class (`/ns/cl_app`).
+
+## Migrating a classic report
+
+*Migrate Classic Report to abap2UI5* (Command Palette, or the context menu
+of a `*.prog.abap` in the editor and the Explorer) converts a classic report
+into a class of the [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui)
+addon, which keeps the programming model of a report: the event blocks as
+methods, `write( )`, `alv( )` and `message( )` as calls. The converter is the
+addon's own report2cloud (`tools/report2cloud` in that repository), the same one the MCP server's `migrate_report` tool runs. It is not on npm,
+so the command runs it from a checkout of the addon:
+
+```sh
+git clone https://github.com/abap2UI5-addons/abap-cloud-gui
+cd abap-cloud-gui && npm ci
+```
+
+and `abap2ui5.report2cloud.path` pointing at that folder (or the
+`ABAP_CLOUD_GUI_HOME` environment variable the MCP server reads). Without
+one the command says so and offers *Configure…*; a checkout without its
+`npm ci` gets *Run npm ci*. It runs with VS Code's own Node.js.
+
+1. It asks for the class name - report2cloud's default, `zcl_` + the report
+   name, is preselected - and whether to write next to the report or into
+   another folder; existing files of that class are only replaced after you
+   confirm.
+2. The class (`.clas.abap`, `.clas.xml`, the report's local classes as
+   `.clas.locals_def/_imp.abap`) and `<class>.migration.md` are written in
+   abapGit format, with the report's text pool when its `.prog.xml` lies
+   beside it. The class opens with the migration report beside it - the work
+   list of TODOs, the tables and APIs not released on ABAP Cloud with their
+   successors, and what the list does not carry over.
+3. A statement with no counterpart in a browser app (`CALL SCREEN`, a dynpro
+   module, batch input, `SUBMIT`, native SQL, ...) is **refused**: each one is
+   an error in Problems, on the statement in the report, and no class is
+   written. *Write Partial Result* writes the draft anyway, the refused
+   statements marked in it.
+4. When the new class builds a view of its own, *Preview View (No System)*
+   and *Check Views* are offered on it. A plain report class draws its screen
+   through `z2ui5_cl_cgui_report` and has no view of its own to check.
+
+A namespaced class name (`/ns/cl_x`) is not offered here - run report2cloud's
+CLI for those.
 
 ## Commands
 
@@ -136,6 +229,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Show Reconstructed XML View | `abap2ui5.showReconstructedXml` |  |
 | Generate Mock Data for This App | `abap2ui5.generateMock` |  |
 | Run Unit Tests (No System) | `abap2ui5.runUnitTests` |  |
+| Migrate Classic Report to abap2UI5 | `abap2ui5.migrateReport` |  |
 | Fix All View Findings in This File | `abap2ui5.fixAll` |  |
 | Install Render Gate | `abap2ui5.installRenderGate` |  |
 | Refresh the App List | `abap2ui5.refreshApps` |  |
@@ -188,9 +282,11 @@ when the two drift apart.
 | `abap2ui5.viewPreview.theme` | `"sap_horizon"` | The UI5 theme *"abap2UI5: Preview View (No System)"* renders in. Any theme name the runtime ships, e.g. `sap_horizon`, `sap_horizon_dark`, `sap_fiori_3`, `sap_belize`. |
 | `abap2ui5.viewPreview.viewport` | `"1280x900"` | The viewport(s) the systemless preview renders at, `<width>x<height>` in CSS pixels - e.g. `390x844` to see the view the way a phone lays it out. **Several, comma-separated, become a device matrix**: `390x844,1280x900` renders both in one browser session and shows them side by side. The picture is taken full-page, so a view taller than the viewport is shown whole. |
 | `abap2ui5.mcp.enabled` | `true` | Offer the [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server) to MCP clients in this window (Copilot agent mode and others). The server gives AI agents the abap2UI5 dev loop without an SAP system: capability queries, static view validation, deploy, build, headless run with screenshot. |
-| `abap2ui5.mcp.system` | `true` | Also offer the **abap2UI5 System** MCP server: real-system tools hosted by the extension itself - list the configured systems, search classes on the system (ADT quick search) and run an app through the auth proxy with a headless screenshot. Uses the same credentials the preview stores; the run tool needs the render gate's Chromium. |
+| `abap2ui5.mcp.system` | `true` | Also offer the **abap2UI5 System** MCP server: real-system tools hosted by the extension itself - list the configured systems, search classes on the system (ADT quick search), run an app through the auth proxy with a headless screenshot, and - only with `abap2ui5.agent.enableAppTools` - operate an app through its JSON protocol. Uses the same credentials the preview stores; the run tool needs the render gate's Chromium. |
+| `abap2ui5.agent.enableAppTools` | `false` | Allow the **abap2UI5 System** MCP server's app tools (`app_list`, `app_start`, `app_describe`, `app_act`) to operate abap2UI5 apps on the **real** active system: an AI agent fills fields and fires events through the abap2UI5 JSON protocol, **as the configured user** - an event runs for real and may save, post or delete data. Off by default; while it is off the tools stay listed and answer with how to allow them, sending nothing. User settings only: a workspace cannot turn it on. |
 | `abap2ui5.mcp.command` | `""` | Command that starts the MCP server. Leave empty for the default: a local checkout under `abap2ui5.mcp.reposRoot` when present, otherwise `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp`. |
 | `abap2ui5.mcp.reposRoot` | `""` | Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, `samples`, `samples-stack`, and optionally `linter`, `mcp-server`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `SAMPLES_HOME` / `SAMPLES_STACK_HOME` / `AI_VIEW_CHECK_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx. |
+| `abap2ui5.report2cloud.path` | `""` | Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose `tools/report2cloud` converter *"abap2UI5: Migrate Classic Report to abap2UI5"* runs - report2cloud is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose. |
 <!-- END GENERATED SETTINGS -->
 
 ## Development
@@ -211,6 +307,14 @@ the cross-checks: the manifest against the registered commands, the property
 gate against the linter's own pipeline, the snippets and templates through the
 bundled linter. The in-host smoke tests (`npm run test:web`,
 `npm run test:desktop`) each download a VS Code build and run in CI.
+
+The agent app tools' snapshot code is
+[mcp-server](https://github.com/abap2UI5/mcp-server)'s, vendored at a
+recorded commit: `npm run agent-vendor -- /path/to/mcp-server [--ref <commit>]`
+copies it into `src/vendor/agent/` (and the recorded sessions its tests replay
+into `src/test/fixtures/agent/`), and `npm run agent-vendor:check -- /path/to/mcp-server`
+fails when the copies drift from that commit. `npm test` fails on a hand edit
+of a copy.
 
 ## Packaging as a `.vsix`
 

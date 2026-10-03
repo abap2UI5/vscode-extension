@@ -81,10 +81,15 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix / Run unit tests (when a `*.clas.testclasses.abap` sits beside the class) above the class definition |
 | `src/unitrunner.ts` | `vscode`-free: what "Run Unit Tests (No System)" decides - the runner (mcp-server's `scripts/ci-unit.mjs` from a checkout under `mcp.reposRoot`, else `npx -p @abap2ui5/mcp-server abap2ui5-unit`), its arguments (`src` or the class's folder, `--class`, `--home`), the shell-quoted terminal line, the banner |
+| `src/report2cloud.ts` | `vscode`-free: what "Migrate Classic Report to abap2UI5" decides - where abap-cloud-gui's report2cloud CLI is (`abap2ui5.report2cloud.path`, then `ABAP_CLOUD_GUI_HOME`, then a `cloudGui` directory under `mcp.reposRoot`; an explicit answer that does not hold is reported, never skipped), the program and class names the CLI derives, its arguments, what its exit code and output mean (0 converted, 2 refused with `file:row:col - reason` lines, 1 wrong call, a missing `npm ci`), and the range a refusal underlines |
+| `src/migratereport.ts` | The command's plumbing: report pick (explorer/editor uri, active `.prog.abap`, open dialog), class-name prompt, output folder, the overwrite question, the CLI through `childproc.run` with VS Code's own Node, refusals as diagnostics on the report, *Write Partial Result*, opening the class beside its migration report |
 | `src/unittests.ts` | The command's plumbing: the one reused "abap2UI5 unit tests" terminal (recreated when cwd or the `*_HOME` env changed), the class from the tree node / lens / active editor, the Restricted Mode refusal |
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
-| `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`) |
+| `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`, and the app tools below) |
+| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the client's `transport` through the auth proxy (endpoint, CSRF handshake, `sap-contextid` per draft, cookies) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client |
+| `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
+| `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
 | `src/screenshot.ts` | "Take App Screenshot": finds the render gate's Chromium and renders the proxied URL headless |
 | `src/colors.ts` | Colour spans for colour-typed property values (the swatch/picker provider's logic) |
@@ -125,12 +130,12 @@ not committed.
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
-`catalogue.ts`,
+`catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
 `abapscan.ts`, `appindex.ts`, `settings.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`,
-`unitrunner.ts`,
+`unitrunner.ts`, `report2cloud.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
@@ -289,8 +294,12 @@ identity (see Conventions).
   the extension spawns; machine scope keeps a cloned repository's
   `.vscode/settings.json` out of that decision. They are listed under
   `capabilities.untrustedWorkspaces.restrictedConfigurations`, together with
-  `systems` and `launchUrlTemplate` - five settings a cloned repository must
-  not be able to set; `manifest.test.ts` pins the list.
+  `systems`, `launchUrlTemplate`, `agent.enableAppTools` and `report2cloud.path` (the
+  abap-cloud-gui checkout whose report2cloud CLI the migrate command runs) - seven settings a
+  cloned repository must not be able to set. The last one is machine scope
+  too, for the same reason in another shape: it lets an agent act on the
+  system AS THE USER, so only the user's own settings may turn it on
+  (`agentapps.test.ts` pins its scope, default and restriction).
 - **The linter owns the rules, this extension owns the presentation.**
   Severity, wording, the `fixes` on a finding, the `rules` block and the
   `abap2ui5lint-disable…` directives all live in `@abap2ui5/linter` and are
@@ -487,9 +496,49 @@ Facts an agent cannot see from the code but will trip over:
   `npm run repo-dirs:check` locally and a weekly regeneration through
   `bump-repo-dirs.yml`, and
   `src/test/repolayout.test.ts` holding the module to the snapshot in
-  `npm test`. **Add a directory name in mcp-server and regenerate here** — never
+  `npm test`. `cloudGui` (the abap-cloud-gui checkout report2cloud runs
+  from) is an OPTIONAL key of the generator: taken when mcp-server's main
+  carries it, absent until then, and `CLOUD_GUI_DIRS` reads an absent key as
+  an empty list - so the repos-root rung of the migrate command's resolution
+  switches on with the bump that brings the key in. Do not regenerate from a
+  mcp-server branch to get it earlier: the next weekly bump against main
+  would drop it again. **Add a directory name in mcp-server and regenerate here** — never
   by editing `repolayout.ts`. This used to be two hand-written lists with no
   gate between them, which is a rename that half-lands.
+- **The agent app tools run mcp-server's own code, vendored at a COMMIT.**
+  `app_list`/`app_start`/`app_describe`/`app_act` exist in mcp-server against
+  its transpiled backend; the snapshot they answer with ("agent snapshot v1",
+  mcp-server's `docs/agent-snapshot.md`) is a contract three implementations
+  share. So the snapshot builder, its parsers and the protocol client with
+  its validation are mcp-server's `lib/snapshot.mjs`, `lib/viewxml.mjs` and
+  `lib/appclient.mjs`, copied by `scripts/vendor-agent.mjs` into
+  `src/vendor/agent/` - as `.js` (a `.mjs` import from this CommonJS
+  TypeScript package is refused, TS1479), the sibling imports rewritten to
+  match, a header naming repository, path and commit, and `source.json`
+  recording the commit and every file's sha256. Unlike the `src/data/`
+  snapshots this follows a recorded commit, not a branch, and has no weekly
+  bump: it is code, and a new version has to pass this repository's tests
+  first. Two gates: `src/test/agentvendor.test.ts` (in `npm test`, offline)
+  fails on a hand edit of a copy and replays mcp-server's recorded sessions
+  through the vendored client; `npm run agent-vendor:check -- <checkout>`
+  fails when the copies differ from the recorded commit. **Fix the snapshot
+  in mcp-server and re-vendor** (`npm run agent-vendor -- <checkout> --ref
+  <commit>`), never in the copy - and update the hand-written `.d.ts` beside
+  it when an export changes shape. What is the extension's own lives in
+  `src/agentapps.ts`: the transport through the auth proxy and the system
+  rules around the client. Every local-backend assumption of the client is
+  an OPTION of mcp-server's `createAppClient` (its `docs/agent-snapshot.md`,
+  "Embedding the client"), and the extension sets them instead of wrapping
+  the client: `transport` (`createSystemTransport` - one roundtrip through
+  the proxy, the CSRF resend inside it, `sap-contextid` keyed by the
+  request's `draftId`), `location` (`systemLocation` - the start's
+  ORIGIN/PATHNAME/SEARCH are the system's launch URL; the proxy url with its
+  token must never reach the backend, which stores them), no `generation`
+  (drafts live on the system, so no restart detection) and `backendHint`
+  (`SYSTEM_HINT`, the connection check instead of mcp-server's `backend`
+  tool). No `baseUrl`, no request rewriting, no message patching - a new
+  local-backend assumption upstream belongs behind a new option there, not
+  behind a wrapper here.
 - **The four weekly bump workflows share one implementation.**
   `.github/workflows/bump-snapshot.yml` holds the shape (regenerate → diff →
   gate → open a pull request) and is called through `workflow_call`; the four

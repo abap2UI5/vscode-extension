@@ -1,0 +1,166 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_070",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_070",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_070"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_070",
+      "ID": "AF4540AE4B314C6187DE2A053AE19211",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:f=\"sap.f\" xmlns:table=\"sap.ui.table\" xmlns:u=\"sap.ui.unified\"><Shell><Page title=\"abap2UI5 - Grid Table - Full Example with sap.ui.table\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\" class=\"sapUiContentPadding\" id=\"page_main\"><MessageStrip text=\"A full sap.ui.table.Table inside a DynamicPage: fixed column, row-action buttons, progress-indicator and currency cells, plus search, sort and filter events that are answered in the backend: the search rebuilds the rows, the column sort and the column filter sort and filter the internal table with the property the event carries.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><f:DynamicPage headerExpanded=\"true\"><f:title><f:DynamicPageTitle><f:heading><HBox><Title text=\"Search Field\"/></HBox></f:heading><f:expandedContent/><f:snappedContent/></f:DynamicPageTitle></f:title><f:header><f:DynamicPageHeader pinnable=\"true\"><FlexBox alignItems=\"Start\" justifyContent=\"SpaceBetween\"><FlexBox alignItems=\"Start\"><VBox><Text text=\"Search\"/><SearchField width=\"17.5rem\" search=\".eB(['BUTTON_SEARCH'])\" value=\"{/MV_SEARCH_VALUE}\" id=\"SEARCH\" placeholder=\"Search products\"/></VBox></FlexBox><HBox justifyContent=\"End\"><Button press=\".eB(['BUTTON_START'])\" text=\"Go\" type=\"Emphasized\"/></HBox></FlexBox></f:DynamicPageHeader></f:header><f:content><table:Table rows=\"{/MT_TABLE}\" alternateRowColors=\"true\" fixedColumnCount=\"1\" rowActionCount=\"2\" selectionMode=\"None\" filter=\".eB(['FILTER'], ${$parameters&gt;/column}.getFilterProperty(), ${$parameters&gt;/value})\" sort=\".eB(['SORT'], ${$parameters&gt;/column}.getSortProperty(), ${$parameters&gt;/sortOrder})\"><table:extension><OverflowToolbar><Title text=\"Products\"/></OverflowToolbar></table:extension><table:columns><table:Column width=\"4rem\"><CheckBox selected=\"{/LV_SELKZ}\" enabled=\"true\" select=\".eB(['SELKZ'])\"/><table:template><CheckBox selected=\"{SELKZ}\"/></table:template></table:Column><table:Column width=\"5rem\" sortProperty=\"ROW_ID\" filterProperty=\"ROW_ID\"><Text text=\"Index\"/><table:template><Text text=\"{ROW_ID}\"/></table:template></table:Column><table:Column width=\"11rem\" sortProperty=\"PROCESS\" filterProperty=\"PROCESS\"><Text text=\"Process Indicator\"/><table:template><ProgressIndicator class=\"sapUiSmallMarginBottom\" percentValue=\"{PROCESS}\" displayValue=\"{PROCESS} %\" showValue=\"true\" state=\"{PROCESS_STATE}\"/></table:template></table:Column><table:Column width=\"11rem\" sortProperty=\"PRODUCT\" filterProperty=\"PRODUCT\"><Text text=\"Product\"/><table:template><Input editable=\"false\" value=\"{PRODUCT}\"/></table:template></table:Column><table:Column width=\"11rem\" sortProperty=\"CREATE_DATE\" filterProperty=\"CREATE_DATE\"><Text text=\"Date\"/><table:template><Text text=\"{CREATE_DATE}\"/></table:template></table:Column><table:Column width=\"11rem\" sortProperty=\"CREATE_BY\" filterProperty=\"CREATE_BY\"><Text text=\"Name\"/><table:template><Text text=\"{CREATE_BY}\"/></table:template></table:Column><table:Column width=\"11rem\" sortProperty=\"STORAGE_LOCATION\" filterProperty=\"STORAGE_LOCATION\"><Text text=\"Location\"/><table:template><Text text=\"{STORAGE_LOCATION}\"/></table:template></table:Column><table:Column width=\"11rem\" sortProperty=\"QUANTITY\" filterProperty=\"QUANTITY\"><Text text=\"Quantity\"/><table:template><Text text=\"{QUANTITY}\"/></table:template></table:Column><table:Column width=\"6rem\" sortProperty=\"MEINS\" filterProperty=\"MEINS\"><Text text=\"Unit\"/><table:template><Text text=\"{MEINS}\"/></table:template></table:Column><table:Column width=\"11rem\" sortProperty=\"PRICE\" filterProperty=\"PRICE\"><Text text=\"Price\"/><table:template><u:Currency value=\"{PRICE}\" currency=\"{WAERS}\"/></table:template></table:Column></table:columns><table:rowActionTemplate><table:RowAction><table:RowActionItem type=\"Navigation\" press=\".eB(['ROW_ACTION_ITEM_NAVIGATION'], ${ROW_ID})\"/><table:RowActionItem icon=\"sap-icon://edit\" text=\"Edit\" press=\".eB(['ROW_ACTION_ITEM_EDIT'], ${ROW_ID})\"/></table:RowAction></table:rowActionTemplate></table:Table></f:content></f:DynamicPage></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "LV_SELKZ": false,
+      "MT_TABLE": [
+       {
+        "CREATE_BY": "Olaf",
+        "CREATE_DATE": "01.01.2023",
+        "MEINS": "ST",
+        "PRICE": 1000.5,
+        "PROCESS": "10",
+        "PROCESS_STATE": "None",
+        "PRODUCT": "table",
+        "QUANTITY": 400,
+        "ROW_ID": "1",
+        "SELECTED": false,
+        "SELKZ": false,
+        "STORAGE_LOCATION": "AREA_001",
+        "WAERS": "EUR"
+       },
+       {
+        "CREATE_BY": "Karlo",
+        "CREATE_DATE": "01.01.2022",
+        "MEINS": "ST",
+        "PRICE": 2000.55,
+        "PROCESS": "20",
+        "PROCESS_STATE": "Warning",
+        "PRODUCT": "chair",
+        "QUANTITY": 123,
+        "ROW_ID": "2",
+        "SELECTED": false,
+        "SELKZ": false,
+        "STORAGE_LOCATION": "AREA_001",
+        "WAERS": "USD"
+       },
+       {
+        "CREATE_BY": "Elin",
+        "CREATE_DATE": "01.05.2021",
+        "MEINS": "ST",
+        "PRICE": 3000.11,
+        "PROCESS": "30",
+        "PROCESS_STATE": "Success",
+        "PRODUCT": "sofa",
+        "QUANTITY": 700,
+        "ROW_ID": "3",
+        "SELECTED": false,
+        "SELKZ": false,
+        "STORAGE_LOCATION": "AREA_002",
+        "WAERS": "CNY"
+       },
+       {
+        "CREATE_BY": "Theo",
+        "CREATE_DATE": "27.01.2023",
+        "MEINS": "ST",
+        "PRICE": 4000.88,
+        "PROCESS": "40",
+        "PROCESS_STATE": "Information",
+        "PRODUCT": "computer",
+        "QUANTITY": 200,
+        "ROW_ID": "4",
+        "SELECTED": false,
+        "SELKZ": false,
+        "STORAGE_LOCATION": "AREA_002",
+        "WAERS": "USD"
+       },
+       {
+        "CREATE_BY": "Renate",
+        "CREATE_DATE": "01.01.2023",
+        "MEINS": "ST",
+        "PRICE": 5000.47,
+        "PROCESS": "70",
+        "PROCESS_STATE": "Warning",
+        "PRODUCT": "printer",
+        "QUANTITY": 90,
+        "ROW_ID": "5",
+        "SELECTED": false,
+        "SELKZ": false,
+        "STORAGE_LOCATION": "AREA_003",
+        "WAERS": "EUR"
+       },
+       {
+        "CREATE_BY": "Angela",
+        "CREATE_DATE": "01.01.2023",
+        "MEINS": "ST",
+        "PRICE": 6000.33,
+        "PROCESS": "90",
+        "PROCESS_STATE": "Error",
+        "PRODUCT": "table2",
+        "QUANTITY": 110,
+        "ROW_ID": "6",
+        "SELECTED": false,
+        "SELKZ": false,
+        "STORAGE_LOCATION": "AREA_003",
+        "WAERS": "GBP"
+       }
+      ],
+      "MV_SEARCH_VALUE": ""
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "a7",
+    "row": 3
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "AF4540AE4B314C6187DE2A053AE19211",
+      "EVENT": "ROW_ACTION_ITEM_EDIT",
+      "T_EVENT_ARG": [
+       "4"
+      ]
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_070",
+      "ID": "64A6C3BE512A4644A17C6D67DC88353F",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_CUSTOM": [
+        [
+         "MESSAGE_TOAST",
+         "show",
+         "Event ROW_ACTION_ITEM_EDIT Row Index 4 "
+        ]
+       ]
+      }
+     }
+    }
+   }
+  }
+ ]
+}

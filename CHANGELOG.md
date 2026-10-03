@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+- **Migrate Classic Report to abap2UI5.** A new command - in the Command
+  Palette and in the context menu of a `*.prog.abap` - converts a classic
+  ABAP report into an abap-cloud-gui report class with that addon's
+  converter, report2cloud: you name the class and pick the folder, and the
+  class opens beside its migration report (the TODOs, the tables and APIs to
+  replace for ABAP Cloud). A statement that has no counterpart in a browser
+  app - `CALL SCREEN`, batch input, `SUBMIT`, native SQL - is reported in
+  Problems on the line it stands on, and *Write Partial Result* writes the
+  draft with those statements marked. report2cloud is not on npm: point the
+  new setting `abap2ui5.report2cloud.path` at a checkout of
+  abap2UI5-addons/abap-cloud-gui with `npm ci` done (or set
+  `ABAP_CLOUD_GUI_HOME`); the command offers *Configure…* until you have.
+- **AI agents can operate an app on the system - once you allow it.** The
+  *abap2UI5 System* MCP server gets the four app tools of the abap2UI5 MCP
+  server, on your real system: `app_list` searches class names,
+  `app_start` starts an app and answers with an *agent snapshot* (its fields
+  and values, its actions, tables and messages), `app_act` fills fields and
+  fires an event, `app_describe` repeats the last snapshot. An agent works by
+  model path, label and event name through the abap2UI5 JSON protocol - no
+  browser, no screenshot - and anything not on the screen is refused with
+  what is. They run through the auth proxy on the active system, **as you**:
+  an event may save, post or delete data. That is why they do nothing until
+  you set `abap2ui5.agent.enableAppTools` in your User settings (a workspace
+  cannot); until then they tell the agent how to switch them on. A value
+  help (`SelectDialog`, `TableSelectDialog`) is a table of the snapshot, and
+  `app_act` with `row` on its `confirm` picks that row as a click does; the
+  items of a `MessagePopover` / `MessageView` are listed as messages.
+
 ## 0.30.2
 
 The bundled linter moves to v0.8.5, and is now taken from its npm release

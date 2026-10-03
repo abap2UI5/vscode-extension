@@ -41,6 +41,7 @@ import { formatTrafficLine, isRoundtrip } from "./traffic";
 import { MODEL_SCHEME, registerModelView } from "./modelview";
 import { registerMockFile } from "./mockfile";
 import { registerUnitTests } from "./unittests";
+import { registerMigrateReport } from "./migratereport";
 import { DEVICE_WIDTHS } from "./webview";
 import { applyModelMessage, staleMessage } from "./previewcore";
 import {
@@ -548,7 +549,8 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // The system MCP server: the extension's systems, credentials and proxy,
-  // offered to AI agents as tools (list/search/run-with-screenshot).
+  // offered to AI agents as tools (list/search/run-with-screenshot, and the
+  // app_* tools that operate an app through its JSON protocol).
   const systemMcp = createSystemMcpServer(
     {
       listSystems: () => ({
@@ -583,6 +585,19 @@ export function activate(context: vscode.ExtensionContext): void {
           showLog
         ),
       recentTraffic: () => [...trafficRing],
+      // the app_* tools: the external launch URL, never the proxied one -
+      // agentapps.ts routes through the proxy itself and keeps its token out
+      // of what the backend is told about its location
+      activeSystem: () => {
+        const system = activeSystem(context);
+        return system
+          ? {
+              name: system.name,
+              launchUrlFor: (className: string) =>
+                session.urlFor(system, className),
+            }
+          : undefined;
+      },
       log,
     },
     String(context.extension.packageJSON.version ?? "0.0.0")
@@ -655,6 +670,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerViewPreview(context, log);
   registerMockFile(context, log);
   registerUnitTests(context, log);
+  registerMigrateReport(context, log);
   registerQuickFix(context, log);
   registerLanguageFeatures(context, log);
   registerCodeLens(context);

@@ -1,0 +1,276 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_011",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_011",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_011"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_011",
+      "ID": "62A9FB6AB2324062B816013E727E79AF",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\"><Shell><Page title=\"abap2UI5 - Table - Editable Cells, Add and Delete Rows\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\" id=\"test2\"><MessageStrip text=\"A MultiSelect table whose input cells switch between display and edit mode via the toolbar, which also adds new rows and deletes the currently selected ones.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><Table items=\"{path: '/T_TAB', templateShareable: false}\" mode=\"MultiSelect\"><headerToolbar><OverflowToolbar><Title text=\"title of the table\"/><Button press=\".eB(['BUTTON_TEST'])\" text=\"test\"/><ToolbarSpacer/><Button press=\".eB(['BUTTON_DELETE'])\" text=\"delete selected row\" icon=\"sap-icon://delete\"/><Button press=\".eB(['BUTTON_ADD'])\" text=\"add\" icon=\"sap-icon://add\"/><Button press=\".eB(['BUTTON_EDIT'])\" text=\"edit\" tooltip=\"Switch the cells between display and edit mode\" icon=\"sap-icon://edit\"/></OverflowToolbar></headerToolbar><columns><Column><Text text=\"Title\"/></Column><Column><Text text=\"Color\"/></Column><Column><Text text=\"Info\"/></Column><Column><Text text=\"Description\"/></Column><Column><Text text=\"Checkbox\"/></Column></columns><items><ColumnListItem selected=\"{SELKZ}\"><cells><Input id=\"test\" enabled=\"{EDITABLE}\" value=\"{TITLE}\"/><Input enabled=\"{EDITABLE}\" value=\"{VALUE}\"/><Input enabled=\"{EDITABLE}\" value=\"{INFO}\"/><Input enabled=\"{EDITABLE}\" value=\"{DESCR}\"/><CheckBox selected=\"{CHECKBOX}\" enabled=\"{EDITABLE}\"/></cells></ColumnListItem></items></Table></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "T_TAB": [
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": false,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 01",
+        "VALUE": "red"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": false,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 02",
+        "VALUE": "blue"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": false,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 03",
+        "VALUE": "green"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "",
+        "EDITABLE": false,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 04",
+        "VALUE": "orange"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": false,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 05",
+        "VALUE": "grey"
+       },
+       {
+        "CHECKBOX": false,
+        "DESCR": "",
+        "EDITABLE": false,
+        "ICON": "",
+        "INFO": "",
+        "SELKZ": false,
+        "TITLE": "",
+        "VALUE": ""
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "BUTTON_EDIT"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "62A9FB6AB2324062B816013E727E79AF",
+      "EVENT": "BUTTON_EDIT"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_011",
+      "ID": "B1B6E4B564DB43C7A259DE3D685C8638",
+      "PROTOCOL": 2
+     },
+     "MODEL": {
+      "T_TAB": [
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 01",
+        "VALUE": "red"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 02",
+        "VALUE": "blue"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 03",
+        "VALUE": "green"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 04",
+        "VALUE": "orange"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 05",
+        "VALUE": "grey"
+       },
+       {
+        "CHECKBOX": false,
+        "DESCR": "",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "",
+        "SELKZ": false,
+        "TITLE": "",
+        "VALUE": ""
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "t1/0/TITLE": "changed",
+     "/T_TAB/1/SELKZ": true
+    },
+    "event": "BUTTON_DELETE"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "B1B6E4B564DB43C7A259DE3D685C8638",
+      "EVENT": "BUTTON_DELETE"
+     },
+     "MODEL": {
+      "T_TAB": {
+       "__delta": {
+        "0": {
+         "TITLE": "changed"
+        },
+        "1": {
+         "SELKZ": true
+        }
+       }
+      }
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_011",
+      "ID": "E10EAEE18F1C423B82A1AA6675C28B78",
+      "PROTOCOL": 2
+     },
+     "MODEL": {
+      "T_TAB": [
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "changed",
+        "VALUE": "red"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 03",
+        "VALUE": "green"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 04",
+        "VALUE": "orange"
+       },
+       {
+        "CHECKBOX": true,
+        "DESCR": "this is a description",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "completed",
+        "SELKZ": false,
+        "TITLE": "entry 05",
+        "VALUE": "grey"
+       },
+       {
+        "CHECKBOX": false,
+        "DESCR": "",
+        "EDITABLE": true,
+        "ICON": "",
+        "INFO": "",
+        "SELKZ": false,
+        "TITLE": "",
+        "VALUE": ""
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

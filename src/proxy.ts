@@ -546,8 +546,10 @@ const TOKEN_SEGMENT = "__abap2ui5";
  *  itself cannot read it back out. The name carries the PORT: cookies are
  *  host-scoped, not port-scoped, so two windows' proxies (two systems at
  *  once is a supported setup) would otherwise overwrite each other's cookie
- *  and break the other window's absolute-path requests. */
-const TOKEN_COOKIE = "__abap2ui5_proxy";
+ *  and break the other window's absolute-path requests. Exported for the
+ *  agent transport (agentapps.ts), which keeps the system's cookies but not
+ *  this one. */
+export const TOKEN_COOKIE = "__abap2ui5_proxy";
 
 /**
  * Whether two tokens match, in constant time. The gate compares against

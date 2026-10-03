@@ -16,4 +16,6 @@ Everything the user sees inside VS Code is in English, including command
 titles and setting descriptions. [AGENTS.md](AGENTS.md) is the full contract:
 the module map, what may import `vscode` and what may not, and the snapshots
 (the linter pin, `app-template.json`, `client-api.json`, `repo-dirs.json`)
-that must be regenerated rather than edited.
+that must be regenerated rather than edited - and the agent code vendored from
+mcp-server into `src/vendor/agent/` (`npm run agent-vendor`), which must be
+re-vendored rather than edited.
