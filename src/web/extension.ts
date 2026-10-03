@@ -4,6 +4,7 @@ import { registerLanguageFeatures } from "../language";
 import { registerXmlPreview } from "../xmlpreview";
 import { registerWebCheck, webFindingsNow } from "../webcheck";
 import { registerNewApp, registerNewProject } from "../wizard";
+import { registerAgentSetup } from "../agentsetupview";
 import { registerConvert } from "../convert";
 import { registerNavMap } from "../navview";
 import { registerPropertyEditor } from "../propview";
@@ -62,6 +63,7 @@ export async function activate(
   registerXmlPreview(context, log, webFindingsNow);
   registerNewApp(context);
   registerNewProject(context);
+  registerAgentSetup(context);
   registerConvert(context, log);
   // The three surfaces that needed nothing a browser host lacks: the
   // navigation map (workspace scan through workspace.fs), the Control

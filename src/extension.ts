@@ -33,6 +33,7 @@ import { isAppSource, registerAppClasses } from "./appclasses";
 import { proxiedUrl, shortUrl } from "./urls";
 import { registerAppSearch } from "./appsearch";
 import { registerNewApp, registerNewProject } from "./wizard";
+import { registerAgentSetup } from "./agentsetupview";
 import { registerConvert } from "./convert";
 import { registerNavMap } from "./navview";
 import { registerPropertyEditor } from "./propview";
@@ -661,6 +662,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerAppClasses(context);
   registerNewApp(context);
   registerNewProject(context);
+  registerAgentSetup(context);
   registerConvert(context, log);
   registerNavMap(context, log);
   registerPropertyEditor(context, log);

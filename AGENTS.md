@@ -97,6 +97,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/convert.ts` | The convert command's plumbing (source pick, result document) |
 | `src/wizard.ts` | "New App from Template" (gallery pick, class name input) and "New Project from Template" (class name input, writing app-template's project - the gallery stays with the former, because the template's test include asserts on the template's own starter class) |
 | `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's shared files copied from `src/data/app-template.json`, its named files (starter class, sidecar, test include, abapGit descriptors) substituted from the same snapshot the way `template.json`'s `substitutions` describe, and the three composed files written here |
+| `src/agentsetup.ts` | `vscode`/`fs`/`path`-free: what "Add Agent Setup to Workspace" writes into an EXISTING project - app-template's `agentSetup` key executed over the snapshot, ported function by function from that repository's `create/agent-setup.mjs` (never overwrite, `package.json`/`.gitignore` only gain entries, the gates pointed at `.abapgit.xml`'s `STARTING_FOLDER`, nothing planned into the source folder), decided as a plan over a `WorkspaceProbe` before anything is written |
+| `src/agentsetupview.ts` | The command's plumbing, shared by both entries: the workspace folder, the modal confirmation listing what is written and skipped, a re-plan right before writing (a folder that changed under the dialog is refused), the writes through `workspace.fs`, the "abap2UI5 Agent Setup" output with the next steps |
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` (the template's `files.shared` and `files.named`, BOM stripped, plus its `template.json`) from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
 | `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot |
 | `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/mcp-server's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
@@ -134,7 +136,7 @@ not committed.
 `abapscan.ts`, `appindex.ts`, `settings.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
-`abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`,
+`abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
 `unitrunner.ts`, `report2cloud.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
@@ -483,6 +485,24 @@ Facts an agent cannot see from the code but will trip over:
   shared or named, reaches a new project here without an edit. mcp-server's
   `scaffold_app` executes the same description; the three executors differ,
   the description does not.
+- **"Add Agent Setup to Workspace" executes the same snapshot's
+  `agentSetup` key.** app-template's `template.json` says which of its
+  shared files an EXISTING project takes (`agentSetup.files`), which two are
+  merged rather than copied (`merge`: `package.json` as json, `.gitignore` as
+  lines), and which text names the source folder (`sourceFolder`). Its
+  create package runs it as `npm create abap2ui5-app@latest -- --agent-setup`;
+  `src/agentsetup.ts` is a port of that package's `create/agent-setup.mjs`,
+  one function per function, over a `WorkspaceProbe` instead of `fs` so the
+  web entry registers the command too. Keep it a port: a rule changed
+  upstream (a new merge kind, a new warning) is changed here the same way,
+  and `src/test/agentsetup.test.ts` runs the planner against the REAL
+  snapshot so a regenerated `agentSetup` it cannot execute fails `npm test`
+  (the generator refuses one whose files are not all in `files.shared`, whose
+  merge kind is unknown or whose source-folder edit finds no text). The two
+  deliberate differences: nothing is planned into the project's source
+  folder, and the pin warning reads `abaplint.jsonc`'s `"branch"` from the
+  text instead of importing the project's `scripts/check-pin.mjs` - an
+  extension must not execute a workspace's code, and the web host could not.
 - **The sibling-checkout naming is mcp-server's, snapshotted here.** The MCP
   registration (`src/mcp.ts`), the view checker (`src/viewcheck.ts`) and the
   example catalogues (`src/exampleview.ts`) all probe a repos root by

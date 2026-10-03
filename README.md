@@ -94,7 +94,13 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   what only the extension has — the configured systems, the credentials and the
   proxy (`list_systems`, `search_apps`, `run_app_on_system`), and, once you
   allow it, the [app tools](#agent-app-tools-on-the-system) that let an agent
-  operate an app on the system through its JSON protocol. The setup for
+  operate an app on the system through its JSON protocol. *Add Agent Setup
+  to Workspace* makes an existing project agent-ready: app-template's
+  `AGENTS.md`, `CLAUDE.md`, the four skills, `.mcp.json`, the two gates and
+  `check.yml`, from the bundled snapshot - nothing overwritten,
+  `package.json` and `.gitignore` merged, the gates pointed at your
+  `STARTING_FOLDER`, the same files as
+  `npm create abap2ui5-app@latest -- --agent-setup`. The setup for
   every agent, the Claude Code plugin among them, is on the
   [AI page](https://abap2ui5.github.io/docs/get_started/ai.html) of the
   documentation.
@@ -211,6 +217,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Clear Stored SAP Credentials | `abap2ui5.resetCredentials` |  |
 | New App from Template | `abap2ui5.newApp` |  |
 | New Project from Template | `abap2ui5.newProject` |  |
+| Add Agent Setup to Workspace | `abap2ui5.addAgentSetup` |  |
 | Take App Screenshot | `abap2ui5.screenshot` |  |
 | Show Traffic Log | `abap2ui5.showTraffic` |  |
 | Convert XML View to Builder Chain | `abap2ui5.convertXml` |  |
