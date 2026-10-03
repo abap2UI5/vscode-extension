@@ -4,3 +4,9 @@
 # with CRLF and the gate parity test would then fail on `crlf-line-ending`
 # rather than on parity - so every checkout gets LF, on every platform.
 *.abap text eol=lf
+
+# The vendored agent snapshot code is checked byte for byte against the
+# sha256 src/vendor/agent/source.json recorded when it was copied
+# (src/test/agentvendor.test.ts). A CRLF checkout would change every hash.
+src/vendor/agent/** text eol=lf
+src/test/fixtures/agent/** text eol=lf
