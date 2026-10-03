@@ -87,7 +87,10 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server) registered for
   every MCP client in the window, plus a second, in-extension server holding
   what only the extension has — the configured systems, the credentials and the
-  proxy (`list_systems`, `search_apps`, `run_app_on_system`).
+  proxy (`list_systems`, `search_apps`, `run_app_on_system`). The setup for
+  every agent, the Claude Code plugin among them, is on the
+  [AI page](https://abap2ui5.github.io/docs/get_started/ai.html) of the
+  documentation.
 - **Works in the browser** — vscode.dev, github.dev and browser-based SAP
   Business Application Studio get the language half.
 
