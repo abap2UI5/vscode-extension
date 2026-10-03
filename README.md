@@ -120,7 +120,7 @@ messages, some static text.
 
 They are the same tools, with the same input, snapshot and refusals, as the
 sandbox tools of the [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server)
-(see its [`docs/agent-snapshot.md`](https://github.com/abap2UI5/mcp-server/blob/6bd3cc3a79e99f8027fb0b62cc968f4161bf1118/docs/agent-snapshot.md), at the vendored commit):
+(see its [`docs/agent-snapshot.md`](https://github.com/abap2UI5/mcp-server/blob/ea4e9fa8f6eaeca8f9c975a1c4fbd532c44ff76c/docs/agent-snapshot.md), at the vendored commit):
 an event that is not on the screen, a field that is not editable, a choice
 outside its values is refused with what *is* allowed, and nothing is sent.
 The code behind the snapshot is that server's own, vendored into
