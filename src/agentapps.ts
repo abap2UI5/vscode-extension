@@ -12,12 +12,13 @@
  * scripts/vendor-agent.mjs. What this module adds is what only the extension
  * has:
  *
- *   - the TRANSPORT (the client's `transport` option): every roundtrip goes
+ *   - the TRANSPORT (the client's `transport` option): every request goes
  *     through the extension's auth proxy (the credentials stay in the proxy,
  *     the traffic shows in its log, a 401 trips its breaker), with the
- *     frontend's handshakes for a real system - a CSRF token layer in front
- *     of the backend, a stateful session's `sap-contextid`, the system's
- *     cookies;
+ *     system's cookies; the frontend's handshakes for a real system - a CSRF
+ *     token layer in front of the backend, a stateful session's
+ *     `sap-contextid` - are the vendored client's own, so the transport
+ *     only carries their headers;
  *   - the LOCATION (the `location` option): the start request's
  *     ORIGIN/PATHNAME/SEARCH are the system's launch URL, never the proxy's,
  *     which must never reach the backend; no `generation` (drafts live on
@@ -224,19 +225,6 @@ export const nodeRequest: SystemRequest = (url, init) =>
     req.end(init.body);
   });
 
-const headerOf = (res: SystemResponse, name: string): string => {
-  const value = res.headers[name];
-  return (Array.isArray(value) ? value.join(", ") : value ?? "").trim();
-};
-
-/** The frontend's rule (core/Lib.js isValidContextId). */
-const validContextId = (id: string | undefined): id is string =>
-  typeof id === "string" && id !== "" && id !== "undefined";
-
-/** How many draft ids keep their stateful-session id - one per roundtrip of
- *  every session, so it is bounded like the client's own session list. */
-const CONTEXT_MAX = 200;
-
 /**
  * The start request's location on a real system: the endpoint's origin and
  * path, and its query (sap-client, theme, language) with the class added as
@@ -251,22 +239,26 @@ export function systemLocation(endpoint: string, app: string): AppLocation {
 }
 
 /**
- * The client's `transport`, on a real system: every roundtrip the vendored
+ * The client's `transport`, on a real system: every request the vendored
  * client makes goes to the system's abap2UI5 endpoint through the auth
- * proxy, and does there what the browser frontend does around it
- * (core/Server.js):
+ * proxy, as the client built it - a roundtrip `POST`, or the `HEAD` of the
+ * CSRF token fetch (no body).
  *
- *   - `sap-contextid-accept: header` on every POST (the client sets it), the
- *     `sap-contextid` a response hands out sent back with the next roundtrip
- *     of THAT session - kept per draft id, so two agent sessions of a
- *     stateful app do not share one ABAP session;
- *   - a 403 with `X-CSRF-Token: Required` (an approuter or Gateway in front
- *     of the backend) answered by `HEAD` + `X-CSRF-Token: Fetch` and ONE
- *     re-send with the token - the backend never saw the refused attempt;
- *   - the system's cookies kept and sent back, as a browser would (the token
- *     layer above binds its token to a session cookie).
+ * The frontend's handshakes (core/Server.js) are the CLIENT's, not this
+ * transport's (mcp-server lib/appclient.mjs, the protocol's
+ * spec/transport.md): it sends `sap-contextid-accept: header` on every POST
+ * and the `sap-contextid` a session was handed with every later POST of
+ * THAT session, and it answers a token layer's 403 + `X-CSRF-Token:
+ * Required` (an approuter or Gateway in front of the backend) with the HEAD
+ * fetch and ONE re-send, the token then sent with every POST. Both arrive
+ * here as request headers and leave as response headers; doing them here
+ * as well would fetch twice and re-send twice. What this adds is what only
+ * the extension has:
  *
- * Credentials never pass through here: the proxy injects them.
+ *   - the route through the auth proxy (credentials never pass through
+ *     here: the proxy injects them);
+ *   - the system's cookies, kept and sent back as a browser would (the
+ *     token layer binds its token to a session cookie).
  */
 export function createSystemTransport(options: {
   /** The system's abap2UI5 endpoint (external URL, no class). */
@@ -276,8 +268,6 @@ export function createSystemTransport(options: {
   request: SystemRequest;
 }): AppTransport {
   const cookies = new Map<string, string>();
-  const contexts = new Map<string, string>();
-  let csrfToken = "";
 
   const keepCookies = (res: SystemResponse): void => {
     const raw = res.headers["set-cookie"];
@@ -312,22 +302,7 @@ export function createSystemTransport(options: {
     }
   };
 
-  const headersFor = (base: Record<string, string>, draftId: string | null) => {
-    const headers: Record<string, string> = { ...base };
-    const context = draftId ? contexts.get(draftId) : undefined;
-    if (validContextId(context)) {
-      headers["sap-contextid"] = context;
-    }
-    if (csrfToken) {
-      headers["x-csrf-token"] = csrfToken;
-    }
-    if (cookies.size) {
-      headers.cookie = [...cookies].map(([k, v]) => `${k}=${v}`).join("; ");
-    }
-    return headers;
-  };
-
-  return async ({ body, headers, signal, draftId }) => {
+  return async ({ method = "POST", body, headers, signal }) => {
     const endpoint = new URL(options.endpoint());
     const base = options.proxyBase(endpoint.origin);
     if (!base) {
@@ -339,63 +314,17 @@ export function createSystemTransport(options: {
     if (!target) {
       throw new Error(`cannot route ${endpoint.host} through the auth proxy`);
     }
-
-    const post = () =>
-      options.request(target, {
-        method: "POST",
-        headers: headersFor(headers, draftId),
-        body,
-        signal,
-      });
-
-    let res = await post();
+    const sent: Record<string, string> = { ...headers };
+    if (cookies.size) {
+      sent.cookie = [...cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    }
+    const res = await options.request(
+      target,
+      method === "HEAD"
+        ? { method: "HEAD", headers: sent, signal }
+        : { method: "POST", headers: sent, body, signal }
+    );
     keepCookies(res);
-    if (
-      res.status === 403 &&
-      headerOf(res, "x-csrf-token").toLowerCase() === "required"
-    ) {
-      csrfToken = "";
-      const fetched = await options.request(target, {
-        method: "HEAD",
-        headers: { ...headersFor({}, draftId), "x-csrf-token": "Fetch" },
-        signal,
-      });
-      keepCookies(fetched);
-      const token = headerOf(fetched, "x-csrf-token");
-      if (
-        fetched.status >= 200 &&
-        fetched.status < 300 &&
-        token &&
-        !["required", "fetch"].includes(token.toLowerCase())
-      ) {
-        csrfToken = token;
-        res = await post();
-        keepCookies(res);
-      }
-    }
-
-    if (res.status >= 200 && res.status < 300) {
-      // the stateful session, carried on to the draft id this answer starts
-      const given = headerOf(res, "sap-contextid");
-      const context = validContextId(given)
-        ? given
-        : draftId
-          ? contexts.get(draftId)
-          : undefined;
-      let nextId: unknown;
-      try {
-        nextId = (JSON.parse(res.body) as { S_FRONT?: { ID?: unknown } })
-          .S_FRONT?.ID;
-      } catch {
-        nextId = undefined;
-      }
-      if (validContextId(context) && typeof nextId === "string" && nextId) {
-        contexts.set(nextId, context);
-        while (contexts.size > CONTEXT_MAX) {
-          contexts.delete(contexts.keys().next().value as string);
-        }
-      }
-    }
     return res;
   };
 }
