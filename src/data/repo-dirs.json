@@ -23,6 +23,9 @@
     "server": [
       "mcp-server",
       "ai-mcp"
+    ],
+    "cloudGui": [
+      "abap-cloud-gui"
     ]
   }
 }
