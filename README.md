@@ -94,7 +94,10 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   what only the extension has — the configured systems, the credentials and the
   proxy (`list_systems`, `search_apps`, `run_app_on_system`), and, once you
   allow it, the [app tools](#agent-app-tools-on-the-system) that let an agent
-  operate an app on the system through its JSON protocol.
+  operate an app on the system through its JSON protocol. The setup for
+  every agent, the Claude Code plugin among them, is on the
+  [AI page](https://abap2ui5.github.io/docs/get_started/ai.html) of the
+  documentation.
 - **Works in the browser** — vscode.dev, github.dev and browser-based SAP
   Business Application Studio get the language half.
 
