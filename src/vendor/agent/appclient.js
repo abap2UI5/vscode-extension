@@ -1,6 +1,6 @@
 /*
  * VENDORED - do not edit. abap2UI5/mcp-server lib/appclient.mjs
- * at commit ea4e9fa8f6eaeca8f9c975a1c4fbd532c44ff76c,
+ * at commit a4d9f07659cd8a18d2e1f8ee4d2121695f40702b,
  * copied by scripts/vendor-agent.mjs (`npm run agent-vendor`); the only
  * change is the sibling imports ending in .js. `npm run agent-vendor:check`
  * fails when this copy drifts from that commit. Change it upstream, then
@@ -106,21 +106,34 @@ function deltaSteps(segs) {
   return null;
 }
 
-/** The backend's error page (a 500 renders the exception chain in a <pre>)
- *  as plain text. */
+/*
+ * The backend's error body as the refusal shows it: VERBATIM text
+ * (protocol spec/errors.md) - the body is text/plain, and what looks like a
+ * tag in it (a request URL the backend reflected into the first frame) is
+ * text, so nothing is stripped, decoded or otherwise interpreted. It is only
+ * shortened (the first ERROR_LINES lines, at most ERROR_CHARS characters)
+ * and its control characters other than tab and newline are shown as
+ * U+FFFD, so a body cannot move a terminal's cursor or hide text from
+ * whoever reads the refusal - neither is markup.
+ */
+const ERROR_LINES = 40;
+const ERROR_CHARS = 4000;
+const REPLACEMENT = String.fromCodePoint(0xfffd);
+
 export function errorText(status, body) {
-  const s = String(body || '');
-  const pre = /<pre[^>]*>([\s\S]*?)<\/pre>/i.exec(s);
-  const raw = pre ? pre[1] : s;
-  const text = raw
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
-    .split('\n').map((l) => l.trimEnd()).filter(Boolean).slice(0, 12).join('\n');
+  const all = String(body ?? '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, REPLACEMENT)
+    .replace(/\r\n?/g, '\n')
+    .replace(/\s+$/, '');
+  const lines = all.split('\n');
+  let text = lines.slice(0, ERROR_LINES).join('\n');
+  let cut = lines.length > ERROR_LINES;
+  if (text.length > ERROR_CHARS) {
+    text = text.slice(0, ERROR_CHARS);
+    cut = true;
+  }
+  if (cut) text += `\n... (${all.length - text.length} more characters)`;
   return `HTTP ${status}${text ? `: ${text}` : ''}`;
 }
 
@@ -132,14 +145,33 @@ const listOf = (items) => {
 /** The hint after "the backend did not answer (...)" on the local backend. */
 export const LOCAL_BACKEND_HINT = 'is it running? backend { action: "status" } says';
 
-/** The transport over `fetch`: one POST of `body` to `baseUrl`. */
+/** The protocol number this client is written for (protocol
+ *  spec/versioning.md): a response declaring another one is refused. */
+export const PROTOCOL = 2;
+
+/** A response header, case-insensitively, a repeated one joined; '' when absent. */
+export function headerOf(headers, name) {
+  if (!headers) return '';
+  const want = String(name).toLowerCase();
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() === want) return (Array.isArray(v) ? v.join(', ') : String(v ?? '')).trim();
+  }
+  return '';
+}
+
+/** The frontend's rule for a stateful session id (core/Lib.js
+ *  isValidContextId): never empty, never the text `undefined`. */
+export const validContextId = (id) => typeof id === 'string' && id !== '' && id !== 'undefined';
+
+/** The transport over `fetch`: one POST of `body` to `baseUrl` - or, for the
+ *  CSRF token fetch, one HEAD without a body. */
 export function fetchTransport({ baseUrl, fetchImpl = globalThis.fetch }) {
-  return async ({ body, headers, signal }) => {
-    const res = await fetchImpl(baseUrl, { method: 'POST', headers, body, signal });
+  return async ({ method = 'POST', body, headers, signal }) => {
+    const res = await fetchImpl(baseUrl, method === 'HEAD' ? { method, headers, signal } : { method, headers, body, signal });
     return {
       status: res.status,
       headers: res.headers && typeof res.headers.entries === 'function' ? Object.fromEntries(res.headers.entries()) : {},
-      body: await res.text(),
+      body: method === 'HEAD' ? '' : await res.text(),
     };
   };
 }
@@ -153,12 +185,17 @@ export function fetchTransport({ baseUrl, fetchImpl = globalThis.fetch }) {
  *   baseUrl      the backend's root (http://127.0.0.1:<port>/) - where the
  *                default transport POSTs and what the default location says
  *   fetchImpl    the default transport's fetch
- *   transport    ({ body, headers, signal, draftId }) => { status, headers?, body }:
- *                ONE roundtrip - `body` is the serialized JSON request,
- *                `headers` the two the frontend sends, `draftId` the
- *                S_FRONT.ID the request continues (null for an app start);
- *                a throw is "the backend did not answer". Replaces
- *                baseUrl/fetchImpl.
+ *   transport    ({ method, body, headers, signal, draftId }) => { status, headers?, body }:
+ *                ONE request, sent as given. `method` 'POST' is a roundtrip:
+ *                `body` the serialized JSON request, `headers` what the
+ *                frontend sends (content-type, sap-contextid-accept, and the
+ *                session's sap-contextid and the CSRF token once the backend
+ *                handed them out); `method` 'HEAD' is the CSRF token fetch
+ *                (no body). `draftId` is the S_FRONT.ID the request continues
+ *                (null for an app start). The answer's `headers` are read for
+ *                sap-contextid and x-csrf-token - the client does both
+ *                handshakes itself, so a transport must not. A throw is "the
+ *                backend did not answer". Replaces baseUrl/fetchImpl.
  *   location     (app) => { origin, pathname, search } (or a promise of
  *                it): the start request's ORIGIN/PATHNAME/SEARCH - the
  *                backend builds URLs out of them and keeps them with the
@@ -195,15 +232,58 @@ export function createAppClient({
   }));
   const currentGeneration = () => (generation ? generation() : null);
 
-  async function post(body) {
+  // the token a CSRF token layer in front of the backend handed out - one
+  // per backend, as the browser frontend keeps it per server
+  let csrfToken = '';
+
+  const requestHeaders = (session) => {
+    const headers = { 'content-type': 'application/json', 'sap-contextid-accept': 'header' };
+    if (session && validContextId(session.contextId)) headers['sap-contextid'] = session.contextId;
+    if (csrfToken) headers['x-csrf-token'] = csrfToken;
+    return headers;
+  };
+
+  /*
+   * A token layer's refusal (an approuter route with csrfProtection, a
+   * Gateway): 403 with `X-CSRF-Token: Required`. The backend's own CSRF gate
+   * answers a 403 WITHOUT it, and that one is final.
+   */
+  const csrfRequired = (res) => res && res.status === 403 && headerOf(res.headers, 'x-csrf-token').toLowerCase() === 'required';
+
+  /* HEAD with `X-CSRF-Token: Fetch`; the token comes back in the same
+   * header. Answers whether one arrived and never throws - without one the
+   * refusal that asked for it is reported as it is. */
+  async function fetchCsrfToken(session, signal, draftId) {
+    csrfToken = '';
+    try {
+      const headers = { 'x-csrf-token': 'Fetch' };
+      if (session && validContextId(session.contextId)) headers['sap-contextid'] = session.contextId;
+      const res = await roundtrip({ method: 'HEAD', headers, signal, draftId });
+      const token = headerOf(res && res.headers, 'x-csrf-token');
+      if (res && res.status >= 200 && res.status < 300 && token && !['required', 'fetch'].includes(token.toLowerCase())) csrfToken = token;
+    } catch {
+      // no token: the 403 below says why
+    }
+    return csrfToken !== '';
+  }
+
+  /*
+   * One roundtrip of `session` (null for an app start), with the browser
+   * frontend's handshakes (protocol spec/transport.md): the session's
+   * sap-contextid sent once the backend handed one out, and a token layer's
+   * 403 answered by a token fetch and ONE re-send of the same body. Answers
+   * the response and the sap-contextid it carried (null when none); the
+   * caller adopts both, or neither.
+   */
+  async function post(body, session) {
+    const draftId = body.S_FRONT && body.S_FRONT.ID ? String(body.S_FRONT.ID) : null;
+    const serialized = JSON.stringify({ value: body });
+    const signal = AbortSignal.timeout(timeoutMs);
+    const send = () => roundtrip({ method: 'POST', body: serialized, headers: requestHeaders(session), signal, draftId });
     let res;
     try {
-      res = await roundtrip({
-        body: JSON.stringify({ value: body }),
-        headers: { 'content-type': 'application/json', 'sap-contextid-accept': 'header' },
-        signal: AbortSignal.timeout(timeoutMs),
-        draftId: body.S_FRONT && body.S_FRONT.ID ? String(body.S_FRONT.ID) : null,
-      });
+      res = await send();
+      if (csrfRequired(res) && await fetchCsrfToken(session, signal, draftId)) res = await send();
     } catch (e) {
       throw new AgentError(`the backend did not answer (${(e && e.message) || e})${backendHint ? ` - ${backendHint}` : ''}`);
     }
@@ -216,7 +296,17 @@ export function createAppClient({
       throw new AgentError(`the backend answered no JSON: ${text.slice(0, 300)}`);
     }
     if (!json || !json.S_FRONT) throw new AgentError(`the backend answered without S_FRONT: ${text.slice(0, 300)}`);
-    return json;
+    // checked before anything of the response is read (spec/versioning.md):
+    // a present and different number is refused whole, its ID included;
+    // an absent one is let through (a backend older than the field)
+    const declared = json.S_FRONT.PROTOCOL;
+    if (declared !== undefined && declared !== null && Number(declared) !== PROTOCOL) {
+      const newer = Number(declared) > PROTOCOL;
+      throw new AgentError(`the backend answered protocol ${JSON.stringify(declared)}, this client speaks protocol ${PROTOCOL} - `
+        + `the ${newer ? 'client' : 'backend'} is older; nothing of the response was adopted (update the ${newer ? 'client' : 'backend'})`);
+    }
+    const contextId = headerOf(res.headers, 'sap-contextid');
+    return { json, contextId: validContextId(contextId) ? contextId : null };
   }
 
   function remember(session) {
@@ -227,7 +317,9 @@ export function createAppClient({
     }
   }
 
-  function adopt(session, response) {
+  function adopt(session, { json: response, contextId }) {
+    // a response without the header keeps the established session id
+    if (contextId) session.contextId = contextId;
     session.state = applyResponse(session.state, response);
     const id = session.state.id;
     if (id) {
@@ -678,6 +770,112 @@ export function createAppClient({
     });
   }
 
+  // ------------------------------------------------------------ act ----
+
+  async function actNow(session, { values, event, args, row, maxRows } = {}) {
+    let res = analyze(session, maxRows);
+    session.lastIndex = res.index;
+    // validate everything before anything changes
+    let entry = null;
+    if (event !== undefined && event !== null && event !== '') {
+      entry = findAction(event, row, res.snapshot, res.index);
+      if (!entry.action.enabled) throw new AgentError(`action ${entry.action.id} (${entry.action.label}) is disabled - ${actionHelp(res.snapshot)}`);
+    } else if (row !== undefined && row !== null) {
+      throw new AgentError('`row` belongs to an event - pass `event` too');
+    }
+    const savedPending = Object.fromEntries(Object.entries(session.pending).map(([k, m]) => [k, new Map(m)]));
+    const savedModels = JSON.stringify(session.state.models);
+    let body;
+    let sent;
+    let modelKey;
+    try {
+      applyValues(session, values, res.snapshot, res.index);
+      if (!entry) {
+        res = analyze(session, maxRows);
+        session.lastIndex = res.index;
+        return res.snapshot;
+      }
+      // the values may have changed what the args read: re-analyse first
+      res = analyze(session, maxRows);
+      session.lastIndex = res.index;
+      entry = res.index.actions.get(entry.action.id) || entry;
+      if (entry.frontend) {
+        // performed here, as the browser performs it: the slot closes, its
+        // unsent edits go with it, no roundtrip
+        const slot = entry.frontend;
+        const nextState = { ...session.state, slots: { ...session.state.slots }, models: { ...session.state.models }, custom: [] };
+        delete nextState.slots[slot];
+        delete nextState.models[slot];
+        session.state = nextState;
+        session.pending[slot] = new Map();
+        res = analyze(session, maxRows);
+        session.lastIndex = res.index;
+        return res.snapshot;
+      }
+      const picked = entry.pick ? applyPick(entry, row, session) : null;
+      const tArgs = eventArgs(entry, args, row, session, picked);
+      modelKey = entry.modelKey || 'MAIN';
+      // what goes out: the edits pending NOW - the ones made while the
+      // roundtrip is in flight are not part of it
+      sent = new Map(session.pending[modelKey] || []);
+      body = { S_FRONT: { ID: session.state.id, EVENT: entry.action.event } };
+      if (tArgs.length) body.S_FRONT.T_EVENT_ARG = tArgs;
+      if (sent.size && session.state.models[modelKey]) body.MODEL = buildDelta([...sent.keys()], session.state.models[modelKey].data);
+    } catch (e) {
+      // a refused act changes nothing: neither the pending edits nor the
+      // models (nothing ran in between - this part does not wait)
+      session.pending = savedPending;
+      session.state = { ...session.state, models: JSON.parse(savedModels) };
+      throw e;
+    }
+    const edits = editsSince(session, savedPending);
+    let response;
+    try {
+      response = await post(body, session);
+    } catch (e) {
+      rollBack(session, edits, savedPending, JSON.parse(savedModels));
+      throw e;
+    }
+    // only what the roundtrip carried is done with: an edit made while it
+    // was in flight (another value, or a path it did not carry) stays pending
+    const pendingNow = session.pending[modelKey];
+    if (pendingNow) {
+      for (const [p, v] of sent) if (pendingNow.has(p) && pendingNow.get(p) === v) pendingNow.delete(p);
+    }
+    adopt(session, response);
+    res = analyze(session, maxRows);
+    session.lastIndex = res.index;
+    return res.snapshot;
+  }
+
+  /* The edits this act made (its values, its pick): every pending path that
+   * differs from what was pending before it. */
+  function editsSince(session, savedPending) {
+    const edits = [];
+    for (const [key, map] of Object.entries(session.pending)) {
+      const before = savedPending[key];
+      for (const [p, v] of map) if (!(before && before.has(p) && before.get(p) === v)) edits.push({ key, p, v });
+    }
+    return edits;
+  }
+
+  /*
+   * A roundtrip that failed takes back the edits of ITS act - not the ones
+   * made while it was in flight: a path is restored only while it still
+   * holds what this act put there.
+   */
+  function rollBack(session, edits, savedPending, savedModels) {
+    for (const { key, p, v } of edits) {
+      const map = session.pending[key];
+      if (!map || map.get(p) !== v) continue;
+      const before = savedPending[key];
+      if (before && before.has(p)) map.set(p, before.get(p));
+      else map.delete(p);
+      const model = session.state.models[key];
+      if (model) setAt(model.data, p, savedModels[key] ? getAt(savedModels[key].data, p) : undefined);
+    }
+  }
+
   // --------------------------------------------------------- operations ----
 
   return {
@@ -686,10 +884,11 @@ export function createAppClient({
       const cls = String(app || '').trim();
       if (!cls) throw new AgentError('pass `app` - the class to start, e.g. z2ui5_cl_smp_app_009 (app_list names the built ones)');
       const where = await locate(cls);
-      const response = await post({ S_FRONT: { ORIGIN: where.origin, PATHNAME: where.pathname, SEARCH: where.search } });
+      const response = await post({ S_FRONT: { ORIGIN: where.origin, PATHNAME: where.pathname, SEARCH: where.search } }, null);
       const session = {
         state: emptyState(), ids: new Set(), pending: { MAIN: new Map(), POPUP: new Map(), POPOVER: new Map() },
         generation: currentGeneration(), maxRows: maxRows ?? DEFAULT_MAX_ROWS, lastIndex: null,
+        contextId: null, queue: Promise.resolve(),
       };
       adopt(session, response);
       remember(session);
@@ -711,64 +910,30 @@ export function createAppClient({
       return res.snapshot;
     },
 
-    /** app_act: validate, apply values, fire the event (or keep the values pending). */
-    async act(sessionId, { values, event, args, row, maxRows } = {}) {
+    /*
+     * app_act: validate, apply values, fire the event (or keep the values
+     * pending). One roundtrip at a time per session (protocol
+     * spec/transport.md "Client behaviour"): an act with an event while
+     * another is in flight waits for it and then runs on the screen and the
+     * draft id that one left - two overlapping requests would continue the
+     * same draft, and the later answer would drop what the earlier did. The
+     * session id is checked when the act is CALLED, so the queued act may
+     * name the draft the one in flight continues. Values without an event
+     * start no roundtrip and apply at once, as typing does while the browser
+     * waits; the act in flight leaves them pending.
+     */
+    async act(sessionId, opts = {}) {
       const session = find(sessionId);
-      let res = analyze(session, maxRows);
-      session.lastIndex = res.index;
-      // validate everything before anything changes
-      let entry = null;
-      if (event !== undefined && event !== null && event !== '') {
-        entry = findAction(event, row, res.snapshot, res.index);
-        if (!entry.action.enabled) throw new AgentError(`action ${entry.action.id} (${entry.action.label}) is disabled - ${actionHelp(res.snapshot)}`);
-      } else if (row !== undefined && row !== null) {
-        throw new AgentError('`row` belongs to an event - pass `event` too');
-      }
-      const savedPending = Object.fromEntries(Object.entries(session.pending).map(([k, m]) => [k, new Map(m)]));
-      const savedModels = JSON.stringify(session.state.models);
-      try {
-        applyValues(session, values, res.snapshot, res.index);
-        if (!entry) {
-          res = analyze(session, maxRows);
-          session.lastIndex = res.index;
-          return res.snapshot;
+      const { event } = opts;
+      if (event === undefined || event === null || event === '') return actNow(session, opts);
+      const run = session.queue.then(() => {
+        if (generation && session.generation !== generation()) {
+          throw new AgentError(`session '${sessionId}' was started on a backend that has since stopped or restarted - its drafts are gone; app_start ${session.state.app || 'the app'} again`);
         }
-        // the values may have changed what the args read: re-analyse first
-        res = analyze(session, maxRows);
-        session.lastIndex = res.index;
-        entry = res.index.actions.get(entry.action.id) || entry;
-        if (entry.frontend) {
-          // performed here, as the browser performs it: the slot closes, its
-          // unsent edits go with it, no roundtrip
-          const slot = entry.frontend;
-          const nextState = { ...session.state, slots: { ...session.state.slots }, models: { ...session.state.models }, custom: [] };
-          delete nextState.slots[slot];
-          delete nextState.models[slot];
-          session.state = nextState;
-          session.pending[slot] = new Map();
-          res = analyze(session, maxRows);
-          session.lastIndex = res.index;
-          return res.snapshot;
-        }
-        const picked = entry.pick ? applyPick(entry, row, session) : null;
-        const tArgs = eventArgs(entry, args, row, session, picked);
-        const modelKey = entry.modelKey || 'MAIN';
-        const sent = session.pending[modelKey] || new Map();
-        const body = { S_FRONT: { ID: session.state.id, EVENT: entry.action.event } };
-        if (tArgs.length) body.S_FRONT.T_EVENT_ARG = tArgs;
-        if (sent.size && session.state.models[modelKey]) body.MODEL = buildDelta([...sent.keys()], session.state.models[modelKey].data);
-        const response = await post(body);
-        session.pending[modelKey] = new Map();
-        adopt(session, response);
-      } catch (e) {
-        // a refused act changes nothing: neither the pending edits nor the models
-        session.pending = savedPending;
-        session.state = { ...session.state, models: JSON.parse(savedModels) };
-        throw e;
-      }
-      res = analyze(session, maxRows);
-      session.lastIndex = res.index;
-      return res.snapshot;
+        return actNow(session, opts);
+      });
+      session.queue = run.catch(() => {});
+      return run;
     },
 
     /** The open sessions (for diagnostics and the error texts). */

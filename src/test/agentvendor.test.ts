@@ -8,6 +8,9 @@ import {
   buildDelta,
   createAppClient,
   errorText,
+  headerOf,
+  PROTOCOL,
+  validContextId,
   type FetchLike,
 } from "../vendor/agent/appclient";
 import {
@@ -149,7 +152,11 @@ test("viewxml: namespaces, bindings, expressions and wires", () => {
   assert.deepEqual(buildDelta(["/T/1/Q"], { T: [{ Q: 1 }, { Q: 2 }] }), {
     T: { __delta: { 1: { Q: 2 } } },
   });
-  assert.equal(errorText(500, "<pre>boom</pre>"), "HTTP 500: boom");
+  // verbatim: the body is text/plain, a tag in it is text (protocol spec/errors.md)
+  assert.equal(errorText(500, "<pre>boom</pre>"), "HTTP 500: <pre>boom</pre>");
+  assert.equal(PROTOCOL, 2);
+  assert.equal(headerOf({ "SAP-ContextId": ["c1"] }, "sap-contextid"), "c1");
+  assert.equal(validContextId("undefined"), false);
 });
 
 // ----------------------------------------------------- the snapshot ----
@@ -209,7 +216,7 @@ function replay(name: string) {
   const fetchImpl: FetchLike = async (url, init) => {
     assert.equal(url, BASE);
     assert.equal(init.method, "POST");
-    const body = JSON.parse(init.body).value;
+    const body = JSON.parse(init.body ?? "").value;
     sent.push(body);
     const next = exchanges[sent.length - 1];
     assert.ok(next, `request ${sent.length} was not in the recording`);

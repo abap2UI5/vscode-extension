@@ -22,24 +22,32 @@ export interface FetchLikeResponse {
   text(): Promise<string>;
 }
 
-/** The slice of `fetch` the default transport calls: always a JSON POST. */
+/** The slice of `fetch` the default transport calls: a JSON POST, or the
+ *  CSRF token fetch's HEAD (no body). */
 export type FetchLike = (
   url: string,
   init: {
     method: string;
     headers: Record<string, string>;
-    body: string;
+    body?: string;
     signal?: AbortSignal;
   }
 ) => Promise<FetchLikeResponse>;
 
-/** One roundtrip as the client hands it to a `transport`. */
+/** One request as the client hands it to a `transport`, to be sent as given. */
 export interface TransportRequest {
-  /** The serialized request: `{"value":{"S_FRONT":...,"MODEL":...}}`. */
-  body: string;
-  /** The two headers the frontend sends (content-type, sap-contextid-accept). */
+  /** 'POST': a roundtrip. 'HEAD': the CSRF token fetch (`x-csrf-token:
+   *  Fetch`, no body). Absent means 'POST'. */
+  method?: "POST" | "HEAD";
+  /** The serialized request (`{"value":{"S_FRONT":...,"MODEL":...}}`);
+   *  absent on a HEAD. */
+  body?: string;
+  /** What the frontend sends: content-type and sap-contextid-accept, plus
+   *  the session's sap-contextid and the x-csrf-token once the backend
+   *  handed them out - the client does both handshakes. */
   headers: Record<string, string>;
-  /** The client's timeout (`timeoutMs`). */
+  /** The client's timeout (`timeoutMs`) - one for a roundtrip and its
+   *  token fetch and re-send. */
   signal: AbortSignal;
   /** The S_FRONT.ID the request continues; null for an app start. */
   draftId: string | null;
@@ -48,12 +56,13 @@ export interface TransportRequest {
 /** A transport's answer: a status outside 2xx is the backend's refusal. */
 export interface TransportResponse {
   status: number;
-  /** Not read by the client. */
+  /** Read for sap-contextid and x-csrf-token (any case, a repeated header
+   *  joined). */
   headers?: Record<string, string | string[] | undefined>;
   body: string;
 }
 
-/** ONE roundtrip; a throw is "the backend did not answer (...)". */
+/** ONE request; a throw is "the backend did not answer (...)". */
 export type AppTransport = (request: TransportRequest) => Promise<TransportResponse>;
 
 /** The app start's ORIGIN/PATHNAME/SEARCH; `search` names the class
@@ -67,9 +76,21 @@ export interface AppLocation {
 /** The local backend's hint after "the backend did not answer (...)". */
 export const LOCAL_BACKEND_HINT: string;
 
+/** The protocol number the client is written for; another one in a
+ *  response is refused. */
+export const PROTOCOL: number;
+/** A response header, case-insensitively, a repeated one joined; '' when absent. */
+export function headerOf(
+  headers: Record<string, string | string[] | undefined> | undefined,
+  name: string
+): string;
+/** core/Lib.js isValidContextId: never empty, never the text `undefined`. */
+export function validContextId(id: unknown): id is string;
 export function buildDelta(paths: string[], data: unknown): Record<string, unknown>;
+/** The error body as a refusal shows it: verbatim, only shortened. */
 export function errorText(status: number, body: string): string;
-/** The default transport: one `fetch` POST of the body to `baseUrl`. */
+/** The default transport: one `fetch` of `baseUrl` - the POST of the body,
+ *  or the token fetch's HEAD. */
 export function fetchTransport(options: { baseUrl: string; fetchImpl?: FetchLike }): AppTransport;
 
 export interface AppClientOptions {
@@ -78,7 +99,7 @@ export interface AppClientOptions {
   baseUrl?: string;
   /** The default transport's fetch. */
   fetchImpl?: FetchLike;
-  /** Replaces baseUrl/fetchImpl: performs one roundtrip. */
+  /** Replaces baseUrl/fetchImpl: sends one request as given. */
   transport?: AppTransport;
   /** The app start's location; may throw an AgentError to refuse. */
   location?: (app: string) => AppLocation | Promise<AppLocation>;
