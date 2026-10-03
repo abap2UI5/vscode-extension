@@ -772,7 +772,11 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
         "value } (table cells as \"<table path or id>/<row>/<COLUMN>\", e.g. \"/T_TAB/2/SELKZ\" to " +
         "select a row) go out as the model delta of the roundtrip; `event` is an action's event " +
         "name or its id (\"a3\"); `row` (0-based) fills the row-dependent arguments of a row action " +
-        "(\"$row:FIELD\", \"$source:text\"); `args` (positional, null = let the client fill it) " +
+        "(\"$row:FIELD\", \"$source:text\", and the row-valued event parameters such as " +
+        "${$parameters>/listItem}.getBindingContext()...); on a SelectDialog/TableSelectDialog the " +
+        "`confirm` action is the pick: `row` selects that row as a click does (its selectionField, " +
+        "sent as the model delta) and fills selectedItem/selectedContexts arguments from it; " +
+        "`args` (positional, null = let the client fill it) " +
         "supplies arguments the browser would compute (\"$expr:...\", \"$parameters:...\", a message " +
         "box's \"$action\"). Without `event` the values stay pending, as typing does in the browser " +
         "- nothing is sent. Strict: an event that is not among the snapshot's actions, a field " +
@@ -801,7 +805,8 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
           },
           row: {
             type: "number",
-            description: "for a row action: the row index (0-based) in its table",
+            description:
+              "for a row action: the row index (0-based) in its table - for a selection dialog's confirm, the row to pick",
           },
           max_rows: {
             type: "number",

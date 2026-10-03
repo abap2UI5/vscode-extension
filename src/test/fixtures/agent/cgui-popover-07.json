@@ -1,0 +1,96 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 by driving lib/appclient.mjs through the runtime harness of abap2UI5/abap-cloud-gui 838a7ee (tools/report2cloud/test/runtime: the report converted by report2cloud, src/01 and abap2UI5-addons/popups af8efe3); request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/abap-cloud-gui report2cloud corpus zr2c_07_messages as Z2UI5_CL_CGUI_R2C_07 (the message popover of Z2UI5_CL_CGUI_REPORT)",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_cgui_r2c_07",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_cgui_r2c_07"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_CGUI_R2C_07",
+      "ID": "A3A9729B06044D18AF0DAB4BD71D638E",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:z2ui5=\"z2ui5.cc\" displayBlock=\"true\" height=\"100%\"><Page title=\"Z2UI5_CL_CGUI_R2C_07\" showNavButton=\"false\" navButtonPress=\".eB(['CGUI_BACK'])\"><z2ui5:Storage type=\"local\" prefix=\"z2ui5_cgui_variants\" key=\"Z2UI5_CL_CGUI_R2C_07\" value=\"{/MV_CGUI_VARIANTS}\" finished=\".eB(['CGUI_VARIANTS_LOADED',false,false,false,true])\"/><form:SimpleForm xmlns:form=\"sap.ui.layout.form\" editable=\"true\" layout=\"ResponsiveGridLayout\" labelSpanXL=\"3\" labelSpanL=\"3\" labelSpanM=\"3\" emptySpanXL=\"4\" emptySpanL=\"4\" emptySpanM=\"2\" columnsXL=\"1\" columnsL=\"1\" columnsM=\"1\"><Label text=\"P_TYPE\" required=\"true\"/><Input value=\"{/P_TYPE}\" required=\"true\" editable=\"true\" id=\"cgui_f_p_type\" maxLength=\"1\"/><Label text=\"P_NUM\" required=\"false\"/><Input value=\"{/P_NUM}\" required=\"false\" editable=\"true\" id=\"cgui_f_p_num\" type=\"Number\"/></form:SimpleForm><footer><OverflowToolbar><Button text=\"Get Variant\" icon=\"sap-icon://open-folder\" press=\".eB(['CGUI_VARIANT_GET'])\"/><Button text=\"Save as Variant\" icon=\"sap-icon://save\" press=\".eB(['CGUI_VARIANT_SAVE'])\"/><Button text=\"Delete Variant\" icon=\"sap-icon://delete\" press=\".eB(['CGUI_VARIANT_DELETE'])\"/><ToolbarSpacer/><Button text=\"Execute\" icon=\"sap-icon://begin\" type=\"Emphasized\" press=\".eB(['CGUI_EXECUTE'])\"/></OverflowToolbar></footer></Page></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "MV_CGUI_VARIANTS": "",
+      "P_NUM": 42,
+      "P_TYPE": "S"
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "P_TYPE": "W"
+    },
+    "event": "CGUI_EXECUTE"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "A3A9729B06044D18AF0DAB4BD71D638E",
+      "EVENT": "CGUI_EXECUTE"
+     },
+     "MODEL": {
+      "P_TYPE": "W"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_CGUI_R2C_07",
+      "ID": "1BAE966A76CC4CF8A5B8D79C696D3AC0",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_CUSTOM": [
+        [
+         "MESSAGE_TOAST",
+         "show",
+         "Number 42 processed"
+        ],
+        [
+         "START_TIMER",
+         "CGUI_MESSAGES_OPEN",
+         "0",
+         "X"
+        ]
+       ],
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:z2ui5=\"z2ui5.cc\" displayBlock=\"true\" height=\"100%\"><Page title=\"Z2UI5_CL_CGUI_R2C_07\" showNavButton=\"true\" navButtonPress=\".eB(['CGUI_BACK'])\"><z2ui5:Storage type=\"local\" prefix=\"z2ui5_cgui_variants\" key=\"Z2UI5_CL_CGUI_R2C_07\" value=\"{/MV_CGUI_VARIANTS}\" finished=\".eB(['CGUI_VARIANTS_LOADED',false,false,false,true])\"/><VBox class=\"sapUiSmallMargin\"><HBox alignItems=\"Center\"><Text text=\"Last message:\" renderWhitespace=\"true\" wrapping=\"false\" class=\"sapUiTinyMarginEnd\"/><Text text=\"Number 42 processed\" renderWhitespace=\"true\" wrapping=\"false\" class=\"sapUiTinyMarginEnd\"/></HBox></VBox><footer><OverflowToolbar><Button id=\"cgui_messages\" icon=\"sap-icon://message-warning\" type=\"Default\" text=\"1\" tooltip=\"Messages\" press=\".eF('CONTROL_BY_ID', 'cgui_message_popover', '', 'toggleBy', 'cgui_messages')\"/><ToolbarSpacer/><Button text=\"Back\" icon=\"sap-icon://nav-back\" type=\"Emphasized\" press=\".eB(['CGUI_BACK'])\"/></OverflowToolbar></footer><dependents><MessagePopover id=\"cgui_message_popover\" placement=\"Top\" activeTitlePress=\".eB(['CGUI_MESSAGE_FOCUS'], ${$parameters&gt;/item})\"><items><MessageItem id=\"cgui_msg_1\" type=\"Warning\" title=\"Number 42 is a warning\" subtitle=\"\" activeTitle=\"false\"/></items></MessagePopover></dependents></Page></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "MV_CGUI_VARIANTS": "",
+      "P_NUM": 42,
+      "P_TYPE": "W"
+     }
+    }
+   }
+  }
+ ]
+}

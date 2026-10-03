@@ -1,6 +1,6 @@
 /*
  * VENDORED - do not edit. abap2UI5/mcp-server lib/snapshot.mjs
- * at commit 9ca6cdf220acab2db938bcce123c81d6640c27ee,
+ * at commit 6bd3cc3a79e99f8027fb0b62cc968f4161bf1118,
  * copied by scripts/vendor-agent.mjs (`npm run agent-vendor`); the only
  * change is the sibling imports ending in .js. `npm run agent-vendor:check`
  * fails when this copy drifts from that commit. Change it upstream, then
@@ -49,6 +49,7 @@ export const MAX_ROWS_LIMIT = 200;
 const MAX_TEXTS = 30;
 const MAX_UNSUPPORTED = 30;
 const MAX_VALUES = 100;
+const MAX_ITEM_MESSAGES = 50;
 const TEXT_MAX_LEN = 200;
 
 /* The two frontend-only wires the client performs itself: closing the popup
@@ -243,6 +244,10 @@ const TABLE_SPECS = {
   'sap.m.Tree': { agg: 'items', kind: 'm' },
   'sap.m.GridList': { agg: 'items', kind: 'm' },
   'sap.m.ListBase': { agg: 'items', kind: 'm' },
+  // the selection dialogs: a list of rows to pick from; `confirm` is the
+  // pick (a row event), `multiSelect` the selection mode
+  'sap.m.SelectDialog': { agg: 'items', kind: 'm', dialog: true },
+  'sap.m.TableSelectDialog': { agg: 'items', kind: 'm', dialog: true },
   'sap.ui.table.Table': { agg: 'rows', kind: 'ui' },
   'sap.ui.table.TreeTable': { agg: 'rows', kind: 'ui' },
   'sap.ui.table.AnalyticalTable': { agg: 'rows', kind: 'ui' },
@@ -265,7 +270,7 @@ const TEXT_PROPS = {
 };
 
 /* Controls that title their layer (Dialog/Popover first, then the page). */
-const TITLED = new Set(['sap.m.Dialog', 'sap.m.Popover', 'sap.m.ResponsivePopover', 'sap.m.Page', 'sap.m.semantic.FullscreenPage', 'sap.m.Shell']);
+const TITLED = new Set(['sap.m.Dialog', 'sap.m.SelectDialog', 'sap.m.TableSelectDialog', 'sap.m.Popover', 'sap.m.ResponsivePopover', 'sap.m.Page', 'sap.m.semantic.FullscreenPage', 'sap.m.Shell']);
 
 /* An event that only fires when a flag shows its trigger. */
 const EVENT_GATE = { navButtonPress: 'showNavButton', valueHelpRequest: 'showValueHelp' };
@@ -281,6 +286,11 @@ const ROW_TEMPLATES = new Set(['rowActionTemplate', 'rowSettingsTemplate']);
 const BENIGN_CUSTOM = new Set(['SET_FOCUS', 'SCROLL_TO', 'SCROLL_INTO_VIEW', 'SET_SIZE_LIMIT', 'SET_TITLE', 'SET_FAVICON', 'BUSY_INDICATOR', 'ROUTER', 'ICON_POOL', 'THEMING', 'FORMATTING', 'POPUP', 'SET_TITLE_LAUNCHPAD']);
 
 const MESSAGE_TYPES = { Error: 'error', Warning: 'warning', Success: 'success', Information: 'info' };
+
+/* The message lists of sap.m: their items are messages, with the source
+ * they are shown in. */
+const MESSAGE_LISTS = { 'sap.m.MessagePopover': 'popover', 'sap.m.MessageView': 'messageview' };
+const MESSAGE_ITEMS = new Set(['sap.m.MessageItem', 'sap.m.MessagePopoverItem']);
 
 function lookupSpec(table, name, metadata) {
   if (table[name]) return table[name];
@@ -517,6 +527,11 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
       return;
     }
 
+    if (MESSAGE_LISTS[name] && !ctx.row) {
+      messageList(node, c, name);
+      return;
+    }
+
     const tableSpec = lookupSpec(TABLE_SPECS, name, metadata);
     if (tableSpec && !ctx.row) {
       table(node, c, name, tableSpec);
@@ -670,7 +685,7 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
   /* Every attribute that carries an abap2UI5 wire: an action (eB/eBP), one
    * of the two popup closes the client performs itself, or a note that a
    * frontend-only action exists here. */
-  function wires(node, ctx, name, fieldRec, { only = null, label: labelOverride = null } = {}) {
+  function wires(node, ctx, name, fieldRec, { only = null, label: labelOverride = null, extra = null } = {}) {
     for (const [attr, raw] of Object.entries(node.attrs)) {
       if (only && attr !== only) continue;
       if (!/\.(eB|eBP|eF)\s*\(/.test(raw)) continue;
@@ -704,7 +719,7 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
         scope,
         table: ctx.row && ctx.row.tableId,
         layer: ctx.layer,
-      }, { wire, node, modelKey: ctx.modelKey, tableId: ctx.row && ctx.row.tableId });
+      }, { wire, node, modelKey: ctx.modelKey, tableId: ctx.row && ctx.row.tableId, rowTemplate: (ctx.row && ctx.row.rowTemplate) || null, ...(extra || {}) });
     }
   }
 
@@ -726,6 +741,51 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
     if (ctx.row && a.type && parseBinding(a.type).kind === 'literal') return `row ${attr} (${a.type})`;
     if (ctx.row) return `row ${attr}`;
     return attr;
+  }
+
+  /* A MessagePopover or MessageView: every MessageItem is a message, open
+   * or not (a MessagePopover in `dependents` opens in the browser only -
+   * the messages are what the app shows there). Static items, or the
+   * template of a bound `items` resolved per row. */
+  function messageList(node, ctx, name) {
+    const source = MESSAGE_LISTS[name];
+    const items = itemControls(node, 'items').filter((n) => MESSAGE_ITEMS.has(controlName(n)));
+    const bound = node.attrs.items !== undefined ? parseBinding(node.attrs.items) : null;
+    let entries = items.map((it) => ({ it, row: undefined }));
+    if (bound) {
+      const bpath = bound.kind === 'path' ? bound : (bound.parts || []).find((p) => p.path !== undefined);
+      if (!bpath || !bpath.path || bpath.model || bpath.relative) {
+        note(`${node.local} bound to ${bpath && bpath.model ? `the named model '${bpath.model}'` : 'something other than a model table'} (${ctx.layer}) - messages not described`);
+        entries = [];
+      } else {
+        const rows = getAt(ctx.data, bpath.path);
+        entries = Array.isArray(rows) && items[0] ? rows.map((row) => ({ it: items[0], row })) : [];
+      }
+    }
+    let count = 0;
+    for (const { it, row } of entries) {
+      const a = it.attrs;
+      // the item's type; absent (or empty) is UI5's default, Error
+      const typeValue = a.type === undefined ? 'Error' : textOf(a.type, ctx, row);
+      const type = MESSAGE_TYPES[typeValue] || (typeValue === '' ? 'error' : 'info');
+      const title = textOf(a.title, ctx, row);
+      const subtitle = textOf(a.subtitle, ctx, row);
+      let description = textOf(a.description, ctx, row);
+      if (description && bool(a.markupDescription, ctx, row, false)) description = stripTags(description);
+      if (!title.trim() && !subtitle.trim() && !description.trim()) continue;
+      count += 1;
+      if (count > MAX_ITEM_MESSAGES) continue;
+      const msg = { type, text: clip(title, 1000), source };
+      if (subtitle.trim()) msg.subtitle = clip(subtitle, 1000);
+      if (description.trim()) msg.description = clip(description, 1000);
+      out.messages.push(msg);
+    }
+    if (count > MAX_ITEM_MESSAGES) note(`${node.local} (${ctx.layer}): ${count} messages, the first ${MAX_ITEM_MESSAGES} listed`);
+    wires(node, ctx, name);
+    // what else it aggregates (a headerButton) is on the screen like any control
+    for (const agg of node.children) {
+      if (isAggregation(agg) && agg.local !== 'items') walk(agg, ctx);
+    }
   }
 
   function messageManager(node, ctx) {
@@ -831,7 +891,10 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
 
     // selection
     let selectionMode = 'None';
-    if (spec.kind === 'm') {
+    if (spec.dialog) {
+      // a selection dialog always selects: one row (a pick confirms) or several
+      selectionMode = bool(a.multiSelect, ctx, undefined, false) ? 'Multi' : 'Single';
+    } else if (spec.kind === 'm') {
       const mode = textOf(a.mode, ctx) || 'None';
       selectionMode = /Multi/.test(mode) ? 'Multi' : /Single/.test(mode) ? 'Single' : 'None';
     } else {
@@ -885,13 +948,24 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
     };
     if (selectionField) rec.selectionField = selectionField;
     out.tables.push(rec);
-    index.tables.set(tableId, { table: rec, path: bpath.path, modelKey: ctx.modelKey, cellSpecs, selectionField, ctx });
+    // what lib/appclient.mjs needs to fill a row event's $parameters: the
+    // item template and its cells (getCells()[n] counts every cell of a
+    // ColumnListItem; a grid table's row has the visible columns' templates)
+    const itemCells = spec.kind === 'm'
+      ? cells.filter((cl) => !cl.prop).map((cl) => cl.node)
+      : cells.filter((cl) => cl.visible).map((cl) => cl.node);
+    index.tables.set(tableId, {
+      table: rec, path: bpath.path, modelKey: ctx.modelKey, cellSpecs, selectionField, ctx,
+      node, kind: spec.kind, dialog: Boolean(spec.dialog), template, cellNodes: itemCells,
+    });
 
-    // the table's own events: a row event on the table is row scope
+    // the table's own events: a row event on the table is row scope, and so
+    // is a selection dialog's confirm - the pick of a row
     for (const [attr, raw] of Object.entries(a)) {
       if (!/\.(eB|eBP|eF)\s*\(/.test(raw)) continue;
-      const rowCtx = ROW_EVENTS_ON_TABLE.has(attr) ? { ...ctx, row: { tableId } } : ctx;
-      wires(node, rowCtx, name, null, { only: attr, label: `${clip(label, 60)}: ${attr}` });
+      const pick = Boolean(spec.dialog) && attr === 'confirm';
+      const rowCtx = ROW_EVENTS_ON_TABLE.has(attr) || pick ? { ...ctx, row: { tableId } } : ctx;
+      wires(node, rowCtx, name, null, { only: attr, label: `${clip(label, 60)}: ${attr}`, extra: pick ? { pick: true } : null });
     }
     // everything but the template: toolbars, columns' own controls, ...
     for (const agg of node.children) {
@@ -931,7 +1005,7 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
       if (spec.kind === 'ui') walkTemplate(cs.node, rowCtx);
     }
     for (const agg of node.children) {
-      if (ROW_TEMPLATES.has(agg.local)) walkTemplate(agg, rowCtx);
+      if (ROW_TEMPLATES.has(agg.local)) walkTemplate(agg, { ...rowCtx, row: { tableId, rowTemplate: agg.local } });
     }
   }
 

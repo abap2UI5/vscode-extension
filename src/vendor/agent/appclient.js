@@ -1,6 +1,6 @@
 /*
  * VENDORED - do not edit. abap2UI5/mcp-server lib/appclient.mjs
- * at commit 9ca6cdf220acab2db938bcce123c81d6640c27ee,
+ * at commit 6bd3cc3a79e99f8027fb0b62cc968f4161bf1118,
  * copied by scripts/vendor-agent.mjs (`npm run agent-vendor`); the only
  * change is the sibling imports ending in .js. `npm run agent-vendor:check`
  * fails when this copy drifts from that commit. Change it upstream, then
@@ -405,7 +405,217 @@ export function createAppClient({
     return undefined;
   }
 
-  function eventArgs(entry, given, rowIndex, session) {
+  /*
+   * A selection dialog's confirm picks a row, as a click on it does in the
+   * browser: the row's selectionField becomes true (and, selecting one row,
+   * every other selected row's false) - two-way bound, so the edits travel
+   * with the confirm as the model delta. Answers the selected rows in model
+   * order, which is what the event's selectedItem/selectedItems/
+   * selectedContexts are made of. Without `row` the selection stays as the
+   * model holds it (a multi-select dialog's OK after the rows were ticked
+   * through `values`); picking one row needs one.
+   */
+  function applyPick(entry, rowIndex, session) {
+    const { action, tableId } = entry;
+    const t = session.lastIndex.tables.get(tableId);
+    const count = t ? t.table.rowCount : 0;
+    const data = session.state.models[t ? t.modelKey : 'MAIN']?.data || {};
+    const rows = t ? getAt(data, t.path) : undefined;
+    const list = Array.isArray(rows) ? rows : [];
+    const single = t && t.table.selectionMode === 'Single';
+    const given = rowIndex !== undefined && rowIndex !== null;
+    if (given && (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= count)) {
+      throw new AgentError(`table ${tableId} has ${count} row(s) - row ${rowIndex} does not exist (rows are 0-based)`);
+    }
+    const sf = t && t.selectionField;
+    const set = (i, value) => {
+      const p = `${t.path}/${i}/${sf}`;
+      setAt(data, p, value);
+      if (!session.pending[t.modelKey]) session.pending[t.modelKey] = new Map();
+      session.pending[t.modelKey].set(p, value);
+    };
+    if (sf && given) {
+      if (single) list.forEach((r, i) => { if (i !== rowIndex && r && r[sf]) set(i, false); });
+      if (!(list[rowIndex] && list[rowIndex][sf] === true)) set(rowIndex, true);
+    }
+    let selected = sf ? list.map((r, i) => (r && r[sf] ? i : -1)).filter((i) => i >= 0) : [];
+    if (given && (single || !sf)) selected = [rowIndex];
+    if (given && !single && sf && !selected.includes(rowIndex)) selected.push(rowIndex);
+    if (single && !selected.length) {
+      throw new AgentError(`action ${action.id} (${action.event}) picks a row of table ${tableId} (${count} rows) - pass \`row\` (0-${Math.max(0, count - 1)})`);
+    }
+    return selected;
+  }
+
+  /*
+   * The event parameters a row event hands its `${$parameters>/...}`
+   * arguments, for the events whose parameters ARE the row: a selection
+   * dialog's confirm (selectedItem, selectedItems, selectedContexts), a list
+   * table's itemPress/selectionChange/delete/beforeOpenContextMenu
+   * (listItem), a grid table's rowSelectionChange (rowIndex, rowContext),
+   * cellClick (rowIndex, rowBindingContext) and beforeOpenContextMenu
+   * (rowIndex), and a row action item of a grid table (row). An item is
+   * { $item: <row> }, a binding context { $ctx: <row> }. null: the event's
+   * parameters are not the row (or no row is known).
+   */
+  function rowEventParams(entry, t, rows) {
+    if (!t || !rows) return null;
+    const item = (r) => ({ $item: r });
+    const ctx = (r) => ({ $ctx: r });
+    if (entry.pick) {
+      return { selectedItem: rows.length ? item(rows[0]) : null, selectedItems: rows.map(item), selectedContexts: rows.map(ctx) };
+    }
+    if (!rows.length) return null;
+    const r = rows[0];
+    const trigger = entry.action.trigger;
+    if (entry.node === t.node) {
+      if (t.kind === 'm' && ['itemPress', 'selectionChange', 'delete', 'beforeOpenContextMenu'].includes(trigger)) return { listItem: item(r) };
+      if (t.kind === 'ui' && trigger === 'rowSelectionChange') return { rowIndex: r, rowContext: ctx(r) };
+      if (t.kind === 'ui' && trigger === 'cellClick') return { rowIndex: r, rowBindingContext: ctx(r) };
+      if (t.kind === 'ui' && trigger === 'beforeOpenContextMenu') return { rowIndex: r };
+      return null;
+    }
+    if (t.kind === 'ui' && entry.rowTemplate === 'rowActionTemplate') return { row: item(r) };
+    return null;
+  }
+
+  const UNKNOWN = Symbol('unknown');
+  const isItem = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && ('$item' in v || '$ctx' in v || '$cell' in v);
+
+  /*
+   * `${$parameters>/<path>}` over those parameters, with the semantics of
+   * the JSONModel UI5 puts them in (EventHandlerResolver): the path is split
+   * at `/` and walked key by key - there is no `[n]` index syntax, so
+   * `selectedContexts[0]/sPath` is undefined in the browser and goes out as
+   * null here too. A context answers its `sPath`; anything else of an item
+   * or a context (the control marshalled with all its properties) is
+   * UNKNOWN, as is a parameter this client does not model.
+   */
+  function walkParams(params, path, t) {
+    const segs = String(path).split('/').filter((x) => x !== '');
+    let node = params;
+    for (let k = 0; k < segs.length; k += 1) {
+      const seg = segs[k];
+      if (node === null || node === undefined) return node;
+      if (isItem(node)) {
+        if ('$ctx' in node && seg === 'sPath') {
+          node = `${t.path}/${node.$ctx}`;
+          continue;
+        }
+        return UNKNOWN;
+      }
+      if (/[[\]]/.test(seg)) return undefined;
+      if (Array.isArray(node)) {
+        node = seg === 'length' ? node.length : (/^\d+$/.test(seg) ? node[Number(seg)] : undefined);
+        continue;
+      }
+      if (typeof node !== 'object') return undefined;
+      if (k === 0 && !Object.prototype.hasOwnProperty.call(node, seg)) return UNKNOWN;
+      node = node[seg];
+    }
+    if (isItem(node) || (Array.isArray(node) && node.some(isItem))) return UNKNOWN;
+    return node;
+  }
+
+  /* A property getter of an item or a cell: the template attribute resolved
+   * in the row - a number as the string the UI5 property holds; an
+   * attribute the template does not set (or one bound to nothing) is
+   * UNKNOWN. */
+  function templateProp(node, prop, data, rowData) {
+    if (!node) return UNKNOWN;
+    const v = resolveSourceProp(node, prop, data, rowData);
+    if (v === undefined || v === null) return UNKNOWN;
+    return typeof v === 'number' ? String(v) : v;
+  }
+
+  /*
+   * The browser-computed argument shapes of a row event, the ones views
+   * actually write:
+   *   ${$parameters>/P}                                (walkParams)
+   *   ${$parameters>/P}.getBindingContext().getPath()
+   *   ${$parameters>/P}.getBindingContext().getProperty('X')
+   *   ${$parameters>/P}.getPath() / .getProperty('X')  (P a context)
+   *   ${$parameters>/P}.get<Prop>()                    (the item template's <prop>)
+   *   ${$parameters>/P}.getCells()[n].get<Prop>()
+   *   ${$parameters>/P} ? <one of the above> : <literal>
+   * Anything else is UNKNOWN - the caller asks for it in `args`.
+   */
+  function paramExpr(raw, params, t, data) {
+    const src = String(raw).trim();
+    const tern = /^(\$\{\$parameters>[^{}]*\})\s*\?\s*([\s\S]+?)\s*:\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|null|-?\d+(?:\.\d+)?)\s*$/.exec(src);
+    if (tern) {
+      // the condition is the parameter itself - an item is truthy
+      const cond = headOf(/^\$\{\$parameters>\/?([^{}]*)\}$/.exec(tern[1])[1], params);
+      if (cond === UNKNOWN) return UNKNOWN;
+      if (cond) return paramExpr(tern[2], params, t, data);
+      const lit = tern[3];
+      if (lit === 'null') return null;
+      if (/^-?\d/.test(lit)) return Number(lit);
+      return lit.slice(1, -1).replace(/\\(.)/g, '$1');
+    }
+    const ref = /^\$\{\$parameters>\/?([^{}]*)\}/.exec(src);
+    if (!ref) return UNKNOWN;
+    let rest = src.slice(ref[0].length);
+    if (!rest.trim()) return walkParams(params, ref[1], t);
+    let cur = headOf(ref[1], params);
+    if (cur === UNKNOWN) return UNKNOWN;
+    const rowOf = (v) => ('$item' in v ? v.$item : '$ctx' in v ? v.$ctx : v.$cell.row);
+    while (rest.trim()) {
+      const call = /^\s*\.\s*([A-Za-z_]\w*)\s*\(\s*('[^']*'|"[^"]*")?\s*\)/.exec(rest);
+      if (!call || !isItem(cur)) return UNKNOWN;
+      rest = rest.slice(call[0].length);
+      const [, fn, arg] = call;
+      const r = rowOf(cur);
+      const rowData = getAt(data, `${t.path}/${r}`);
+      if ('$ctx' in cur) {
+        if (fn === 'getPath' && !arg) cur = `${t.path}/${r}`;
+        else if (fn === 'getProperty' && arg) cur = getAt(rowData, arg.slice(1, -1)) ?? null;
+        else return UNKNOWN;
+      } else if (fn === 'getBindingContext' && !arg) {
+        cur = { $ctx: r };
+      } else if (fn === 'getCells' && !arg && '$item' in cur) {
+        const idx = /^\s*\[\s*(\d+)\s*\]/.exec(rest);
+        if (!idx) return UNKNOWN;
+        rest = rest.slice(idx[0].length);
+        const n = Number(idx[1]);
+        if (!t.cellNodes || n >= t.cellNodes.length) return UNKNOWN;
+        cur = { $cell: { row: r, n } };
+      } else if (/^get[A-Z]/.test(fn) && !arg && fn !== 'getId') {
+        const prop = fn[3].toLowerCase() + fn.slice(4);
+        const node = '$cell' in cur ? t.cellNodes[cur.$cell.n] : (t.kind === 'm' ? t.template : null);
+        cur = templateProp(node, prop, data, rowData);
+        if (cur === UNKNOWN) return UNKNOWN;
+      } else {
+        return UNKNOWN;
+      }
+    }
+    return isItem(cur) ? UNKNOWN : cur;
+  }
+
+  /* The parameter a call chain starts from, as a value: an item or a
+   * context is not walked into; a parameter this client does not model is
+   * UNKNOWN. */
+  function headOf(path, params) {
+    const segs = String(path).split('/').filter((x) => x !== '');
+    let cur = params;
+    for (let k = 0; k < segs.length; k += 1) {
+      const seg = segs[k];
+      if (cur === null || cur === undefined || isItem(cur) || /[[\]]/.test(seg)) return UNKNOWN;
+      if (k === 0 && !Object.prototype.hasOwnProperty.call(cur, seg)) return UNKNOWN;
+      cur = Array.isArray(cur) ? (/^\d+$/.test(seg) ? cur[Number(seg)] : undefined) : cur[seg];
+    }
+    return cur;
+  }
+
+  /** A `$parameters`/`$expr` argument of a row event, from its row(s); UNKNOWN when this client cannot. */
+  function rowParamArg(d, params, t, data) {
+    if (!params || !t) return UNKNOWN;
+    if (d.kind === 'parameters') return walkParams(params, d.path, t);
+    if (d.kind === 'expr') return paramExpr(d.raw, params, t, data);
+    return UNKNOWN;
+  }
+
+  function eventArgs(entry, given, rowIndex, session, picked = null) {
     const { action, wire, node, tableId, choices } = entry;
     const descs = (wire && wire.args) || [];
     if (given !== undefined && given !== null && !Array.isArray(given)) throw new AgentError('`args` is an array, positional to the action\'s args (null where the client should fill in the value)');
@@ -413,19 +623,27 @@ export function createAppClient({
     if (g.length > descs.length) throw new AgentError(`action ${action.id} (${action.event}) takes ${descs.length} argument(s) - ${JSON.stringify(action.args)}; ${g.length} given`);
     const data = session.state.models[entry.modelKey || 'MAIN']?.data || {};
     let rowData;
+    let params = null;
     if (action.scope !== 'row' && rowIndex !== undefined && rowIndex !== null) {
       throw new AgentError(`\`row\` is for row actions - ${action.id} (${action.event}) is a screen action; leave \`row\` out`);
     }
+    const t = action.scope === 'row' ? session.lastIndex.tables.get(tableId) : null;
     if (action.scope === 'row') {
-      const t = session.lastIndex.tables.get(tableId);
       const count = t ? t.table.rowCount : 0;
-      const needsRow = descs.some((d, i) => !d.static && (g[i] === undefined || g[i] === null) && ['row', 'source'].includes(d.kind));
+      // an argument the row would fill: a row property, the source control's
+      // property in the row, or an event parameter that is the row
+      const probe = picked || (count ? [0] : null);
+      const probeParams = rowEventParams(entry, t, probe);
+      const readsRow = (d) => ['row', 'source'].includes(d.kind)
+        || (['parameters', 'expr'].includes(d.kind) && rowParamArg(d, probeParams, t, data) !== UNKNOWN);
+      const needsRow = descs.some((d, i) => !d.static && (g[i] === undefined || g[i] === null) && readsRow(d));
       if (rowIndex === undefined || rowIndex === null) {
-        if (needsRow) throw new AgentError(`action ${action.id} (${action.event}) is a row action of table ${tableId} (${count} rows) - pass \`row\` (0-${Math.max(0, count - 1)})`);
+        if (needsRow && !picked) throw new AgentError(`action ${action.id} (${action.event}) is a row action of table ${tableId} (${count} rows) - pass \`row\` (0-${Math.max(0, count - 1)})`);
       } else {
         if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= count) throw new AgentError(`table ${tableId} has ${count} row(s) - row ${rowIndex} does not exist (rows are 0-based)`);
         rowData = t ? getAt(data, `${t.path}/${rowIndex}`) : undefined;
       }
+      params = rowEventParams(entry, t, picked || (rowIndex !== undefined && rowIndex !== null ? [rowIndex] : null));
     }
     return descs.map((d, i) => {
       const explicit = g[i];
@@ -448,6 +666,14 @@ export function createAppClient({
         return v;
       }
       if (d.kind === 'action') return choices ? choices[0] : 'OK';
+      if (params) {
+        const v = rowParamArg(d, params, t, data);
+        if (v !== UNKNOWN) return v === undefined ? null : v;
+      }
+      if (entry.pick && picked && !picked.length && rowEventParams(entry, t, [0]) && t.table.rowCount
+        && rowParamArg(d, rowEventParams(entry, t, [0]), t, data) !== UNKNOWN) {
+        throw new AgentError(`argument ${i} of ${action.event} (${d.describe}) reads the picked row and none is selected - pass \`row\`, or the value in args[${i}]`);
+      }
       throw new AgentError(`argument ${i} of ${action.event} (${d.describe}) is computed in the browser - pass its value in args[${i}]`);
     });
   }
@@ -524,7 +750,8 @@ export function createAppClient({
           session.lastIndex = res.index;
           return res.snapshot;
         }
-        const tArgs = eventArgs(entry, args, row, session);
+        const picked = entry.pick ? applyPick(entry, row, session) : null;
+        const tArgs = eventArgs(entry, args, row, session, picked);
         const modelKey = entry.modelKey || 'MAIN';
         const sent = session.pending[modelKey] || new Map();
         const body = { S_FRONT: { ID: session.state.id, EVENT: entry.action.event } };

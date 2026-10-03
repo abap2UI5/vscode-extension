@@ -13,7 +13,10 @@
   what is. They run through the auth proxy on the active system, **as you**:
   an event may save, post or delete data. That is why they do nothing until
   you set `abap2ui5.agent.enableAppTools` in your User settings (a workspace
-  cannot); until then they tell the agent how to switch them on.
+  cannot); until then they tell the agent how to switch them on. A value
+  help (`SelectDialog`, `TableSelectDialog`) is a table of the snapshot, and
+  `app_act` with `row` on its `confirm` picks that row as a click does; the
+  items of a `MessagePopover` / `MessageView` are listed as messages.
 
 ## 0.30.2
 

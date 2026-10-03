@@ -1,7 +1,7 @@
 {
   "note": "What scripts/vendor-agent.mjs copied from abap2UI5/mcp-server, at which commit, and the sha256 of every file it wrote. Generated - do not edit; src/test/agentvendor.test.ts holds the copies to these hashes.",
   "repository": "abap2UI5/mcp-server",
-  "commit": "9ca6cdf220acab2db938bcce123c81d6640c27ee",
+  "commit": "6bd3cc3a79e99f8027fb0b62cc968f4161bf1118",
   "files": {
     "src/test/fixtures/agent/args-537.json": {
       "from": "test/fixtures/agent/args-537.json",
@@ -10,6 +10,14 @@
     "src/test/fixtures/agent/box-382.json": {
       "from": "test/fixtures/agent/box-382.json",
       "sha256": "e2f66a5f4043a1b2044c9a993cf15bf2e6e23ccea4442f0788d53bcbc291871c"
+    },
+    "src/test/fixtures/agent/cgui-f4-06.json": {
+      "from": "test/fixtures/agent/cgui-f4-06.json",
+      "sha256": "6e358abcc0f0fc27177db55784d2d9065857dd003ed69b4a05f25f59427b6d53"
+    },
+    "src/test/fixtures/agent/cgui-popover-07.json": {
+      "from": "test/fixtures/agent/cgui-popover-07.json",
+      "sha256": "7ab74a72b7aee1862fe525c67cddeef80829b4ce80b01b5b409af991baf6b6c9"
     },
     "src/test/fixtures/agent/form-381.json": {
       "from": "test/fixtures/agent/form-381.json",
@@ -22,6 +30,10 @@
     "src/test/fixtures/agent/list-048.json": {
       "from": "test/fixtures/agent/list-048.json",
       "sha256": "d33d5d1356579eaf17dc47f095856e7dc340d65bb7c4731b780125cdc251513f"
+    },
+    "src/test/fixtures/agent/messages-452.json": {
+      "from": "test/fixtures/agent/messages-452.json",
+      "sha256": "6fe4f9f9868bd7aec318d0201b7f968914700ec5bdacdffc710ccf7f085ced43"
     },
     "src/test/fixtures/agent/messages-467.json": {
       "from": "test/fixtures/agent/messages-467.json",
@@ -43,21 +55,25 @@
       "from": "test/fixtures/agent/popup-012.json",
       "sha256": "9c22eaab6691f0f999d55c2e7ff9608099381e23ff503dea05e30cff2508cf3b"
     },
+    "src/test/fixtures/agent/select-623.json": {
+      "from": "test/fixtures/agent/select-623.json",
+      "sha256": "25d301bcb61c8f1466572e4eab7350be864627a456470a900a5bda0786a1d2e3"
+    },
     "src/test/fixtures/agent/table-011.json": {
       "from": "test/fixtures/agent/table-011.json",
       "sha256": "a24e7474966dee1c23393c8fd9d440ec9ea3f7e3fe8351d59a550903cf74e52a"
     },
     "src/vendor/agent/appclient.js": {
       "from": "lib/appclient.mjs",
-      "sha256": "daf4428fbe03971db793a7c139d2b6ead5d411be7222ace676caf63fad732619"
+      "sha256": "7f25336b8c2acdc5ed944cf69913736835b816b24e053d558e4f1e8f77e77982"
     },
     "src/vendor/agent/snapshot.js": {
       "from": "lib/snapshot.mjs",
-      "sha256": "6f9adbd144ccfc506050ece90ed20d452cb8d6a125d9036c0be28d3a7c0519ab"
+      "sha256": "abda2501ad08a3a65820d70daaca4410b7f19afa2fe8e3b912082ddb3b7e5add"
     },
     "src/vendor/agent/viewxml.js": {
       "from": "lib/viewxml.mjs",
-      "sha256": "f3f592b9b6d24a11b0ad952effcb6dfc76652bda71b14579e87063b79d7fcac4"
+      "sha256": "0adc23b1aac58b09c6d48b666cd6d5fce232fa488ba17fc49fced5e333c24960"
     }
   }
 }

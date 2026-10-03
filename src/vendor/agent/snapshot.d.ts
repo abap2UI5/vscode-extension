@@ -54,8 +54,12 @@ export interface SnapshotTable {
 export interface SnapshotMessage {
   type: "success" | "info" | "warning" | "error";
   text: string;
-  source: "toast" | "box" | "strip" | "field" | "model";
+  source: "toast" | "box" | "strip" | "field" | "model" | "popover" | "messageview";
   field?: string;
+  /** Only on a MessagePopover / MessageView item, when not empty. */
+  subtitle?: string;
+  /** Only on a MessagePopover / MessageView item, when not empty. */
+  description?: string;
 }
 
 /** Agent snapshot v1. */

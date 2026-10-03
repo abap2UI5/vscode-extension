@@ -263,6 +263,33 @@ test("values travel as the model delta, the popup's model with the popup's event
   assert.equal(closed.snaps[2].session, closed.snaps[1].session);
 });
 
+test("a selection dialog is a table and its confirm is the pick, row-valued parameters filled from `row`", async () => {
+  const select = await run("select-623");
+  assert.deepEqual(select.sent[3].S_FRONT.T_EVENT_ARG, ["Notebook Basic 17"]);
+  const f4 = await run("cgui-f4-06");
+  const dialog = f4.snaps[3].tables[0];
+  assert.equal(dialog.control, "sap.m.TableSelectDialog");
+  assert.equal(dialog.selectionMode, "Single");
+  assert.equal(dialog.selectionField, "ZZSELKZ");
+  // selectedContexts[0]/sPath is undefined in UI5's JSONModel - sent as null
+  assert.deepEqual(f4.sent[4].S_FRONT.T_EVENT_ARG, [null]);
+  assert.deepEqual(f4.sent[4].MODEL, {
+    MR_TAB_POPUP: { "*": [{ NAME: "Berlin", WERKS: "3000", ZZSELKZ: true }] },
+  });
+});
+
+test("MessagePopover and MessageView items are messages with their own source", () => {
+  const popover = buildSnapshot({ state: stateOf("cgui-popover-07") });
+  assert.ok(
+    popover.messages.some((m) => m.source === "popover" && m.type === "warning"),
+    "the popover's item"
+  );
+  const view = buildSnapshot({ state: stateOf("messages-452") });
+  const item = view.messages.find((m) => m.source === "messageview" && m.subtitle);
+  assert.ok(item, "a MessageView item with its subtitle");
+  assert.equal(typeof item.description, "string");
+});
+
 test("refusals name what is allowed, and nothing goes over the wire", async () => {
   const r = replay("popup-009");
   const client = createAppClient({ baseUrl: BASE, fetchImpl: r.fetchImpl });
