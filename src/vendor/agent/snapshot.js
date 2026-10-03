@@ -1,6 +1,6 @@
 /*
  * VENDORED - do not edit. abap2UI5/mcp-server lib/snapshot.mjs
- * at commit d8d3b765d7591805e832cd93cc102ddc792b462c,
+ * at commit a4d9f07659cd8a18d2e1f8ee4d2121695f40702b,
  * copied by scripts/vendor-agent.mjs (`npm run agent-vendor`); the only
  * change is the sibling imports ending in .js. `npm run agent-vendor:check`
  * fails when this copy drifts from that commit. Change it upstream, then
