@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Migrate Classic Report to abap2UI5.** A new command - in the Command
+  Palette and in the context menu of a `*.prog.abap` - converts a classic
+  ABAP report into an abap-cloud-gui report class with that addon's
+  converter, report2cloud: you name the class and pick the folder, and the
+  class opens beside its migration report (the TODOs, the tables and APIs to
+  replace for ABAP Cloud). A statement that has no counterpart in a browser
+  app - `CALL SCREEN`, batch input, `SUBMIT`, native SQL - is reported in
+  Problems on the line it stands on, and *Write Partial Result* writes the
+  draft with those statements marked. report2cloud is not on npm: point the
+  new setting `abap2ui5.report2cloud.path` at a checkout of
+  abap2UI5-addons/abap-cloud-gui with `npm ci` done (or set
+  `ABAP_CLOUD_GUI_HOME`); the command offers *Configure…* until you have.
 - **AI agents can operate an app on the system - once you allow it.** The
   *abap2UI5 System* MCP server gets the four app tools of the abap2UI5 MCP
   server, on your real system: `app_list` searches class names,

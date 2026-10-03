@@ -81,6 +81,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix / Run unit tests (when a `*.clas.testclasses.abap` sits beside the class) above the class definition |
 | `src/unitrunner.ts` | `vscode`-free: what "Run Unit Tests (No System)" decides - the runner (mcp-server's `scripts/ci-unit.mjs` from a checkout under `mcp.reposRoot`, else `npx -p @abap2ui5/mcp-server abap2ui5-unit`), its arguments (`src` or the class's folder, `--class`, `--home`), the shell-quoted terminal line, the banner |
+| `src/report2cloud.ts` | `vscode`-free: what "Migrate Classic Report to abap2UI5" decides - where abap-cloud-gui's report2cloud CLI is (`abap2ui5.report2cloud.path`, then `ABAP_CLOUD_GUI_HOME`, then a `cloudGui` directory under `mcp.reposRoot`; an explicit answer that does not hold is reported, never skipped), the program and class names the CLI derives, its arguments, what its exit code and output mean (0 converted, 2 refused with `file:row:col - reason` lines, 1 wrong call, a missing `npm ci`), and the range a refusal underlines |
+| `src/migratereport.ts` | The command's plumbing: report pick (explorer/editor uri, active `.prog.abap`, open dialog), class-name prompt, output folder, the overwrite question, the CLI through `childproc.run` with VS Code's own Node, refusals as diagnostics on the report, *Write Partial Result*, opening the class beside its migration report |
 | `src/unittests.ts` | The command's plumbing: the one reused "abap2UI5 unit tests" terminal (recreated when cwd or the `*_HOME` env changed), the class from the tree node / lens / active editor, the Restricted Mode refusal |
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
@@ -133,7 +135,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`,
-`unitrunner.ts`,
+`unitrunner.ts`, `report2cloud.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
@@ -292,7 +294,8 @@ identity (see Conventions).
   the extension spawns; machine scope keeps a cloned repository's
   `.vscode/settings.json` out of that decision. They are listed under
   `capabilities.untrustedWorkspaces.restrictedConfigurations`, together with
-  `systems`, `launchUrlTemplate` and `agent.enableAppTools` - six settings a
+  `systems`, `launchUrlTemplate`, `agent.enableAppTools` and `report2cloud.path` (the
+  abap-cloud-gui checkout whose report2cloud CLI the migrate command runs) - seven settings a
   cloned repository must not be able to set. The last one is machine scope
   too, for the same reason in another shape: it lets an agent act on the
   system AS THE USER, so only the user's own settings may turn it on
@@ -493,7 +496,13 @@ Facts an agent cannot see from the code but will trip over:
   `npm run repo-dirs:check` locally and a weekly regeneration through
   `bump-repo-dirs.yml`, and
   `src/test/repolayout.test.ts` holding the module to the snapshot in
-  `npm test`. **Add a directory name in mcp-server and regenerate here** — never
+  `npm test`. `cloudGui` (the abap-cloud-gui checkout report2cloud runs
+  from) is an OPTIONAL key of the generator: taken when mcp-server's main
+  carries it, absent until then, and `CLOUD_GUI_DIRS` reads an absent key as
+  an empty list - so the repos-root rung of the migrate command's resolution
+  switches on with the bump that brings the key in. Do not regenerate from a
+  mcp-server branch to get it earlier: the next weekly bump against main
+  would drop it again. **Add a directory name in mcp-server and regenerate here** — never
   by editing `repolayout.ts`. This used to be two hand-written lists with no
   gate between them, which is a rename that half-lands.
 - **The agent app tools run mcp-server's own code, vendored at a COMMIT.**

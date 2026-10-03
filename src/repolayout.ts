@@ -44,3 +44,12 @@ export const SAMPLES_STACK_DIRS: readonly string[] = DIRS.samplesStack;
  *  FINDS the server before falling back to npx, so a checkout carrying the
  *  previous name has to keep working. */
 export const SERVER_DIRS: readonly string[] = DIRS.server;
+
+/** Directory names an abap-cloud-gui checkout can carry
+ *  (github.com/abap2UI5-addons/abap-cloud-gui) - where "Migrate Classic
+ *  Report to abap2UI5" finds report2cloud under the repos root. An OPTIONAL
+ *  key of the snapshot (scripts/generate-repo-dirs.mjs): empty until
+ *  mcp-server's main carries `cloudGui`, and the setting or
+ *  ABAP_CLOUD_GUI_HOME still resolve the checkout meanwhile. */
+export const CLOUD_GUI_DIRS: readonly string[] =
+  (DIRS as Partial<Record<string, readonly string[]>>).cloudGui ?? [];

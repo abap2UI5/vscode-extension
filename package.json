@@ -47,14 +47,15 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "The view check and the MCP server can be told which program to start, the launch settings decide which host F9 and the credential prompt talk to, and one setting allows AI agents to operate apps on the system as you. Those settings are read from your user settings only, so a repository cannot point them at something else - but the render gate, the MCP server and the unit-test runner do start processes (the runner does not start at all in Restricted Mode: the tests are the repository's code), which is why this is limited rather than unconditional.",
+      "description": "The view check and the MCP server can be told which program to start, the launch settings decide which host F9 and the credential prompt talk to, and one setting allows AI agents to operate apps on the system as you. Those settings are read from your user settings only, so a repository cannot point them at something else - but the render gate, the MCP server, the unit-test runner and the report converter do start processes (the runner does not start at all in Restricted Mode: the tests are the repository's code), which is why this is limited rather than unconditional.",
       "restrictedConfigurations": [
         "abap2ui5.viewCheck.command",
         "abap2ui5.mcp.command",
         "abap2ui5.mcp.reposRoot",
         "abap2ui5.systems",
         "abap2ui5.launchUrlTemplate",
-        "abap2ui5.agent.enableAppTools"
+        "abap2ui5.agent.enableAppTools",
+        "abap2ui5.report2cloud.path"
       ]
     }
   },
@@ -246,6 +247,12 @@
         "icon": "$(beaker)"
       },
       {
+        "command": "abap2ui5.migrateReport",
+        "category": "abap2UI5",
+        "title": "Migrate Classic Report to abap2UI5",
+        "icon": "$(arrow-swap)"
+      },
+      {
         "command": "abap2ui5.fixAll",
         "category": "abap2UI5",
         "title": "Fix All View Findings in This File"
@@ -402,6 +409,10 @@
         },
         {
           "command": "abap2ui5.runUnitTests",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.migrateReport",
           "when": "!isWeb"
         },
         {
@@ -627,6 +638,18 @@
         {
           "command": "abap2ui5.convertXml",
           "group": "4_edit@3"
+        },
+        {
+          "command": "abap2ui5.migrateReport",
+          "group": "4_edit@4",
+          "when": "!isWeb && resourceFilename =~ /\\.prog\\.abap$/i"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "abap2ui5.migrateReport",
+          "group": "7_modification@9",
+          "when": "!isWeb && resourceFilename =~ /\\.prog\\.abap$/i"
         }
       ]
     },
@@ -976,6 +999,12 @@
           "default": "",
           "scope": "machine",
           "markdownDescription": "Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, `samples`, `samples-stack`, and optionally `linter`, `mcp-server`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `SAMPLES_HOME` / `SAMPLES_STACK_HOME` / `AI_VIEW_CHECK_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx.\n\nWhat is found here decides which programs are started, so it is read from your user settings only."
+        },
+        "abap2ui5.report2cloud.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose `tools/report2cloud` converter *\"abap2UI5: Migrate Classic Report to abap2UI5\"* runs - report2cloud is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose.\n\nIt decides which program is started, so it is read from your user settings only."
         }
       }
     },
