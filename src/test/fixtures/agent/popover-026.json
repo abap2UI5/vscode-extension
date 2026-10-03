@@ -1,0 +1,83 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_026",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_026",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_026"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_026",
+      "ID": "D6672D8521364D09A0BA5AAFE010C455",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:form=\"sap.ui.layout.form\"><Shell><Page title=\"abap2UI5 - Popover - Basic Example with Placement\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\"><MessageStrip text=\"Popover demo: choose a placement with the segmented button, then open a popover anchored to a control, with confirm and cancel actions.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><form:SimpleForm title=\"Popover\" editable=\"true\"><form:content><Title text=\"Input\"/><Label text=\"Link\"/><Link text=\"Documentation UI5 Popover Control\" href=\"https://sdk.openui5.org/entity/sap.m.Popover\" target=\"_blank\"/><Label text=\"placement\"/><SegmentedButton selectedKey=\"{/PLACEMENT}\"><items><SegmentedButtonItem icon=\"sap-icon://add-favorite\" key=\"Left\" text=\"Left\"/><SegmentedButtonItem icon=\"sap-icon://accept\" key=\"Top\" text=\"Top\"/><SegmentedButtonItem icon=\"sap-icon://accept\" key=\"Bottom\" text=\"Bottom\"/><SegmentedButtonItem icon=\"sap-icon://attachment\" key=\"Right\" text=\"Right\"/></items></SegmentedButton><Label text=\"popover\"/><Button press=\".eB(['POPOVER'])\" text=\"show\" id=\"TEST\"/></form:content></form:SimpleForm></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "PLACEMENT": "Left"
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "f1": "Bottom"
+    },
+    "event": "POPOVER"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "D6672D8521364D09A0BA5AAFE010C455",
+      "EVENT": "POPOVER"
+     },
+     "MODEL": {
+      "PLACEMENT": "Bottom"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_026",
+      "ID": "6DBFF5D32256440FA24BCE964BAA363C",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "POPOVER",
+         "<core:FragmentDefinition xmlns=\"sap.m\" xmlns:core=\"sap.ui.core\"><Popover title=\"Popover Title\" placement=\"Bottom\"><footer><OverflowToolbar><ToolbarSpacer/><Button press=\".eB(['BUTTON_CANCEL'])\" text=\"Cancel\"/><Button press=\".eB(['BUTTON_CONFIRM'])\" text=\"Confirm\" type=\"Emphasized\"/></OverflowToolbar></footer><Text text=\"make an input here:\"/><Input value=\"{/INPUT}\"/></Popover></core:FragmentDefinition>",
+         {
+          "openById": "TEST"
+         }
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "INPUT": "abcd",
+      "PLACEMENT": "Bottom"
+     }
+    }
+   }
+  }
+ ]
+}

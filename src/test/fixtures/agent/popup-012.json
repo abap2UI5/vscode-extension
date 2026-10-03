@@ -1,0 +1,161 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_012",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_012",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_012"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_012",
+      "ID": "CDA6003066614B3DB74D1133453BF0CA",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:form=\"sap.ui.layout.form\" xmlns:layout=\"sap.ui.layout\"><Shell><Page title=\"abap2UI5 - Popup - Ways to Open a Dialog\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\"><MessageStrip text=\"Shows different ways to open a popup - inside the same app or as a sub-app - and how the background view is kept, destroyed or re-rendered.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><layout:Grid defaultSpan=\"L7 M12 S12\"><layout:content><form:SimpleForm title=\"Popup in same App\" editable=\"true\"><form:content><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_01'])\" text=\"popup rendering, no background rendering\"/><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_02'])\" text=\"popup rendering, background destroyed and rerendering\"/><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_03'])\" text=\"popup, background unchanged (default) - close (no roundtrip)\"/><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_04'])\" text=\"popup, background unchanged (default) - close with server\"/></form:content></form:SimpleForm><form:SimpleForm title=\"Popup in new App\" editable=\"true\"><form:content><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_05'])\" text=\"popup rendering, no background\"/><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_06'])\" text=\"popup rendering, hold previous view\"/></form:content></form:SimpleForm></layout:content></layout:Grid></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "BUTTON_POPUP_03"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "CDA6003066614B3DB74D1133453BF0CA",
+      "EVENT": "BUTTON_POPUP_03"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_012",
+      "ID": "D41A1D24B3404492AE80ABBCD2917D06",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "POPUP",
+         "<core:FragmentDefinition xmlns=\"sap.m\" xmlns:core=\"sap.ui.core\"><Dialog title=\"Popup - Info\"><VBox><Text text=\"this is an information, press close to go back to the main view without a server roundtrip\"/></VBox><buttons><Button press=\".eF('CONTROL_GLOBAL', 'VIEW_SLOTS', 'destroy', 'POPUP')\" text=\"close\" type=\"Emphasized\"/></buttons></Dialog></core:FragmentDefinition>"
+        ]
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "@CLOSE_POPUP"
+   },
+   "exchange": null
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "BUTTON_POPUP_06"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "D41A1D24B3404492AE80ABBCD2917D06",
+      "EVENT": "BUTTON_POPUP_06"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_020",
+      "ID": "27821B463E79442EB2FC241439203EFE",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "POPUP",
+         "<core:FragmentDefinition xmlns=\"sap.m\" xmlns:core=\"sap.ui.core\"><Dialog title=\"abap2UI5 - Popup to decide\"><MessageStrip text=\"A reusable decision popup opened as a sub-app: its text, button labels and events are passed in by the caller, and the pressed event is sent back.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><VBox><Text text=\"(new app) this is a popup to decide, the text is sent from the previous app and the answer will be sent back\"/></VBox><buttons><Button press=\".eB(['POPUP_DECIDE_CANCEL'])\" text=\"Cancel\"/><Button press=\".eB(['POPUP_DECIDE_CONTINUE'])\" text=\"Continue\" type=\"Emphasized\"/></buttons></Dialog></core:FragmentDefinition>"
+        ],
+        [
+         "ROUTER",
+         "sync",
+         {
+          "setNavRouting": "DEFAULT"
+         }
+        ]
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "POPUP_DECIDE_CONTINUE"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "27821B463E79442EB2FC241439203EFE",
+      "EVENT": "POPUP_DECIDE_CONTINUE"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_012",
+      "ID": "A9B128E455F147FE8DE55FEE111C9174",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_CUSTOM": [
+        [
+         "MESSAGE_TOAST",
+         "show",
+         "POPUP_DECIDE_CONTINUE pressed"
+        ]
+       ],
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:form=\"sap.ui.layout.form\" xmlns:layout=\"sap.ui.layout\"><Shell><Page title=\"abap2UI5 - Popup - Ways to Open a Dialog\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\"><MessageStrip text=\"Shows different ways to open a popup - inside the same app or as a sub-app - and how the background view is kept, destroyed or re-rendered.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><layout:Grid defaultSpan=\"L7 M12 S12\"><layout:content><form:SimpleForm title=\"Popup in same App\" editable=\"true\"><form:content><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_01'])\" text=\"popup rendering, no background rendering\"/><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_02'])\" text=\"popup rendering, background destroyed and rerendering\"/><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_03'])\" text=\"popup, background unchanged (default) - close (no roundtrip)\"/><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_04'])\" text=\"popup, background unchanged (default) - close with server\"/></form:content></form:SimpleForm><form:SimpleForm title=\"Popup in new App\" editable=\"true\"><form:content><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_05'])\" text=\"popup rendering, no background\"/><Label text=\"Demo\"/><Button press=\".eB(['BUTTON_POPUP_06'])\" text=\"popup rendering, hold previous view\"/></form:content></form:SimpleForm></layout:content></layout:Grid></Page></Shell></mvc:View>",
+         {
+          "appInstance": "9F55F15272CA49BCB85037DDD1A950B2",
+          "navBack": true
+         }
+        ],
+        [
+         "ROUTER",
+         "sync",
+         {
+          "setNavRouting": "DEFAULT"
+         }
+        ]
+       ]
+      }
+     }
+    }
+   }
+  }
+ ]
+}

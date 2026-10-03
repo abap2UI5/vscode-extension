@@ -47,13 +47,14 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "The view check and the MCP server can be told which program to start, and the launch settings decide which host F9 and the credential prompt talk to. Those settings are read from your user settings only, so a repository cannot point them at something else - but the render gate, the MCP server and the unit-test runner do start processes (the runner does not start at all in Restricted Mode: the tests are the repository's code), which is why this is limited rather than unconditional.",
+      "description": "The view check and the MCP server can be told which program to start, the launch settings decide which host F9 and the credential prompt talk to, and one setting allows AI agents to operate apps on the system as you. Those settings are read from your user settings only, so a repository cannot point them at something else - but the render gate, the MCP server and the unit-test runner do start processes (the runner does not start at all in Restricted Mode: the tests are the repository's code), which is why this is limited rather than unconditional.",
       "restrictedConfigurations": [
         "abap2ui5.viewCheck.command",
         "abap2ui5.mcp.command",
         "abap2ui5.mcp.reposRoot",
         "abap2ui5.systems",
-        "abap2ui5.launchUrlTemplate"
+        "abap2ui5.launchUrlTemplate",
+        "abap2ui5.agent.enableAppTools"
       ]
     }
   },
@@ -956,7 +957,13 @@
         "abap2ui5.mcp.system": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Also offer the **abap2UI5 System** MCP server: real-system tools hosted by the extension itself - list the configured systems, search classes on the system (ADT quick search) and run an app through the auth proxy with a headless screenshot. Uses the same credentials the preview stores; the run tool needs the render gate's Chromium."
+          "markdownDescription": "Also offer the **abap2UI5 System** MCP server: real-system tools hosted by the extension itself - list the configured systems, search classes on the system (ADT quick search), run an app through the auth proxy with a headless screenshot, and - only with `#abap2ui5.agent.enableAppTools#` - operate an app through its JSON protocol. Uses the same credentials the preview stores; the run tool needs the render gate's Chromium."
+        },
+        "abap2ui5.agent.enableAppTools": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Allow the **abap2UI5 System** MCP server's app tools (`app_list`, `app_start`, `app_describe`, `app_act`) to operate abap2UI5 apps on the **real** active system: an AI agent fills fields and fires events through the abap2UI5 JSON protocol, **as the configured user** - an event runs for real and may save, post or delete data. Off by default; while it is off the tools stay listed and answer with how to allow them, sending nothing. User settings only: a workspace cannot turn it on."
         },
         "abap2ui5.mcp.command": {
           "type": "string",
@@ -1099,6 +1106,8 @@
     "app-template:check": "node scripts/generate-app-template.mjs --check",
     "repo-dirs": "node scripts/generate-repo-dirs.mjs",
     "repo-dirs:check": "node scripts/generate-repo-dirs.mjs --check",
+    "agent-vendor": "node scripts/vendor-agent.mjs",
+    "agent-vendor:check": "node scripts/vendor-agent.mjs --check",
     "settings": "node scripts/generate-settings.mjs",
     "settings:check": "node scripts/generate-settings.mjs --check",
     "commands": "node scripts/generate-commands.mjs",

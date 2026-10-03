@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **AI agents can operate an app on the system - once you allow it.** The
+  *abap2UI5 System* MCP server gets the four app tools of the abap2UI5 MCP
+  server, on your real system: `app_list` searches class names,
+  `app_start` starts an app and answers with an *agent snapshot* (its fields
+  and values, its actions, tables and messages), `app_act` fills fields and
+  fires an event, `app_describe` repeats the last snapshot. An agent works by
+  model path, label and event name through the abap2UI5 JSON protocol - no
+  browser, no screenshot - and anything not on the screen is refused with
+  what is. They run through the auth proxy on the active system, **as you**:
+  an event may save, post or delete data. That is why they do nothing until
+  you set `abap2ui5.agent.enableAppTools` in your User settings (a workspace
+  cannot); until then they tell the agent how to switch them on.
+
 ## 0.30.2
 
 The bundled linter moves to v0.8.5, and is now taken from its npm release

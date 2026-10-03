@@ -1,0 +1,324 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_009",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_009",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_009"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_009",
+      "ID": "CA4F2D4A3F8A4BEA933797076716AFCA",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:core=\"sap.ui.core\" xmlns:form=\"sap.ui.layout.form\" xmlns:layout=\"sap.ui.layout\"><Shell><Page title=\"abap2UI5 - Popup - Value Help: Suggestions and F4 Dialog\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\"><MessageStrip text=\"Four value-help patterns: inline suggestions, numeric-only input, a value-help popup with a selectable table, and a custom popup with a city search. Fill the fields, then Clear resets the view and Send simulates a submit.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><layout:Grid defaultSpan=\"L7 M7 S7\"><layout:content><form:SimpleForm title=\"Input with Value Help\" editable=\"true\"><form:content><Label text=\"Input with suggestion items\"/><Input placeholder=\"fill in your favorite colour\" value=\"{/S_SCREEN/COLOR_01}\" suggestionItems=\"{/T_SUGGESTION}\" showSuggestion=\"true\"><suggestionItems><core:ListItem text=\"{VALUE}\" additionalText=\"{DESCR}\"/></suggestionItems></Input><Label text=\"Input only numbers allowed\"/><Input placeholder=\"quantity\" type=\"Number\" value=\"{/S_SCREEN/QUANTITY}\"/><Label text=\"Input with value\"/><Input placeholder=\"fill in your favorite colour\" value=\"{/S_SCREEN/COLOR_02}\" valueHelpRequest=\".eB(['POPUP_TABLE_VALUE'])\" showValueHelp=\"true\"/><Label text=\"Custom value Popup\"/><Input placeholder=\"name\" value=\"{/S_SCREEN/NAME}\" valueHelpRequest=\".eB(['POPUP_TABLE_VALUE_CUSTOM'])\" showValueHelp=\"true\"/><Input placeholder=\"lastname\" value=\"{/S_SCREEN/LASTNAME}\" valueHelpRequest=\".eB(['POPUP_TABLE_VALUE_CUSTOM'])\" showValueHelp=\"true\"/></form:content></form:SimpleForm></layout:content></layout:Grid><footer><OverflowToolbar><ToolbarSpacer/><Button press=\".eB(['BUTTON_CLEAR'])\" text=\"Clear\" icon=\"sap-icon://delete\" type=\"Reject\"/><Button press=\".eB(['BUTTON_SEND'])\" text=\"Send to Server\" icon=\"sap-icon://paper-plane\" type=\"Accept\"/></OverflowToolbar></footer></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "S_SCREEN": {
+       "COLOR_01": "",
+       "COLOR_02": "",
+       "LASTNAME": "",
+       "NAME": "",
+       "QUANTITY": ""
+      },
+      "T_SUGGESTION": [
+       {
+        "DESCR": "this is the color Green",
+        "SELKZ": false,
+        "VALUE": "GREEN"
+       },
+       {
+        "DESCR": "this is the color Blue",
+        "SELKZ": false,
+        "VALUE": "BLUE"
+       },
+       {
+        "DESCR": "this is the color Black",
+        "SELKZ": false,
+        "VALUE": "BLACK"
+       },
+       {
+        "DESCR": "this is the color Grey",
+        "SELKZ": false,
+        "VALUE": "GREY"
+       },
+       {
+        "DESCR": "this is the color Blue2",
+        "SELKZ": false,
+        "VALUE": "BLUE2"
+       },
+       {
+        "DESCR": "this is the color Blue3",
+        "SELKZ": false,
+        "VALUE": "BLUE3"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "f4": "Smith",
+     "f2": "3"
+    },
+    "event": "POPUP_TABLE_VALUE"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "CA4F2D4A3F8A4BEA933797076716AFCA",
+      "EVENT": "POPUP_TABLE_VALUE"
+     },
+     "MODEL": {
+      "S_SCREEN": {
+       "COLOR_01": "",
+       "COLOR_02": "",
+       "LASTNAME": "",
+       "NAME": "Smith",
+       "QUANTITY": "3"
+      }
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_009",
+      "ID": "BB1198D42E6942EFB4A3351C6965E85F",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "POPUP",
+         "<core:FragmentDefinition xmlns=\"sap.m\" xmlns:core=\"sap.ui.core\"><Dialog title=\"abap2UI5 - Value Help\"><Table items=\"{/T_SUGGESTION_SEL}\" mode=\"SingleSelectLeft\"><columns><Column width=\"20rem\"><Text text=\"Color\"/></Column><Column><Text text=\"Description\"/></Column></columns><items><ColumnListItem selected=\"{SELKZ}\"><cells><Text text=\"{VALUE}\"/><Text text=\"{DESCR}\"/></cells></ColumnListItem></items></Table><buttons><Button press=\".eB(['POPUP_TABLE_VALUE_CONTINUE'])\" text=\"continue\" type=\"Emphasized\"/></buttons></Dialog></core:FragmentDefinition>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "S_SCREEN": {
+       "COLOR_01": "",
+       "COLOR_02": "",
+       "LASTNAME": "",
+       "NAME": "Smith",
+       "QUANTITY": "3"
+      },
+      "T_SUGGESTION": [
+       {
+        "DESCR": "this is the color Green",
+        "SELKZ": false,
+        "VALUE": "GREEN"
+       },
+       {
+        "DESCR": "this is the color Blue",
+        "SELKZ": false,
+        "VALUE": "BLUE"
+       },
+       {
+        "DESCR": "this is the color Black",
+        "SELKZ": false,
+        "VALUE": "BLACK"
+       },
+       {
+        "DESCR": "this is the color Grey",
+        "SELKZ": false,
+        "VALUE": "GREY"
+       },
+       {
+        "DESCR": "this is the color Blue2",
+        "SELKZ": false,
+        "VALUE": "BLUE2"
+       },
+       {
+        "DESCR": "this is the color Blue3",
+        "SELKZ": false,
+        "VALUE": "BLUE3"
+       }
+      ],
+      "T_SUGGESTION_SEL": [
+       {
+        "DESCR": "this is the color Green",
+        "SELKZ": false,
+        "VALUE": "GREEN"
+       },
+       {
+        "DESCR": "this is the color Blue",
+        "SELKZ": false,
+        "VALUE": "BLUE"
+       },
+       {
+        "DESCR": "this is the color Black",
+        "SELKZ": false,
+        "VALUE": "BLACK"
+       },
+       {
+        "DESCR": "this is the color Grey",
+        "SELKZ": false,
+        "VALUE": "GREY"
+       },
+       {
+        "DESCR": "this is the color Blue2",
+        "SELKZ": false,
+        "VALUE": "BLUE2"
+       },
+       {
+        "DESCR": "this is the color Blue3",
+        "SELKZ": false,
+        "VALUE": "BLUE3"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "/T_SUGGESTION_SEL/2/SELKZ": true
+    },
+    "event": "POPUP_TABLE_VALUE_CONTINUE"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "BB1198D42E6942EFB4A3351C6965E85F",
+      "EVENT": "POPUP_TABLE_VALUE_CONTINUE"
+     },
+     "MODEL": {
+      "T_SUGGESTION_SEL": {
+       "__delta": {
+        "2": {
+         "SELKZ": true
+        }
+       }
+      }
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_009",
+      "ID": "5FD8DC5383CB40EE8B98C3C170211192",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_CUSTOM": [
+        [
+         "MESSAGE_TOAST",
+         "show",
+         "value selected"
+        ]
+       ],
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "destroy",
+         "POPUP"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "S_SCREEN": {
+       "COLOR_01": "",
+       "COLOR_02": "BLACK",
+       "LASTNAME": "",
+       "NAME": "Smith",
+       "QUANTITY": "3"
+      },
+      "T_SUGGESTION": [
+       {
+        "DESCR": "this is the color Green",
+        "SELKZ": false,
+        "VALUE": "GREEN"
+       },
+       {
+        "DESCR": "this is the color Blue",
+        "SELKZ": false,
+        "VALUE": "BLUE"
+       },
+       {
+        "DESCR": "this is the color Black",
+        "SELKZ": false,
+        "VALUE": "BLACK"
+       },
+       {
+        "DESCR": "this is the color Grey",
+        "SELKZ": false,
+        "VALUE": "GREY"
+       },
+       {
+        "DESCR": "this is the color Blue2",
+        "SELKZ": false,
+        "VALUE": "BLUE2"
+       },
+       {
+        "DESCR": "this is the color Blue3",
+        "SELKZ": false,
+        "VALUE": "BLUE3"
+       }
+      ],
+      "T_SUGGESTION_SEL": [
+       {
+        "DESCR": "this is the color Black",
+        "SELKZ": true,
+        "VALUE": "BLACK"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "BUTTON_SEND"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "5FD8DC5383CB40EE8B98C3C170211192",
+      "EVENT": "BUTTON_SEND"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_009",
+      "ID": "47ACA007486D4679918BCB3AAA0BFFE6",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_CUSTOM": [
+        [
+         "MESSAGE_BOX",
+         "show",
+         "success - values sent to the server",
+         {
+          "title": "Information"
+         }
+        ]
+       ]
+      }
+     }
+    }
+   }
+  }
+ ]
+}

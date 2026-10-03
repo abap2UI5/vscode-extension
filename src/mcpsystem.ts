@@ -10,7 +10,13 @@ import {
   McpTool,
   textResult,
 } from "./mcprpc";
-import { searchClasses } from "./appsearch";
+import { searchClassRefs, searchClasses } from "./appsearch";
+import {
+  createAgentAppTools,
+  ENABLE_APP_TOOLS_KEY,
+  type AgentSystem,
+} from "./agentapps";
+import { snapshot } from "./snapshot";
 import { isLoopbackHost, type SapProxy } from "./proxy";
 import { runGate, VIEW_XML_RE } from "./gate";
 import { withParams } from "./urls";
@@ -24,7 +30,9 @@ import { CONFIG_SECTION } from "./settings";
  * other half: it lives inside the extension, so it holds what only the
  * extension has - the configured systems, the stored credentials and the
  * auth proxy - and lets an agent search classes on the system and run an
- * app against it, screenshot included.
+ * app against it, screenshot included, or operate it semantically through
+ * the abap2UI5 JSON protocol (the app_* tools, agentapps.ts - gated by
+ * `abap2ui5.agent.enableAppTools`).
  *
  * Hosted over plain streamable HTTP on 127.0.0.1 with a random path token,
  * and registered through the same MCP definition provider as it.
@@ -50,6 +58,9 @@ export interface SystemMcpDeps {
   /** The most recent proxy traffic-log lines, oldest first - when the host
    *  keeps them. Without it the `get_traffic` tool is not offered. */
   recentTraffic?(): string[];
+  /** The active system with its EXTERNAL launch URL per class - when the
+   *  host has one. Without it the app_* tools are not offered. */
+  activeSystem?(): AgentSystem | undefined;
   log: (m: string) => void;
 }
 
@@ -345,6 +356,32 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
         );
       },
     });
+  }
+  if (deps.activeSystem) {
+    const activeSystem = deps.activeSystem.bind(deps);
+    tools.push(
+      ...createAgentAppTools({
+        // read per call: turning the setting off stops the next call, with
+        // no server restart (the tools stay listed - see DISABLED_MESSAGE)
+        enabled: () =>
+          vscode.workspace
+            .getConfiguration(CONFIG_SECTION)
+            .get<boolean>(ENABLE_APP_TOOLS_KEY, false) === true,
+        activeSystem,
+        systemNames: () => deps.listSystems().systems.map((s) => s.name),
+        connect,
+        // only while the proxy forwards to THAT system: after a system switch
+        // without a connect it still points at the previous one
+        proxyBase: (origin) =>
+          deps.proxy.isRunning && deps.proxy.systemOrigin === origin
+            ? deps.proxy.origin
+            : undefined,
+        searchClasses: (query, sapClient) =>
+          searchClassRefs(deps.proxy, query, sapClient),
+        metadata: snapshot,
+        log: deps.log,
+      })
+    );
   }
   return tools;
 }

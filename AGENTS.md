@@ -84,7 +84,10 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/unittests.ts` | The command's plumbing: the one reused "abap2UI5 unit tests" terminal (recreated when cwd or the `*_HOME` env changed), the class from the tree node / lens / active editor, the Restricted Mode refusal |
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
-| `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`) |
+| `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`, and the app tools below) |
+| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the transport through the auth proxy (endpoint, start-location rewrite, CSRF handshake, `sap-contextid` per draft, cookies), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client |
+| `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
+| `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
 | `src/screenshot.ts` | "Take App Screenshot": finds the render gate's Chromium and renders the proxied URL headless |
 | `src/colors.ts` | Colour spans for colour-typed property values (the swatch/picker provider's logic) |
@@ -125,7 +128,7 @@ not committed.
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
-`catalogue.ts`,
+`catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
 `abapscan.ts`, `appindex.ts`, `settings.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
@@ -289,8 +292,11 @@ identity (see Conventions).
   the extension spawns; machine scope keeps a cloned repository's
   `.vscode/settings.json` out of that decision. They are listed under
   `capabilities.untrustedWorkspaces.restrictedConfigurations`, together with
-  `systems` and `launchUrlTemplate` - five settings a cloned repository must
-  not be able to set; `manifest.test.ts` pins the list.
+  `systems`, `launchUrlTemplate` and `agent.enableAppTools` - six settings a
+  cloned repository must not be able to set. The last one is machine scope
+  too, for the same reason in another shape: it lets an agent act on the
+  system AS THE USER, so only the user's own settings may turn it on
+  (`agentapps.test.ts` pins its scope, default and restriction).
 - **The linter owns the rules, this extension owns the presentation.**
   Severity, wording, the `fixes` on a finding, the `rules` block and the
   `abap2ui5lint-disable…` directives all live in `@abap2ui5/linter` and are
@@ -490,6 +496,34 @@ Facts an agent cannot see from the code but will trip over:
   `npm test`. **Add a directory name in mcp-server and regenerate here** — never
   by editing `repolayout.ts`. This used to be two hand-written lists with no
   gate between them, which is a rename that half-lands.
+- **The agent app tools run mcp-server's own code, vendored at a COMMIT.**
+  `app_list`/`app_start`/`app_describe`/`app_act` exist in mcp-server against
+  its transpiled backend; the snapshot they answer with ("agent snapshot v1",
+  mcp-server's `docs/agent-snapshot.md`) is a contract three implementations
+  share. So the snapshot builder, its parsers and the protocol client with
+  its validation are mcp-server's `lib/snapshot.mjs`, `lib/viewxml.mjs` and
+  `lib/appclient.mjs`, copied by `scripts/vendor-agent.mjs` into
+  `src/vendor/agent/` - as `.js` (a `.mjs` import from this CommonJS
+  TypeScript package is refused, TS1479), the sibling imports rewritten to
+  match, a header naming repository, path and commit, and `source.json`
+  recording the commit and every file's sha256. Unlike the `src/data/`
+  snapshots this follows a recorded commit, not a branch, and has no weekly
+  bump: it is code, and a new version has to pass this repository's tests
+  first. Two gates: `src/test/agentvendor.test.ts` (in `npm test`, offline)
+  fails on a hand edit of a copy and replays mcp-server's recorded sessions
+  through the vendored client; `npm run agent-vendor:check -- <checkout>`
+  fails when the copies differ from the recorded commit. **Fix the snapshot
+  in mcp-server and re-vendor** (`npm run agent-vendor -- <checkout> --ref
+  <commit>`), never in the copy - and update the hand-written `.d.ts` beside
+  it when an export changes shape. What is the extension's own lives in
+  `src/agentapps.ts`: the transport through the auth proxy and the system
+  rules around the client. The vendored client's local-backend bits are
+  neutralised there, not patched: `generation` is not used (drafts live on
+  the system), the start request's ORIGIN/PATHNAME/SEARCH are set to the
+  system's endpoint in the transport (the client derives them from its
+  `baseUrl`, and the proxy url with its token must never reach the backend,
+  which stores them), and the one hint naming mcp-server's `backend` tool is
+  reworded (`systemMessage`).
 - **The four weekly bump workflows share one implementation.**
   `.github/workflows/bump-snapshot.yml` holds the shape (regenerate → diff →
   gate → open a pull request) and is called through `workflow_call`; the four

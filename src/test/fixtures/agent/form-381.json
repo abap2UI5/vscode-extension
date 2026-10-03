@@ -1,0 +1,147 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_381",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_381",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_381"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_381",
+      "ID": "27AE5ED0967341D6AD1D4677521E89E6",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:core=\"sap.ui.core\" xmlns:form=\"sap.ui.layout.form\"><Shell><Page title=\"abap2UI5 - Message - MessageToast via the Global Object\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\"><MessageStrip text=\"Two ways to a toast, and this is the UI5 one: follow_up_action( cs_event-control_global ) calls sap.m.MessageToast.show( ) itself, and its last argument is the option object of that API 1:1 - position, collision, animation, autoClose. Configure them below and watch the object travel. The other way is client-&gt;message_toast_display( ), which carries no UI5 option at all: it carries what an ABAP app decides, and Z2UI5_CL_SMP_APP_502 shows that side for the message box.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><core:HTML content=\"&lt;style&gt;.myToast \\{ background-color: #0a6ed1; color: #fff; \\}&lt;/style&gt;&lt;div id=&quot;toastAnchor&quot; class=&quot;sapUiSmallMargin&quot; style=&quot;border: 2px dashed #0a6ed1; padding: 0.5rem; width: 14rem;&quot;&gt;the anchor box (id toastAnchor)&lt;/div&gt;\"/><headerContent><Link text=\"UI5 Demo Kit\" target=\"_blank\" href=\"https://sdk.openui5.org/entity/sap.m.MessageToast/sample/sap.m.sample.MessageToast\"/></headerContent><Panel headerText=\"Message Toast Configuration\"><form:SimpleForm title=\"Settings\" editable=\"true\"><form:content><Label text=\"Message\"/><Input value=\"{/MESSAGE}\"/><Label text=\"Duration (ms)\"/><Input type=\"Number\" value=\"{/DURATION}\"/><Label text=\"Width\"/><Input value=\"{/WIDTH}\"/><Label text=\"my\"/><Select selectedKey=\"{/MY}\"><core:Item key=\"begin top\" text=\"begin top\"/><core:Item key=\"begin center\" text=\"begin center\"/><core:Item key=\"begin bottom\" text=\"begin bottom\"/><core:Item key=\"left top\" text=\"left top\"/><core:Item key=\"left center\" text=\"left center\"/><core:Item key=\"left bottom\" text=\"left bottom\"/><core:Item key=\"center top\" text=\"center top\"/><core:Item key=\"center center\" text=\"center center\"/><core:Item key=\"center bottom\" text=\"center bottom\"/><core:Item key=\"right top\" text=\"right top\"/><core:Item key=\"right center\" text=\"right center\"/><core:Item key=\"right bottom\" text=\"right bottom\"/><core:Item key=\"end top\" text=\"end top\"/><core:Item key=\"end center\" text=\"end center\"/><core:Item key=\"end bottom\" text=\"end bottom\"/></Select><Label text=\"at\"/><Select selectedKey=\"{/AT}\"><core:Item key=\"begin top\" text=\"begin top\"/><core:Item key=\"begin center\" text=\"begin center\"/><core:Item key=\"begin bottom\" text=\"begin bottom\"/><core:Item key=\"left top\" text=\"left top\"/><core:Item key=\"left center\" text=\"left center\"/><core:Item key=\"left bottom\" text=\"left bottom\"/><core:Item key=\"center top\" text=\"center top\"/><core:Item key=\"center center\" text=\"center center\"/><core:Item key=\"center bottom\" text=\"center bottom\"/><core:Item key=\"right top\" text=\"right top\"/><core:Item key=\"right center\" text=\"right center\"/><core:Item key=\"right bottom\" text=\"right bottom\"/><core:Item key=\"end top\" text=\"end top\"/><core:Item key=\"end center\" text=\"end center\"/><core:Item key=\"end bottom\" text=\"end bottom\"/></Select><Label text=\"of - dock to the anchor box instead of the window\"/><CheckBox selected=\"{/DOCK_TO_ANCHOR}\"/><Label text=\"offset\"/><Input value=\"{/OFFSET}\"/><Label text=\"collision\"/><Select selectedKey=\"{/COLLISION}\"><core:Item key=\"fit fit\" text=\"fit fit - shift into the viewport\"/><core:Item key=\"flip flip\" text=\"flip flip - flip to the opposite side\"/><core:Item key=\"flipfit flipfit\" text=\"flipfit flipfit - flip first, then shift\"/><core:Item key=\"none none\" text=\"none none - stay where told\"/></Select><Label text=\"animationTimingFunction\"/><Select selectedKey=\"{/ANIMATION_TIMING}\"><core:Item key=\"ease\" text=\"ease\"/><core:Item key=\"linear\" text=\"linear\"/><core:Item key=\"ease-in\" text=\"ease-in\"/><core:Item key=\"ease-out\" text=\"ease-out\"/><core:Item key=\"ease-in-out\" text=\"ease-in-out\"/></Select><Label text=\"animationDuration (ms)\"/><Input type=\"Number\" value=\"{/ANIMATION_DURATION}\"/><Label text=\"autoClose\"/><CheckBox selected=\"{/AUTOCLOSE}\"/><Label text=\"closeOnBrowserNavigation\"/><CheckBox selected=\"{/CLOSE_ON_NAVIGATION}\"/><Label text=\"onclose - report the closing as a backend event\"/><CheckBox selected=\"{/NOTIFY_CLOSE}\"/><Label text=\"class - a CSS class for the toast (myToast is styled above)\"/><Input value=\"{/CSS_CLASS}\"/><Button press=\".eB(['SHOW'])\" text=\"Show Message Toast\" type=\"Emphasized\"/><Label text=\"the onclose event\"/><Text text=\"{/CLOSED_TEXT}\"/><Label text=\"wired, no round-trip - the text is composed on the client\"/><Button text=\"Compose on the client\" press=\".eF('CONTROL_GLOBAL', 'MESSAGE_TOAST', 'show', '{0} - composed on the client, the backend never saw this press', ${$source&gt;/text})\"/></form:content></form:SimpleForm></Panel></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "ANIMATION_DURATION": "1000",
+      "ANIMATION_TIMING": "ease",
+      "AT": "center bottom",
+      "AUTOCLOSE": true,
+      "CLOSED_TEXT": "no toast closed yet",
+      "CLOSE_ON_NAVIGATION": true,
+      "COLLISION": "fit fit",
+      "CSS_CLASS": "myToast",
+      "DOCK_TO_ANCHOR": false,
+      "DURATION": "3000",
+      "MESSAGE": "This is a message toast.",
+      "MY": "center bottom",
+      "NOTIFY_CLOSE": true,
+      "OFFSET": "0 0",
+      "WIDTH": "15em"
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "f1": "hello agent",
+     "f6": true,
+     "f4": "left top"
+    },
+    "event": "SHOW"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "27AE5ED0967341D6AD1D4677521E89E6",
+      "EVENT": "SHOW"
+     },
+     "MODEL": {
+      "MESSAGE": "hello agent",
+      "DOCK_TO_ANCHOR": true,
+      "MY": "left top"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_381",
+      "ID": "0240CFF824C44B48A95B0CED6D2B14AE",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_CUSTOM": [
+        [
+         "CONTROL_GLOBAL",
+         "MESSAGE_TOAST",
+         "show",
+         "hello agent",
+         {
+          "animationDuration": 1000,
+          "animationTimingFunction": "ease",
+          "at": "center bottom",
+          "autoClose": true,
+          "class": "myToast",
+          "closeOnBrowserNavigation": true,
+          "collision": "fit fit",
+          "duration": 3000,
+          "my": "left top",
+          "of": "#toastAnchor",
+          "offset": "0 0",
+          "onClose": "TOAST_CLOSED",
+          "width": "15em"
+         }
+        ]
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "TOAST_CLOSED"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "0240CFF824C44B48A95B0CED6D2B14AE",
+      "EVENT": "TOAST_CLOSED"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_381",
+      "ID": "16697A9D5682433CB2D42F4ACE2992F4",
+      "PROTOCOL": 2
+     },
+     "MODEL": {
+      "ANIMATION_DURATION": "1000",
+      "ANIMATION_TIMING": "ease",
+      "AT": "center bottom",
+      "AUTOCLOSE": true,
+      "CLOSED_TEXT": "toast closed 1 time(s) - the onclose event reached the backend",
+      "CLOSE_ON_NAVIGATION": true,
+      "COLLISION": "fit fit",
+      "CSS_CLASS": "myToast",
+      "DOCK_TO_ANCHOR": true,
+      "DURATION": "3000",
+      "MESSAGE": "hello agent",
+      "MY": "left top",
+      "NOTIFY_CLOSE": true,
+      "OFFSET": "0 0",
+      "WIDTH": "15em"
+     }
+    }
+   }
+  }
+ ]
+}

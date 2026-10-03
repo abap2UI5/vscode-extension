@@ -1,0 +1,104 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_537",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_537",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_537"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_537",
+      "ID": "B5180F93D1B24E9699405AE18B015381",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:core=\"sap.ui.core\" core:require=\"{Formatter: 'z2ui5/model/formatter'}\"><Shell><Page title=\"abap2UI5 - Event - Expressions, Formatters and Literals in t_arg\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\"><MessageStrip text=\"An argument that starts with $ or \\{ is evaluated in the browser when the event fires, with the full expression binding syntax: a field of the pressed row, arithmetic and comparisons over it, a formatter, an object literal. Only the result travels to ABAP.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><Link text=\"UI5 documentation: Handling Events in XML Views\" target=\"_blank\" href=\"https://sdk.openui5.org/topic/b0fb4de7364f4bcbb053a99aa645affe\" class=\"sapUiSmallMarginBegin\"/><Table headerText=\"Each row's button sends four values computed from that row\" items=\"{/T_PRODUCTS}\"><columns><Column><Text text=\"Product\"/></Column><Column><Text text=\"Category\"/></Column><Column><Text text=\"Quantity\"/></Column><Column><Text text=\"Delivery\"/></Column><Column><Text text=\"Event\"/></Column></columns><items><ColumnListItem><Text text=\"{PRODUCT}\"/><Text text=\"{CATEGORY}\"/><Text text=\"{QUANTITY}\"/><Text text=\"{DELIVERY}\"/><Button text=\"Send Row\" press=\".eB(['ROW'], ${PRODUCT}, ${QUANTITY} * 10, ${CATEGORY} === 'Laptop', ${path: 'DELIVERY', formatter: 'Formatter.DateAbapDateToDateObject'}.toDateString())\"/></ColumnListItem></items></Table><Button text=\"Send an Object Literal\" class=\"sapUiSmallMargin\" press=\".eB(['LITERAL'], { product: 'Notebook', quantity: 3, express: true, tags: ['new', 'sale'] })\"/></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "T_PRODUCTS": [
+       {
+        "CATEGORY": "Laptop",
+        "DELIVERY": "20260720",
+        "PRODUCT": "Notebook Basic 15",
+        "QUANTITY": 3
+       },
+       {
+        "CATEGORY": "Monitor",
+        "DELIVERY": "20260805",
+        "PRODUCT": "Flat Basic",
+        "QUANTITY": 12
+       },
+       {
+        "CATEGORY": "Accessories",
+        "DELIVERY": "20261102",
+        "PRODUCT": "Ergo Mousepad",
+        "QUANTITY": 40
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "ROW",
+    "row": 1,
+    "args": [
+     null,
+     120,
+     false,
+     "Wed Aug 05 2026"
+    ]
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "B5180F93D1B24E9699405AE18B015381",
+      "EVENT": "ROW",
+      "T_EVENT_ARG": [
+       "Flat Basic",
+       120,
+       false,
+       "Wed Aug 05 2026"
+      ]
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_537",
+      "ID": "C65A89B556D34304B9699E51F8BA2CA6",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_CUSTOM": [
+        [
+         "MESSAGE_BOX",
+         "show",
+         "Product: Flat Basic\nQuantity * 10: 120\nIs a laptop: no\nDelivery (formatted in the browser): Wed Aug 05 2026",
+         {
+          "title": "Information"
+         }
+        ]
+       ]
+      }
+     }
+    }
+   }
+  }
+ ]
+}

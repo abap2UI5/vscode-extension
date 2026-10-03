@@ -1,0 +1,56 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_467",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_467",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_467"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_467",
+      "ID": "CFD1509889C741D285AA0CE7F5723821",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:z2ui5=\"z2ui5.cc\"><Shell><Page title=\"abap2UI5 - Message - Message Model and MessageManager\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\"><MessageStrip text=\"Both sources of the central message&gt; model in one page: the Name messages are AUTHORED BY THE APP (pushed from an ABAP table by the invisible z2ui5.cc.MessageManager companion - the Error targets the Name field and colours it), while typing letters into the Amount field collects the failed Integer validation AUTOMATICALLY - no app code, no roundtrip. Both render in the list below.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><z2ui5:MessageManager items=\"{/T_MESSAGES}\"/><VBox class=\"sapUiSmallMargin\"><Label text=\"Name (message authored by the app)\"/><Input value=\"{/NAME}\"/><Label text=\"Amount (integer only - validation collected automatically)\"/><Input value=\"{ path: '/AMOUNT', type: 'sap.ui.model.type.Integer' }\" width=\"12rem\"/></VBox><List headerText=\"Collected messages (message&gt; model)\" items=\"{message&gt;/}\" class=\"sapUiSmallMargin\" noDataText=\"no messages\"><StandardListItem title=\"{message&gt;message}\" description=\"{message&gt;additionalText}\" info=\"{message&gt;type}\"/></List></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "AMOUNT": 42,
+      "NAME": "",
+      "T_MESSAGES": [
+       {
+        "ADDITIONALTEXT": "Name",
+        "DESCRIPTION": "",
+        "MESSAGE": "Please enter a valid name",
+        "TARGET": "/NAME",
+        "TYPE": "Error"
+       },
+       {
+        "ADDITIONALTEXT": "Autosave",
+        "DESCRIPTION": "",
+        "MESSAGE": "Draft saved automatically",
+        "TARGET": "",
+        "TYPE": "Information"
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

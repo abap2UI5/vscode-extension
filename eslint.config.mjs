@@ -32,6 +32,10 @@ export default tseslint.config(
       // see several candidate tsconfig roots and refuse to parse a single
       // file - `npm run lint` then reports every source as a parse error.
       ".claude/worktrees/**",
+      // Vendored from abap2UI5/mcp-server by scripts/vendor-agent.mjs and
+      // linted there; a finding here could only be fixed by editing a copy
+      // that src/test/agentvendor.test.ts holds byte-identical to its source.
+      "src/vendor/**/*.js",
     ],
   },
   ...tseslint.configs.recommended.map((config) => ({

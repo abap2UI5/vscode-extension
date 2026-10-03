@@ -1,0 +1,81 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_382",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_382",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_382"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_382",
+      "ID": "590921F2935B4636B440717BACD911FE",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:form=\"sap.ui.layout.form\"><Shell><Page title=\"abap2UI5 - Message - MessageBox, Types and Custom Actions\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\"><MessageStrip text=\"This sample demonstrates MessageBox: open confirm, information, success, warning, error, or a custom dialog with your own actions.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><headerContent><Link text=\"UI5 Demo Kit\" target=\"_blank\" href=\"https://sdk.openui5.org/entity/sap.m.MessageBox/sample/sap.m.sample.MessageBox\"/></headerContent><Panel headerText=\"Message Box Configuration\"><form:SimpleForm title=\"Settings\" editable=\"true\"><form:content><Label text=\"Title\"/><Input value=\"{/TITLE}\"/><Label text=\"Message\"/><Input value=\"{/MESSAGE}\"/><Label text=\"Details\"/><TextArea value=\"{/DETAILS}\" rows=\"3\"/></form:content></form:SimpleForm></Panel><footer><OverflowToolbar><Text text=\"Open Message Box:\"/><ToolbarSpacer/><Button press=\".eB(['confirm'])\" text=\"Confirm\"/><Button press=\".eB(['information'])\" text=\"Information\"/><Button press=\".eB(['success'])\" text=\"Success\" type=\"Accept\"/><Button press=\".eB(['warning'])\" text=\"Warning\"/><Button press=\".eB(['error'])\" text=\"Error\" type=\"Reject\"/><Button press=\".eB(['CUSTOM'])\" text=\"Custom\" type=\"Emphasized\"/></OverflowToolbar></footer></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "DETAILS": "These are additional details about the message.",
+      "MESSAGE": "This is a message box.",
+      "TITLE": "abap2UI5"
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "f2": "Really?"
+    },
+    "event": "confirm"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "590921F2935B4636B440717BACD911FE",
+      "EVENT": "confirm"
+     },
+     "MODEL": {
+      "MESSAGE": "Really?"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_382",
+      "ID": "A33D077C0C924896A2FB52F49A7810FE",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_CUSTOM": [
+        [
+         "MESSAGE_BOX",
+         "confirm",
+         "Really?",
+         {
+          "details": "These are additional details about the message.",
+          "title": "abap2UI5"
+         }
+        ]
+       ]
+      }
+     }
+    }
+   }
+  }
+ ]
+}

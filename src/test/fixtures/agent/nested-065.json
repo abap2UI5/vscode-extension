@@ -1,0 +1,116 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.146.0 (the npm backend) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/samples Z2UI5_CL_SMP_APP_065",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "z2ui5_cl_smp_app_065",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=z2ui5_cl_smp_app_065"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_065",
+      "ID": "6A29981F0C174546ADCF32508838F6AC",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\"><Shell><Page title=\"abap2UI5 - Nested View - Basic Example (nest_view_display)\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\" id=\"test\"><MessageStrip text=\"A main view with a nested view inside: the buttons re-render everything, only the main view, only the nested view, or refresh just the nested view's model.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><content><Button press=\".eB(['ALL'])\" text=\"Rerender all\"/><Button press=\".eB(['MAIN'])\" text=\"Rerender Main without nest\"/><Button press=\".eB(['NEST'])\" text=\"Rerender only nested view\"/><Button press=\".eB(['NEST_MODEL'])\" text=\"Update only nested MODEL (no re-render)\"/><Input value=\"{/MV_INPUT_MAIN}\"/></content></Page></Shell></mvc:View>"
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "MV_INPUT_MAIN": ""
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "f1": "main typed"
+    },
+    "event": "ALL"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "6A29981F0C174546ADCF32508838F6AC",
+      "EVENT": "ALL"
+     },
+     "MODEL": {
+      "MV_INPUT_MAIN": "main typed"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_065",
+      "ID": "05B2B863F8DC4A169A3B50C99E1A6CAC",
+      "PROTOCOL": 2,
+      "S_ACTION": {
+       "T_SYSTEM": [
+        [
+         "VIEW_SLOTS",
+         "display",
+         "MAIN",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\"><Shell><Page title=\"abap2UI5 - Nested View - Basic Example (nest_view_display)\" showNavButton=\"false\" navButtonPress=\".eB(['___ZZZ_NAL'])\" id=\"test\"><MessageStrip text=\"A main view with a nested view inside: the buttons re-render everything, only the main view, only the nested view, or refresh just the nested view's model.\" type=\"Information\" showIcon=\"true\" class=\"sapUiSmallMargin\"/><content><Button press=\".eB(['ALL'])\" text=\"Rerender all\"/><Button press=\".eB(['MAIN'])\" text=\"Rerender Main without nest\"/><Button press=\".eB(['NEST'])\" text=\"Rerender only nested view\"/><Button press=\".eB(['NEST_MODEL'])\" text=\"Update only nested MODEL (no re-render)\"/><Input value=\"{/MV_INPUT_MAIN}\"/></content></Page></Shell></mvc:View>"
+        ],
+        [
+         "VIEW_SLOTS",
+         "display",
+         "NEST",
+         "<mvc:View displayBlock=\"true\" height=\"100%\" xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\"><Page title=\"Nested View\"><Button press=\".eB(['TEST'])\" text=\"event\"/><Input value=\"{/MV_INPUT_NEST}\"/></Page></mvc:View>",
+         {
+          "id": "test",
+          "methodDestroy": "removeAllContent",
+          "methodInsert": "addContent"
+         }
+        ]
+       ]
+      }
+     },
+     "MODEL": {
+      "MV_INPUT_MAIN": "main typed",
+      "MV_INPUT_NEST": ""
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "NEST_MODEL"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "05B2B863F8DC4A169A3B50C99E1A6CAC",
+      "EVENT": "NEST_MODEL"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "Z2UI5_CL_SMP_APP_065",
+      "ID": "8948331B1AF44D438BD8773AAF2317D6",
+      "PROTOCOL": 2
+     },
+     "MODEL": {
+      "MV_INPUT_MAIN": "main typed",
+      "MV_INPUT_NEST": "nest model updated #1"
+     }
+    }
+   }
+  }
+ ]
+}
