@@ -287,13 +287,17 @@ test("a system that cannot be reached is said in the extension's words", async (
   assert.equal(SYSTEM_HINT, 'is the system reachable? "abap2UI5: Check System Connection" says');
 });
 
-test("a backend error page is the refusal, with the backend's text", async () => {
+test("a backend error is the refusal, with the backend's text verbatim", async () => {
   const h = harness({
-    request: async () => json(500, "<html><pre>Class ZCL_APP does not implement z2ui5_if_app</pre></html>"),
+    request: async () => json(500, "Class ZCL_APP does not implement z2ui5_if_app\nurl /sap/bc/z2ui5?app_start=<b>x</b>"),
   });
   const r = await h.call("app_start", { app: "zcl_app" });
   assert.equal(r.isError, true);
-  assert.match(textOf(r), /the backend refused the roundtrip - HTTP 500: Class ZCL_APP does not implement z2ui5_if_app/);
+  assert.match(
+    textOf(r),
+    /the backend refused the roundtrip - HTTP 500: Class ZCL_APP does not implement z2ui5_if_app\nurl \/sap\/bc\/z2ui5\?app_start=<b>x<\/b>/,
+    "a tag in the text/plain body is text (protocol spec/errors.md)"
+  );
 });
 
 // ----------------------------------------------------- the system ----
@@ -400,65 +404,99 @@ const ROUNDTRIP = (body: string, draftId: string | null = null) => ({
   draftId,
 });
 
-test("transport: a CSRF token layer is answered with HEAD + Fetch and ONE re-send", async () => {
-  const sent: Sent[] = [];
-  let posts = 0;
+test("transport: one request per call, sent as the client built it, with the system's cookies", async () => {
+  const sent: Array<Sent & { rawBody?: string }> = [];
+  const answers: SystemResponse[] = [
+    json(403, "CSRF token validation failed", {
+      "x-csrf-token": "Required",
+      "set-cookie": ["SAP_SESSIONID_DEV_100=s1; path=/", "__abap2ui5_proxy_50123=tok; Path=/"],
+    }),
+    json(200, "", { "x-csrf-token": "TOKEN123", "set-cookie": ["sap-XSRF_DEV=abc; path=/; HttpOnly"] }),
+    json(200, { S_FRONT: { ID: "D1" } }, { "sap-contextid": "CTX-A", "set-cookie": "sap-XSRF_DEV=; Max-Age=0" }),
+  ];
   const transport = createSystemTransport({
     endpoint: () => "https://dev.example:44300/sap/bc/z2ui5?sap-client=100",
     proxyBase: () => PROXY,
     request: async (url, init) => {
-      sent.push({ url, method: init.method, headers: init.headers });
-      if (init.method === "HEAD") {
-        return json(200, "", { "x-csrf-token": "TOKEN123", "set-cookie": ["sap-XSRF_DEV=abc; path=/; HttpOnly"] });
-      }
-      posts++;
-      return posts === 1
-        ? json(403, "CSRF token validation failed", {
-            "x-csrf-token": "Required",
-            "set-cookie": ["SAP_SESSIONID_DEV_100=s1; path=/", "__abap2ui5_proxy_50123=tok; Path=/"],
-          })
-        : json(200, { S_FRONT: { ID: "D1" } });
-    },
-  });
-  const res = await transport(ROUNDTRIP(START_BODY));
-  assert.equal(res.status, 200);
-  assert.deepEqual(sent.map((s) => s.method), ["POST", "HEAD", "POST"]);
-  assert.equal(sent[1].headers["x-csrf-token"], "Fetch");
-  assert.equal(sent[1].headers.cookie, "SAP_SESSIONID_DEV_100=s1", "the proxy's own cookie is not kept");
-  assert.equal(sent[2].headers["x-csrf-token"], "TOKEN123");
-  assert.equal(sent[2].headers.cookie, "SAP_SESSIONID_DEV_100=s1; sap-XSRF_DEV=abc");
-  // a layer that keeps refusing ends in its refusal, not in a loop
-  const refusing = createSystemTransport({
-    endpoint: () => "https://dev.example/sap/bc/z2ui5",
-    proxyBase: () => PROXY,
-    request: async (_url, init) =>
-      init.method === "HEAD" ? json(200, "", {}) : json(403, "no", { "x-csrf-token": "Required" }),
-  });
-  const refused = await refusing(ROUNDTRIP(START_BODY));
-  assert.equal(refused.status, 403);
-});
-
-test("transport: a stateful session's sap-contextid follows its own draft ids", async () => {
-  const sent: Sent[] = [];
-  const answers: SystemResponse[] = [
-    json(200, { S_FRONT: { ID: "D1" } }, { "sap-contextid": "CTX-A" }),
-    json(200, { S_FRONT: { ID: "D2" } }),
-    json(200, { S_FRONT: { ID: "E1" } }),
-  ];
-  const transport = createSystemTransport({
-    endpoint: () => "https://dev.example/sap/bc/z2ui5",
-    proxyBase: () => PROXY,
-    request: async (url, init) => {
-      sent.push({ url, method: init.method, headers: init.headers });
+      sent.push({ url, method: init.method, headers: init.headers, rawBody: init.body });
       return answers.shift()!;
     },
   });
-  await transport(ROUNDTRIP(START_BODY));
+  // a refusal comes back as it is - the handshake is the client's
+  const refused = await transport(ROUNDTRIP(START_BODY));
+  assert.equal(refused.status, 403);
+  assert.equal(refused.headers?.["x-csrf-token"], "Required");
+  assert.equal(sent.length, 1, "no token fetch, no re-send of its own");
+  assert.equal(sent[0].method, "POST");
+  assert.equal(sent[0].rawBody, START_BODY);
+  // the client's HEAD goes out as a HEAD, without a body, with the cookies
+  const head = await transport({ method: "HEAD", headers: { "x-csrf-token": "Fetch" }, signal: AbortSignal.timeout(10_000), draftId: null });
+  assert.equal(head.headers?.["x-csrf-token"], "TOKEN123", "the answer's headers reach the client");
+  assert.equal(sent[1].method, "HEAD");
+  assert.equal(sent[1].rawBody, undefined);
+  assert.deepEqual(sent[1].headers, { "x-csrf-token": "Fetch", cookie: "SAP_SESSIONID_DEV_100=s1" }, "the proxy's own cookie is not kept");
+  // the client's token and session id are carried as given
+  const ok = await transport({
+    ...ROUNDTRIP(EVENT_BODY("D0"), "D0"),
+    headers: { ...ROUNDTRIP("").headers, "x-csrf-token": "TOKEN123", "sap-contextid": "CTX-0" },
+  });
+  assert.equal(ok.headers?.["sap-contextid"], "CTX-A");
+  assert.deepEqual(sent[2].headers, {
+    "content-type": "application/json",
+    "sap-contextid-accept": "header",
+    "x-csrf-token": "TOKEN123",
+    "sap-contextid": "CTX-0",
+    cookie: "SAP_SESSIONID_DEV_100=s1; sap-XSRF_DEV=abc",
+  });
+  // an expired cookie is dropped
+  answers.push(json(200, { S_FRONT: { ID: "D2" } }));
   await transport(ROUNDTRIP(EVENT_BODY("D1"), "D1"));
-  await transport(ROUNDTRIP(EVENT_BODY("D2"), "D2"));
-  assert.equal(sent[0].headers["sap-contextid"], undefined, "a start has no session yet");
-  assert.equal(sent[1].headers["sap-contextid"], "CTX-A");
-  assert.equal(sent[2].headers["sap-contextid"], "CTX-A", "inherited by the next draft of the same session");
+  assert.equal(sent[3].headers.cookie, "SAP_SESSIONID_DEV_100=s1");
+});
+
+test("the client's handshakes through the transport: one token fetch, one re-send, the session id per session", async () => {
+  const sent: Sent[] = [];
+  let token = "";
+  let posts = 0;
+  const h = harness({
+    request: async (url, init) => {
+      const body = init.body ? JSON.parse(init.body) : undefined;
+      sent.push({ url, method: init.method, headers: init.headers, body });
+      if (init.method === "HEAD") {
+        token = "TOKEN123";
+        return json(200, "", { "x-csrf-token": token, "set-cookie": ["sap-XSRF_DEV=abc; path=/"] });
+      }
+      if (init.headers["x-csrf-token"] !== token || !token) {
+        return json(403, "CSRF token validation failed", { "x-csrf-token": "Required", "set-cookie": ["SAP_SESSIONID_DEV_100=s1; path=/"] });
+      }
+      posts++;
+      const view = '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Page title="T"><Button text="Go" press=".eB([\'GO\'])"/></Page></mvc:View>';
+      const start = !body.value.S_FRONT.ID;
+      return json(
+        200,
+        start
+          ? { S_FRONT: { ID: `D${posts}`, APP: "ZCL_APP", PROTOCOL: 2, S_ACTION: { T_SYSTEM: [["VIEW_SLOTS", "display", "MAIN", view]] } } }
+          : { S_FRONT: { ID: `D${posts}`, APP: "ZCL_APP", PROTOCOL: 2 } },
+        start && posts === 1 ? { "sap-contextid": "CTX-A" } : {}
+      );
+    },
+  });
+  let snap = snapOf(await h.call("app_start", { app: "zcl_app" }));
+  assert.deepEqual(sent.map((s) => s.method), ["POST", "HEAD", "POST"], "one token fetch, one re-send - not two of each");
+  assert.deepEqual(sent[2].body, sent[0].body, "the same body once more");
+  assert.equal(sent[2].headers["x-csrf-token"], "TOKEN123");
+  assert.equal(sent[2].headers.cookie, "SAP_SESSIONID_DEV_100=s1; sap-XSRF_DEV=abc", "the token's session cookie goes with it");
+  snap = snapOf(await h.call("app_act", { session: snap.session, event: "GO" }));
+  await h.call("app_act", { session: snap.session, event: "GO" });
+  assert.equal(sent.length, 5, "no more fetches while the token is accepted");
+  assert.deepEqual(sent.slice(3).map((s) => [s.headers["x-csrf-token"], s.headers["sap-contextid"]]), [
+    ["TOKEN123", "CTX-A"],
+    ["TOKEN123", "CTX-A"],
+  ], "the token with every POST, the session id kept through an answer without it");
+  // another session of the same system starts without the first one's id
+  await h.call("app_start", { app: "zcl_app" });
+  assert.equal(sent[5].headers["sap-contextid"], undefined);
+  assert.equal(sent[5].headers["x-csrf-token"], "TOKEN123", "the token is the system's, not the session's");
 });
 
 test("location: the start names the system's endpoint and the class, never the proxy", () => {
@@ -501,17 +539,32 @@ test("transport: the body goes out as the client built it; no proxy, no request"
 
 // ------------------------------------------- end to end, real proxy ----
 
-test("end to end: the real auth proxy and node http carry a recorded session to the system", async () => {
+test("end to end: the real auth proxy and node http carry a recorded session to the system, with the client's handshakes", async () => {
   const http = require("http") as typeof import("http");
   const { SapProxy } = require("../proxy") as typeof import("../proxy");
   const exchanges = fixture("form-381")
     .steps.filter((s) => s.exchange)
     .map((s) => s.exchange as Exchange);
   const seen: Array<{ url: string; auth?: string; origin?: string; body: { value: Exchange["request"] } }> = [];
+  const handshake: Array<{ method: string; csrf?: string; context?: string }> = [];
+  // a token layer in front of the system, and a stateful app: the first
+  // POST is refused for want of a token, the first answer hands out a session id
   const backend = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
+      const csrf = req.headers["x-csrf-token"] as string | undefined;
+      handshake.push({ method: String(req.method), csrf, context: req.headers["sap-contextid"] as string | undefined });
+      if (req.method === "HEAD") {
+        res.writeHead(200, { "x-csrf-token": csrf === "Fetch" ? "T1" : "" });
+        res.end();
+        return;
+      }
+      if (csrf !== "T1") {
+        res.writeHead(403, { "content-type": "text/plain", "x-csrf-token": "Required" });
+        res.end("CSRF token validation failed");
+        return;
+      }
       seen.push({
         url: String(req.url),
         auth: req.headers.authorization,
@@ -519,7 +572,10 @@ test("end to end: the real auth proxy and node http carry a recorded session to 
         body: JSON.parse(body),
       });
       const next = exchanges[seen.length - 1];
-      res.writeHead(200, { "content-type": "application/json" });
+      res.writeHead(200, {
+        "content-type": "application/json",
+        ...(seen.length === 1 ? { "sap-contextid": "SID:ANON:e2e" } : {}),
+      });
       res.end(JSON.stringify(next.response));
     });
   });
@@ -549,6 +605,16 @@ test("end to end: the real auth proxy and node http carry a recorded session to 
       snap = snapOf(await call("app_act", { session: snap.session, ...(step.arg as object) }));
     }
     assert.equal(seen.length, exchanges.length);
+    assert.deepEqual(
+      handshake.map((x) => [x.method, x.csrf ?? null, x.context ?? null]),
+      [
+        ["POST", null, null],
+        ["HEAD", "Fetch", null],
+        ["POST", "T1", null],
+        ...exchanges.slice(1).map(() => ["POST", "T1", "SID:ANON:e2e"]),
+      ],
+      "through the proxy: one token fetch and re-send, then the token and the session id with every POST"
+    );
     for (const [i, s] of seen.entries()) {
       assert.equal(s.url, "/sap/bc/z2ui5?sap-client=001", "the endpoint, the proxy prefix gone");
       assert.equal(

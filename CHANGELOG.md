@@ -22,6 +22,19 @@
 - **"New Project from Template" is in step with app-template again:** its
   latest `AGENTS.md`, `abap-check` and `ui5-check` skills, `check-pin.mjs`
   and `doctor.mjs`.
+- **The agent app tools follow the abap2UI5 protocol's frontend rules.**
+  The vendored agent client is now abap2UI5/mcp-server `d8d3b76`: a
+  response of another protocol number is refused with both numbers named
+  instead of being shown; an `app_act` with an event while another is still
+  running waits for it instead of sending the same draft id twice; values
+  set meanwhile are kept; a popup of the previous app closes when another
+  app answers; and the system's error text is shown exactly as sent (a
+  `<b>` in it stays visible text). The CSRF token handshake and the
+  stateful session id (`sap-contextid`) are now done by the client itself -
+  the extension's transport through the auth proxy only carries their
+  headers and the system's cookies, so the token is fetched once and the
+  body re-sent once, never twice.
+
 - **Migrate Classic Report to abap2UI5.** A new command - in the Command
   Palette and in the context menu of a `*.prog.abap` - converts a classic
   ABAP report into an abap-cloud-gui report class with that addon's
