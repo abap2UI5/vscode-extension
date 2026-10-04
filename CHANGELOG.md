@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Add Agent Setup to Workspace.** A new command makes the project in the
+  open folder ready for an AI agent - most abap2UI5 projects did not start
+  from app-template and have no briefing for one. It adds what
+  `npm create abap2ui5-app@latest -- --agent-setup` adds, from the copy of
+  app-template bundled with the extension, so it needs no network and works
+  on vscode.dev too: `AGENTS.md`, `CLAUDE.md`, `.claude/settings.json` and
+  the four skills, `.mcp.json`, `abaplint.jsonc` and `abap2ui5lint.jsonc`,
+  `.github/workflows/check.yml` with the two scripts it runs, and `.nvmrc`.
+  A file you already have is left as it is; `package.json` and `.gitignore`
+  only gain the scripts, devDependencies and patterns you are missing, and
+  every value of yours that differs from the template's is named. The gates
+  are pointed at the folder your `.abapgit.xml` names as `STARTING_FOLDER`,
+  and nothing is written into it. A confirmation lists every file first; the
+  *abap2UI5 Agent Setup* output then says what was done and what to run next
+  (`npm install`, `npm run check`) - and how the Claude Code plugin brings
+  the skills and the MCP server without the gates. The *Get started*
+  walkthrough has a step for it.
+- **"New Project from Template" is in step with app-template again:** its
+  latest `AGENTS.md`, `abap-check` and `ui5-check` skills, `check-pin.mjs`
+  and `doctor.mjs`.
 - **The agent app tools follow the abap2UI5 protocol's frontend rules.**
   The vendored agent client is now abap2UI5/mcp-server `d8d3b76`: a
   response of another protocol number is refused with both numbers named

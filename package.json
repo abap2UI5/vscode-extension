@@ -143,6 +143,11 @@
         "title": "New Project from Template"
       },
       {
+        "command": "abap2ui5.addAgentSetup",
+        "category": "abap2UI5",
+        "title": "Add Agent Setup to Workspace"
+      },
+      {
         "command": "abap2ui5.screenshot",
         "category": "abap2UI5",
         "title": "Take App Screenshot",
@@ -1094,6 +1099,17 @@
             },
             "completionEvents": [
               "onCommand:abap2ui5.showMcpStatus"
+            ]
+          },
+          {
+            "id": "agentsetup",
+            "title": "Make your repository agent-ready",
+            "description": "Add AGENTS.md, the four abap2UI5 skills, the MCP server and the two gates to the open project - nothing is overwritten, your classes are not touched.\n[Add Agent Setup to Workspace](command:abap2ui5.addAgentSetup)",
+            "media": {
+              "markdown": "media/walkthrough/agentsetup.md"
+            },
+            "completionEvents": [
+              "onCommand:abap2ui5.addAgentSetup"
             ]
           }
         ]
