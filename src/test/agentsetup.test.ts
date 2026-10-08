@@ -7,6 +7,7 @@ import {
   confirmationDetail,
   mergeLines,
   mergePackageJson,
+  PackageJsonShapeError,
   packageNameFor,
   planAgentSetup,
   planFromSnapshot,
@@ -312,6 +313,23 @@ test("a package.json that is not JSON stops the plan before anything is written"
     plan(new MemoryFolder({ "package.json": "{ nope" }, ["src"])),
     /package\.json is not valid JSON .* - fix it, or move it aside and run again/
   );
+});
+
+test("a package.json that is JSON but no object is not called invalid JSON", async () => {
+  // `null` used to throw a TypeError out of the merge, reported as "not
+  // valid JSON"; an array took the entries as properties JSON.stringify
+  // drops, and the plan announced additions it would write back as `[]`
+  for (const [text, shape] of [
+    ["null", "null"],
+    ["[]", "an array"],
+    ['"x"', "a string"],
+  ]) {
+    await assert.rejects(
+      plan(new MemoryFolder({ "package.json": text }, ["src"])),
+      new RegExp(`package\\.json is not a package manifest \\(its top level is ${shape}, not an object\\)`)
+    );
+  }
+  assert.throws(() => mergePackageJson("[]", '{"scripts":{"a":"1"}}', ["scripts"]), PackageJsonShapeError);
 });
 
 test("the pure merges, as the create package has them", () => {

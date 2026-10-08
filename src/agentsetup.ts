@@ -137,11 +137,16 @@ export interface KeptEntry {
   want: unknown;
 }
 
+/** A package.json that parses but is not an object - a different fix than
+ *  a syntax error, so a different message. */
+export class PackageJsonShapeError extends Error {}
+
 /**
  * package.json, merged: every entry under `keys` the project lacks is added,
  * every entry it has keeps its value. Returns the new text (null when nothing
  * was added), what was added, and what was kept on a value that differs from
- * the template's. Throws when the project's package.json is not JSON.
+ * the template's. Throws when the project's package.json is not JSON, and a
+ * `PackageJsonShapeError` when it is JSON but not an object.
  */
 export function mergePackageJson(
   existingText: string,
@@ -149,7 +154,17 @@ export function mergePackageJson(
   keys: readonly string[]
 ): { text: string | null; added: string[]; kept: KeptEntry[] } {
   const tpl = JSON.parse(stripBom(templateText)) as Record<string, unknown>;
-  const pkg = JSON.parse(stripBom(existingText)) as Record<string, unknown>;
+  const parsed: unknown = JSON.parse(stripBom(existingText));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    // Valid JSON, just not a manifest. Merged anyway, `null` threw a
+    // TypeError that the caller reported as "not valid JSON", and an array
+    // took the entries as properties that JSON.stringify then dropped - the
+    // plan announced additions to a file it would write back unchanged.
+    throw new PackageJsonShapeError(
+      `its top level is ${parsed === null ? "null" : Array.isArray(parsed) ? "an array" : `a ${typeof parsed}`}, not an object`
+    );
+  }
+  const pkg = parsed as Record<string, unknown>;
   const section = (key: string): Record<string, unknown> | undefined => {
     const value = pkg[key];
     return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
@@ -392,8 +407,11 @@ export async function planAgentSetup(
       try {
         result = mergePackageJson(existing, adapted, keys);
       } catch (err) {
+        const why = err instanceof Error ? err.message : String(err);
         throw new Error(
-          `${rel} is not valid JSON (${err instanceof Error ? err.message : String(err)}) - fix it, or move it aside and run again`
+          err instanceof PackageJsonShapeError
+            ? `${rel} is not a package manifest (${why}) - fix it, or move it aside and run again`
+            : `${rel} is not valid JSON (${why}) - fix it, or move it aside and run again`
         );
       }
       for (const k of result.kept) {

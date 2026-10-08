@@ -126,6 +126,10 @@
     parameters stay exactly as configured. Every launch used to re-encode
     the whole query (`%20` became `+`, `~` became `%7E`, `/` and `:` were
     escaped, a bare `?debug` became `debug=`).
+  - *Add Agent Setup to Workspace* says that a `package.json` holding
+    `null`, an array or a plain value is not a package manifest, instead of
+    calling it invalid JSON - and no longer plans to add entries to an
+    array-shaped one that it would have written back unchanged.
 
 
 ## 0.30.2
