@@ -17,6 +17,7 @@
  * named after whichever name it was cloned under, and all of them resolve.
  */
 
+import * as path from "path";
 import snapshot from "./data/repo-dirs.json";
 
 const DIRS = snapshot.dirs as Record<string, readonly string[]>;
@@ -53,3 +54,50 @@ export const SERVER_DIRS: readonly string[] = DIRS.server;
  *  ABAP_CLOUD_GUI_HOME still resolve the checkout meanwhile. */
 export const CLOUD_GUI_DIRS: readonly string[] =
   (DIRS as Partial<Record<string, readonly string[]>>).cloudGui ?? [];
+
+/** Directory name -> the environment variable mcp-server resolves that
+ *  checkout with (the `env` of its `lib/repo-dirs.json` entry). What the
+ *  stdio server and the unit-test runner are started with, so they find the
+ *  same clones under `abap2ui5.mcp.reposRoot` this extension does. */
+export const HOME_VARS: ReadonlyArray<readonly [string, string]> = [
+  ["abap2UI5", "A2UI5_HOME"],
+  ...CORPUS_DIRS.map((d) => [d, "SAMPLES_CONTROLS_HOME"] as const),
+  ...VIEW_CHECK_DIRS.map((d) => [d, "AI_VIEW_CHECK_HOME"] as const),
+  /* The `examples` tool searches THREE sample catalogues, and until it did,
+   * only the corpus needed an env var here. A checkout the extension does not
+   * point at is not an error over there - the tool answers from the ones it
+   * can read - so a missing one costs a third of the answer silently, which
+   * is exactly why both are passed whenever they are present. */
+  ...SAMPLES_DIRS.map((d) => [d, "SAMPLES_HOME"] as const),
+  ...SAMPLES_STACK_DIRS.map((d) => [d, "SAMPLES_STACK_HOME"] as const),
+  /* migrate_report runs abap-cloud-gui's converter, and only from a LOCAL
+   * checkout (mcp-server keeps no mirror of it): a server started through
+   * npx looks for its siblings next to the npx cache, so without this the
+   * checkout "Migrate Classic Report" itself finds under the repos root was
+   * invisible to the agent's tool. */
+  ...CLOUD_GUI_DIRS.map((d) => [d, "ABAP_CLOUD_GUI_HOME"] as const),
+];
+
+/** The env variables for the checkouts present under `root` - the first
+ *  directory name found per variable wins, the current name over a legacy
+ *  one. `exists` is injected so the test needs no file system. */
+export function checkoutHomes(
+  root: string,
+  exists: (dir: string) => boolean
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  const base = root.trim();
+  if (!base) {
+    return env;
+  }
+  for (const [repo, envVar] of HOME_VARS) {
+    if (env[envVar]) {
+      continue;
+    }
+    const dir = path.join(base, repo);
+    if (exists(dir)) {
+      env[envVar] = dir;
+    }
+  }
+  return env;
+}

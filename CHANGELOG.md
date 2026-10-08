@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **The MCP server finds abap-cloud-gui under the repos root.** An
+  `abap-cloud-gui` checkout under `abap2ui5.mcp.reposRoot` is now handed to
+  the server as `ABAP_CLOUD_GUI_HOME`, as the other checkouts are. The
+  server's `migrate_report` tool runs that addon's converter from a local
+  checkout only, and a server started through npx does not look beside your
+  repos root - so the agent's tool reported the checkout missing while
+  *Migrate Classic Report to abap2UI5* found it.
 - **Add Agent Setup to Workspace.** A new command makes the project in the
   open folder ready for an AI agent - most abap2UI5 projects did not start
   from app-template and have no briefing for one. It adds what

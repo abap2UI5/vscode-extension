@@ -1008,7 +1008,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, `samples`, `samples-stack`, and optionally `linter`, `mcp-server`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `SAMPLES_HOME` / `SAMPLES_STACK_HOME` / `AI_VIEW_CHECK_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx.\n\nWhat is found here decides which programs are started, so it is read from your user settings only."
+          "markdownDescription": "Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, `samples`, `samples-stack`, and optionally `linter`, `mcp-server`, `abap-cloud-gui`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `SAMPLES_HOME` / `SAMPLES_STACK_HOME` / `AI_VIEW_CHECK_HOME` / `ABAP_CLOUD_GUI_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx.\n\nWhat is found here decides which programs are started, so it is read from your user settings only."
         },
         "abap2ui5.report2cloud.path": {
           "type": "string",
