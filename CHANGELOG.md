@@ -143,6 +143,10 @@
     `lint/../baseline.json` or an absolute path is found again: only a
     leading `../` used to be resolved, so the baseline was not read and the
     findings it waives were reported (the desktop editor and CI waived them).
+  - *Builder-chain abbreviations* (`Page>content>Button+Input`) expand
+    when a text or a value holds a lone parenthesis - `Text{1) First}+Button`
+    or `Input[placeholder="(optional"]+Button` used to be refused as "not an
+    abbreviation".
 
 
 ## 0.30.2
