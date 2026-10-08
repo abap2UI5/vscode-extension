@@ -298,13 +298,17 @@ identity (see Conventions).
   `capabilities.untrustedWorkspaces.restrictedConfigurations`, together with
   `systems`, `launchUrlTemplate`, `agent.enableAppTools`, `report2cloud.path` (the
   abap-cloud-gui checkout whose report2cloud CLI the migrate command runs),
-  `viewCheck.render` and `allowUnauthorizedCerts` - nine settings a
-  cloned repository must not be able to set. `agent.enableAppTools` is machine scope
+  `viewCheck.render`, `viewCheck.rollingBundle` and `allowUnauthorizedCerts` -
+  ten settings a cloned repository must not be able to set. `agent.enableAppTools` is machine scope
   too, for the same reason in another shape: it lets an agent act on the
   system AS THE USER, so only the user's own settings may turn it on
   (`agentapps.test.ts` pins its scope, default and restriction).
   `allowUnauthorizedCerts` is machine scope as well - it decides whether the
   proxy that injects the credentials verifies the system's certificate - and
+  so is `viewCheck.rollingBundle`, which decides which build of the render
+  gate "Install Render Gate" downloads and runs. `SETTING_POLICY` in
+  `manifest.test.ts` classifies EVERY setting (machine + restricted,
+  restricted, or open), so a new one cannot land unclassified. And
   the render gate does not run at all in Restricted Mode (`viewcheck.ts`
   asks `workspace.isTrusted`); its last-resort `npx` fallback is pinned to
   `LINTER_COMMIT` like the bundle download (`checkcore.test.ts` pins both).

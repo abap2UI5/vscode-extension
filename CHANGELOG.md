@@ -97,6 +97,10 @@
     certificate verification for the auth proxy on or off. Its default is
     unchanged; a value you had set in a workspace's settings no longer
     applies - set it in your User settings instead.
+  - *`abap2ui5.viewCheck.rollingBundle`* is read from your user settings
+    only, too: a repository's `.vscode/settings.json` can no longer make
+    *Install Render Gate* download the linter's rolling build instead of the
+    release this extension bundles. Off by default, as before.
 
 
 ## 0.30.2
