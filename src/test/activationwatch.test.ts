@@ -425,3 +425,54 @@ test("a slow baseline answer cannot resurrect itself after the next save", async
   );
   watch.stop();
 });
+
+test("a superseded capture leaves no baseline behind, not the previous version's", async () => {
+  /*
+   * The case next to the one above. The previous load's capture HAD landed
+   * (v1, an old timestamp); then the preview reloaded onto v2 and its
+   * capture was still out when the next save started the watch - so that
+   * answer was dropped, rightly, and the baseline stayed v1's. The first
+   * poll then saw v2 itself ("active", newer than v1) and reloaded for an
+   * activation that never happened, clearing the "not activated" badge.
+   * A capture means the shown version changed: the old baseline is void
+   * from that moment on.
+   */
+  let call = 0;
+  let release: (state: AdtClassState) => void = () => undefined;
+  const source = {
+    isRunning: true,
+    systemOrigin: "https://sys-a:44300",
+    async fetchClassState(): Promise<AdtClassState> {
+      call++;
+      if (call === 1) {
+        return { version: "active", changedAt: "2020-01-01T00:00:00Z" }; // v1
+      }
+      if (call === 2) {
+        return new Promise<AdtClassState>((resolve) => {
+          release = resolve; // v2's capture, still out
+        });
+      }
+      return { version: "active", changedAt: "2026-01-01T00:00:00Z" }; // v2, as polled
+    },
+  };
+  const reloads: string[] = [];
+  const watch = new ActivationWatch(
+    {
+      source,
+      current: () => ({ className: "ZCL_APP" }),
+      log: () => undefined,
+      reload: (r) => reloads.push(r),
+    },
+    TIMING
+  );
+
+  watch.captureBaseline(); // v1 shown
+  await sleep(5);
+  watch.captureBaseline(); // v2 shown - its answer is late
+  watch.start(); // the next save
+  release({ version: "active", changedAt: "2026-01-01T00:00:00Z" });
+  await until(() => call >= 5);
+  watch.stop();
+
+  assert.deepEqual(reloads, [], "nothing was activated since v2 was shown");
+});

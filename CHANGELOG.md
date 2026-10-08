@@ -107,6 +107,11 @@
     cloned repository carrying `.claude -> ~/.claude` used to have the
     template's permission allowlist written into your global Claude Code
     settings.
+  - *Reload on activation.* Saving right after the preview reloaded (before
+    the system had answered which version the preview now shows) could
+    reload the preview again on the first poll for an activation that never
+    happened, and clear the *not activated* badge. The watch now waits for
+    the real activation.
 
 
 ## 0.30.2
