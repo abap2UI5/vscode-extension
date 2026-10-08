@@ -345,6 +345,8 @@ test("the pure merges, as the create package has them", () => {
   assert.deepEqual(mergeLines("", "# c\nb\n"), { text: "# c\nb\n", added: ["b"] });
   assert.equal(packageNameFor("My Project!"), "my-project-");
   assert.equal(packageNameFor("..."), "abap2ui5-app");
+  assert.equal(packageNameFor("y".repeat(250)).length, 214);
+  assert.equal(packageNameFor("node_modules"), "abap2ui5-app");
   assert.equal(
     adaptSourceFolder("x.json", '"paths": ["src"]', { placeholder: "src", edits: [{ file: "x.json", text: '"paths": ["src"]' }] }, "lib"),
     '"paths": ["lib"]'

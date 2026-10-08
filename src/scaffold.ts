@@ -617,12 +617,33 @@ export function scaffoldText(file: ScaffoldFile): string {
   return file.bom ? BOM + file.content : file.content;
 }
 
-/** npm package names: lower case, no spaces, no leading dot or underscore. */
+/** npm's ceiling on a package name (validate-npm-package-name). */
+export const NPM_NAME_MAX = 214;
+
+/** The two names npm refuses outright, whatever their characters. */
+const NPM_BLOCKED_NAMES = new Set(["node_modules", "favicon.ico"]);
+
+/**
+ * The npm rules the character filter alone does not enforce, applied to a
+ * name already made of `[a-z0-9._-]`: at most 214 characters, cut without
+ * leaving a separator dangling, and never one of the two names npm refuses -
+ * `fallback` then. A folder named after a long ticket title produced a
+ * package.json `npm install` rejected with "name can no longer contain more
+ * than 214 characters" before it had installed anything.
+ */
+export function withinNpmNameRules(name: string, fallback = "abap2ui5-app"): string {
+  const capped =
+    name.length > NPM_NAME_MAX ? name.slice(0, NPM_NAME_MAX).replace(/[._-]+$/, "") : name;
+  return capped && !NPM_BLOCKED_NAMES.has(capped) ? capped : fallback;
+}
+
+/** npm package names: lower case, no spaces, no leading dot or underscore,
+ *  and npm's length and reserved-name rules (`withinNpmNameRules`). */
 export function projectNameFrom(folderName: string): string {
   const name = folderName
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^[._-]+/, "")
     .replace(/-+$/, "");
-  return name || "abap2ui5-app";
+  return withinNpmNameRules(name);
 }

@@ -41,7 +41,7 @@
  * execute a workspace's code, and the web host could not.
  */
 
-import { TEMPLATE_FILES, TEMPLATE_SPEC } from "./scaffold";
+import { TEMPLATE_FILES, TEMPLATE_SPEC, withinNpmNameRules } from "./scaffold";
 
 /** The `agentSetup` key of app-template's template.json. */
 export interface AgentSetupSpec {
@@ -261,11 +261,13 @@ export function mergeLines(
  *  in the characters npm accepts. Takes the folder NAME - the caller knows it
  *  from the workspace folder, and this module stays free of `path`. */
 export function packageNameFor(folderName: string): string {
-  return (
+  // the create package's character rules, then npm's length and reserved
+  // names - a package.json npm refuses to install is not an added file
+  return withinNpmNameRules(
     folderName
       .toLowerCase()
       .replace(/[^a-z0-9._-]+/g, "-")
-      .replace(/^[._-]+/, "") || "abap2ui5-app"
+      .replace(/^[._-]+/, "")
   );
 }
 

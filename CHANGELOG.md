@@ -130,6 +130,10 @@
     `null`, an array or a plain value is not a package manifest, instead of
     calling it invalid JSON - and no longer plans to add entries to an
     array-shaped one that it would have written back unchanged.
+  - *New Project from Template* and *Add Agent Setup to Workspace* keep the
+    `package.json` name within npm's rules: a folder name longer than 214
+    characters is cut, and a folder called `node_modules` or `favicon.ico`
+    gets `abap2ui5-app` - `npm install` refused the names they used to write.
 
 
 ## 0.30.2
