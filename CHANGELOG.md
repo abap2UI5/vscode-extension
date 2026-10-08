@@ -30,7 +30,7 @@
   latest `AGENTS.md`, `abap-check` and `ui5-check` skills, `check-pin.mjs`
   and `doctor.mjs`.
 - **The agent app tools follow the abap2UI5 protocol's frontend rules.**
-  The vendored agent client is now abap2UI5/mcp-server `d8d3b76`: a
+  The vendored agent client is now abap2UI5/mcp-server `a4d9f07`: a
   response of another protocol number is refused with both numbers named
   instead of being shown; an `app_act` with an event while another is still
   running waits for it instead of sending the same draft id twice; values
