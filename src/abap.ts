@@ -263,9 +263,12 @@ export function methodImplementations(
   // handed Ctrl+T a phantom symbol. Offsets are preserved, and a real METHOD
   // line is code, so its name survives the blanking untouched.
   const code = blankNonCode(source);
-  for (const m of code.matchAll(/^[ \t]*METHOD\s+([\w~/]+)\s*[.\n]/gim)) {
-    const start = m.index + m[0].indexOf(m[1]);
-    out.push({ name: m[1], start, end: start + m[1].length });
+  for (const m of code.matchAll(/^([ \t]*METHOD\s+)([\w~/]+)\s*[.\n]/gim)) {
+    // counted past the keyword, never searched for: `method meth.` (or
+    // `method e.`) found the name INSIDE the lower-case keyword, and F12 and
+    // Ctrl+T landed on `method` instead of the method's name
+    const start = m.index + m[1].length;
+    out.push({ name: m[2], start, end: start + m[2].length });
   }
   return out;
 }

@@ -112,6 +112,11 @@
     reload the preview again on the first poll for an activation that never
     happened, and clear the *not activated* badge. The watch now waits for
     the real activation.
+  - *Go to Definition and Go to Symbol in Workspace* land on the method's
+    name in a class written in lower case: `method meth.` used to put the
+    cursor on the `meth` of the keyword.
+  - *Completion in a `*.view.xml`* offers nothing in front of the first
+    tag; accepting an offer there replaced the root tag's name.
 
 
 ## 0.30.2

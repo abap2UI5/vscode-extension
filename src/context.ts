@@ -1686,7 +1686,11 @@ export function xmlContextAt(
   offset: number
 ): WriteContext | undefined {
   // The tag the cursor sits in: the last `<` not yet closed by a `>`.
-  const open = source.lastIndexOf("<", offset - 1);
+  // Nothing lies before offset 0 - and `lastIndexOf` reads a negative start
+  // as 0, which found the document's own first `<` AFTER the cursor: a
+  // completion there replaced the root tag's name (`mvc:View`, prefix and
+  // all) with whatever control was picked.
+  const open = offset > 0 ? source.lastIndexOf("<", offset - 1) : -1;
   if (open < 0) {
     return undefined;
   }

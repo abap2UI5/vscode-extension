@@ -348,6 +348,19 @@ test("hover on an attribute name in a view.xml explains the whole name", () => {
   assert.equal(source.slice(offer.start, offer.end), "text");
 });
 
+test("before the first tag of a view.xml there is nothing to complete", () => {
+  // `lastIndexOf("<", -1)` searches from 0: the cursor at the very start of
+  // the file was taken to be inside the root tag, and accepting an offer
+  // replaced the root tag's name (`mvc:View`, prefix and all) behind it
+  const source = '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">\n  <Button text="Go"/>\n</mvc:View>';
+  assert.equal(completionAt(source, "main.view.xml", 0, data, noShape), undefined);
+  assert.equal(hoverAt(source, "main.view.xml", 0, data, noShape), undefined);
+  // one character in, the root tag's name is still offered
+  const offer = completionAt(source, "main.view.xml", 1, data, noShape);
+  assert.ok(offer);
+  assert.ok(offer.start <= 1 && 1 <= offer.end);
+});
+
 test("hover in dead space stays quiet", () => {
   const { source, offset } = at("DATA(x) = ‸1.");
   assert.equal(
