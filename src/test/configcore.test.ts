@@ -227,11 +227,15 @@ test("no opinion on either side leaves the gate its defaults", () => {
  * `ui5` stayed a number. `parseLintConfig` now IS the linter's parseConfig.
  */
 test("the text is read the way the CLI reads it: validated and normalised", () => {
+  /* `ui5` quoted: a NUMBER is the linter's to judge, and it changed its
+   * mind - 0.8.5 read 1.96 as "1.96", the release after it refuses one,
+   * because JSON reads 1.120 as 1.12. Pinning either answer here would fail
+   * the pin bump for a decision this module only passes on. */
   const raw = parseLintConfig(
-    '{ "ui5": 1.96, "distribution": "OpenUI5", "render": { "pages": 2 } }',
+    '{ "ui5": "1.96", "distribution": "OpenUI5", "render": { "pages": 2 } }',
     "/repo/abap2ui5lint.jsonc"
   );
-  assert.equal(raw.minUi5, "1.96", "a numeric ui5 becomes the string the gate compares");
+  assert.equal(raw.minUi5, "1.96", "ui5 becomes the minUi5 the gate compares");
   assert.equal(raw.distribution, "openui5", "the distribution is lower-cased");
   assert.equal(raw.render, true, "the object form of render is a boolean plus a pool size");
   assert.throws(
