@@ -121,6 +121,11 @@
     (`// "branch": "1.100.0"` above the real one, or a dependency commented
     out) is no longer read as the pin, and a `{` in a comment no longer hides
     the dependency it sits in.
+  - *Preview theme and language.* Switching them changes only the
+    `sap-ui-theme` / `sap-language` parameter of the launch URL: the other
+    parameters stay exactly as configured. Every launch used to re-encode
+    the whole query (`%20` became `+`, `~` became `%7E`, `/` and `:` were
+    escaped, a bare `?debug` became `debug=`).
 
 
 ## 0.30.2

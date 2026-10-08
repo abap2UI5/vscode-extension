@@ -35,29 +35,85 @@ export function expandTemplate(template: string, className: string): string {
   );
 }
 
+/** A query parameter's NAME as a server reads it - `+` is a space and the
+ *  percent escapes are decoded - for matching only; the pair itself is never
+ *  rewritten from it. */
+function paramName(pair: string): string {
+  const eq = pair.indexOf("=");
+  const raw = (eq === -1 ? pair : pair.slice(0, eq)).replace(/\+/g, " ");
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * The URL with its query's `name=value` pairs edited as TEXT: every pair the
+ * edit does not touch stays exactly as it was written, and so does
+ * everything around the query (scheme, host, path, fragment). `edit` returns
+ * the new pair list, or undefined when it changed nothing - the URL then
+ * comes back byte-identical. Not a URL at all: back unchanged.
+ *
+ * Text rather than `URL.searchParams`, because the first mutation of a
+ * `URLSearchParams` re-serialises the WHOLE query as form data: setting the
+ * theme turned `%20` into `+`, `~` into `%7E`, `/` and `:` into `%2F`/`%3A`,
+ * and a bare flag `?debug` into `debug=` - in parameters the user typed and
+ * nobody asked to change. A system or an app that reads its own parameters
+ * literally saw a different value.
+ */
+function editQuery(
+  url: string,
+  edit: (pairs: string[]) => string[] | undefined
+): string {
+  try {
+    new URL(url);
+  } catch {
+    return url;
+  }
+  const hashAt = url.indexOf("#");
+  const beforeHash = hashAt === -1 ? url : url.slice(0, hashAt);
+  const fragment = hashAt === -1 ? "" : url.slice(hashAt);
+  const queryAt = beforeHash.indexOf("?");
+  const base = queryAt === -1 ? beforeHash : beforeHash.slice(0, queryAt);
+  const query = queryAt === -1 ? "" : beforeHash.slice(queryAt + 1);
+  const next = edit(query ? query.split("&") : []);
+  if (!next) {
+    return url;
+  }
+  return base + (next.length ? `?${next.join("&")}` : "") + fragment;
+}
+
 /**
  * Adds or replaces query parameters — how the preview switches the UI5 theme
  * and the logon language without touching the configured template. An empty
  * value removes the parameter again, so "back to the system default" is not a
- * special case.
+ * special case. Only the named parameters are touched (see `editQuery`): a
+ * replaced one keeps its place, a new one goes last, and a URL that needs no
+ * change comes back as it was.
  */
 export function withParams(
   url: string,
   params: Record<string, string | undefined>
 ): string {
-  try {
-    const parsed = new URL(url);
+  return editQuery(url, (pairs) => {
+    let out = pairs;
     for (const [key, value] of Object.entries(params)) {
-      if (value) {
-        parsed.searchParams.set(key, value);
-      } else {
-        parsed.searchParams.delete(key);
+      const first = out.findIndex((pair) => paramName(pair) === key);
+      if (!value) {
+        out = out.filter((pair) => paramName(pair) !== key);
+        continue;
       }
+      const pair = `${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+      // a replaced parameter keeps its place, a repeated one is folded into
+      // it - what `URLSearchParams.set` did, minus re-encoding the rest
+      out =
+        first === -1
+          ? [...out, pair]
+          : out.flatMap((p, i) => (i === first ? [pair] : paramName(p) === key ? [] : [p]));
     }
-    return parsed.toString();
-  } catch {
-    return url;
-  }
+    return out.join("&") === pairs.join("&") && out.length === pairs.length ? undefined : out;
+  });
 }
 
 /**
@@ -67,24 +123,13 @@ export function withParams(
  * of this user can read, and a launch URL configured with those two carried
  * them there in clear text. The proxy injects the credentials anyway, so the
  * page loads exactly as before. Byte-identical when there is nothing to take
- * out.
+ * out, and every other parameter byte-identical when there is.
  */
 export function withoutLogonParams(url: string): string {
-  try {
-    const parsed = new URL(url);
-    const logon = [...parsed.searchParams.keys()].filter((key) =>
-      /^sap-(user|password)$/i.test(key)
-    );
-    if (!logon.length) {
-      return url;
-    }
-    for (const key of logon) {
-      parsed.searchParams.delete(key);
-    }
-    return parsed.toString();
-  } catch {
-    return url;
-  }
+  return editQuery(url, (pairs) => {
+    const kept = pairs.filter((pair) => !/^sap-(user|password)$/i.test(paramName(pair)));
+    return kept.length === pairs.length ? undefined : kept;
+  });
 }
 
 /**
