@@ -95,6 +95,32 @@ test("frameworkPinAt places the pin on its value", () => {
   assert.equal(config('      "branch": "",')[empty.offset], '"');
 });
 
+test("a pin in a comment is not the pin", () => {
+  // the previous pin kept as a comment above the real one - abaplint reads
+  // the second, and so must the check (a warning on the comment, about a
+  // release nobody is on, was the result)
+  const kept = config('      // "branch": "1.100.0",  the pin before the upgrade\n      "branch": "1.145.2",');
+  const at = frameworkPinAt(kept);
+  assert.ok(at);
+  assert.equal(at.branch, "1.145.2");
+  assert.equal(kept.slice(at.offset, at.offset + at.length), "1.145.2");
+  assert.equal(compatFinding(COMPAT, kept), undefined);
+  // a whole dependency commented out ahead of the live one
+  const old = `{ "dependencies": [
+    /* { "url": "https://github.com/abap2UI5/abap2UI5", "branch": "1.100.0" }, */
+    { "url": "https://github.com/abap2UI5/abap2UI5", "branch": "1.145.2" }
+  ] }`;
+  assert.equal(frameworkPinOf(old), "1.145.2");
+  // a brace in a comment does not hide the dependency it sits in
+  const brace = config('      // pinned per {release}\n      "branch": "1.142.0",');
+  assert.equal(frameworkPinOf(brace), "1.142.0");
+  // `//` inside a string is no comment
+  assert.equal(
+    frameworkPinOf('{ "url": "https://github.com/abap2UI5/abap2UI5", "branch": "1.144.0" }'),
+    "1.144.0"
+  );
+});
+
 test("the scaffold names the template's pin through the shared parser", () => {
   // scaffold.ts used to carry its own "branch" regex - the first branch in
   // the file, whichever dependency it belonged to

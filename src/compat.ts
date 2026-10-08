@@ -102,15 +102,49 @@ export function readCompat(): CompatRecord | null {
  *  trailing slash, in any case. */
 const FRAMEWORK_URL_RE = /abap2ui5\/abap2ui5(\.git)?\/?$/i;
 
+/** The JSONC text with every comment replaced by spaces (line breaks kept),
+ *  so offsets into it are offsets into the original. A `//` or `/*` inside a
+ *  string is text, not a comment. */
+function blankJsoncComments(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"' && text[j] !== "\n") {
+        j += text[j] === "\\" ? 2 : 1;
+      }
+      out += text.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (ch === "/" && (text[i + 1] === "/" || text[i + 1] === "*")) {
+      const block = text[i + 1] === "*";
+      const close = block ? text.indexOf("*/", i + 2) : text.indexOf("\n", i);
+      const end = close < 0 ? text.length : block ? close + 2 : close;
+      out += text.slice(i, end).replace(/[^\r\n]/g, " ");
+      i = end;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 /** Where the pin is in the text - the `branch` value of the dependency whose
  *  url names abap2UI5/abap2UI5, with the offset and length of the value so a
  *  diagnostic lands on it. Undefined when there is no such dependency or it
  *  carries no `branch` (abaplint then clones the default branch). Comments
- *  are what abaplint.jsonc is full of, so the objects are read as flat
- *  `{ ... }` spans: a dependency has no nested object. */
+ *  are what abaplint.jsonc is full of - a previous pin kept as one, a
+ *  dependency commented out, a `{` in prose - so they are blanked first, and
+ *  the objects are read as flat `{ ... }` spans: a dependency has no nested
+ *  object. */
 export function frameworkPinAt(
-  text: string
+  original: string
 ): { branch: string; offset: number; length: number } | undefined {
+  const text = blankJsoncComments(original);
   const objects = /\{[^{}]*\}/g;
   let m: RegExpExecArray | null;
   while ((m = objects.exec(text))) {

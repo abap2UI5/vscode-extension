@@ -117,6 +117,10 @@
     cursor on the `meth` of the keyword.
   - *Completion in a `*.view.xml`* offers nothing in front of the first
     tag; accepting an offer there replaced the root tag's name.
+  - *Framework-pin warning.* A pin kept in a comment of `abaplint.jsonc`
+    (`// "branch": "1.100.0"` above the real one, or a dependency commented
+    out) is no longer read as the pin, and a `{` in a comment no longer hides
+    the dependency it sits in.
 
 
 ## 0.30.2
