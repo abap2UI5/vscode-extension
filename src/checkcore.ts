@@ -202,13 +202,30 @@ export interface CheckerCommandInput {
   /** The checkout names probed under the repos root, `cli.mjs` inside. */
   checkoutDirs: readonly string[];
   exists: (file: string) => boolean;
+  /** The release commit of the bundled linter (`LINTER_COMMIT`, stamped by
+   *  esbuild.js from `linterRelease`) - what the npx fallback is pinned to.
+   *  Empty in a dev build with nothing stamped. */
+  linterCommit?: string;
+}
+
+/** The npx spec of the linter the last-resort fallback runs: the release
+ *  commit this build ships when it is stamped, the repository's default
+ *  branch only in a dev build without one. Unpinned, an installed extension
+ *  ran whatever the linter's main said that day - code nobody had tested
+ *  with this build, fetched and executed on a setting a repository can
+ *  switch on. */
+export function linterNpxSpec(commit: string | undefined): string {
+  const pinned = (commit ?? "").trim();
+  return /^[0-9a-f]{40}$/.test(pinned)
+    ? `github:abap2UI5/linter#${pinned}`
+    : "github:abap2UI5/linter";
 }
 
 /** The command used to run the external checker CLI for the render gate. An
  *  explicit setting wins; then a gate installed via "Install Render Gate";
  *  then a local linter checkout under the repos root (both run
- *  with VS Code's own Node.js); npx fetching from GitHub is the last
- *  resort. */
+ *  with VS Code's own Node.js); npx fetching from GitHub - at the bundled
+ *  linter's release commit - is the last resort. */
 export function resolveCheckerCommand(input: CheckerCommandInput): CheckerCommand {
   const explicit = input.explicit.trim();
   if (explicit) {
@@ -234,7 +251,7 @@ export function resolveCheckerCommand(input: CheckerCommandInput): CheckerComman
   }
   return {
     cmd: "npx",
-    args: ["--yes", "github:abap2UI5/linter"],
+    args: ["--yes", linterNpxSpec(input.linterCommit)],
     env: {},
     installed: false,
   };
@@ -522,7 +539,10 @@ export type RenderGateOutcome =
   /** Not started: the repo's `abap2ui5lint.jsonc` says `render: false`, so
    *  CI does not render either - a "passed" here would claim a gate the
    *  repository switched off. */
-  | "off-by-config";
+  | "off-by-config"
+  /** Not started: the workspace is not trusted (Restricted Mode), and the
+   *  render gate starts an external process over the repository's code. */
+  | "skipped-untrusted";
 
 /**
  * The parenthesis appended to what the check says about itself, so a "view
@@ -549,6 +569,8 @@ export function renderGateNote(outcome: RenderGateOutcome): string {
       return " (render gate skipped - superseded by a newer check)";
     case "off-by-config":
       return " (render gate off by config)";
+    case "skipped-untrusted":
+      return " (render gate skipped - the workspace is not trusted)";
   }
 }
 

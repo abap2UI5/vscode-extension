@@ -10,7 +10,12 @@ import { handlerStub } from "./handlerstub";
 import { plural } from "./text";
 import { clearBaselineCache } from "./lintconfig";
 import { CONFIG_SECTION } from "./settings";
-import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
+import {
+  baselineFileFor,
+  baselineRootFor,
+  findingsNow,
+  recheckOpenDocuments,
+} from "./viewcheck";
 
 /*
  * Quick fixes for the view-check findings.
@@ -393,7 +398,14 @@ export function registerQuickFix(
       "abap2ui5.addToBaseline",
       (baselineFile: string, sourceFile: string, finding: PropertyFinding) => {
         try {
-          const key = addToBaseline(baselineFile, sourceFile, finding);
+          // the arguments come from the code action, but the root does not:
+          // it is re-derived from the config that governs the source file
+          const key = addToBaseline(
+            baselineFile,
+            sourceFile,
+            finding,
+            baselineRootFor(sourceFile)
+          );
           log(`quick-fix: baselined ${key} in ${baselineFile}`);
           // the memo is keyed on mtime, and this write may land in the same
           // second as the read that filled it

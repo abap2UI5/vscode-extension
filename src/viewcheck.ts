@@ -44,7 +44,7 @@ import {
 } from "./checkcore";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
 import { plural } from "./text";
-import { rebuildBaseline } from "./baselinefile";
+import { baselineWriteRefusal, rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
   CheckOptions,
@@ -52,6 +52,7 @@ import {
   clearConfigCache,
   configGeneration,
   describeOptions,
+  findConfigFile,
   resolveOptions,
 } from "./lintconfig";
 
@@ -172,6 +173,22 @@ export function baselineFileFor(doc: vscode.TextDocument): string | undefined {
   return doc.uri.scheme === "file" ? optionsFor(doc).baseline : undefined;
 }
 
+/** The folder a baseline named by `configFile` must lie in to be written:
+ *  the workspace folder holding that config, or - for a config outside every
+ *  open folder, which a cloned repository cannot put there - the config's own
+ *  directory. See `baselineWriteRefusal`. */
+function baselineRootOfConfig(configFile: string): string {
+  const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(configFile));
+  return folder?.uri.scheme === "file" ? folder.uri.fsPath : path.dirname(configFile);
+}
+
+/** The same root for a source file, through the config that governs it -
+ *  undefined when none does (then there is no baseline to write either). */
+export function baselineRootFor(sourceFile: string): string | undefined {
+  const configFile = findConfigFile(path.dirname(sourceFile));
+  return configFile ? baselineRootOfConfig(configFile) : undefined;
+}
+
 function optionsFor(doc: vscode.TextDocument): CheckOptions {
   const cfg = config();
   return resolveOptions(discoveryDir(doc), {
@@ -212,6 +229,7 @@ export function checkerCommand(): CheckerCommand {
     reposRoot: config().get<string>("mcp.reposRoot", ""),
     checkoutDirs: VIEW_CHECK_DIRS,
     exists: (file) => fs.existsSync(file),
+    linterCommit: process.env.LINTER_COMMIT || "",
   });
 }
 
@@ -612,6 +630,13 @@ async function checkDocument(
        * started, and the message says which gate did not run. */
       renderOff = true;
       helperNote = renderGateNote("off-by-config");
+    } else if (!vscode.workspace.isTrusted) {
+      /* Restricted Mode: the render gate is an external process over the
+       * repository's code - and its last-resort fallback fetches one - so it
+       * waits for the workspace to be trusted. `viewCheck.render` itself is
+       * a restricted setting too: a cloned repository cannot switch it on. */
+      log("view-check: render gate not run - the workspace is not trusted");
+      helperNote = renderGateNote("skipped-untrusted");
     } else if (state.kind === "failed") {
       log(`view-check: render gate not run - ${state.reason}`);
       helperNote = renderGateNote("skipped-not-started");
@@ -1254,6 +1279,15 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
       });
     return;
   }
+  // refused before the sweep, not after it: rebuildBaseline asks again
+  const baselineRoot = rootOptions.configFile
+    ? baselineRootOfConfig(rootOptions.configFile)
+    : undefined;
+  const refusal = baselineWriteRefusal(baselineFile, baselineRoot);
+  if (refusal) {
+    vscode.window.showWarningMessage(`abap2UI5: ${refusal}`);
+    return;
+  }
   const confirmed = await vscode.window.showWarningMessage(
     `abap2UI5: rewrite ${path.basename(baselineFile)} from what the workspace ` +
       "reports right now? Every finding that exists today becomes waived; " +
@@ -1334,7 +1368,8 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
           mine.map((file) => ({
             file: file.uri.fsPath,
             findings: file.findings,
-          }))
+          })),
+          baselineRoot
         );
         // the file just changed; its memo is keyed on an mtime that may not
         // have moved yet

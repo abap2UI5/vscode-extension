@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "fs";
 import * as path from "path";
 import { checkXmlSource } from "@abap2ui5/linter";
 import { applyDirectives, defaultSeverityOf } from "@abap2ui5/linter/findings";
@@ -140,10 +141,51 @@ test("a checkout under the repos root is found by its known names", () => {
 });
 
 test("with nothing installed npx from GitHub is the last resort", () => {
+  // a dev build with nothing stamped has no release to pin to
   const cmd = resolveCheckerCommand(NO_GATE);
   assert.equal(cmd.cmd, "npx");
   assert.deepEqual(cmd.args, ["--yes", "github:abap2UI5/linter"]);
   assert.equal(cmd.installed, false);
+});
+
+test("the npx fallback runs the bundled linter's release commit, not main", () => {
+  /*
+   * regression: the fallback ran `github:abap2UI5/linter` - whatever the
+   * linter's main said that day, fetched and executed on a setting a
+   * repository could switch on. A stamped build pins it to the commit its
+   * linter release was published from.
+   */
+  const commit = "41e3fbde14281181d81a121f629eb96164deb961";
+  const cmd = resolveCheckerCommand({ ...NO_GATE, linterCommit: commit });
+  assert.deepEqual(cmd.args, ["--yes", `github:abap2UI5/linter#${commit}`]);
+  // nothing that is not a full commit id is spliced into the spec
+  for (const odd of ["", "  ", "main", "41e3fbde1428", `${commit} --foo`]) {
+    assert.deepEqual(
+      resolveCheckerCommand({ ...NO_GATE, linterCommit: odd }).args,
+      ["--yes", "github:abap2UI5/linter"],
+      JSON.stringify(odd)
+    );
+  }
+  // a stamped commit changes nothing above the last rung
+  const explicit = resolveCheckerCommand({
+    ...NO_GATE,
+    explicit: "node cli.mjs",
+    linterCommit: commit,
+  });
+  assert.deepEqual(explicit.args, ["cli.mjs"]);
+});
+
+test("the render gate's switch and the TLS stance are not a repository's to set", () => {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")
+  );
+  const restricted: string[] =
+    pkg.capabilities.untrustedWorkspaces.restrictedConfigurations;
+  assert.ok(restricted.includes("abap2ui5.viewCheck.render"));
+  assert.ok(restricted.includes("abap2ui5.allowUnauthorizedCerts"));
+  const certs = pkg.contributes.configuration.properties["abap2ui5.allowUnauthorizedCerts"];
+  assert.equal(certs.scope, "machine", "a cloned repository must not switch TLS verification off");
+  assert.equal(certs.default, true, "the default is unchanged");
 });
 
 // ---------------------------------------------------------------------------
@@ -244,6 +286,7 @@ test("every way the render half did not run says so", () => {
     "spawn-failed",
     "no-report",
     "abandoned",
+    "skipped-untrusted",
   ] as const) {
     const note = renderGateNote(outcome);
     assert.match(note, /^ \(render gate skipped - .+\)$/, outcome);

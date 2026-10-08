@@ -50,6 +50,61 @@ export function readBaseline(baselineFile: string): Baseline {
   }
 }
 
+/** A path with its symbolic links resolved - the file itself when it exists,
+ *  else its directory (a baseline not written yet), else as given. */
+function realPath(file: string): string {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    // not there (yet)
+  }
+  try {
+    return path.join(fs.realpathSync(path.dirname(file)), path.basename(file));
+  } catch {
+    return path.resolve(file);
+  }
+}
+
+/**
+ * Why `baselineFile` must not be written, or undefined when it may be.
+ *
+ * The file is whatever the repository's `abap2ui5lint.jsonc` names, and
+ * "Add to Baseline" / "Update Baseline" REPLACE it with JSON. Unconfined, a
+ * cloned repository saying `"baseline": "../../.config/Code/User/settings.json"`
+ * (or committing a symbolic link that goes there) had the editor overwrite a
+ * file of the user's on the first click. So it has to lie inside `root` - the
+ * workspace folder holding the config - once its links are resolved; without
+ * a root there is nothing to confine it to, and nothing is written.
+ */
+export function baselineWriteRefusal(
+  baselineFile: string,
+  root: string | undefined
+): string | undefined {
+  if (!root) {
+    return (
+      `refusing to write ${baselineFile} - no abap2ui5lint.jsonc in an open ` +
+      "folder names it as this file's baseline"
+    );
+  }
+  const rel = path.relative(realPath(root), realPath(baselineFile));
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+    return (
+      `refusing to write ${baselineFile} - the "baseline" of abap2ui5lint.jsonc ` +
+      `lies outside the workspace folder ${root}. Point it at a file inside ` +
+      "the repository."
+    );
+  }
+  return undefined;
+}
+
+/** Throws the refusal, so no writer below can forget to ask. */
+function assertWritable(baselineFile: string, root: string | undefined): void {
+  const refusal = baselineWriteRefusal(baselineFile, root);
+  if (refusal) {
+    throw new Error(refusal);
+  }
+}
+
 /** The one way a baseline is written: keys sorted for a stable diff, the
  *  stored note preserved, one trailing newline - shared by the append and
  *  the rebuild so the file format cannot fork. */
@@ -98,8 +153,10 @@ export function baselineKeys(
  */
 export function rebuildBaseline(
   baselineFile: string,
-  files: ReadonlyArray<{ file: string; findings: readonly PropertyFinding[] }>
+  files: ReadonlyArray<{ file: string; findings: readonly PropertyFinding[] }>,
+  root: string | undefined
 ): { entries: number; findings: number } {
+  assertWritable(baselineFile, root);
   const raw = readBaseline(baselineFile);
   const counted: Record<string, number> = {};
   for (const { file, findings } of files) {
@@ -113,14 +170,20 @@ export function rebuildBaseline(
 /**
  * Appends one finding to the baseline file - the same key and count semantics
  * `--update-baseline` writes, so the CLI recognises the entry. Returns the key
- * that was added.
+ * that was added. Every writer takes the `root` the file must lie in (see
+ * `baselineWriteRefusal`) and throws without touching anything outside it.
  */
 export function addToBaseline(
   baselineFile: string,
   sourceFile: string,
-  finding: PropertyFinding
+  finding: PropertyFinding,
+  root: string | undefined
 ): string {
-  return addAllToBaseline(baselineFile, [{ file: sourceFile, findings: [finding] }])[0];
+  return addAllToBaseline(
+    baselineFile,
+    [{ file: sourceFile, findings: [finding] }],
+    root
+  )[0];
 }
 
 /**
@@ -131,8 +194,10 @@ export function addToBaseline(
  */
 export function addAllToBaseline(
   baselineFile: string,
-  files: ReadonlyArray<{ file: string; findings: readonly PropertyFinding[] }>
+  files: ReadonlyArray<{ file: string; findings: readonly PropertyFinding[] }>,
+  root: string | undefined
 ): string[] {
+  assertWritable(baselineFile, root);
   const raw = readBaseline(baselineFile);
   const findings: Record<string, number> = raw.findings ?? {};
   const added: string[] = [];
