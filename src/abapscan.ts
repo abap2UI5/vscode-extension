@@ -539,3 +539,16 @@ export function declaredNames(
   }
   return out;
 }
+
+/**
+ * Start of the line `offset` is on - 0 for the first line, whatever the
+ * source starts with.
+ *
+ * Not `source.lastIndexOf("\n", offset - 1) + 1`: at offset 0 that asks for
+ * a search from -1, which `lastIndexOf` reads as 0 - so a source starting
+ * with a newline put "the start of the first line" at 1, past the offset it
+ * was asked about (the same trap `xmlContextAt` fell into with `<`).
+ */
+export function lineStartAt(source: string, offset: number): number {
+  return offset > 0 ? source.lastIndexOf("\n", offset - 1) + 1 : 0;
+}

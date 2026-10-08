@@ -109,7 +109,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/navmap.ts` | App navigation graph: nav_app_call extraction, column layout, SVG rendering |
 | `src/navview.ts` | "Show App Navigation Map": workspace scan + the webview panel around the SVG |
 | `src/snapshot.ts` | Loads the bundled UI5 metadata once, for the gate and the language features |
-| `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over |
+| `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over - plus `lineStartAt`, the line start that is right at offset 0 too (never `lastIndexOf("\n", offset - 1)`, which reads -1 as 0) |
 | `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
 | `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
 | `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, and what a RENAME has to drop (never object identity against a memo) |

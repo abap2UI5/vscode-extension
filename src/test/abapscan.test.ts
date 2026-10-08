@@ -8,6 +8,7 @@ import {
   blankNonCode,
   blankNonCodeKeepEmbeds,
   declaredNames,
+  lineStartAt,
 } from "../abapscan";
 
 /*
@@ -392,4 +393,14 @@ test("blankNonCodeKeepEmbeds keeps a template's embedded code only", () => {
   // without a template it is blankNonCode
   const plain = "x = 'a'. \" c";
   assert.equal(blankNonCodeKeepEmbeds(plain), blankNonCode(plain));
+});
+
+test("the start of the line an offset is on, the first line included", () => {
+  // `lastIndexOf("\n", offset - 1)` at offset 0 searches from -1, read as 0:
+  // a source opening with a newline put the first line's start at 1
+  assert.equal(lineStartAt("\nDATA x.", 0), 0);
+  assert.equal(lineStartAt("\nDATA x.", 1), 1);
+  assert.equal(lineStartAt("ab\ncd", 2), 0, "the newline itself ends the first line");
+  assert.equal(lineStartAt("ab\ncd", 4), 3);
+  assert.equal(lineStartAt("", 0), 0);
 });

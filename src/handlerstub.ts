@@ -19,7 +19,7 @@
  * a commented-out `* WHEN OTHERS.` cannot steer the edit.
  */
 
-import { blankComments, blankNonCode } from "./abapscan";
+import { blankComments, blankNonCode, lineStartAt } from "./abapscan";
 import { eventCaseRegion, eventRaises, ownLevel } from "./context";
 
 /** One insertion: the text to put at `offset` in the source it was read from. */
@@ -30,14 +30,9 @@ export interface HandlerStub {
   name: string;
 }
 
-/** Start of the line `offset` is on. */
-function lineStart(source: string, offset: number): number {
-  return source.lastIndexOf("\n", offset - 1) + 1;
-}
-
 /** The leading whitespace of the line `offset` is on. */
 function indentAt(source: string, offset: number): string {
-  const start = lineStart(source, offset);
+  const start = lineStartAt(source, offset);
   const end = source.indexOf("\n", start);
   return /^[ \t]*/.exec(source.slice(start, end === -1 ? undefined : end))?.[0] ?? "";
 }
@@ -106,7 +101,7 @@ export function handlerStub(
   // where: before WHEN OTHERS, else before ENDCASE - at the line start, so
   // the new branch has lines of its own
   const anchor = others ?? region.endcaseAt;
-  const offset = lineStart(source, anchor);
+  const offset = lineStartAt(source, anchor);
 
   // how: like the neighbours; without any, like the CASE itself, two in
   const keywordUpper = region.keyword === region.keyword.toUpperCase();
