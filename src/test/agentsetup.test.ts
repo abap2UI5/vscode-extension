@@ -257,6 +257,39 @@ test("nothing is ever planned into the source folder", async () => {
   }
 });
 
+test("nothing is written through a symbolic link", async () => {
+  /* `.claude -> ~/.claude` in a cloned repository: `exists` follows the link,
+   * so `.claude/settings.json` looked absent whenever the user had no global
+   * Claude Code settings - and the template's permission allowlist was
+   * written into them, for every project. A linked package.json would have
+   * been merged into wherever it points. */
+  class LinkedFolder extends MemoryFolder {
+    constructor(files: Record<string, string>, dirs: string[], public links: string[]) {
+      super(files, dirs);
+    }
+    async isLink(rel: string): Promise<boolean> {
+      return this.links.includes(rel);
+    }
+  }
+  const folder = new LinkedFolder(
+    { "package.json": '{"name":"x"}' },
+    ["src", ".claude"],
+    [".claude", "package.json"]
+  );
+  const p = await plan(folder);
+  const claude = p.actions.filter((a) => a.path.startsWith(".claude/"));
+  assert.ok(claude.length >= 2, "the setup has files under .claude/");
+  for (const a of claude) {
+    assert.equal(a.kind, "skip", a.path);
+    assert.equal(a.detail, ".claude is a symbolic link - never written through one");
+  }
+  assert.equal(action(p, "package.json")?.kind, "skip");
+  assert.equal(action(p, "package.json")?.detail, "package.json is a symbolic link - never written through one");
+  // everything else is planned as before
+  assert.equal(action(p, "AGENTS.md")?.kind, "add");
+  assert.ok(!writesOf(p).some((a) => a.path.startsWith(".claude/") || a.path === "package.json"));
+});
+
 test("a kept abaplint.jsonc without a framework pin is named", async () => {
   const p = await plan(new MemoryFolder({ "abaplint.jsonc": '{ "global": { "files": "/src/**/*.*" } }' }, ["src"]));
   assert.equal(action(p, "abaplint.jsonc")?.kind, "skip");

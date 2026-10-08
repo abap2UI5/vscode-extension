@@ -65,6 +65,10 @@ export const AGENT_SETUP: AgentSetupSpec | undefined = (
 export interface WorkspaceProbe {
   exists(rel: string): Promise<boolean>;
   readText(rel: string): Promise<string>;
+  /** Whether `rel` ITSELF is a symbolic link (not what it points at). A
+   *  probe of a file system without links (the web host's virtual folders,
+   *  a test's map) may leave it out. */
+  isLink?(rel: string): Promise<boolean>;
 }
 
 export type AgentSetupAction =
@@ -269,6 +273,27 @@ export function sourceFolderOf(
   return { folder, from: ".abapgit.xml STARTING_FOLDER" };
 }
 
+/**
+ * The first component of `rel` - `.claude`, then `.claude/settings.json` -
+ * that is a symbolic link, or undefined. A write through one lands wherever
+ * it points: a cloned repository carrying `.claude -> ~/.claude` would have
+ * the template's permission allowlist written into the user's GLOBAL Claude
+ * Code settings, every project's. `exists` follows links, so it cannot tell.
+ */
+async function linkOnTheWay(probe: WorkspaceProbe, rel: string): Promise<string | undefined> {
+  if (!probe.isLink) {
+    return undefined;
+  }
+  const parts = rel.split("/");
+  for (let i = 1; i <= parts.length; i++) {
+    const prefix = parts.slice(0, i).join("/");
+    if (await probe.isLink(prefix)) {
+      return prefix;
+    }
+  }
+  return undefined;
+}
+
 /** Whether `rel` lies inside `folder` (both workspace-relative). */
 function inside(rel: string, folder: string): boolean {
   const f = folder.replace(/\/+$/, "");
@@ -319,6 +344,15 @@ export async function planAgentSetup(
         path: rel,
         kind: "skip",
         detail: `inside the source folder ${folder}/ - never written`,
+      });
+      continue;
+    }
+    const link = await linkOnTheWay(probe, rel);
+    if (link) {
+      actions.push({
+        path: rel,
+        kind: "skip",
+        detail: `${link} is a symbolic link - never written through one`,
       });
       continue;
     }

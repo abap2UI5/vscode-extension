@@ -37,6 +37,16 @@ function probeFor(root: vscode.Uri): WorkspaceProbe {
     },
     readText: async (rel) =>
       new TextDecoder().decode(await vscode.workspace.fs.readFile(at(rel))),
+    // `stat` follows a link and ORs `SymbolicLink` into the type; a path
+    // that is not there is no link
+    isLink: async (rel) => {
+      try {
+        const stat = await vscode.workspace.fs.stat(at(rel));
+        return (stat.type & vscode.FileType.SymbolicLink) !== 0;
+      } catch {
+        return false;
+      }
+    },
   };
 }
 

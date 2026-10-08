@@ -101,6 +101,12 @@
     only, too: a repository's `.vscode/settings.json` can no longer make
     *Install Render Gate* download the linter's rolling build instead of the
     release this extension bundles. Off by default, as before.
+  - *Add Agent Setup to Workspace* writes nothing through a symbolic link:
+    a project whose `.claude` (or `package.json`, or any other file of the
+    setup) is a link has that file skipped and named in the confirmation. A
+    cloned repository carrying `.claude -> ~/.claude` used to have the
+    template's permission allowlist written into your global Claude Code
+    settings.
 
 
 ## 0.30.2
