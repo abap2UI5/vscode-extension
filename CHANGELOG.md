@@ -138,6 +138,11 @@
     temporary folder that could not be written, a checker that could not be
     resolved) in the panel, over the last pictures. It used to keep saying
     "rendering…" until the next save, with the reason only in the log.
+  - *View check on vscode.dev / in the browser.* A `baseline` in
+    `abap2ui5lint.jsonc` written as `./../baseline.json`,
+    `lint/../baseline.json` or an absolute path is found again: only a
+    leading `../` used to be resolved, so the baseline was not read and the
+    findings it waives were reported (the desktop editor and CI waived them).
 
 
 ## 0.30.2

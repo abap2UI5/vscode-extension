@@ -29,18 +29,38 @@ export function dirOf(filePath: string): string {
   return cut < 0 ? "" : filePath.slice(0, cut);
 }
 
-/** `dir` + a relative name, without a `path` module. */
+/**
+ * `dir` + a name, without a `path` module - resolved the way the desktop
+ * reader's `path.resolve( dirname( config ), baseline )` resolves it: an
+ * absolute name stands on its own, and `.` and `..` segments are folded
+ * wherever they appear.
+ *
+ * Only a leading run of `../` used to be folded, so `./../b.json`,
+ * `lint/../b.json` and `/abs/b.json` came out as `/repo/app/../b.json`,
+ * `/repo/app/lint/../b.json` and `/repo/app//abs/b.json`. On the web the
+ * baseline was then read from a path no file system provider resolves, and
+ * its findings were reported although the desktop editor and CI waived them;
+ * the baseline key was off by the same segments.
+ */
 export function joinPath(dir: string, name: string): string {
-  if (!dir) {
-    return name;
+  const joined = name.startsWith("/") || !dir ? name : `${dir}/${name}`;
+  const absolute = joined.startsWith("/");
+  const out: string[] = [];
+  for (const segment of joined.split("/")) {
+    if (segment === "" || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      if (out.length && out[out.length - 1] !== "..") {
+        out.pop();
+      } else if (!absolute) {
+        out.push(segment); // above a relative start: kept, as path.join keeps it
+      }
+      continue;
+    }
+    out.push(segment);
   }
-  let base = dir;
-  let rest = name;
-  while (rest.startsWith("../")) {
-    base = dirOf(base);
-    rest = rest.slice(3);
-  }
-  return `${base.replace(/\/$/, "")}/${rest.replace(/^\.\//, "")}`;
+  return (absolute ? "/" : "") + out.join("/");
 }
 
 /**

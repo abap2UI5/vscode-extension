@@ -126,6 +126,27 @@ test("path helpers work on the '/'-separated paths a workspace URI carries", () 
   assert.equal(joinPath("", "baseline.json"), "baseline.json");
 });
 
+test("a baseline path resolves like the desktop reader's path.resolve", () => {
+  // only a LEADING run of `../` was folded: these three used to keep their
+  // `..` / `//`, and on the web the baseline was read from a path no file
+  // system resolves - its findings came back although CI waived them
+  assert.equal(joinPath("/repo/app", "./../b.json"), "/repo/b.json");
+  assert.equal(joinPath("/repo/app", "lint/../b.json"), "/repo/app/b.json");
+  assert.equal(joinPath("/repo/app", "/abs/b.json"), "/abs/b.json");
+  assert.equal(joinPath("/repo/app", "../../../b.json"), "/b.json", "not above the root");
+  assert.equal(joinPath("/repo/app/", "./x/./b.json"), "/repo/app/x/b.json");
+  assert.equal(joinPath("/repo/app", "../b.json"), "/repo/b.json");
+  // and the options a config produces carry the resolved file
+  assert.equal(
+    optionsFromConfig({ baseline: "./../b.json" } as never, "/repo/app/abap2ui5lint.jsonc", {
+      minUi5: "1.71",
+      distribution: null,
+      allow: [],
+    }).baseline,
+    "/repo/b.json"
+  );
+});
+
 test("the baseline waives what it covers and leaves the rest", () => {
   const findings = [
     { type: "unknown-binding-path", control: "sap.m.Input", value: "{/OLD}" },
