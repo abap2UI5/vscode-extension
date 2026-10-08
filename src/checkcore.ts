@@ -457,6 +457,26 @@ export function parseScreenshotErrors(stderr: string): string[] {
   return out;
 }
 
+/**
+ * What the view-preview panel shows after a refresh that THREW (a scratch
+ * file that could not be written, a checker that could not be resolved): the
+ * last pictures kept, the reason above them - and no `busy`. The panel is
+ * painted busy before the render starts, and a refresh that ended in its
+ * catch used to only log, so the panel said "rendering…" over the old
+ * pictures until the next save, with nothing on screen saying why.
+ */
+export function failedPreviewState<S>(
+  shown: { shots: S[]; errors: string[] },
+  err: unknown
+): { shots: S[]; errors: string[]; problem: string } {
+  const why = err instanceof Error ? err.message : String(err);
+  return {
+    shots: shown.shots,
+    errors: shown.errors,
+    problem: `The preview could not be rendered - ${why}. Saving again runs it afresh.`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // What "fix all" would do
 // ---------------------------------------------------------------------------

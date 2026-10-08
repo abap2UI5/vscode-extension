@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+  failedPreviewState,
   parseScreenshotErrors,
   parseScreenshotOutput,
   scratchFileName,
@@ -455,6 +456,15 @@ async function refresh(
   } catch (err) {
     // this runs from a save listener, where a rejection would land nowhere
     log(`view-preview: refresh failed - ${String(err)}`);
+    // and the panel was painted busy above: without this it kept saying
+    // "rendering…" until the next save, with the reason only in the log
+    if (target === panel) {
+      try {
+        paint(target, doc, failedPreviewState(shown, err), mock);
+      } catch {
+        // the panel went away between the check and the paint
+      }
+    }
   } finally {
     running = false;
     if (!panel) {

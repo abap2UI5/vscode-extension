@@ -33,6 +33,7 @@ import {
   resolveCheckerCommand,
   splitCommandLine,
   scratchFileName,
+  failedPreviewState,
 } from "../checkcore";
 
 /*
@@ -1070,4 +1071,16 @@ test("a class on a frozen builder is checkable", () => {
   );
   // still not a license for quoting files
   assert.equal(isCheckableSource("notes.md", "markdown", FROZEN_CLASS), false);
+});
+
+test("a preview refresh that threw shows why, keeps the pictures and is not busy", () => {
+  // the panel is painted busy before the render; a refresh that ended in its
+  // catch only logged, and the panel said "rendering…" until the next save
+  const shown = { shots: [{ uri: "a.png", label: "1280x900" }], errors: ["old"] };
+  const state = failedPreviewState(shown, new Error("EACCES: permission denied, mkdir '/tmp/x/now'"));
+  assert.deepEqual(state.shots, shown.shots);
+  assert.deepEqual(state.errors, ["old"]);
+  assert.equal("busy" in state, false);
+  assert.match(state.problem, /could not be rendered - EACCES: permission denied/);
+  assert.match(failedPreviewState({ shots: [], errors: [] }, "boom").problem, /- boom\./);
 });

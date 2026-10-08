@@ -134,6 +134,10 @@
     `package.json` name within npm's rules: a folder name longer than 214
     characters is cut, and a folder called `node_modules` or `favicon.ico`
     gets `abap2ui5-app` - `npm install` refused the names they used to write.
+  - *Preview View (No System)* shows why a render could not even start (a
+    temporary folder that could not be written, a checker that could not be
+    resolved) in the panel, over the last pictures. It used to keep saying
+    "rendering…" until the next save, with the reason only in the log.
 
 
 ## 0.30.2
