@@ -147,6 +147,11 @@
     when a text or a value holds a lone parenthesis - `Text{1) First}+Button`
     or `Input[placeholder="(optional"]+Button` used to be refused as "not an
     abbreviation".
+  - *`abap2ui5.systems`* entries of the wrong type (`"name": 100`, a `url`
+    that is not a string, a bare string in the list, an object instead of
+    the list) are skipped like any other malformed entry; they used to make
+    *Run App*, the system picker and the status bar fail with an error until
+    the setting was fixed by hand.
 
 
 ## 0.30.2
