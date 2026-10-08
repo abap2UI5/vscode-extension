@@ -62,6 +62,42 @@
   help (`SelectDialog`, `TableSelectDialog`) is a table of the snapshot, and
   `app_act` with `row` on its `confirm` picks that row as a click does; the
   items of a `MessagePopover` / `MessageView` are listed as messages.
+- **Fixes from a security and correctness review:**
+  - *F2 on an event* renames only the `WHEN` branches of the class's
+    `CASE client->get_event( )` (or `client->get( )-event`) - it used to
+    rewrite a same-named `WHEN 'EDIT'` of an unrelated `CASE mv_mode.` or of
+    a status switch nested in a handler too. Go to Definition, the
+    highlights, the "raised n× in the view" lens and completion in a `WHEN`
+    follow the same rule. A class without such a CASE keeps the old
+    behaviour.
+  - *F2 on a bound attribute* no longer rewrites the word inside a string
+    template's text (`|The mv_title is …|`) or another structure's component
+    embedded in one (`|{ ls_row-mv_title }|`); `|{ mv_title }|` is still
+    renamed.
+  - *Control ids.* ``a( n = `id` v = |inp_{ lv_i }| )`` no longer makes the
+    next attribute's name (`value`) a declared id - the id is the literal
+    right behind `v =`, or there is none.
+  - *Render gate.* Its last-resort `npx` fallback runs the linter release
+    this extension bundles instead of the linter's current main, and the
+    render gate does not run in an untrusted workspace (Restricted Mode).
+    `abap2ui5.viewCheck.render` can no longer be switched on by an untrusted
+    workspace's settings.
+  - *Baseline.* The "add … to the baseline" quick fix, *Add All Findings of
+    This Rule to the Baseline* and *Rebuild the View-Check Baseline* refuse - with a message saying why - a `baseline` in
+    `abap2ui5lint.jsonc` that points outside the workspace folder holding
+    the config, a symbolic link out of it included. They used to overwrite
+    whatever JSON file the config named.
+  - *Proxy.* A page declared as `windows-1252` or `iso-8859-1` shows its euro
+    signs, dashes and curly quotes the way a browser does, a page in another
+    charset (`iso-8859-2`, `shift_jis`, ...) is decoded as that charset
+    instead of as UTF-8, and a page in a charset that cannot be decoded is
+    passed through unchanged instead of being garbled.
+  - *`abap2ui5.allowUnauthorizedCerts`* is read from your user settings
+    only: a repository's `.vscode/settings.json` can no longer switch
+    certificate verification for the auth proxy on or off. Its default is
+    unchanged; a value you had set in a workspace's settings no longer
+    applies - set it in your User settings instead.
+
 
 ## 0.30.2
 

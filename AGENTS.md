@@ -55,7 +55,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
 | `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, "add to baseline", and the one correction composed here - the WHEN branch for `event-without-handler` |
-| `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE |
+| `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE. The CASE region itself (`eventCaseRegion`, `ownLevel`) lives in `context.ts`, which restricts the event rename, highlights, lens and Go-to-Definition to the WHENs at its own level |
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
 | `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
 | `src/clientapi.ts` | The bundled `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion |
@@ -296,12 +296,23 @@ identity (see Conventions).
   the extension spawns; machine scope keeps a cloned repository's
   `.vscode/settings.json` out of that decision. They are listed under
   `capabilities.untrustedWorkspaces.restrictedConfigurations`, together with
-  `systems`, `launchUrlTemplate`, `agent.enableAppTools` and `report2cloud.path` (the
-  abap-cloud-gui checkout whose report2cloud CLI the migrate command runs) - seven settings a
-  cloned repository must not be able to set. The last one is machine scope
+  `systems`, `launchUrlTemplate`, `agent.enableAppTools`, `report2cloud.path` (the
+  abap-cloud-gui checkout whose report2cloud CLI the migrate command runs),
+  `viewCheck.render` and `allowUnauthorizedCerts` - nine settings a
+  cloned repository must not be able to set. `agent.enableAppTools` is machine scope
   too, for the same reason in another shape: it lets an agent act on the
   system AS THE USER, so only the user's own settings may turn it on
   (`agentapps.test.ts` pins its scope, default and restriction).
+  `allowUnauthorizedCerts` is machine scope as well - it decides whether the
+  proxy that injects the credentials verifies the system's certificate - and
+  the render gate does not run at all in Restricted Mode (`viewcheck.ts`
+  asks `workspace.isTrusted`); its last-resort `npx` fallback is pinned to
+  `LINTER_COMMIT` like the bundle download (`checkcore.test.ts` pins both).
+- **A file the repository's config names is confined before it is written.**
+  The `baseline` of an `abap2ui5lint.jsonc` is replaced with JSON by "Add to
+  Baseline" / "Update Baseline"; `baselinefile.ts` refuses every write whose
+  target - symbolic links resolved - lies outside the workspace folder holding
+  that config (`baselineWriteRefusal`, a required `root` on every writer).
 - **The linter owns the rules, this extension owns the presentation.**
   Severity, wording, the `fixes` on a finding, the `rules` block and the
   `abap2ui5lint-disable…` directives all live in `@abap2ui5/linter` and are
