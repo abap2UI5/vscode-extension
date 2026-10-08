@@ -20,7 +20,7 @@
  */
 
 import { blankComments, blankNonCode } from "./abapscan";
-import { eventRaises } from "./context";
+import { eventCaseRegion, eventRaises, ownLevel } from "./context";
 
 /** One insertion: the text to put at `offset` in the source it was read from. */
 export interface HandlerStub {
@@ -28,84 +28,6 @@ export interface HandlerStub {
   text: string;
   /** The event name as the branch writes it - the raise's own spelling. */
   name: string;
-}
-
-/** The head of a CASE over the event - the same two spellings the linter's
- *  `event-without-handler` reads its handlers from. */
-const CASE_OVER_EVENT_HEAD =
-  /\b(CASE)\s+[^.]*?(?:get_event\s*\(\s*\)|get\s*\(\s*\)-event)[^.]*\./gi;
-
-interface CaseRegion {
-  /** Offset of the `CASE` keyword. */
-  from: number;
-  /** One past `ENDCASE`'s last character. */
-  to: number;
-  /** Start of the body: one past the head's period. */
-  bodyAt: number;
-  /** Offset of the `ENDCASE` keyword. */
-  endcaseAt: number;
-  /** Nested CASE … ENDCASE blocks inside the body, as `[from, to)`. */
-  inner: Array<[number, number]>;
-  /** The `CASE` keyword as written - `CASE` or `case`. */
-  keyword: string;
-}
-
-/**
- * The first CASE over the event in the source, up to ITS OWN ENDCASE, nested
- * CASE blocks counted through (a status switch inside one handler is not
- * the dispatcher, and its `WHEN OTHERS` is not the dispatcher's either).
- */
-function eventCaseRegion(code: string): CaseRegion | undefined {
-  CASE_OVER_EVENT_HEAD.lastIndex = 0;
-  const head = CASE_OVER_EVENT_HEAD.exec(code);
-  if (!head) {
-    return undefined;
-  }
-  const bodyAt = head.index + head[0].length;
-  const inner: Array<[number, number]> = [];
-  let depth = 1;
-  let open: number | undefined;
-  // only a CASE that starts a statement opens a block - the one in
-  // `TO UPPER CASE` or `IGNORING CASE` is part of another statement, and
-  // counting it let the dispatcher's own ENDCASE close it instead
-  const re = /(?<=(?:^|[.:,])\s*)\b(CASE)\b|\b(ENDCASE)\b/gi;
-  re.lastIndex = bodyAt;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(code))) {
-    if (m[1]) {
-      depth++;
-      if (depth === 2) {
-        open = m.index;
-      }
-    } else {
-      depth--;
-      if (depth === 1 && open !== undefined) {
-        inner.push([open, m.index + m[0].length]);
-        open = undefined;
-      }
-      if (depth === 0) {
-        return {
-          from: head.index,
-          to: m.index + m[0].length,
-          bodyAt,
-          endcaseAt: m.index,
-          inner,
-          keyword: head[1],
-        };
-      }
-    }
-  }
-  return undefined; // an unclosed CASE mid-edit: nothing to insert into
-}
-
-/** Is `offset` at the CASE's own level - inside its body, outside every
- *  nested block? */
-function ownLevel(region: CaseRegion, offset: number): boolean {
-  return (
-    offset >= region.bodyAt &&
-    offset < region.endcaseAt &&
-    !region.inner.some(([from, to]) => offset >= from && offset < to)
-  );
 }
 
 /** Start of the line `offset` is on. */

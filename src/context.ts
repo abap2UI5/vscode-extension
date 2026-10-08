@@ -1274,6 +1274,131 @@ export function bindableAttributes(source: string): BindableAttribute[] {
   return out;
 }
 
+/** The head of a CASE over the event - the same two spellings the linter's
+ *  `event-without-handler` reads its handlers from. */
+const CASE_OVER_EVENT_HEAD =
+  /\b(CASE)\s+[^.]*?(?:get_event\s*\(\s*\)|get\s*\(\s*\)-event)[^.]*\./gi;
+
+/** A `CASE client->get_event( )` (or `CASE client->get( )-event`) block -
+ *  the dispatcher whose WHEN branches are the event handlers. */
+export interface CaseRegion {
+  /** Offset of the `CASE` keyword. */
+  from: number;
+  /** One past `ENDCASE`'s last character. */
+  to: number;
+  /** Start of the body: one past the head's period. */
+  bodyAt: number;
+  /** Offset of the `ENDCASE` keyword. */
+  endcaseAt: number;
+  /** Nested CASE … ENDCASE blocks inside the body, as `[from, to)`. */
+  inner: Array<[number, number]>;
+  /** The `CASE` keyword as written - `CASE` or `case`. */
+  keyword: string;
+}
+
+/**
+ * The CASE whose head was matched at `headAt` (`headLength` long), up to ITS
+ * OWN ENDCASE, nested CASE blocks counted through (a status switch inside one
+ * handler is not the dispatcher, and its `WHEN OTHERS` is not the
+ * dispatcher's either). Undefined for an unclosed CASE mid-edit.
+ */
+function caseRegionFrom(
+  code: string,
+  headAt: number,
+  headLength: number,
+  keyword: string
+): CaseRegion | undefined {
+  const bodyAt = headAt + headLength;
+  const inner: Array<[number, number]> = [];
+  let depth = 1;
+  let open: number | undefined;
+  // only a CASE that starts a statement opens a block - the one in
+  // `TO UPPER CASE` or `IGNORING CASE` is part of another statement, and
+  // counting it let the dispatcher's own ENDCASE close it instead
+  const re = /(?<=(?:^|[.:,])\s*)\b(CASE)\b|\b(ENDCASE)\b/gi;
+  re.lastIndex = bodyAt;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code))) {
+    if (m[1]) {
+      depth++;
+      if (depth === 2) {
+        open = m.index;
+      }
+    } else {
+      depth--;
+      if (depth === 1 && open !== undefined) {
+        inner.push([open, m.index + m[0].length]);
+        open = undefined;
+      }
+      if (depth === 0) {
+        return {
+          from: headAt,
+          to: m.index + m[0].length,
+          bodyAt,
+          endcaseAt: m.index,
+          inner,
+          keyword,
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Every CASE over the event in `code` - which must be the `blankNonCode`
+ * copy of the source, so a CASE in a comment or a literal is not one. A
+ * class may dispatch in more than one method, so this is a list; a head
+ * whose block never closes (mid-edit) is left out.
+ */
+export function eventCaseRegions(code: string): CaseRegion[] {
+  const out: CaseRegion[] = [];
+  const re = new RegExp(CASE_OVER_EVENT_HEAD.source, CASE_OVER_EVENT_HEAD.flags);
+  let head: RegExpExecArray | null;
+  while ((head = re.exec(code))) {
+    const region = caseRegionFrom(code, head.index, head[0].length, head[1]);
+    if (region) {
+      out.push(region);
+      re.lastIndex = Math.max(re.lastIndex, region.to);
+    }
+  }
+  return out;
+}
+
+/** The first CASE over the event (see `eventCaseRegions`) - where the
+ *  handler-stub quick fix adds a branch. */
+export function eventCaseRegion(code: string): CaseRegion | undefined {
+  const re = new RegExp(CASE_OVER_EVENT_HEAD.source, CASE_OVER_EVENT_HEAD.flags);
+  const head = re.exec(code);
+  return head ? caseRegionFrom(code, head.index, head[0].length, head[1]) : undefined;
+}
+
+/** Is `offset` at the CASE's own level - inside its body, outside every
+ *  nested block? */
+export function ownLevel(region: CaseRegion, offset: number): boolean {
+  return (
+    offset >= region.bodyAt &&
+    offset < region.endcaseAt &&
+    !region.inner.some(([from, to]) => offset >= from && offset < to)
+  );
+}
+
+/**
+ * Whether a WHEN at `offset` is a branch of the event dispatch: at the own
+ * level of a CASE over the event - or, when the source has no such CASE at
+ * all, any WHEN (a dispatcher spelled some other way, e.g. over a local
+ * `lv_event`, still gets its wires). Without that restriction a
+ * `CASE mv_mode. WHEN 'EDIT'.` beside the dispatch was renamed, highlighted
+ * and lensed along with the event `EDIT`.
+ */
+function dispatchFilter(source: string): (offset: number) => boolean {
+  const regions = eventCaseRegions(blankNonCode(source));
+  if (!regions.length) {
+    return () => true;
+  }
+  return (offset) => regions.some((region) => ownLevel(region, offset));
+}
+
 /** How far back the WHEN test reads. Wide enough for any real alternative
  *  chain (`WHEN 'A' OR 'B' OR …` across lines) - the old 200 silently lost
  *  completion and rename on the last literals of a long one - and bounded so
@@ -1294,7 +1419,13 @@ export function whenLiteralAt(
     Math.max(0, literal.start - WHEN_LOOKBACK),
     literal.start
   );
-  if (!/\bWHEN\s*(?:(['`])[\w-]+\1\s+OR\s+)*['`]$/i.test(before)) {
+  const when = /\bWHEN\s*(?:(['`])[\w-]+\1\s+OR\s+)*['`]$/i.exec(before);
+  if (!when) {
+    return undefined;
+  }
+  // a WHEN of another CASE (`CASE mv_mode.`) is not a branch of the dispatch
+  const whenAt = literal.start - before.length + when.index;
+  if (!dispatchFilter(source)(whenAt)) {
     return undefined;
   }
   return { start: literal.start, end: literal.end };
@@ -1381,21 +1512,28 @@ export function eventUsagesOf(source: string, name: string): number[] {
     .map((raise) => raise.at);
 }
 
-/** Every `WHEN '<name>'` of the source - what the usage lens hangs on. Each
- *  alternative of a `WHEN 'A' OR 'B'` is its own branch. */
+/** Every `WHEN '<name>'` of the event dispatch - what the usage lens hangs
+ *  on. Each alternative of a `WHEN 'A' OR 'B'` is its own branch. Only the
+ *  WHENs at the own level of a `CASE client->get_event( )` count when the
+ *  class has one (a nested status switch or a `CASE mv_mode.` beside it
+ *  is not the dispatch); without such a CASE, every WHEN does. */
 export function whenBranches(source: string): NamedSpan[] {
   const out: NamedSpan[] = [];
   const code = blankComments(source);
+  const inDispatch = dispatchFilter(source);
   const re = /\bWHEN\s+/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code))) {
     let at = m.index + m[0].length;
+    const own = inDispatch(m.index);
     for (;;) {
       const lit = /^(['`])([\w-]+)\1/.exec(code.slice(at));
       if (!lit) {
         break;
       }
-      out.push({ name: lit[2], start: at + 1, end: at + 1 + lit[2].length });
+      if (own) {
+        out.push({ name: lit[2], start: at + 1, end: at + 1 + lit[2].length });
+      }
       at += lit[0].length;
       const or = /^\s+OR\s+/i.exec(code.slice(at));
       if (!or) {

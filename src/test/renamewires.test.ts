@@ -573,3 +573,80 @@ ENDCLASS.`;
     "view->tag( n = `Text` )->a( n = `text` v = `{/|NAME",
   ]);
 });
+
+test("a string template's text is no attribute, its embeds may be", () => {
+  /*
+   * regression: the identifier search read the raw source, so the word in a
+   * template's TEXT (`|The mv_title is …|`) was renamed - and the selector
+   * check read a copy with the whole template blanked, so the `ls_row-` of
+   * `|{ ls_row-mv_title }|` was invisible and another structure's component
+   * was renamed as this class's attribute.
+   */
+  const source = [
+    "CLASS zcl_app DEFINITION PUBLIC.",
+    "  PUBLIC SECTION.",
+    "    DATA mv_title TYPE string.",
+    "ENDCLASS.",
+    "CLASS zcl_app IMPLEMENTATION.",
+    "  METHOD x.",
+    "    DATA ls_row TYPE ty_row.",
+    "    mv_title = `a`.",
+    "    client->message_toast_display( |The mv_title is { mv_title }| ).",
+    "    DATA(lv) = |{ ls_row-mv_title }|.",
+    "    lv = |{ |nested mv_title { to_upper( mv_title ) }| } 'mv_title'|.",
+    "    lv = |{ cond( val = 'mv_title' ) }|.",
+    "    lv = ls_row-mv_title.",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\n");
+  const spans = attributeSpans(source, "mv_title");
+  const where = spans.map((s) => {
+    const lineStart = source.lastIndexOf("\n", s.start) + 1;
+    return `${source.slice(0, s.start).split("\n").length}:${s.start - lineStart}`;
+  });
+  assert.deepEqual(where, ["3:9", "8:4", "9:54", "11:41"]);
+  // the text occurrence is not even a rename target under the cursor
+  const inText = source.indexOf("The mv_title") + 6;
+  assert.equal(attributeAt(source, inText), undefined);
+  const inEmbed = source.indexOf("{ mv_title }") + 4;
+  assert.equal(attributeAt(source, inEmbed)?.name, "mv_title");
+});
+
+test("the declaring n = `id` takes its value from v = right behind it", () => {
+  /*
+   * regression: the declaration borrowed the wires' reach and took the first
+   * literal anywhere after the marker - past a `v = |inp_{ lv_i }|` (a
+   * template, not a literal) into the next attribute, so `value` became a
+   * declared id and F2 on it rewrote the property name.
+   */
+  const source = [
+    "CLASS zcl_app IMPLEMENTATION.",
+    "  METHOD view.",
+    "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).",
+    "    view->ele( `Page` )",
+    "        )->tag( `Input`",
+    "        )->a( n = `id` v = |inp_{ lv_i }|",
+    "        )->a( n = `value` v = client->_bind_edit( mv_value )",
+    "        )->tag( `Button`",
+    "        )->a( n = `id` v = client->_bind( mv_id )",
+    "        )->a( n = `text` v = `Go` )",
+    "        )->tag( `Text`",
+    "        )->a( n = `id`",
+    "              v = `TXT` ).",
+    "    client->follow_up_action( client->_event_client( val = client->cs_event-set_focus t_arg = VALUE #( ( |inp_1| ) ) ) ).",
+    "    client->set_focus( `TXT` ).",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\n");
+  assert.deepEqual(
+    idLiterals(source).map((l) => [l.name, l.role]),
+    [
+      ["TXT", "declaration"],
+      ["TXT", "wire"],
+    ]
+  );
+  assert.deepEqual(declaredIds(source), ["TXT"]);
+  assert.equal(idSpans(source, "value").length, 0);
+  assert.equal(idSpans(source, "text").length, 0);
+  assert.equal(idSpans(source, "TXT").length, 2);
+});

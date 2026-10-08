@@ -22,6 +22,7 @@ import {
   abapStatements,
   blankComments,
   blankNonCode,
+  blankNonCodeKeepEmbeds,
   declaredNames,
   type AbapStatement,
 } from "./abapscan";
@@ -65,14 +66,13 @@ interface Literal {
  * `abapscan.ts` now memoises the lex itself, so the spans and the two blanked
  * copies are shared with every other feature in the window rather than only
  * with the next detector here. What is left for this cache is the DERIVED
- * shapes - the literal list, the comment ranges, the statements, the names a
+ * shapes - the literal list, the statements, the names a
  * declaration statement introduces - and each of them is built the first time
  * it is asked for, so a detector that only wants the literals no longer pays
  * for the statement split as well.
  */
 class Lexed {
   private literalList?: Literal[];
-  private commentList?: Array<[number, number]>;
   private statementList?: AbapStatement[];
   /** `declaredNames` per statement index - `declares( )` walks every
    *  statement, and every walk used to re-blank and re-parse each one. */
@@ -99,16 +99,6 @@ class Lexed {
         }));
     }
     return this.literalList;
-  }
-
-  /** Comment spans, `[from, to)`. */
-  get comments(): Array<[number, number]> {
-    if (!this.commentList) {
-      this.commentList = abapSpans(this.source)
-        .filter((span) => span.kind === "comment")
-        .map((span) => [span.from, span.to] as [number, number]);
-    }
-    return this.commentList;
   }
 
   /** The source with only comments blanked. */
@@ -233,8 +223,17 @@ function idLiteralScan(source: string, includeEmpty: boolean): IdLiteral[] {
   const seen = new Set<number>();
   for (const marker of code.matchAll(ID_MARKERS)) {
     const at = (marker.index ?? 0) + marker[0].length;
+    const declaring = DECLARING_MARKER.test(marker[0]);
     const literal = literalAfter(literals, at, statementEnd(statements, at));
     if (!literal || seen.has(literal.start)) {
+      continue;
+    }
+    // The declaring `n = \`id\`` takes its value from the `v =` right
+    // behind it, or from nowhere: the wider reach is for a wire's
+    // `VALUE #( ( … ) )`, and lent to the declaration it read past a
+    // `v = |inp_{ lv_i }|` (a template, no literal) into the next
+    // `a( n = \`value\` … )` and called `value` an id.
+    if (declaring && !/^\s*v\s*=\s*$/i.test(code.slice(at, literal.start - 1))) {
       continue;
     }
     // An EMPTY literal is nobody's id, so the readers skip it - but it is
@@ -248,7 +247,7 @@ function idLiteralScan(source: string, includeEmpty: boolean): IdLiteral[] {
       name: literal.text,
       start: literal.start,
       end: literal.end,
-      role: DECLARING_MARKER.test(marker[0]) ? "declaration" : "wire",
+      role: declaring ? "declaration" : "wire",
     });
   }
   return out.sort((a, b) => a.start - b.start);
@@ -420,11 +419,6 @@ function ownMember(code: string, at: number, ownClasses: Set<string>): boolean {
   return selector[2] === "=>" && ownClasses.has(selector[1].toUpperCase());
 }
 
-/** Is this offset inside one of the source's string literals? */
-function insideLiteral(all: readonly Literal[], offset: number): boolean {
-  return all.some((literal) => offset >= literal.start && offset < literal.end);
-}
-
 /** The two spellings of one attribute: the ABAP identifier as the class
  *  writes it, and the root segment of a binding path, which the framework
  *  derives from the identifier UPPER-cased. */
@@ -468,8 +462,6 @@ export function attributeSpans(source: string, name: string): AttributeSpan[] {
   if (!declares(lexed, name)) {
     return [];
   }
-  const inComment = (at: number) =>
-    lexed.comments.some(([from, to]) => at >= from && at < to);
   const out: AttributeSpan[] = [];
   const components = componentOffsets(lexed);
   const ownClasses = new Set(
@@ -478,20 +470,22 @@ export function attributeSpans(source: string, name: string): AttributeSpan[] {
     )
   );
 
-  // the ABAP identifier, outside literals and comments
+  // the ABAP identifier, in code only: outside literals and comments, and
+  // outside a string template's TEXT - but inside its `{ … }` embeds, which
+  // are code (`|{ mv_title }|` names the attribute, `|The mv_title is|` does
+  // not). The selector check below reads the same copy, so the `ls_row-` of
+  // an embedded `|{ ls_row-mv_title }|` is seen too.
+  const code = blankNonCodeKeepEmbeds(source);
   const identifier = new RegExp(String.raw`\b${name}\b`, "gi");
-  for (const match of source.matchAll(identifier)) {
+  for (const match of code.matchAll(identifier)) {
     const at = match.index ?? 0;
-    if (insideLiteral(lexed.literals, at) || inComment(at)) {
-      continue;
-    }
     /*
      * The same word is not always this attribute: the field of a row type
      * (`TYPES: BEGIN OF ty_row, name TYPE …`), `ls_row-name`, another
      * class's `zcl_other=>name` or an interface's `lif_x~name`. Renaming
      * them along with it broke the class.
      */
-    if (components.has(at) || !ownMember(lexed.blanked, at, ownClasses)) {
+    if (components.has(at) || !ownMember(code, at, ownClasses)) {
       continue;
     }
     out.push({

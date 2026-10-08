@@ -610,6 +610,76 @@ test("every alternative of WHEN 'A' OR 'B' is a branch of its own", () => {
   assert.equal(whenNameAt(cond, cond.indexOf("Y") + 1), undefined);
 });
 
+test("a WHEN of another CASE beside the dispatch is not an event branch", () => {
+  /*
+   * F2 on the event `EDIT` used to rewrite the `WHEN 'EDIT'` of a
+   * `CASE mv_mode.` too - and Go-to-Definition, highlights and the lens
+   * took it for a handler. Only the WHENs at the own level of the CASE
+   * over the event are branches when the class has one.
+   */
+  const { whenNameAt } = require("../context") as typeof import("../context");
+  const source = [
+    "CLASS zcl_app IMPLEMENTATION.",
+    "  METHOD z2ui5_if_app~main.",
+    "    CASE mv_mode.",
+    "      WHEN 'EDIT'.",
+    "        lv_first = abap_true.",
+    "    ENDCASE.",
+    "    CASE client->get( )-event.",
+    "      WHEN 'EDIT'.",
+    "        CASE mv_status.",
+    "          WHEN 'EDIT'.",
+    "            lv_nested = abap_true.",
+    "        ENDCASE.",
+    "        mv_mode = 'EDIT'.",
+    "    ENDCASE.",
+    "    CASE mv_mode.",
+    "      WHEN 'EDIT'.",
+    "        lv_editable = abap_true.",
+    "    ENDCASE.",
+    "    view->tag( `Button` )->a( n = `press` v = client->_event( `EDIT` ) ).",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\n");
+  const lineOf = (offset: number) => source.slice(0, offset).split("\n").length;
+  assert.deepEqual(
+    eventNameSpans(source, "EDIT").map((span) => lineOf(span.start)),
+    [8, 19],
+    "only the dispatch's WHEN and the raise are renamed"
+  );
+  assert.deepEqual(
+    whenBranches(source).map((b) => lineOf(b.start)),
+    [8]
+  );
+  assert.equal(lineOf(whenBranchOf(source, "EDIT")!), 8);
+  // the cursor on the unrelated WHENs is no event at all
+  const lines = source.split("\n");
+  const offsetOfLine = (line: number) =>
+    lines.slice(0, line - 1).join("\n").length + 1;
+  for (const line of [4, 10, 16]) {
+    const inLiteral = offsetOfLine(line) + lines[line - 1].indexOf("EDIT") + 1;
+    assert.equal(whenNameAt(source, inLiteral), undefined, `line ${line}`);
+    assert.equal(whenLiteralAt(source, inLiteral), undefined, `line ${line}`);
+  }
+  const inDispatch = offsetOfLine(8) + lines[7].indexOf("EDIT") + 1;
+  assert.equal(whenNameAt(source, inDispatch)?.name, "EDIT");
+});
+
+test("without a CASE over the event, every WHEN still counts", () => {
+  // a dispatcher over a local (`CASE lv_event.`) has no head to find - the
+  // fallback keeps its branches wired rather than going silent
+  const source = [
+    "    DATA(lv_event) = client->get( )-event.",
+    "    CASE lv_event.",
+    "      WHEN 'GO'.",
+    "    ENDCASE.",
+    "    CASE mv_mode.",
+    "      WHEN 'GO'.",
+    "    ENDCASE.",
+  ].join("\n");
+  assert.equal(whenBranches(source).length, 2);
+});
+
 test("a > inside a quoted attribute value does not end the XML tag", () => {
   const context = xmlAt(
     '<mvc:View xmlns="sap.m"><Button tooltip="a > b" te‸xt="x"/></mvc:View>'

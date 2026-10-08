@@ -6,6 +6,7 @@ import {
   abapStatements,
   blankComments,
   blankNonCode,
+  blankNonCodeKeepEmbeds,
   declaredNames,
 } from "../abapscan";
 
@@ -368,4 +369,27 @@ test("BEGIN OF ENUM and BEGIN OF MESH declare the type, not the keyword", () => 
     "TYPES: BEGIN OF ENUM ty_color, red, green, END OF ENUM ty_color".slice(at, at + 8),
     "ty_color"
   );
+});
+
+test("blankNonCodeKeepEmbeds keeps a template's embedded code only", () => {
+  const source =
+    "lv = |Hi { lv_name } and { get( 'a|b' ) } { |in { lv_x }| }|. \" c\n" +
+    "* lv_dead\n" +
+    "lv = `lit`.";
+  const kept = blankNonCodeKeepEmbeds(source);
+  assert.equal(kept.length, source.length);
+  // the embeds' code stays at its offsets
+  for (const word of ["lv_name", "get(", "lv_x"]) {
+    const at = source.indexOf(word);
+    assert.equal(kept.slice(at, at + word.length), word, word);
+  }
+  // text, bars, braces, literals and comments are gone
+  for (const word of ["Hi", "and", "a|b", "in ", "lv_dead", "lit", "\""]) {
+    assert.ok(!kept.includes(word), word);
+  }
+  assert.ok(!kept.includes("|"));
+  assert.ok(!kept.includes("{"));
+  // without a template it is blankNonCode
+  const plain = "x = 'a'. \" c";
+  assert.equal(blankNonCodeKeepEmbeds(plain), blankNonCode(plain));
 });
