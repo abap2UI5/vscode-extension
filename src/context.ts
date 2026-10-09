@@ -1444,7 +1444,10 @@ export function whenLiteralAt(
   return { start: literal.start, end: literal.end };
 }
 
-/** The event name the cursor sits on inside a `WHEN '…'` of the dispatch. */
+/** The event name the cursor sits on inside a `WHEN '…'` of the dispatch -
+ *  spelled the way `whenBranches` reads one. `WHEN \`Out of Stock\` THEN`,
+ *  `WHEN \`%MSG\`` or `WHEN \`/N\`` is a value, not an event, and F2 there
+ *  used to offer a rename that then changed nothing. */
 export function whenNameAt(
   source: string,
   offset: number
@@ -1454,7 +1457,7 @@ export function whenNameAt(
     return undefined;
   }
   const name = source.slice(span.start, span.end);
-  return name ? { name, ...span } : undefined;
+  return /^[\w-]+$/.test(name) ? { name, ...span } : undefined;
 }
 
 /*

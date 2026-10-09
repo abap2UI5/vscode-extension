@@ -389,6 +389,24 @@ test("only the name literal of an _event call is the event", () => {
   }
 });
 
+test("a WHEN value no event can be spelled is no event", () => {
+  // Regression (corpus fuzz): `WHEN \`Out of Stock\` THEN` in a SWITCH, a
+  // `WHEN \`%MSG\``, `WHEN \`/N\`` - whenNameAt answered with the value,
+  // whenBranches (what F2 writes) never had it, and the rename was empty
+  const { whenNameAt } = require("../context") as typeof import("../context");
+  const src = [
+    "    DATA(state) = SWITCH string( lv_status",
+    "      WHEN `Out of Stock` THEN `Warning`",
+    "      WHEN `IN_STOCK` THEN `Success` ).",
+    "    CASE lv_code.",
+    "      WHEN `/N`.",
+    "    ENDCASE.",
+  ].join("\n");
+  assert.equal(whenNameAt(src, src.indexOf("Out of") + 2), undefined);
+  assert.equal(whenNameAt(src, src.indexOf("/N") + 1), undefined);
+  assert.equal(whenNameAt(src, src.indexOf("IN_STOCK") + 2)?.name, "IN_STOCK");
+});
+
 test("whenBranches and eventNameSpans see every naming of an event", () => {
   const {
     eventNameSpans,

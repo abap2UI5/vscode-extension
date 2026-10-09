@@ -168,7 +168,9 @@
     the event's name in `_event( )` - positional or `val =`. In any other
     literal of the call (`arg = \`${$parameters>/value}\``, a `t_arg` row)
     F2 offered a rename that then changed nothing, and an argument spelled
-    like an event jumped to that event's `WHEN`.
+    like an event jumped to that event's `WHEN`. The same goes for a `WHEN`
+    value no event is spelled like (``WHEN `Out of Stock` THEN`` in a
+    `SWITCH`, ``WHEN `%MSG` ``).
 
 
 ## 0.30.2
