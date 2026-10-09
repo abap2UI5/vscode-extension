@@ -1,11 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
+import type { ViewNode } from "@abap2ui5/linter/reconstruct";
+import { parseXml } from "@abap2ui5/linter/properties";
 import {
   costAnnotations,
   deprecationAnnotations,
   publicAttributes,
   sinceAnnotations,
+  xmlNamespaceScopes,
   versionAbove,
 } from "../annotations";
 
@@ -218,3 +221,40 @@ test("a model measured in kilobytes is worth a warning", () => {
 });
 
 // byte formatting is `traffic.ts`'s `formatBytes`, pinned in traffic.test.ts
+
+test("a raw XML view is annotated too, each element in its own namespace scope", () => {
+  const xml = [
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">',
+    '  <VBox xmlns:f="sap.f">',
+    '    <f:Card headerPosition="Top"/>',
+    "  </VBox>",
+    '  <Panel xmlns="sap.ui.layout.form">',
+    "    <SimpleForm/>",
+    "  </Panel>",
+    "  <f:Card/>",
+    "</mvc:View>",
+  ].join("\n");
+  const root = parseXml(xml) as ViewNode;
+  const asked: string[] = [];
+  const found = sinceAnnotations(root.children, xmlNamespaceScopes(root), "1.71", {
+    control: (control) => {
+      asked.push(control);
+      return control === "sap.f.Card" ? "1.64" : undefined;
+    },
+    member: (control, member) =>
+      control === "sap.f.Card" && member === "headerPosition" ? "1.65" : undefined,
+  });
+  // the inner default namespace re-resolves its subtree - and only that
+  assert.ok(asked.includes("sap.ui.layout.form.SimpleForm"), asked.join(", "));
+  assert.ok(asked.includes("sap.m.VBox") && !asked.includes("sap.ui.layout.form.VBox"));
+  // `f:` is declared in the VBox only: the Card outside it resolves to nothing
+  assert.equal(asked.filter((c) => c === "sap.f.Card").length, 1);
+  // the annotations sit on the element and the attribute that need them
+  assert.deepEqual(
+    found.map((a) => [xml.slice(a.offset, a.offset + 7), a.text]),
+    [
+      ["<f:Card", "1.64"],
+      ["headerP", "1.65"],
+    ]
+  );
+});

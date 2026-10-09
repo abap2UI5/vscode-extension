@@ -61,16 +61,66 @@ export interface SinceLookup {
   member(control: string, member: string): string | undefined;
 }
 
-/** `f:Card` + the class's namespace map -> `sap.f.Card`. An UNDECLARED
+/** The namespaces a node resolves against: one map for a whole class (the
+ *  builder writes them all on the root), or a function answering per node -
+ *  a raw XML view scopes them per element (`xmlNamespaceScopes`). */
+export type NamespaceScope = Record<string, string> | ((node: ViewNode) => Record<string, string>);
+
+/** `f:Card` + the namespaces in scope -> `sap.f.Card`. An UNDECLARED
  *  prefix resolves to nothing - falling back to the default namespace
  *  qualified `x:Card` as a sap.m control and annotated it with that
  *  control's version. */
-function qualify(node: ViewNode, ns: Record<string, string>): string | undefined {
+function qualify(node: ViewNode, scope: NamespaceScope): string | undefined {
   if (!node.name) {
     return undefined;
   }
+  const ns = typeof scope === "function" ? scope(node) : scope;
   const library = node.ns ? ns[node.ns] : ns[""];
   return library ? `${library}.${node.name}` : undefined;
+}
+
+/**
+ * The namespaces in scope at every node of a tree `parseXml( )` read out of
+ * a raw view or fragment - an element's own `xmlns` attributes over its
+ * parent's, the way XML scopes them (and the linter's property gate resolves
+ * its controls). The document's top-level elements share one scope, as the
+ * linter keeps it for a second root. An unknown node answers the empty map.
+ */
+export function xmlNamespaceScopes(root: ViewNode): (node: ViewNode) => Record<string, string> {
+  const scopes = new Map<ViewNode, Record<string, string>>();
+  const own = (node: ViewNode): Record<string, string> => {
+    const map: Record<string, string> = {};
+    for (const [name, value] of node.attrs) {
+      const m = /^xmlns(?::([\w.-]+))?$/.exec(name);
+      if (m) {
+        map[m[1] ?? ""] = String(value);
+      }
+    }
+    return map;
+  };
+  const walk = (node: ViewNode, outer: Record<string, string>): void => {
+    let scope = outer;
+    if (node.name !== null) {
+      const declared = own(node);
+      if (Object.keys(declared).length) {
+        scope = { ...outer, ...declared };
+      }
+    } else {
+      const top: Record<string, string> = {};
+      for (const child of node.children) {
+        if (child.name !== null) {
+          Object.assign(top, own(child));
+        }
+      }
+      scope = { ...outer, ...top };
+    }
+    scopes.set(node, scope);
+    for (const child of node.children) {
+      walk(child, scope);
+    }
+  };
+  walk(root, {});
+  return (node) => scopes.get(node) ?? {};
 }
 
 /**
@@ -83,7 +133,7 @@ function qualify(node: ViewNode, ns: Record<string, string>): string | undefined
  */
 export function sinceAnnotations(
   nodes: readonly ViewNode[],
-  ns: Record<string, string>,
+  ns: NamespaceScope,
   floor: string,
   lookup: SinceLookup
 ): Annotation[] {
@@ -135,7 +185,7 @@ export function sinceAnnotations(
  */
 export function deprecationAnnotations(
   nodes: readonly ViewNode[],
-  ns: Record<string, string>,
+  ns: NamespaceScope,
   lookup: SinceLookup
 ): Annotation[] {
   const out: Annotation[] = [];

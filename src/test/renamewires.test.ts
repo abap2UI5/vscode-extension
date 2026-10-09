@@ -140,6 +140,49 @@ ENDCLASS.`;
   assert.ok(spans.some((s) => s.start === root), "the root path is renamed");
 });
 
+test("a path into a named model is not the attribute", () => {
+  /*
+   * Regression (corpus fuzz): `${$parameters>/value}` is the event's own
+   * parameter, `${$source>/text}` the source control's property and
+   * `{device>/system}` the device model - none of them the app's attribute.
+   * A class declaring `DATA value` had F2 rewrite the event argument along
+   * with the attribute, and the frontend then sent nothing for it.
+   */
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    DATA value TYPE string.
+    DATA text TYPE string.
+ENDCLASS.
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->tag( \`Input\`
+        )->a( n = \`value\`  v = \`{/VALUE}\`
+        )->a( n = \`change\` v = client->_event( val = \`VALIDATE\` arg = \`\${$parameters>/value}\` )
+        )->a( n = \`description\` v = \`{device>/text}\`
+        )->a( n = \`tooltip\` v = \`\${$source>/text}\` ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const value = attributeSpans(source, "value");
+  assert.deepEqual(
+    value.map((s) => source.slice(s.start - 1, s.end)),
+    [" value", "/VALUE"],
+    "the declaration and the default-model path - not $parameters>/value"
+  );
+  assert.equal(
+    attributeAt(source, source.indexOf("$parameters>/value") + "$parameters>/".length),
+    undefined,
+    "the event parameter is not offered for an attribute rename"
+  );
+  const text = attributeSpans(source, "text");
+  assert.ok(
+    !text.some((s) => s.kind === "path"),
+    "device>/text and $source>/text address other models"
+  );
+});
+
 test("an icon URL is not a binding path", () => {
   const source = `CLASS zcl_app DEFINITION PUBLIC.
   PUBLIC SECTION.
@@ -572,4 +615,81 @@ ENDCLASS.`;
     "DATA(lv_rest) = strlen( name ) -|name",
     "view->tag( n = `Text` )->a( n = `text` v = `{/|NAME",
   ]);
+});
+
+test("a string template's text is no attribute, its embeds may be", () => {
+  /*
+   * regression: the identifier search read the raw source, so the word in a
+   * template's TEXT (`|The mv_title is …|`) was renamed - and the selector
+   * check read a copy with the whole template blanked, so the `ls_row-` of
+   * `|{ ls_row-mv_title }|` was invisible and another structure's component
+   * was renamed as this class's attribute.
+   */
+  const source = [
+    "CLASS zcl_app DEFINITION PUBLIC.",
+    "  PUBLIC SECTION.",
+    "    DATA mv_title TYPE string.",
+    "ENDCLASS.",
+    "CLASS zcl_app IMPLEMENTATION.",
+    "  METHOD x.",
+    "    DATA ls_row TYPE ty_row.",
+    "    mv_title = `a`.",
+    "    client->message_toast_display( |The mv_title is { mv_title }| ).",
+    "    DATA(lv) = |{ ls_row-mv_title }|.",
+    "    lv = |{ |nested mv_title { to_upper( mv_title ) }| } 'mv_title'|.",
+    "    lv = |{ cond( val = 'mv_title' ) }|.",
+    "    lv = ls_row-mv_title.",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\n");
+  const spans = attributeSpans(source, "mv_title");
+  const where = spans.map((s) => {
+    const lineStart = source.lastIndexOf("\n", s.start) + 1;
+    return `${source.slice(0, s.start).split("\n").length}:${s.start - lineStart}`;
+  });
+  assert.deepEqual(where, ["3:9", "8:4", "9:54", "11:41"]);
+  // the text occurrence is not even a rename target under the cursor
+  const inText = source.indexOf("The mv_title") + 6;
+  assert.equal(attributeAt(source, inText), undefined);
+  const inEmbed = source.indexOf("{ mv_title }") + 4;
+  assert.equal(attributeAt(source, inEmbed)?.name, "mv_title");
+});
+
+test("the declaring n = `id` takes its value from v = right behind it", () => {
+  /*
+   * regression: the declaration borrowed the wires' reach and took the first
+   * literal anywhere after the marker - past a `v = |inp_{ lv_i }|` (a
+   * template, not a literal) into the next attribute, so `value` became a
+   * declared id and F2 on it rewrote the property name.
+   */
+  const source = [
+    "CLASS zcl_app IMPLEMENTATION.",
+    "  METHOD view.",
+    "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).",
+    "    view->ele( `Page` )",
+    "        )->tag( `Input`",
+    "        )->a( n = `id` v = |inp_{ lv_i }|",
+    "        )->a( n = `value` v = client->_bind_edit( mv_value )",
+    "        )->tag( `Button`",
+    "        )->a( n = `id` v = client->_bind( mv_id )",
+    "        )->a( n = `text` v = `Go` )",
+    "        )->tag( `Text`",
+    "        )->a( n = `id`",
+    "              v = `TXT` ).",
+    "    client->follow_up_action( client->_event_client( val = client->cs_event-set_focus t_arg = VALUE #( ( |inp_1| ) ) ) ).",
+    "    client->set_focus( `TXT` ).",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\n");
+  assert.deepEqual(
+    idLiterals(source).map((l) => [l.name, l.role]),
+    [
+      ["TXT", "declaration"],
+      ["TXT", "wire"],
+    ]
+  );
+  assert.deepEqual(declaredIds(source), ["TXT"]);
+  assert.equal(idSpans(source, "value").length, 0);
+  assert.equal(idSpans(source, "text").length, 0);
+  assert.equal(idSpans(source, "TXT").length, 2);
 });

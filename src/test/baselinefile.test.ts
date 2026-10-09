@@ -3,7 +3,13 @@ import * as assert from "node:assert";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { addAllToBaseline, addToBaseline, readBaseline, rebuildBaseline } from "../baselinefile";
+import {
+  addAllToBaseline,
+  addToBaseline,
+  baselineWriteRefusal,
+  readBaseline,
+  rebuildBaseline,
+} from "../baselinefile";
 
 const FINDING = {
   type: "control-too-new",
@@ -40,7 +46,7 @@ test("addToBaseline leaves an unparseable file untouched", () => {
   const file = path.join(dir, "abap2ui5lint-baseline.json");
   const corrupt = '{"findings": {"keep|me||": 3},,,}';
   fs.writeFileSync(file, corrupt);
-  assert.throws(() => addToBaseline(file, path.join(dir, "x.clas.abap"), FINDING));
+  assert.throws(() => addToBaseline(file, path.join(dir, "x.clas.abap"), FINDING, dir));
   assert.equal(fs.readFileSync(file, "utf8"), corrupt, "the file must not be rewritten");
 });
 
@@ -52,14 +58,14 @@ test("addToBaseline keeps the existing entries and counts repeats", () => {
     JSON.stringify({ note: "mine", findings: { "other/f.clas.abap|x||": 2 } })
   );
   const src = path.join(dir, "app.clas.abap");
-  const key = addToBaseline(file, src, FINDING);
+  const key = addToBaseline(file, src, FINDING, dir);
 
   const after = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.equal(after.note, "mine", "an existing note survives");
   assert.equal(after.findings["other/f.clas.abap|x||"], 2, "existing entries survive");
   assert.equal(after.findings[key], 1);
 
-  addToBaseline(file, src, FINDING);
+  addToBaseline(file, src, FINDING, dir);
   assert.equal(
     JSON.parse(fs.readFileSync(file, "utf8")).findings[key],
     2,
@@ -76,7 +82,7 @@ test("addAllToBaseline writes many findings once, counted like one at a time", (
   const keys = addAllToBaseline(file, [
     { file: a, findings: [FINDING, FINDING] },
     { file: b, findings: [FINDING] },
-  ]);
+  ], dir);
   assert.equal(keys.length, 3);
   const after = JSON.parse(fs.readFileSync(file, "utf8")).findings;
   assert.equal(after["keep|me||"], 1);
@@ -84,7 +90,7 @@ test("addAllToBaseline writes many findings once, counted like one at a time", (
   assert.equal(after[keys[2]], 1);
   // nothing to add, nothing written
   const before = fs.statSync(file).mtimeMs;
-  assert.deepEqual(addAllToBaseline(file, [{ file: a, findings: [] }]), []);
+  assert.deepEqual(addAllToBaseline(file, [{ file: a, findings: [] }], dir), []);
   assert.equal(fs.statSync(file).mtimeMs, before);
 });
 
@@ -111,7 +117,7 @@ test("a rebuild replaces the file: today's findings, nothing else", () => {
       file: path.join(dir, "src", "zcl_b.clas.abap"),
       findings: [{ type: "event-without-handler", control: "sap.m.Button" }] as never,
     },
-  ]);
+  ], dir);
   const stored = JSON.parse(fs.readFileSync(file, "utf8"));
   // the stale entry is GONE - a baseline that only grows is one the CLI fails on
   assert.ok(!Object.keys(stored.findings).some((k) => k.includes("zcl_old")));
@@ -130,7 +136,7 @@ test("a baseline that does not parse is not silently replaced", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "a2u5-baseline-"));
   const file = path.join(dir, "abap2ui5lint-baseline.json");
   fs.writeFileSync(file, "{ this is not json");
-  assert.throws(() => rebuildBaseline(file, []), /not a valid baseline file/);
+  assert.throws(() => rebuildBaseline(file, [], dir), /not a valid baseline file/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -139,8 +145,66 @@ test("a workspace with nothing to waive writes an empty baseline, not a broken o
   const file = path.join(dir, "abap2ui5lint-baseline.json");
   const written = rebuildBaseline(file, [
     { file: path.join(dir, "src", "zcl_clean.clas.abap"), findings: [] },
-  ]);
+  ], dir);
   assert.deepEqual(written, { entries: 0, findings: 0 });
   assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).findings, {});
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// The confinement - a repository's config names the file, the user's click
+// writes it
+// ---------------------------------------------------------------------------
+
+test("a baseline outside the workspace folder is refused, nothing written", () => {
+  /*
+   * regression: "Add to Baseline" / "Update Baseline" wrote whatever path
+   * the repo's abap2ui5lint.jsonc named - `"baseline": "../../somewhere.json"`
+   * replaced a file of the user's with a baseline on the first click.
+   */
+  const outer = tmp();
+  const repo = path.join(outer, "repo");
+  fs.mkdirSync(repo);
+  const victim = path.join(outer, "settings.json");
+  fs.writeFileSync(victim, '{ "mine": true }');
+  const src = path.join(repo, "zcl_app.clas.abap");
+  const files = [{ file: src, findings: [FINDING] }];
+
+  assert.throws(() => addToBaseline(victim, src, FINDING, repo), /outside the workspace folder/);
+  assert.throws(() => addAllToBaseline(victim, files, repo), /outside the workspace folder/);
+  assert.throws(() => rebuildBaseline(victim, files, repo), /outside the workspace folder/);
+  assert.equal(fs.readFileSync(victim, "utf8"), '{ "mine": true }', "the file must be untouched");
+
+  // the folder itself is no file to write, and no root means no write
+  assert.ok(baselineWriteRefusal(repo, repo));
+  assert.match(baselineWriteRefusal(path.join(repo, "b.json"), undefined) ?? "", /no abap2ui5lint\.jsonc/);
+  // a sibling folder whose name starts like the root is outside too
+  assert.ok(baselineWriteRefusal(path.join(`${repo}-evil`, "b.json"), repo));
+
+  // inside - nested or not, existing or not - is fine
+  assert.equal(baselineWriteRefusal(path.join(repo, "abap2ui5lint-baseline.json"), repo), undefined);
+  assert.equal(baselineWriteRefusal(path.join(repo, "ci", "b.json"), repo), undefined);
+  addToBaseline(path.join(repo, "abap2ui5lint-baseline.json"), src, FINDING, repo);
+  fs.rmSync(outer, { recursive: true, force: true });
+});
+
+test("a symbolic link inside the folder does not carry the write outside", (t) => {
+  const outer = tmp();
+  const repo = path.join(outer, "repo");
+  fs.mkdirSync(repo);
+  const victim = path.join(outer, "settings.json");
+  fs.writeFileSync(victim, "{}");
+  const link = path.join(repo, "abap2ui5lint-baseline.json");
+  try {
+    fs.symlinkSync(victim, link);
+  } catch {
+    t.skip("no symbolic links here (Windows without the privilege)");
+    return;
+  }
+  assert.match(baselineWriteRefusal(link, repo) ?? "", /outside the workspace folder/);
+  assert.throws(() =>
+    addToBaseline(link, path.join(repo, "zcl_app.clas.abap"), FINDING, repo)
+  );
+  assert.equal(fs.readFileSync(victim, "utf8"), "{}");
+  fs.rmSync(outer, { recursive: true, force: true });
 });

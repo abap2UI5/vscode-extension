@@ -50,6 +50,21 @@ test("a quoted value keeps its spaces, braces and plus signs", () => {
   ]);
 });
 
+test("a parenthesis inside a text or a value does not swallow the next sibling", () => {
+  // every bracket kind used to be counted into one depth, so the `)` of a
+  // text or the `(` of a value moved it off zero, the `+` behind it went
+  // unseen and the whole abbreviation was refused as "not an abbreviation"
+  const listed = parseAbbreviation("VBox>Text{1) First}+Button");
+  assert.equal(listed.error, undefined);
+  assert.equal(shape(listed.roots), "VBox(Text+Button)");
+  assert.deepEqual(listed.roots[0].children[0].attrs, [["text", "1) First"]]);
+  const valued = parseAbbreviation(`VBox>Input[placeholder="(optional"]+Button`);
+  assert.equal(valued.error, undefined);
+  assert.equal(shape(valued.roots), "VBox(Input+Button)");
+  // and inside a group
+  assert.equal(shape(parseAbbreviation("VBox>(Label{a (b}+Input)*2").roots), "VBox(Label+Input+Label+Input)");
+});
+
 test("a namespace prefix survives", () => {
   assert.equal(shape(parseAbbreviation("f:Card>f:Header").roots), "f:Card(f:Header)");
 });

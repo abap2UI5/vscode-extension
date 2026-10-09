@@ -262,3 +262,31 @@ test("a warning about an unreadable tag stays on one line", () => {
   assert.equal(unreadable.length, 1);
   assert.ok(!/\n/.test(unreadable[0]), unreadable[0]);
 });
+
+test("a CRLF view's multi-line value converts to literals with no line break inside", () => {
+  /* A binding written over several lines is common in the demo kit
+   * (Checkout.view.xml's `value="{ path: …, constraints: { … } }"`). Long
+   * enough to be split into `&&` chunks, a cut could fall between the `\r`
+   * and the `\n` of a CRLF file, and `lit( )` turned only the `\n` into a
+   * blank - the chunk kept a bare `\r`, which is a line break inside an ABAP
+   * literal for VS Code and for abapGit alike. */
+  const lines = Array.from({ length: 40 }, (_, i) => `\t\t\t\tpart${i}: 'x${i}',`);
+  const xml = [
+    `<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">`,
+    `\t<Input value="{`,
+    ...lines,
+    `\t\t\t}"/>`,
+    `</mvc:View>`,
+  ].join("\r\n");
+  const { abap } = xmlToAbap(xml, "    ");
+  assert.ok(!abap.includes("\r"), "a CR reached the converted source");
+  assert.ok(abap.split("\n").every((line) => line.length <= 255));
+  // the value is what an XML parser hands UI5: each line break (CRLF as one)
+  // and each tab a blank
+  const value = parseXml(xml).roots[0].children[0].attrs[0][1];
+  assert.ok(!/[\r\n\t]/.test(value));
+  assert.equal(value, parseXml(xml.replace(/\r\n/g, "\n")).roots[0].children[0].attrs[0][1]);
+  assert.match(value, /^\{ {5}part0: 'x0', {5}part1/);
+  // and a line break written as a character reference is one
+  assert.equal(parseXml(`<Text text="a&#10;b"/>`).roots[0].attrs[0][1], "a\nb");
+});

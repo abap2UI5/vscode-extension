@@ -108,6 +108,16 @@ export class ActivationWatch {
    */
   captureBaseline(): void {
     const { source, current, log } = this.deps;
+    /*
+     * A capture means the preview shows another version from now on, so the
+     * previous baseline is void HERE - not when (or whether) the answer
+     * below lands. Kept until then, it outlived a capture superseded by the
+     * next save: the first poll saw the shown version itself, newer than
+     * the one before it, and reloaded for an activation that never happened.
+     * No baseline is the safe state - the inactive→active flip still counts.
+     */
+    this.baselineClass = undefined;
+    this.baselineChangedAt = undefined;
     const target = current();
     if (!target || !source.isRunning || this.refused()) {
       return;

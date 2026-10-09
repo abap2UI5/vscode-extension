@@ -1,0 +1,16 @@
+<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"
+    xmlns:template="http://schemas.sap.com/sapui5/extension/sap.ui.core.template/1" displayBlock="true">
+  <!-- portable-app over a raw view (test/review/portable.mjs): the first
+       three wires are inside the portable profile v1, the rest are not -->
+  <Page title="Raw" showNavButton="true" navButtonPress=".eB(['___ZZZ_NAL'])">
+    <Button text="Save" press=".eB(['SAVE'], '${$source>/text}')"/>
+    <Button text="Focus" press=".eF('SET_FOCUS', 'name')"/>
+    <Input id="name" value="{/NAME}" liveChange=".eB(['LIVE'], ${$parameters>/value})"/>
+    <Button text="Call" press=".eF('CONTROL_BY_ID', 'name', 'focus')"/>
+    <Button text="Handler" press=".onPress"/>
+    <Button text="Event" press=".eB(['EV'], $event.getSource().getId())"/>
+    <template:if test="{/FLAG}">
+      <Text text="{= encodeURIComponent(${/NAME}) }"/>
+    </template:if>
+  </Page>
+</mvc:View>

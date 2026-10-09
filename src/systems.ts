@@ -38,24 +38,49 @@ function config() {
   return vscode.workspace.getConfiguration(CONFIG_SECTION);
 }
 
-/** The configured profiles. A malformed entry is skipped rather than
- *  breaking the picker - the setting is hand-edited JSON. */
-export function systems(): SystemProfile[] {
-  const raw = config().get<Array<{ name?: string; url?: string }>>(SYSTEMS_KEY, []);
+/** One entry of the `systems` setting as configured - unchecked. */
+type RawProfile = { name?: unknown; url?: unknown };
+
+/** A configured string, trimmed - "" for anything that is not one. The
+ *  settings are hand-edited JSON, and VS Code hands a value of the wrong
+ *  type over as it is (the schema only underlines it). */
+function textOf(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** The `systems` setting as a list - nothing when it is not an array. */
+function rawProfiles(raw: unknown): RawProfile[] {
+  return Array.isArray(raw) ? (raw as RawProfile[]) : [];
+}
+
+/**
+ * The profiles a `systems` value configures. A malformed entry is skipped
+ * rather than breaking the picker - the setting is hand-edited JSON. That
+ * includes the wrong TYPE: `"name": 100`, a `url` that is not a string, a
+ * bare string in the list or an object instead of the list used to throw
+ * (`trim is not a function`, `not iterable`) out of every F9, the status
+ * bar and the picker, until the setting was fixed by hand.
+ */
+export function profilesFrom(raw: unknown): SystemProfile[] {
   const list: SystemProfile[] = [];
-  for (const entry of raw ?? []) {
-    const template = (entry?.url ?? "").trim();
+  for (const entry of rawProfiles(raw)) {
+    const template = textOf(entry?.url);
     if (!isUsableTemplate(template)) {
       continue;
     }
-    list.push({ name: (entry.name ?? "").trim() || shortUrl(template), template });
+    list.push({ name: textOf(entry.name) || shortUrl(template), template });
   }
   return list;
 }
 
+/** The configured profiles - see `profilesFrom`. */
+export function systems(): SystemProfile[] {
+  return profilesFrom(config().get<unknown>(SYSTEMS_KEY, []));
+}
+
 /** The single-setting profile, i.e. what every version before the list had. */
 function singleSystem(): SystemProfile | undefined {
-  const template = config().get<string>(TEMPLATE_KEY, "").trim();
+  const template = textOf(config().get<unknown>(TEMPLATE_KEY, ""));
   return template ? { name: shortUrl(template), template } : undefined;
 }
 
@@ -144,8 +169,6 @@ export async function askForTemplate(current: string): Promise<string | undefine
   return answer || undefined;
 }
 
-type RawProfile = { name?: string; url?: string };
-
 /**
  * The profile list with one entry's URL replaced, or undefined when no entry
  * carries `replacing`. Matched by URL, not by name: the name the picker shows
@@ -159,7 +182,7 @@ export function replaceTemplateIn(
   replacing: string,
   template: string
 ): RawProfile[] | undefined {
-  const at = list.findIndex((entry) => (entry?.url ?? "").trim() === replacing);
+  const at = list.findIndex((entry) => textOf(entry?.url) === replacing);
   if (at < 0) {
     return undefined;
   }
@@ -179,14 +202,14 @@ export async function storeTemplate(
   replacing?: string
 ): Promise<void> {
   const cfg = config();
-  const list = cfg.get<RawProfile[]>(SYSTEMS_KEY, []) ?? [];
+  const list = rawProfiles(cfg.get<unknown>(SYSTEMS_KEY, []));
   if (replacing !== undefined) {
     const edited = replaceTemplateIn(list, replacing, template);
     if (edited) {
       await cfg.update(SYSTEMS_KEY, edited, vscode.ConfigurationTarget.Global);
       return;
     }
-    if (cfg.get<string>(TEMPLATE_KEY, "").trim() === replacing) {
+    if (textOf(cfg.get<unknown>(TEMPLATE_KEY, "")) === replacing) {
       await cfg.update(TEMPLATE_KEY, template, vscode.ConfigurationTarget.Global);
       return;
     }
@@ -286,8 +309,7 @@ export async function pickSystem(
     // Adding a second system turns the single setting into the first entry of
     // the list, so both end up in the same place.
     const cfg = config();
-    const existing =
-      cfg.get<Array<{ name?: string; url?: string }>>(SYSTEMS_KEY, []) ?? [];
+    const existing = rawProfiles(cfg.get<unknown>(SYSTEMS_KEY, []));
     if (!existing.length) {
       const single = singleSystem();
       if (single) {

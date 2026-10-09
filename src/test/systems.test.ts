@@ -30,6 +30,7 @@ const {
   enteredUser,
   keysFor,
   legacyAdoption,
+  profilesFrom,
   replaceTemplateIn,
   uniqueName,
   withUniqueNames,
@@ -141,4 +142,27 @@ test("editing a launch URL replaces that profile in place, matched by URL", () =
   );
   // nothing in the list carries it - the caller looks elsewhere
   assert.equal(replaceTemplateIn(twins, "https://z/x", "https://n/x"), undefined);
+});
+
+test("a systems entry of the wrong type is skipped, not thrown over", () => {
+  // VS Code hands a value of the wrong type over as it is; `.trim()` on a
+  // number and `for...of` over an object threw out of F9, the status bar and
+  // the picker until the setting was fixed by hand
+  const url = "https://h/sap/bc/z2ui5?app_start={class}";
+  assert.deepEqual(
+    profilesFrom([
+      { name: 100, url },
+      { name: "BAD", url: 42 },
+      "https://h/sap/bc/z2ui5?app_start={class}",
+      null,
+      { name: " DEV ", url: ` ${url} ` },
+    ]),
+    [
+      { name: "h/sap/bc/z2ui5", template: url },
+      { name: "DEV", template: url },
+    ]
+  );
+  assert.deepEqual(profilesFrom({ name: "DEV", url }), []);
+  assert.deepEqual(profilesFrom(undefined), []);
+  assert.equal(replaceTemplateIn([{ url: 42 }, { url }] as never, url, "https://n/x?app_start={class}")?.[1]?.url, "https://n/x?app_start={class}");
 });

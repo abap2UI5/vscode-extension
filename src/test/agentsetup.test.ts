@@ -7,6 +7,7 @@ import {
   confirmationDetail,
   mergeLines,
   mergePackageJson,
+  PackageJsonShapeError,
   packageNameFor,
   planAgentSetup,
   planFromSnapshot,
@@ -257,6 +258,39 @@ test("nothing is ever planned into the source folder", async () => {
   }
 });
 
+test("nothing is written through a symbolic link", async () => {
+  /* `.claude -> ~/.claude` in a cloned repository: `exists` follows the link,
+   * so `.claude/settings.json` looked absent whenever the user had no global
+   * Claude Code settings - and the template's permission allowlist was
+   * written into them, for every project. A linked package.json would have
+   * been merged into wherever it points. */
+  class LinkedFolder extends MemoryFolder {
+    constructor(files: Record<string, string>, dirs: string[], public links: string[]) {
+      super(files, dirs);
+    }
+    async isLink(rel: string): Promise<boolean> {
+      return this.links.includes(rel);
+    }
+  }
+  const folder = new LinkedFolder(
+    { "package.json": '{"name":"x"}' },
+    ["src", ".claude"],
+    [".claude", "package.json"]
+  );
+  const p = await plan(folder);
+  const claude = p.actions.filter((a) => a.path.startsWith(".claude/"));
+  assert.ok(claude.length >= 2, "the setup has files under .claude/");
+  for (const a of claude) {
+    assert.equal(a.kind, "skip", a.path);
+    assert.equal(a.detail, ".claude is a symbolic link - never written through one");
+  }
+  assert.equal(action(p, "package.json")?.kind, "skip");
+  assert.equal(action(p, "package.json")?.detail, "package.json is a symbolic link - never written through one");
+  // everything else is planned as before
+  assert.equal(action(p, "AGENTS.md")?.kind, "add");
+  assert.ok(!writesOf(p).some((a) => a.path.startsWith(".claude/") || a.path === "package.json"));
+});
+
 test("a kept abaplint.jsonc without a framework pin is named", async () => {
   const p = await plan(new MemoryFolder({ "abaplint.jsonc": '{ "global": { "files": "/src/**/*.*" } }' }, ["src"]));
   assert.equal(action(p, "abaplint.jsonc")?.kind, "skip");
@@ -281,6 +315,23 @@ test("a package.json that is not JSON stops the plan before anything is written"
   );
 });
 
+test("a package.json that is JSON but no object is not called invalid JSON", async () => {
+  // `null` used to throw a TypeError out of the merge, reported as "not
+  // valid JSON"; an array took the entries as properties JSON.stringify
+  // drops, and the plan announced additions it would write back as `[]`
+  for (const [text, shape] of [
+    ["null", "null"],
+    ["[]", "an array"],
+    ['"x"', "a string"],
+  ]) {
+    await assert.rejects(
+      plan(new MemoryFolder({ "package.json": text }, ["src"])),
+      new RegExp(`package\\.json is not a package manifest \\(its top level is ${shape}, not an object\\)`)
+    );
+  }
+  assert.throws(() => mergePackageJson("[]", '{"scripts":{"a":"1"}}', ["scripts"]), PackageJsonShapeError);
+});
+
 test("the pure merges, as the create package has them", () => {
   assert.deepEqual(mergePackageJson('{"scripts":{"a":"1"}}', '{"scripts":{"a":"2"}}', ["scripts"]), {
     text: null,
@@ -294,6 +345,8 @@ test("the pure merges, as the create package has them", () => {
   assert.deepEqual(mergeLines("", "# c\nb\n"), { text: "# c\nb\n", added: ["b"] });
   assert.equal(packageNameFor("My Project!"), "my-project-");
   assert.equal(packageNameFor("..."), "abap2ui5-app");
+  assert.equal(packageNameFor("y".repeat(250)).length, 214);
+  assert.equal(packageNameFor("node_modules"), "abap2ui5-app");
   assert.equal(
     adaptSourceFolder("x.json", '"paths": ["src"]', { placeholder: "src", edits: [{ file: "x.json", text: '"paths": ["src"]' }] }, "lib"),
     '"paths": ["lib"]'

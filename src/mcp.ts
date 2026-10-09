@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
 import * as fs from "fs";
 import * as path from "path";
-import { CORPUS_DIRS, VIEW_CHECK_DIRS, SAMPLES_DIRS, SAMPLES_STACK_DIRS, SERVER_DIRS } from "./repolayout";
+import { SERVER_DIRS, checkoutHomes } from "./repolayout";
 import { splitCommandLine } from "./checkcore";
 
 /*
@@ -27,21 +27,6 @@ import { splitCommandLine } from "./checkcore";
  */
 
 const PROVIDER_ID = "abap2ui5.mcp";
-
-/** Repo-name -> env var the server resolves it with (see mcp-server
- *  lib/repos.mjs, whose directory lists this mirrors via src/repolayout.ts). */
-const HOME_VARS: ReadonlyArray<readonly [string, string]> = [
-  ["abap2UI5", "A2UI5_HOME"],
-  ...CORPUS_DIRS.map((d) => [d, "SAMPLES_CONTROLS_HOME"] as const),
-  ...VIEW_CHECK_DIRS.map((d) => [d, "AI_VIEW_CHECK_HOME"] as const),
-  /* The `examples` tool searches THREE sample catalogues, and until it did,
-   * only the corpus needed an env var here. A checkout the extension does not
-   * point at is not an error over there - the tool answers from the ones it
-   * can read - so a missing one costs a third of the answer silently, which
-   * is exactly why both are passed whenever they are present. */
-  ...SAMPLES_DIRS.map((d) => [d, "SAMPLES_HOME"] as const),
-  ...SAMPLES_STACK_DIRS.map((d) => [d, "SAMPLES_STACK_HOME"] as const),
-];
 
 function config() {
   return vscode.workspace.getConfiguration(CONFIG_SECTION);
@@ -126,20 +111,9 @@ export function checkoutEnv(): Record<string, string> {
 }
 
 function serverEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  const root = config().get<string>("mcp.reposRoot", "").trim();
-  if (root) {
-    for (const [repo, envVar] of HOME_VARS) {
-      if (env[envVar]) {
-        continue; // first match wins - the new directory name over the legacy one
-      }
-      const dir = path.join(root, repo);
-      if (fs.existsSync(dir)) {
-        env[envVar] = dir;
-      }
-    }
-  }
-  return env;
+  return checkoutHomes(config().get<string>("mcp.reposRoot", ""), (dir) =>
+    fs.existsSync(dir)
+  );
 }
 
 export function registerMcp(

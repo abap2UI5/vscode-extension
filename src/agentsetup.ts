@@ -41,7 +41,7 @@
  * execute a workspace's code, and the web host could not.
  */
 
-import { TEMPLATE_FILES, TEMPLATE_SPEC } from "./scaffold";
+import { TEMPLATE_FILES, TEMPLATE_SPEC, withinNpmNameRules } from "./scaffold";
 
 /** The `agentSetup` key of app-template's template.json. */
 export interface AgentSetupSpec {
@@ -65,6 +65,10 @@ export const AGENT_SETUP: AgentSetupSpec | undefined = (
 export interface WorkspaceProbe {
   exists(rel: string): Promise<boolean>;
   readText(rel: string): Promise<string>;
+  /** Whether `rel` ITSELF is a symbolic link (not what it points at). A
+   *  probe of a file system without links (the web host's virtual folders,
+   *  a test's map) may leave it out. */
+  isLink?(rel: string): Promise<boolean>;
 }
 
 export type AgentSetupAction =
@@ -133,11 +137,16 @@ export interface KeptEntry {
   want: unknown;
 }
 
+/** A package.json that parses but is not an object - a different fix than
+ *  a syntax error, so a different message. */
+export class PackageJsonShapeError extends Error {}
+
 /**
  * package.json, merged: every entry under `keys` the project lacks is added,
  * every entry it has keeps its value. Returns the new text (null when nothing
  * was added), what was added, and what was kept on a value that differs from
- * the template's. Throws when the project's package.json is not JSON.
+ * the template's. Throws when the project's package.json is not JSON, and a
+ * `PackageJsonShapeError` when it is JSON but not an object.
  */
 export function mergePackageJson(
   existingText: string,
@@ -145,7 +154,17 @@ export function mergePackageJson(
   keys: readonly string[]
 ): { text: string | null; added: string[]; kept: KeptEntry[] } {
   const tpl = JSON.parse(stripBom(templateText)) as Record<string, unknown>;
-  const pkg = JSON.parse(stripBom(existingText)) as Record<string, unknown>;
+  const parsed: unknown = JSON.parse(stripBom(existingText));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    // Valid JSON, just not a manifest. Merged anyway, `null` threw a
+    // TypeError that the caller reported as "not valid JSON", and an array
+    // took the entries as properties that JSON.stringify then dropped - the
+    // plan announced additions to a file it would write back unchanged.
+    throw new PackageJsonShapeError(
+      `its top level is ${parsed === null ? "null" : Array.isArray(parsed) ? "an array" : `a ${typeof parsed}`}, not an object`
+    );
+  }
+  const pkg = parsed as Record<string, unknown>;
   const section = (key: string): Record<string, unknown> | undefined => {
     const value = pkg[key];
     return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
@@ -242,11 +261,13 @@ export function mergeLines(
  *  in the characters npm accepts. Takes the folder NAME - the caller knows it
  *  from the workspace folder, and this module stays free of `path`. */
 export function packageNameFor(folderName: string): string {
-  return (
+  // the create package's character rules, then npm's length and reserved
+  // names - a package.json npm refuses to install is not an added file
+  return withinNpmNameRules(
     folderName
       .toLowerCase()
       .replace(/[^a-z0-9._-]+/g, "-")
-      .replace(/^[._-]+/, "") || "abap2ui5-app"
+      .replace(/^[._-]+/, "")
   );
 }
 
@@ -267,6 +288,27 @@ export function sourceFolderOf(
     };
   }
   return { folder, from: ".abapgit.xml STARTING_FOLDER" };
+}
+
+/**
+ * The first component of `rel` - `.claude`, then `.claude/settings.json` -
+ * that is a symbolic link, or undefined. A write through one lands wherever
+ * it points: a cloned repository carrying `.claude -> ~/.claude` would have
+ * the template's permission allowlist written into the user's GLOBAL Claude
+ * Code settings, every project's. `exists` follows links, so it cannot tell.
+ */
+async function linkOnTheWay(probe: WorkspaceProbe, rel: string): Promise<string | undefined> {
+  if (!probe.isLink) {
+    return undefined;
+  }
+  const parts = rel.split("/");
+  for (let i = 1; i <= parts.length; i++) {
+    const prefix = parts.slice(0, i).join("/");
+    if (await probe.isLink(prefix)) {
+      return prefix;
+    }
+  }
+  return undefined;
 }
 
 /** Whether `rel` lies inside `folder` (both workspace-relative). */
@@ -322,6 +364,15 @@ export async function planAgentSetup(
       });
       continue;
     }
+    const link = await linkOnTheWay(probe, rel);
+    if (link) {
+      actions.push({
+        path: rel,
+        kind: "skip",
+        detail: `${link} is a symbolic link - never written through one`,
+      });
+      continue;
+    }
     const exists = await probe.exists(rel);
     const merge = setup.merge?.[rel];
     if (exists && !merge) {
@@ -358,8 +409,11 @@ export async function planAgentSetup(
       try {
         result = mergePackageJson(existing, adapted, keys);
       } catch (err) {
+        const why = err instanceof Error ? err.message : String(err);
         throw new Error(
-          `${rel} is not valid JSON (${err instanceof Error ? err.message : String(err)}) - fix it, or move it aside and run again`
+          err instanceof PackageJsonShapeError
+            ? `${rel} is not a package manifest (${why}) - fix it, or move it aside and run again`
+            : `${rel} is not valid JSON (${why}) - fix it, or move it aside and run again`
         );
       }
       for (const k of result.kept) {

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { LINTER_RELEASE } from "./linterrelease";
 import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
@@ -40,12 +41,11 @@ import { bundleTrust } from "./checkcore";
 
 const ROLLING_BUNDLE_URL =
   "https://github.com/abap2UI5/linter/releases/download/render-gate-bundle/view-check-bundle.tgz";
-// injected at build time by esbuild.js (define): the bundled linter's npm
-// version (from package-lock.json) and the commit that version was published
-// from (package.json `linterRelease`) - the per-commit bundle tag is cut from
-// the latter, since the linter publishes no per-version bundle
-const LINTER_PIN = process.env.LINTER_PIN || "";
-const LINTER_COMMIT = process.env.LINTER_COMMIT || "";
+// the bundled linter's npm version and the commit that version was published
+// from (linterrelease.ts) - the per-commit bundle tag is cut from the latter,
+// since the linter publishes no per-version bundle
+const LINTER_PIN = LINTER_RELEASE.version;
+const LINTER_COMMIT = LINTER_RELEASE.commit;
 const PINNED_BUNDLE_URL = LINTER_COMMIT
   ? `https://github.com/abap2UI5/linter/releases/download/render-gate-bundle-${LINTER_COMMIT.slice(0, 12)}/view-check-bundle.tgz`
   : undefined;

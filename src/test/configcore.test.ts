@@ -126,6 +126,27 @@ test("path helpers work on the '/'-separated paths a workspace URI carries", () 
   assert.equal(joinPath("", "baseline.json"), "baseline.json");
 });
 
+test("a baseline path resolves like the desktop reader's path.resolve", () => {
+  // only a LEADING run of `../` was folded: these three used to keep their
+  // `..` / `//`, and on the web the baseline was read from a path no file
+  // system resolves - its findings came back although CI waived them
+  assert.equal(joinPath("/repo/app", "./../b.json"), "/repo/b.json");
+  assert.equal(joinPath("/repo/app", "lint/../b.json"), "/repo/app/b.json");
+  assert.equal(joinPath("/repo/app", "/abs/b.json"), "/abs/b.json");
+  assert.equal(joinPath("/repo/app", "../../../b.json"), "/b.json", "not above the root");
+  assert.equal(joinPath("/repo/app/", "./x/./b.json"), "/repo/app/x/b.json");
+  assert.equal(joinPath("/repo/app", "../b.json"), "/repo/b.json");
+  // and the options a config produces carry the resolved file
+  assert.equal(
+    optionsFromConfig({ baseline: "./../b.json" } as never, "/repo/app/abap2ui5lint.jsonc", {
+      minUi5: "1.71",
+      distribution: null,
+      allow: [],
+    }).baseline,
+    "/repo/b.json"
+  );
+});
+
 test("the baseline waives what it covers and leaves the rest", () => {
   const findings = [
     { type: "unknown-binding-path", control: "sap.m.Input", value: "{/OLD}" },
@@ -206,11 +227,15 @@ test("no opinion on either side leaves the gate its defaults", () => {
  * `ui5` stayed a number. `parseLintConfig` now IS the linter's parseConfig.
  */
 test("the text is read the way the CLI reads it: validated and normalised", () => {
+  /* `ui5` quoted: a NUMBER is the linter's to judge, and it changed its
+   * mind - 0.8.5 read 1.96 as "1.96", the release after it refuses one,
+   * because JSON reads 1.120 as 1.12. Pinning either answer here would fail
+   * the pin bump for a decision this module only passes on. */
   const raw = parseLintConfig(
-    '{ "ui5": 1.96, "distribution": "OpenUI5", "render": { "pages": 2 } }',
+    '{ "ui5": "1.96", "distribution": "OpenUI5", "render": { "pages": 2 } }',
     "/repo/abap2ui5lint.jsonc"
   );
-  assert.equal(raw.minUi5, "1.96", "a numeric ui5 becomes the string the gate compares");
+  assert.equal(raw.minUi5, "1.96", "ui5 becomes the minUi5 the gate compares");
   assert.equal(raw.distribution, "openui5", "the distribution is lower-cased");
   assert.equal(raw.render, true, "the object form of render is a boolean plus a pool size");
   assert.throws(

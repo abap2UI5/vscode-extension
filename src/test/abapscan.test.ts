@@ -6,7 +6,9 @@ import {
   abapStatements,
   blankComments,
   blankNonCode,
+  blankNonCodeKeepEmbeds,
   declaredNames,
+  lineStartAt,
 } from "../abapscan";
 
 /*
@@ -368,4 +370,37 @@ test("BEGIN OF ENUM and BEGIN OF MESH declare the type, not the keyword", () => 
     "TYPES: BEGIN OF ENUM ty_color, red, green, END OF ENUM ty_color".slice(at, at + 8),
     "ty_color"
   );
+});
+
+test("blankNonCodeKeepEmbeds keeps a template's embedded code only", () => {
+  const source =
+    "lv = |Hi { lv_name } and { get( 'a|b' ) } { |in { lv_x }| }|. \" c\n" +
+    "* lv_dead\n" +
+    "lv = `lit`.";
+  const kept = blankNonCodeKeepEmbeds(source);
+  assert.equal(kept.length, source.length);
+  // the embeds' code stays at its offsets
+  for (const word of ["lv_name", "get(", "lv_x"]) {
+    const at = source.indexOf(word);
+    assert.equal(kept.slice(at, at + word.length), word, word);
+  }
+  // text, bars, braces, literals and comments are gone
+  for (const word of ["Hi", "and", "a|b", "in ", "lv_dead", "lit", "\""]) {
+    assert.ok(!kept.includes(word), word);
+  }
+  assert.ok(!kept.includes("|"));
+  assert.ok(!kept.includes("{"));
+  // without a template it is blankNonCode
+  const plain = "x = 'a'. \" c";
+  assert.equal(blankNonCodeKeepEmbeds(plain), blankNonCode(plain));
+});
+
+test("the start of the line an offset is on, the first line included", () => {
+  // `lastIndexOf("\n", offset - 1)` at offset 0 searches from -1, read as 0:
+  // a source opening with a newline put the first line's start at 1
+  assert.equal(lineStartAt("\nDATA x.", 0), 0);
+  assert.equal(lineStartAt("\nDATA x.", 1), 1);
+  assert.equal(lineStartAt("ab\ncd", 2), 0, "the newline itself ends the first line");
+  assert.equal(lineStartAt("ab\ncd", 4), 3);
+  assert.equal(lineStartAt("", 0), 0);
 });

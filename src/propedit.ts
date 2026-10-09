@@ -7,6 +7,7 @@
  * edit out - covered by the test suite.
  */
 
+import { blankComments, lineStartAt } from "./abapscan";
 import { ChainAttribute, ControlCall } from "./context";
 
 export interface SpanEdit {
@@ -144,8 +145,20 @@ export function removeAttributeEdit(
   }
   if (closeLineStart > lineStart && !source.slice(closeLineStart, attr.aClose).trim()) {
     // the usual chain shape: the call's own `)` opens the next line, so the
-    // whole line (or lines, for a multi-line value) can go
-    return { start: lineStart, end: closeLineStart, text: "" };
+    // whole line (or lines, for a multi-line value) can go - but not a blank
+    // line between it and that `)`: that one separates two parts of the
+    // chain (the namespaces from the first control, say), and removing the
+    // attribute above it is no reason to close the gap
+    let end = closeLineStart;
+    for (;;) {
+      // the line before the one starting at `end` (whose `\n` is end - 1)
+      const prevStart = lineStartAt(source, end - 1);
+      if (prevStart <= lineStart || source.slice(prevStart, end).trim()) {
+        break;
+      }
+      end = prevStart;
+    }
+    return { start: lineStart, end, text: "" };
   }
   /*
    * The call closes on its own line - which is what the LAST attribute of
@@ -160,5 +173,42 @@ export function removeAttributeEdit(
    * it took the first line alone and left the `v = …` dangling in the chain.
    */
   const afterParen = lineStart + opener[0].indexOf(")") + 1;
-  return { start: afterParen, end: attr.aClose + 1, text: "" };
+  const joined = joinOntoPreviousLine(source, lineStart, attr.aClose + 1);
+  return joined ?? { start: afterParen, end: attr.aClose + 1, text: "" };
+}
+
+/**
+ * The removal of a call that closes its own line, written so the `)` that is
+ * left over does not stand alone: `)->a( n = \`x\` v = \`y\` ).` cut down to
+ * its `)` left a line holding nothing but `).`, where the house layout (and
+ * every hand-written chain) closes on the line of the last call:
+ * `)->tag( \`Input\` ).`. So when nothing but the statement's end follows the
+ * cut - the period, or a comma of a chained statement - the `)` moves up to
+ * the end of the previous line.
+ *
+ * Not when that line ends in a comment (the `)` would be commented out) or is
+ * blank or a whole-line comment; the caller then keeps the plain cut.
+ */
+function joinOntoPreviousLine(
+  source: string,
+  lineStart: number,
+  cutEnd: number
+): SpanEdit | undefined {
+  const lineEnd = source.indexOf("\n", cutEnd);
+  const rest = source.slice(cutEnd, lineEnd < 0 ? source.length : lineEnd);
+  if (!/^\s*[.,]?\s*$/.test(rest) || lineStart === 0) {
+    return undefined;
+  }
+  const prevStart = lineStartAt(source, lineStart - 1);
+  const prevRaw = source.slice(prevStart, lineStart - 1).replace(/\r$/, "");
+  const content = prevRaw.replace(/[ \t]+$/, "");
+  if (!content.trim() || content.startsWith("*")) {
+    return undefined;
+  }
+  // a `"` comment at the end of that line: what blanking comments removes
+  const blanked = blankComments(source.slice(prevStart, lineStart - 1)).replace(/\r$/, "");
+  if (blanked.replace(/[ \t]+$/, "").length !== content.length) {
+    return undefined;
+  }
+  return { start: prevStart + content.length, end: cutEnd, text: " )" };
 }

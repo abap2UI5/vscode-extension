@@ -4,8 +4,28 @@ import * as fs from "fs";
 import * as path from "path";
 import { checkAbapSource, checkXmlSource } from "@abap2ui5/linter";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
-import { runGate } from "../gate";
+import { RULES } from "@abap2ui5/linter/findings";
+import * as abapRulesNs from "@abap2ui5/linter/abap-rules";
+import * as reconstructNs from "@abap2ui5/linter/reconstruct";
+import * as propertiesNs from "@abap2ui5/linter/properties";
+import * as findingsNs from "@abap2ui5/linter/findings";
+import * as fixNs from "@abap2ui5/linter/fix";
+import * as linterMain from "@abap2ui5/linter";
+import {
+  DECLARES_APP_RE,
+  declaresApp,
+  LINTER_COLLECT_CONTAINER_PAGES,
+  LINTER_MATCH_EOL,
+  LINTER_PORTABLE,
+  LINTER_PUBLIC_READ_FROM_OUTSIDE,
+  matchLineEndings,
+  matchLineEndingsPort,
+  runGate,
+  VIEWLESS_APP_RULE,
+} from "../gate";
+import { LINTER_CLASS_INDEX_OF } from "../classindex";
 import type { CheckOptions } from "../lintconfig";
+import { LINTER_RELEASE } from "../linterrelease";
 
 /*
  * The gate against the linter's own pipeline.
@@ -313,6 +333,126 @@ ENDCLASS.
 `;
 ABAP_FIXTURES["a bare factory that builds no element"] = EMPTY_BUILDER;
 
+/* The linter's stand-down of unused-namespace-declaration: a class that
+ * writes the prefix in more builder literals (`form:SimpleForm`) than its
+ * reconstructed view carries uses it in a part of the view nobody here saw,
+ * so the rule stays silent - and its deleting --fix with it. The gate
+ * reported it, and the lightbulb offered to delete a declaration the view
+ * needs. */
+const helperBuilt = (directive: string): string => `CLASS zcl_parity DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    "! the edit form - added by the subclass that edits
+    METHODS add_form IMPORTING parent TYPE REF TO z2ui5_cl_ui5_view_builder.
+ENDCLASS.
+
+CLASS zcl_parity IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+${directive}    DATA(page) = view->ele( n = \`View\` ns = \`mvc\`
+        )->a( n = \`xmlns\`      v = \`sap.m\`
+        )->a( n = \`xmlns:mvc\`  v = \`sap.ui.core.mvc\`
+        )->a( n = \`xmlns:form\` v = \`sap.ui.layout.form\`
+        )->ele( n = \`Page\` ).
+    page->ele( n = \`Text\` )->a( n = \`text\` v = \`x\` ).
+
+    client->view_display( view->stringify( ) ).
+
+  ENDMETHOD.
+
+  METHOD add_form.
+    parent->ele( n = \`form:SimpleForm\` )->tag( n = \`Text\` )->a( n = \`text\` v = \`y\` ).
+  ENDMETHOD.
+ENDCLASS.
+`;
+ABAP_FIXTURES["a prefix the class writes outside its reconstructed view (the rule stands down)"] =
+  helperBuilt("");
+ABAP_FIXTURES["a waiver of a rule that stood down is not unused"] = helperBuilt(
+  '    " abap2ui5lint-disable-next-line unused-namespace-declaration\n'
+);
+
+/* --- the inputs a seventh round found missing --------------------------------
+ *
+ * Each of these was a finding the branch linter's `checkAbapSource` reports
+ * and the gate did not (or the other way round):
+ *
+ *   - `rowsvisible`: `sizeLimitRaised` never reached `checkNodes`, so
+ *     rows-hidden-by-visible stayed silent - and a raise written only in a
+ *     comment or as prose must not count (the variants below);
+ *   - `startpath`: a document the FIRST display shows is judged against the
+ *     start-path model (`initModel`, `initialFields`), which the gate never
+ *     passed - enum-bound-to-initial-field;
+ *   - a bound field holding one of a container's page ids: `containerPages`
+ *     never reached `checkAbapRules` - navigation-lost-on-rebuild;
+ *   - an app class whose view comes from another class: `checkAbapSource`
+ *     judges it by its class rules (even at the pin), the gate answered
+ *     "nothing to check".
+ *
+ * At the pin most of them agree vacuously (the rules arrive with the next
+ * release); run against the linter's branch, they are what measures the
+ * wiring. */
+const ROWS_VISIBLE = linterFixture("rowsvisible.clas.abap");
+const DISPLAY_CALL = "    client->view_display( page->stringify( ) ).\n";
+ABAP_FIXTURES["rows hidden by a binding-valued visible (linter fixture rowsvisible)"] = ROWS_VISIBLE;
+ABAP_FIXTURES["the same rows, with the size limit raised"] = ROWS_VISIBLE.replace(
+  DISPLAY_CALL,
+  "    DATA(raise) = client->cs_event-set_size_limit.\n" + DISPLAY_CALL
+);
+ABAP_FIXTURES["the same rows, with the raise only in a comment"] = ROWS_VISIBLE.replace(
+  DISPLAY_CALL,
+  '    " DATA(raise) = client->cs_event-set_size_limit.\n' + DISPLAY_CALL
+);
+ABAP_FIXTURES["an enum bound to a field the start path leaves initial (linter fixture startpath)"] =
+  linterFixture("startpath.clas.abap");
+
+/** A handler that navigates a NavContainer to a page whose id a bound field
+ *  holds - off the display path, so the rebuild after the roundtrip shows the
+ *  initial page again (the linter's case (c), which needs `containerPages`). */
+const NAV_PAGE_FIELD = `CLASS zcl_parity DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    DATA mv_page TYPE string VALUE \`p2\`.
+    METHODS on_event IMPORTING client TYPE REF TO z2ui5_if_client.
+ENDCLASS.
+
+CLASS zcl_parity IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
+        )->a( n = \`xmlns\`     v = \`sap.m\`
+        )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
+        )->ele( n = \`Page\`
+            )->ele( n = \`NavContainer\`
+                )->a( n = \`id\` v = \`nav\`
+                )->tag( n = \`Page\`
+                    )->a( n = \`id\` v = \`p1\`
+                )->tag( n = \`Page\`
+                    )->a( n = \`id\` v = \`p2\`
+            )->end(
+            )->tag( n = \`Select\`
+                )->a( n = \`selectedKey\` v = client->_bind( mv_page ) ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+
+  METHOD on_event.
+    client->follow_up_action( val = client->cs_event-control_by_id t_arg = VALUE #( ( \`nav\` ) ( \`to\` ) ( \`p2\` ) ) ).
+  ENDMETHOD.
+ENDCLASS.
+`;
+ABAP_FIXTURES["a bound field naming a container's page, navigated off the display path"] = NAV_PAGE_FIELD;
+
+/** An app class that builds no view - its view comes from another class.
+ *  The linter's own review fixture (round 2026-09-25): a `_bind_edit( )`, a
+ *  bind on a PRIVATE attribute. */
+const VIEWLESS_APP =
+  "CLASS zcl_viewless DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    INTERFACES z2ui5_if_app.\n    DATA mv_name TYPE string.\n" +
+  "  PROTECTED SECTION.\n    DATA client TYPE REF TO z2ui5_if_client.\n  PRIVATE SECTION.\n    DATA mv_secret TYPE string.\nENDCLASS.\n\n" +
+  "CLASS zcl_viewless IMPLEMENTATION.\n  METHOD z2ui5_if_app~main.\n    me->client = client.\n    IF client->check_on_navigated( ).\n" +
+  "      client->view_display( zcl_x_views=>main( client = client name = client->_bind_edit( mv_name ) secret = client->_bind( mv_secret ) ) ).\n" +
+  "    ENDIF.\n  ENDMETHOD.\nENDCLASS.\n";
+ABAP_FIXTURES["an app class whose view comes from another class"] = VIEWLESS_APP;
+
 /** Fixtures that need a floor of their own - the same comparison, with both
  *  sides told the same `minUi5`. */
 const ABAP_FIXTURES_AT: Record<string, { source: string; minUi5: string }> = {
@@ -332,6 +472,11 @@ const XML_FIXTURES: Record<string, string> = {
     '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <Button text="Go" nosuchprop="x"/>\n</mvc:View>',
   "child in the wrong aggregation":
     '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <Button><content><Text text="x"/></content></Button>\n</mvc:View>',
+  // checkXmlSource scans the view's text for icons with its COMMENTS blanked
+  // (`xml: true`); the gate scanned them too and reported the icon of a
+  // commented-out control
+  "an icon in a commented-out control":
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <!-- <Button icon="sap-icon://nosuchicon"/> -->\n  <Button text="Go"/>\n</mvc:View>',
 };
 
 for (const [name, source] of Object.entries(ABAP_FIXTURES)) {
@@ -378,6 +523,140 @@ for (const [name, xml] of Object.entries(XML_FIXTURES)) {
   });
 }
 
+
+/* --- CRLF ------------------------------------------------------------------
+ *
+ * Every fixture above is LF, and so was every fixture here until a CRLF file
+ * was found to be judged by a different path: `crlf-line-ending` fires (its
+ * fix rewrites every line break), the line-keyed rules count `\r` as
+ * neither content nor blank, and the fixes that insert lines have to write
+ * the file's own line ending - the linter's `settle` ends with
+ * `matchLineEndings` from the release after 0.8.5 on, and the gate runs the
+ * same pass (`matchLineEndings` in gate.ts: the linter's when exported, its
+ * port until then). The CLI side is passed through the same function, which
+ * is a no-op on a linter that already ran it - so this compares the
+ * pipelines, and the line-ending pass is pinned on its own below. */
+
+const crlf = (text: string): string => text.replace(/\r?\n/g, "\r\n");
+
+/** A class whose fix INSERTS a line - the case the line-ending pass is for. */
+const CTOR_IN_PRIVATE = `CLASS zcl_parity DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+  PRIVATE SECTION.
+    CLASS-METHODS class_constructor.
+ENDCLASS.
+
+CLASS zcl_parity IMPLEMENTATION.
+  METHOD class_constructor.
+  ENDMETHOD.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
+        )->a( n = \`xmlns\`     v = \`sap.m\`
+        )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
+        )->ele( n = \`Page\`
+            )->tag( n = \`Text\`
+                )->a( n = \`text\` v = \`x\` ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.
+`;
+
+const CRLF_ABAP: Record<string, string> = {
+  "a class whose fix inserts a line": CTOR_IN_PRIVATE,
+  ...ABAP_FIXTURES,
+};
+
+for (const rules of [{}, { "crlf-line-ending": false }]) {
+  const label = Object.keys(rules).length ? "crlf-line-ending off" : "every rule on";
+  for (const [name, lf] of Object.entries(CRLF_ABAP)) {
+    test(`the gate agrees with checkAbapSource on a CRLF file (${label}) - ${name}`, () => {
+      const file = "src/zcl_parity.clas.abap";
+      const source = crlf(lf);
+      const mine = runGate(source, file, false, { ...OPTIONS, rules });
+      const theirs = checkAbapSource(source, { ...linterOptions(file), rules });
+      assert.deepEqual(
+        reduce(mine.findings),
+        reduce(matchLineEndings(theirs.findings as Parameters<typeof matchLineEndings>[0], source)),
+        "gate.ts and checkAbapSource disagree on a CRLF source"
+      );
+    });
+  }
+  for (const [name, lf] of Object.entries(XML_FIXTURES)) {
+    test(`the gate agrees with checkXmlSource on a CRLF file (${label}) - ${name}`, () => {
+      const file = "src/view.view.xml";
+      const source = crlf(lf);
+      const mine = runGate(source, file, true, { ...OPTIONS, rules });
+      const theirs = checkXmlSource(source, { ...linterOptions(file), rules });
+      assert.deepEqual(
+        reduce(mine.findings),
+        reduce(matchLineEndings(theirs.findings as Parameters<typeof matchLineEndings>[0], source)),
+        "gate.ts and checkXmlSource disagree on a CRLF source"
+      );
+    });
+  }
+}
+
+test("a CRLF file's fixes write CRLF, and LF while crlf-line-ending converts it", () => {
+  const file = "src/zcl_parity.clas.abap";
+  const source = crlf(CTOR_IN_PRIVATE);
+  const kept = runGate(source, file, false, { ...OPTIONS, rules: { "crlf-line-ending": false } });
+  const inserted = kept.findings.find((f) => f.type === "class-constructor-visibility");
+  const texts = (inserted?.fixes ?? []).map((e) => e.text).filter((t) => t.includes("\n"));
+  assert.ok(texts.length, "the fixture stopped producing a multi-line fix - the test measures nothing");
+  for (const t of texts) {
+    assert.ok(!/(^|[^\r])\n/.test(t.replace(/^\n/, "")), `a bare LF in a CRLF file's fix: ${JSON.stringify(t)}`);
+  }
+  // crlf-line-ending's own fix makes the file LF - every other text follows
+  const converted = runGate(source, file, false, OPTIONS);
+  assert.ok(converted.findings.some((f) => f.type === "crlf-line-ending"));
+  for (const f of converted.findings) {
+    for (const e of f.fixes ?? []) {
+      assert.ok(!e.text.includes("\r\n"), `${f.type} writes CRLF into a file being made LF`);
+    }
+  }
+  // and an LF file is left exactly as the rules wrote it
+  const lf = runGate(CTOR_IN_PRIVATE, file, false, OPTIONS);
+  for (const f of lf.findings) {
+    for (const e of f.fixes ?? []) {
+      assert.ok(!e.text.includes("\r"), `${f.type} writes a CR into an LF file`);
+    }
+  }
+});
+
+test("the line-ending port behaves as the linter's matchLineEndings", () => {
+  const fx = (type: string, start: number, text: string) => ({ type, fixes: [{ start, end: start, text }] });
+  // mostly CRLF: every LF of a fix text becomes CRLF
+  const crlfSource = "a\r\nb\r\nc\r\n";
+  assert.equal(matchLineEndingsPort([fx("r", 3, "x\ny\n")], crlfSource)[0].fixes[0].text, "x\r\ny\r\n");
+  // a text starting with LF right behind a CR completes that line break
+  assert.equal(matchLineEndingsPort([fx("r", 2, "\nz")], crlfSource)[0].fixes[0].text, "\nz");
+  // already CRLF stays CRLF
+  assert.equal(matchLineEndingsPort([fx("r", 3, "x\r\ny")], crlfSource)[0].fixes[0].text, "x\r\ny");
+  // mostly LF (one CRLF among four breaks): untouched
+  assert.equal(matchLineEndingsPort([fx("r", 0, "x\ny")], "a\nb\nc\r\nd\n")[0].fixes[0].text, "x\ny");
+  // half and half is not "mostly CRLF"
+  assert.equal(matchLineEndingsPort([fx("r", 0, "x\ny")], "a\r\nb\n")[0].fixes[0].text, "x\ny");
+  // with crlf-line-ending among them every text is LF, its own fix untouched
+  const conv = matchLineEndingsPort(
+    [fx("r", 0, "x\r\ny"), { type: "crlf-line-ending", fixes: [{ start: 1, end: 2, text: "" }] }],
+    "a\nb"
+  );
+  assert.equal(conv[0].fixes[0].text, "x\ny");
+  assert.equal(conv[1].fixes[0].text, "");
+  // when the pinned linter exports its own, the two agree on all of the above
+  if (LINTER_MATCH_EOL) {
+    for (const [findings, source] of [
+      [[fx("r", 3, "x\ny\n")], crlfSource],
+      [[fx("r", 2, "\nz")], crlfSource],
+      [[fx("r", 0, "x\ny")], "a\nb\nc\r\nd\n"],
+    ] as const) {
+      const copy = () => JSON.parse(JSON.stringify(findings));
+      assert.deepEqual(LINTER_MATCH_EOL(copy(), source), matchLineEndingsPort(copy(), source));
+    }
+  }
+});
 
 test("the fixtures actually produce findings - a vacuous parity proves nothing", () => {
   const types = new Set<string>();
@@ -597,4 +876,341 @@ test("a precomputed prep produces exactly the findings the gate derives itself",
     compared++;
   }
   assert.ok(compared >= 5, "the fixture table went missing");
+});
+
+test("the directives hear the rules block, as the linter's settle tells them", () => {
+  /* A directive's own findings (unused-directive, unknown-directive-rule)
+   * pass through the `rules` block like every other finding - in the
+   * linter's settle, which hands applyDirectives the rules and the file. The
+   * gate called it with neither, so a repository that switched
+   * `unused-directive` off, re-graded `unknown-directive-rule` or excluded a
+   * folder still saw them in the editor. */
+  const source = clazz(`            )->tag( n = \`Text\`
+                " abap2ui5lint-disable-next-line unknown-property
+                )->a( n = \`text\` v = \`fine\`
+                " abap2ui5lint-disable-next-line no-such-rule
+                )->a( n = \`wrapping\` v = \`true\``);
+  const file = "src/zcl_parity.clas.abap";
+  const variants: Array<Record<string, unknown>> = [
+    {},
+    { "unused-directive": "off" },
+    { "unknown-directive-rule": "error" },
+    { "unused-directive": { exclude: ["^src/"] }, "unknown-directive-rule": false },
+  ];
+  const control = runGate(source, file, false, OPTIONS).findings.map((f) => f.type);
+  assert.ok(
+    control.includes("unused-directive") && control.includes("unknown-directive-rule"),
+    `the fixture stopped producing both directive findings - the test measures nothing (${control.join(", ")})`
+  );
+  for (const rules of variants) {
+    const mine = runGate(source, file, false, { ...OPTIONS, rules });
+    const theirs = checkAbapSource(source, { ...linterOptions(file), rules });
+    assert.deepEqual(reduce(mine.findings), reduce(theirs.findings), JSON.stringify(rules));
+  }
+});
+
+test("a stood-down rule's waiver is unjudged, not unused - and the stand-down is the linter's", () => {
+  const source = ABAP_FIXTURES["a waiver of a rule that stood down is not unused"];
+  const mine = runGate(source, "src/zcl_parity.clas.abap", false, OPTIONS).findings;
+  assert.ok(!mine.some((f) => f.type === "unused-namespace-declaration"), "the rule stood down");
+  assert.ok(!mine.some((f) => f.type === "unused-directive"), "its waiver is not unused");
+  // and the same class with the literal the view does not carry taken out:
+  // the rule judges it again, and the declaration is reported
+  const judged = runGate(
+    ABAP_FIXTURES["a prefix the class writes outside its reconstructed view (the rule stands down)"]
+      .replace("`form:SimpleForm`", "`SimpleForm`"),
+    "src/zcl_parity.clas.abap",
+    false,
+    OPTIONS
+  ).findings;
+  assert.ok(
+    judged.some((f) => f.type === "unused-namespace-declaration"),
+    "the fixture stopped producing the finding - the test measures nothing"
+  );
+});
+
+test("a public attribute another class reads: the rules stand down, and their waiver is unjudged", (t) => {
+  /* From the release after 0.8.5 on, checkAbapSource stands the two
+   * public-attribute rules down for a class whose public attributes another
+   * class of the run reads (`publicReadFromOutside` over the class index) -
+   * and tells applyDirectives so, or the waiver that used to be needed would
+   * turn into an unused-directive the moment the index arrived. */
+  if (!LINTER_PUBLIC_READ_FROM_OUTSIDE || !LINTER_CLASS_INDEX_OF) {
+    t.skip("the pinned linter has no publicReadFromOutside / classIndexOf");
+    return;
+  }
+  const popup = `CLASS zcl_px_popup DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    " abap2ui5lint-disable-next-line unused-public-attribute
+    DATA ms_result TYPE string.
+    DATA mv_title TYPE string.
+ENDCLASS.
+
+CLASS zcl_px_popup IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
+        )->a( n = \`xmlns\` v = \`sap.m\`
+        )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
+        )->ele( \`Page\`
+            )->a( n = \`title\` v = client->_bind( mv_title )
+        )->end( ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.
+`;
+  const caller = `CLASS zcl_px_caller DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+ENDCLASS.
+
+CLASS zcl_px_caller IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA lo_popup TYPE REF TO zcl_px_popup.
+    lo_popup ?= client->get_app( client->get( )-s_draft-id_prev_app ).
+    DATA(lv_result) = lo_popup->ms_result.
+  ENDMETHOD.
+ENDCLASS.
+`;
+  const classIndex = LINTER_CLASS_INDEX_OF([popup, caller]);
+  const file = "src/zcl_px_popup.clas.abap";
+  const mine = runGate(popup, file, false, { ...OPTIONS, classIndex });
+  const theirs = checkAbapSource(popup, { ...linterOptions(file), classIndex } as Parameters<
+    typeof checkAbapSource
+  >[1]);
+  assert.deepEqual(reduce(mine.findings), reduce(theirs.findings));
+  assert.ok(!mine.findings.some((f) => f.type === "unused-directive"), "the waiver is unjudged, not unused");
+});
+
+
+/* --- the config's switches -------------------------------------------------
+ *
+ * `properties: false` (the property gate off, the ABAP rules on - and a
+ * waiver of a walk rule then unjudged rather than unused), `allClasses` (a
+ * class that builds no view judged by the source rules) and the opt-in
+ * `portable-app` all change what checkAbapSource / checkXmlSource report.
+ * The gate heard none of them: a repository that switched the walk off still
+ * saw its findings in the editor, and one with `allClasses` saw nothing on
+ * the classes CI fails. */
+
+/** A class that is no app and builds no view, with a defect the source-side
+ *  rules report (a class_constructor outside the PUBLIC SECTION). */
+const NON_APP_CLASS = `CLASS zcl_parity_util DEFINITION PUBLIC.
+  PRIVATE SECTION.
+    CLASS-METHODS class_constructor.
+ENDCLASS.
+
+CLASS zcl_parity_util IMPLEMENTATION.
+  METHOD class_constructor.
+  ENDMETHOD.
+ENDCLASS.
+`;
+
+/** An unknown property, waived - judged with the walk on, unjudged with it
+ *  off (neither an unknown-property nor an unused-directive). */
+const WAIVED_PROPERTY = clazz(`            )->tag( n = \`Button\`
+                " abap2ui5lint-disable-next-line unknown-property
+                )->a( n = \`nosuchprop\` v = \`x\``);
+
+const PORTABLE_ON = { "portable-app": "error" };
+const OPTION_CASES: Array<{
+  name: string;
+  source: string;
+  isXml?: boolean;
+  options: Partial<CheckOptions>;
+}> = [
+  { name: "properties: false over an unknown property", source: ABAP_FIXTURES["an unknown property"], options: { properties: false } },
+  { name: "properties: false over a waived unknown property", source: WAIVED_PROPERTY, options: { properties: false } },
+  { name: "properties on over the same waiver", source: WAIVED_PROPERTY, options: {} },
+  { name: "properties: false over a builder class with ABAP-side findings", source: ABAP_FIXTURES["a handler that is raw javascript"], options: { properties: false } },
+  { name: "properties: false over a raw view", source: XML_FIXTURES["unknown property"], isXml: true, options: { properties: false } },
+  { name: "allClasses over a class that builds no view", source: NON_APP_CLASS, options: { allClasses: true } },
+  { name: "the same class without allClasses", source: NON_APP_CLASS, options: {} },
+  { name: "allClasses over an app class without a view", source: VIEWLESS_APP, options: { allClasses: true } },
+  { name: "portable-app over a portable class (linter fixture portable)", source: linterFixture("portable.clas.abap"), options: { rules: PORTABLE_ON } },
+  { name: "portable-app over a class outside the profile (linter fixture portablebad)", source: linterFixture("portablebad.clas.abap"), options: { rules: PORTABLE_ON } },
+  { name: "portable-app over an app class without a view", source: VIEWLESS_APP, options: { rules: PORTABLE_ON } },
+  { name: "portable-app over a raw view (linter fixture portable.view.xml)", source: linterFixture("portable.view.xml"), isXml: true, options: { rules: PORTABLE_ON } },
+  { name: "portable-app left off over the same view", source: linterFixture("portable.view.xml"), isXml: true, options: {} },
+];
+
+for (const c of OPTION_CASES) {
+  test(`the gate agrees with the linter under the config's switches - ${c.name}`, () => {
+    const file = c.isXml ? "src/view.view.xml" : "src/zcl_parity.clas.abap";
+    const mine = runGate(c.source, file, Boolean(c.isXml), { ...OPTIONS, ...c.options });
+    // the same switches, the linter's way (its `distribution` is the narrower type)
+    const opts = { ...linterOptions(file), ...c.options } as Parameters<typeof checkAbapSource>[1];
+    const theirs = c.isXml ? checkXmlSource(c.source, opts) : checkAbapSource(c.source, opts);
+    assert.deepEqual(reduce(mine.findings), reduce(theirs.findings), JSON.stringify(c.options));
+  });
+}
+
+test("what the switches and the viewless paths say about the check itself", () => {
+  const file = "src/zcl_parity.clas.abap";
+  // an app class without a view WAS checked - by its class rules
+  const viewless = runGate(VIEWLESS_APP, file, false, OPTIONS);
+  assert.equal(viewless.nothingChecked, undefined);
+  assert.equal(viewless.renderable, false);
+  assert.ok(
+    viewless.findings.some((f) => f.type === "binding-to-nonpublic"),
+    "binding-to-nonpublic is missing - the gate answered 'nothing to check' for an app class without a view"
+  );
+  assert.match(viewless.helperNote, /builds? no view|building no view/);
+  // a class that is neither an app nor builds a view is checked only under allClasses
+  assert.ok(runGate(NON_APP_CLASS, file, false, OPTIONS).nothingChecked);
+  const all = runGate(NON_APP_CLASS, file, false, { ...OPTIONS, allClasses: true });
+  assert.equal(all.nothingChecked, undefined);
+  assert.ok(all.findings.some((f) => f.type === "class-constructor-visibility"));
+  // the walk off: said, and a raw view is not walked at all
+  const off = runGate(XML_FIXTURES["unknown property"], "src/view.view.xml", true, { ...OPTIONS, properties: false });
+  assert.deepEqual(off.findings, []);
+  assert.match(off.helperNote, /properties: false/);
+});
+
+test("the rules the round-seven inputs feed are reachable through the gate", () => {
+  const typesOf = (source: string, options: Partial<CheckOptions> = {}, isXml = false): Set<string> =>
+    new Set(
+      runGate(source, isXml ? "src/view.view.xml" : "src/zcl_parity.clas.abap", isXml, {
+        ...OPTIONS,
+        ...options,
+      }).findings.map((f) => f.type)
+    );
+  const known = new Set<string>(RULES);
+  let judged = 0;
+  /* Each rule only where the installed linter has it - at the pin they arrive
+   * with the next release; against the linter's branch this is what fails
+   * first, with the rule's name, when an input stops reaching it. */
+  const expect = (rule: string, source: string, why: string, options: Partial<CheckOptions> = {}) => {
+    if (!known.has(rule)) {
+      return;
+    }
+    judged++;
+    assert.ok(typesOf(source, options).has(rule), `${rule} is missing - ${why}`);
+  };
+  expect("rows-hidden-by-visible", ROWS_VISIBLE, "sizeLimitRaised is not reaching checkNodes");
+  expect(
+    "rows-hidden-by-visible",
+    ABAP_FIXTURES["the same rows, with the raise only in a comment"],
+    "a raise written in a comment counted as one"
+  );
+  if (known.has("rows-hidden-by-visible")) {
+    assert.ok(
+      !typesOf(ABAP_FIXTURES["the same rows, with the size limit raised"]).has("rows-hidden-by-visible"),
+      "rows-hidden-by-visible fired for a class that raises the size limit"
+    );
+  }
+  expect(
+    "enum-bound-to-initial-field",
+    ABAP_FIXTURES["an enum bound to a field the start path leaves initial (linter fixture startpath)"],
+    "the start-path model (initModel / initialFields) is not reaching checkNodes"
+  );
+  expect(
+    "navigation-lost-on-rebuild",
+    NAV_PAGE_FIELD,
+    "containerPages (collectContainerPages) is not reaching checkAbapRules"
+  );
+  if (LINTER_PORTABLE) {
+    expect(
+      "portable-app",
+      linterFixture("portablebad.clas.abap"),
+      "the portable profile is not where the gate reads it (esbuild.js copies " +
+        "data/portable-v1.json into the extension root's data/)",
+      { rules: PORTABLE_ON }
+    );
+  }
+  // the release that brings the start-path rules brings the container pages
+  // too - a linter with the rules and without the export is wired wrong here
+  if (known.has("navigation-lost-on-rebuild")) {
+    assert.ok(LINTER_COLLECT_CONTAINER_PAGES, "the linter has navigation-lost-on-rebuild but no collectContainerPages");
+    assert.ok(judged >= 4, `only ${judged} of the round-seven rules were judged`);
+  }
+});
+
+/* --- the stand-ins ---------------------------------------------------------
+ *
+ * Where the gate cannot call the linter's own code, it holds a stand-in, and
+ * every stand-in is pinned here: to the installed linter's behaviour while
+ * the linter keeps the original out of reach, and to its removal once it
+ * does not. */
+
+/** The linter's main entry, as text - the ports below are copies of what
+ *  `lib/index.mjs` holds unexported. */
+const LINTER_INDEX = fs.readFileSync(
+  path.join(__dirname, "..", "node_modules", "@abap2ui5", "linter", "lib", "index.mjs"),
+  "utf8"
+);
+
+test("the stand-ins for linter exports: the ports say what lib/index.mjs says", () => {
+  // VIEWLESS_APP_RULE, character for character
+  const viewless = /const VIEWLESS_APP_RULE = \/(.+)\/;\n/.exec(LINTER_INDEX)?.[1];
+  assert.ok(viewless, "lib/index.mjs no longer defines VIEWLESS_APP_RULE - see gate.ts");
+  assert.equal(VIEWLESS_APP_RULE.source, viewless, "the linter changed VIEWLESS_APP_RULE - copy it into gate.ts");
+  // declaresApp, by behaviour (the pin and the branch spell the anchor
+  // differently and mean the same) - over every fixture and the edge cases
+  const samples = [
+    ...Object.values(ABAP_FIXTURES),
+    NON_APP_CLASS,
+    "CLASS a DEFINITION. PUBLIC SECTION. INTERFACES z2ui5_if_app. ENDCLASS.",
+    "CLASS a DEFINITION.\n  PUBLIC SECTION.\n    INTERFACES: if_serializable_object, z2ui5_if_app.\nENDCLASS.",
+    "CLASS a DEFINITION.\n  PUBLIC SECTION.\n    \" INTERFACES z2ui5_if_app.\nENDCLASS.",
+    "CLASS a DEFINITION.\n  PUBLIC SECTION.\n    DATA x TYPE string VALUE `INTERFACES z2ui5_if_app`.\nENDCLASS.",
+    /* Not compared: a literal left UNCLOSED at a line end (a half-typed
+     * buffer). The linter's blankLiterals ends it at the line end,
+     * abapscan's lexer carries it on to the next delimiter - so the two can
+     * disagree about an INTERFACES line below it until the literal is
+     * closed. No valid class is read differently. */
+    "*  INTERFACES z2ui5_if_app.\n",
+    "\r\n   INTERFACES z2ui5_if_app.\r\n",
+  ];
+  for (const sample of samples) {
+    assert.equal(declaresApp(sample), linterMain.declaresApp(sample), JSON.stringify(sample.slice(0, 80)));
+  }
+  assert.ok(DECLARES_APP_RE.flags.includes("m"));
+});
+
+test("the stand-ins for linter exports: a port goes once a leaf module exports the original", () => {
+  /* The gate reaches the linter through its leaf subpaths only (the main
+   * entry pulls in the renderer, which the web host cannot load). The day one
+   * of them exports what gate.ts ports, the port is a second copy of the
+   * linter's semantics - this fails so it is deleted, not kept. */
+  const leaves: Record<string, object> = {
+    "./abap-rules": abapRulesNs,
+    "./reconstruct": reconstructNs,
+    "./properties": propertiesNs,
+    "./findings": findingsNs,
+    "./fix": fixNs,
+  };
+  const ported = ["declaresApp", "VIEWLESS_APP_RULE", "sizeLimitRaised", "standDownUnusedNamespaces", "frozenBuilderOf"];
+  for (const [subpath, ns] of Object.entries(leaves)) {
+    for (const name of ported) {
+      assert.ok(
+        !(name in ns),
+        `@abap2ui5/linter/${subpath.slice(2)} exports ${name} now - call it from gate.ts and delete the port`
+      );
+    }
+  }
+});
+
+test("the stand-ins for linter exports: gone with the bump", () => {
+  /* Stand-ins that wait for the NEXT release (feature-detected exports, the
+   * require of `./portable`, the line-ending port): harmless while the pin is
+   * 0.8.5 - including a test run against the linter's branch, which still
+   * says 0.8.5 - and dead code the moment it is not. LINTER_PIN is stamped
+   * from package-lock.json, so this fails on the bump's own pull request. */
+  const BUMP_FROM = "0.8.5";
+  if (LINTER_RELEASE.version === BUMP_FROM) {
+    return;
+  }
+  const gate = fs.readFileSync(path.join(__dirname, "..", "src", "gate.ts"), "utf8");
+  for (const stale of [
+    'require("@abap2ui5/linter/portable")',
+    "matchLineEndingsPort",
+    "interface StartPath",
+  ]) {
+    assert.ok(
+      !gate.includes(stale),
+      `the pin moved past ${BUMP_FROM}: replace the stand-in \`${stale}\` in gate.ts with the linter's export (see its BUMP notes)`
+    );
+  }
 });

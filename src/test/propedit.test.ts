@@ -124,8 +124,10 @@ test("the last attribute of a chain can be removed too", () => {
   assert.ok(edit, "the edit is offered");
   const next = apply(SOURCE, edit!);
   assert.ok(!next.includes("n = `value`"), "the attribute is gone");
-  // the chain still closes and the statement still ends
-  assert.ok(next.includes(")->tag( `Input`\n                )."), next);
+  // the chain still closes and the statement still ends - on the line of
+  // the call that is now the last one, not on a line holding only `).`
+  assert.ok(next.includes(")->tag( `Input` ).\n"), next);
+  assert.ok(!/^\s*\)\.\s*$/m.test(next), next);
   // and the parens still balance
   const parens = (s: string, ch: string) => s.split(ch).length - 1;
   const chain = next.slice(next.indexOf("DATA(view)"), next.indexOf("client->view_display"));
@@ -313,5 +315,73 @@ test("removing an a-call whose arguments run onto a second line takes both", () 
   const call = controlCallAt(source, source.indexOf("Text`"))!;
   const edit = removeAttributeEdit(source, call, "text");
   assert.ok(edit, "the edit is offered");
-  assert.equal(apply(source, edit!), "    view->tag( `Text`\n        ).");
+  assert.equal(apply(source, edit!), "    view->tag( `Text` ).");
+});
+
+test("removing the last attribute leaves no line holding only the closing paren", () => {
+  const source = [
+    "    view->tag( `Input`",
+    "        )->a( n = `value` v = `x`",
+    "        )->a( n = `type` v = `Email` ).",
+    "    client->view_display( view->stringify( ) ).",
+  ].join("\n");
+  const call = controlCallAt(source, source.indexOf("Input`"))!;
+  const next = apply(source, removeAttributeEdit(source, call, "type")!);
+  assert.equal(
+    next,
+    [
+      "    view->tag( `Input`",
+      "        )->a( n = `value` v = `x` ).",
+      "    client->view_display( view->stringify( ) ).",
+    ].join("\n")
+  );
+  // and CRLF: the `\r` of the line the paren moves onto stays its line end
+  const crlf = source.replace(/\n/g, "\r\n");
+  const crlfCall = controlCallAt(crlf, crlf.indexOf("Input`"))!;
+  assert.equal(
+    apply(crlf, removeAttributeEdit(crlf, crlfCall, "type")!),
+    next.replace(/\n/g, "\r\n")
+  );
+});
+
+test("the paren does not move onto a line that ends in a comment", () => {
+  const source = [
+    "    view->tag( `Input`",
+    "        )->a( n = `value` v = `x` \" keep",
+    "        )->a( n = `type` v = `Email` ).",
+  ].join("\n");
+  const call = controlCallAt(source, source.indexOf("Input`"))!;
+  const next = apply(source, removeAttributeEdit(source, call, "type")!);
+  // moved up, the `)` would be commented out and the chain left open
+  assert.equal(
+    next,
+    [
+      "    view->tag( `Input`",
+      "        )->a( n = `value` v = `x` \" keep",
+      "        ).",
+    ].join("\n")
+  );
+});
+
+test("removing a middle attribute keeps the blank line that follows it", () => {
+  const source = [
+    "    view->ele( n = `View` ns = `mvc`",
+    "        )->a( n = `xmlns` v = `sap.m`",
+    "        )->a( n = `xmlns:mvc` v = `sap.ui.core.mvc`",
+    "",
+    "        )->ele( n = `Page`",
+    "        )->a( n = `title` v = `x` ).",
+  ].join("\n");
+  const call = controlCallAt(source, source.indexOf("`View`"))!;
+  const next = apply(source, removeAttributeEdit(source, call, "xmlns:mvc")!);
+  assert.equal(
+    next,
+    [
+      "    view->ele( n = `View` ns = `mvc`",
+      "        )->a( n = `xmlns` v = `sap.m`",
+      "",
+      "        )->ele( n = `Page`",
+      "        )->a( n = `title` v = `x` ).",
+    ].join("\n")
+  );
 });

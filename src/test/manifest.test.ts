@@ -413,3 +413,95 @@ test("every file the manifest points at exists", () => {
     assert.ok(fs.existsSync(path.join(ROOT, file)), `${file} exists`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Which settings a repository may set
+// ---------------------------------------------------------------------------
+
+/*
+ * A workspace's `.vscode/settings.json` arrives with every clone. A setting
+ * that names a program to start (or decides which build of one is downloaded),
+ * a host the credentials are sent to, a file to write, or that switches a
+ * security check off must therefore not be the repository's to set:
+ *
+ * - "machine": read from the user's own settings only, trusted or not;
+ * - "restricted": listed under `restrictedConfigurations`, so Restricted
+ *   Mode ignores the workspace's value.
+ *
+ * Every contributed setting is classified here, so a new one cannot be added
+ * without somebody deciding which class it is in.
+ */
+const SETTING_POLICY: Record<string, "machine+restricted" | "restricted" | "open"> = {
+  // which binary is spawned
+  "abap2ui5.viewCheck.command": "machine+restricted",
+  "abap2ui5.mcp.command": "machine+restricted",
+  "abap2ui5.mcp.reposRoot": "machine+restricted",
+  "abap2ui5.report2cloud.path": "machine+restricted",
+  // which build of the render gate is downloaded and run
+  "abap2ui5.viewCheck.rollingBundle": "machine+restricted",
+  // whether the auth proxy verifies the certificate of the host it sends the credentials to
+  "abap2ui5.allowUnauthorizedCerts": "machine+restricted",
+  // an agent acting on the system as the user
+  "abap2ui5.agent.enableAppTools": "machine+restricted",
+  // where F9 and the credential prompt go - a team shares them per workspace,
+  // so trusted workspaces keep them; credentials are stored per origin
+  "abap2ui5.systems": "restricted",
+  "abap2ui5.launchUrlTemplate": "restricted",
+  // starts the render gate over the repository's code (which does not run
+  // in Restricted Mode at all)
+  "abap2ui5.viewCheck.render": "restricted",
+  // presentation, check strictness, and switches that only turn features on
+  // or off whose program/host is decided by the settings above
+  "abap2ui5.codeLens": "open",
+  "abap2ui5.openMode": "open",
+  "abap2ui5.reloadOn": "open",
+  "abap2ui5.reloadOnSave": "open",
+  "abap2ui5.viewCheck.onSave": "open",
+  "abap2ui5.viewCheck.live": "open",
+  "abap2ui5.viewCheck.distribution": "open",
+  "abap2ui5.viewCheck.minUi5": "open",
+  "abap2ui5.viewCheck.allow": "open",
+  "abap2ui5.viewCheck.rules": "open",
+  "abap2ui5.inlineFindings": "open",
+  "abap2ui5.inlineSince": "open",
+  "abap2ui5.inlineDeprecated": "open",
+  "abap2ui5.inlineRoundtripCost": "open",
+  "abap2ui5.renamePreview": "open",
+  "abap2ui5.previewThemes": "open",
+  "abap2ui5.previewLanguages": "open",
+  "abap2ui5.viewPreview.theme": "open", // validated (THEME_RE) before it reaches the CLI
+  "abap2ui5.viewPreview.viewport": "open", // validated (VIEWPORT_RE) likewise
+  "abap2ui5.mcp.enabled": "open",
+  "abap2ui5.mcp.system": "open",
+};
+
+test("every setting is classified for what a cloned repository may set", () => {
+  const raw = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    contributes: { configuration: { properties: Record<string, { scope?: string; default?: unknown }> } };
+    capabilities: { untrustedWorkspaces: { restrictedConfigurations: string[] } };
+  };
+  const properties = raw.contributes.configuration.properties;
+  const restricted = new Set(raw.capabilities.untrustedWorkspaces.restrictedConfigurations);
+  assert.deepEqual(
+    Object.keys(properties).sort(),
+    Object.keys(SETTING_POLICY).sort(),
+    "a new setting needs a line in SETTING_POLICY"
+  );
+  for (const [key, policy] of Object.entries(SETTING_POLICY)) {
+    const setting = properties[key];
+    if (policy === "open") {
+      assert.ok(!restricted.has(key), `${key} is restricted but classified open`);
+      continue;
+    }
+    assert.ok(restricted.has(key), `${key} is not in restrictedConfigurations`);
+    if (policy === "machine+restricted") {
+      assert.equal(setting.scope, "machine", `${key} must be read from user settings only`);
+    }
+  }
+  for (const key of restricted) {
+    assert.ok(properties[key], `restrictedConfigurations names ${key}, which is no setting`);
+  }
+  // the rolling render-gate bundle is the user's choice (machine scope and
+  // restricted, pinned above) - and off unless they make it
+  assert.equal(properties["abap2ui5.viewCheck.rollingBundle"].default, false);
+});

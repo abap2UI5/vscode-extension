@@ -12,7 +12,7 @@ import {
   whenLiteralAt,
   WriteContext,
   xmlContextAt,
-  xmlNsMap,
+  xmlNsMapAt,
 } from "./context";
 import {
   absoluteOffers,
@@ -62,6 +62,42 @@ function contextAt(
   return isXmlView(fileName, text)
     ? xmlContextAt(text, offset)
     : abapContextAt(text, offset);
+}
+
+/**
+ * Attributes the XML view framework itself handles on every control, so no
+ * control's metadata declares them - the linter's own list (`SPECIAL_ATTRS`
+ * in its properties rules, which accept them anywhere) minus the rare ones.
+ * `id` and `class` are on nearly every control of a real view, and neither
+ * was offered nor explained: completion listed the snapshot's members alone.
+ */
+const FRAMEWORK_ATTRIBUTES: ReadonlyArray<{ name: string; doc: string }> = [
+  {
+    name: "id",
+    doc:
+      "**id** - the control's id, unique in the view. What `byId`, a frontend " +
+      "action addressing a control and a popover's anchor refer to it by. " +
+      "Handled by the XML view itself, on every control.",
+  },
+  {
+    name: "class",
+    doc:
+      "**class** - CSS classes added to the control (`addStyleClass`), " +
+      "blank-separated: `sapUiSmallMargin sapUiContentPadding`. Handled by the " +
+      "XML view itself, on every control.",
+  },
+  {
+    name: "binding",
+    doc:
+      "**binding** - an element binding (`bindElement`): the path relative " +
+      "bindings of this control and its children resolve against, e.g. " +
+      "`{/selected}`. Handled by the XML view itself, on every control.",
+  },
+];
+
+/** The framework attribute of that name, if it is one. */
+function frameworkAttribute(name: string): { name: string; doc: string } | undefined {
+  return FRAMEWORK_ATTRIBUTES.find((attr) => attr.name === name);
 }
 
 /** Members are offered properties-first: that is what a view writes most. */
@@ -322,9 +358,22 @@ export function completionAt(
       data,
       context.control
     )?.defaultAggregation;
+    const members = membersOf(data, context.control);
+    const declared = new Set(members.map((member) => member.name));
+    // the framework's own attributes, after the control's properties - only
+    // for a control the snapshot knows (nothing is offered for an unknown one)
+    const framework: CompletionEntry[] = members.length
+      ? FRAMEWORK_ATTRIBUTES.filter((attr) => !declared.has(attr.name)).map((attr) => ({
+          label: attr.name,
+          kind: "properties" as const,
+          detail: "XML view attribute",
+          documentation: attr.doc,
+          sortText: `${SECTION_ORDER.properties}2${attr.name}`,
+        }))
+      : [];
     return {
       ...span,
-      entries: membersOf(data, context.control).map((member) => {
+      entries: [...members.map((member) => {
         // Own members before inherited ones, properties before the rest,
         // deprecated ones after their current siblings.
         const inherited = member.declaredOn === context.control ? "0" : "1";
@@ -346,7 +395,7 @@ export function completionAt(
           },
           () => describeMember(data, context.control!, member.name)
         );
-      }),
+      }), ...framework],
     };
   }
 
@@ -379,7 +428,7 @@ export function completionAt(
   }
 
   if (context.kind === "namespace") {
-    const map = VIEW_XML_RE.test(fileName) ? xmlNsMap(text) : abapNsMap(text);
+    const map = VIEW_XML_RE.test(fileName) ? xmlNsMapAt(text, offset) : abapNsMap(text);
     return {
       ...span,
       entries: Object.entries(map)
@@ -491,7 +540,10 @@ export function hoverAt(
     return explained ? { ...span, text: explained } : undefined;
   }
   if (context.kind === "member" && context.control) {
-    const explained = describeMember(data, context.control, word);
+    // describeMember answers "" for a name the metadata does not declare
+    const explained =
+      describeMember(data, context.control, word) ||
+      (controlInfo(data, context.control) ? frameworkAttribute(word)?.doc : undefined);
     return explained ? { ...span, text: explained } : undefined;
   }
   // On a value, what helps is the member it belongs to: its type and, for

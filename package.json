@@ -47,7 +47,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "The view check and the MCP server can be told which program to start, the launch settings decide which host F9 and the credential prompt talk to, and one setting allows AI agents to operate apps on the system as you. Those settings are read from your user settings only, so a repository cannot point them at something else - but the render gate, the MCP server, the unit-test runner and the report converter do start processes (the runner does not start at all in Restricted Mode: the tests are the repository's code), which is why this is limited rather than unconditional.",
+      "description": "The view check and the MCP server can be told which program to start, the launch settings decide which host F9 and the credential prompt talk to, one setting allows AI agents to operate apps on the system as you, one lets the auth proxy accept an unverified TLS certificate, one switches on the render gate and one decides which build of it is downloaded. Those settings are read from your user settings only, so a repository cannot point them at something else - and the render gate does not run in Restricted Mode at all. The MCP server, the unit-test runner and the report converter do start processes (the runner does not start at all in Restricted Mode: the tests are the repository's code), which is why this is limited rather than unconditional.",
       "restrictedConfigurations": [
         "abap2ui5.viewCheck.command",
         "abap2ui5.mcp.command",
@@ -55,7 +55,10 @@
         "abap2ui5.systems",
         "abap2ui5.launchUrlTemplate",
         "abap2ui5.agent.enableAppTools",
-        "abap2ui5.report2cloud.path"
+        "abap2ui5.report2cloud.path",
+        "abap2ui5.viewCheck.render",
+        "abap2ui5.viewCheck.rollingBundle",
+        "abap2ui5.allowUnauthorizedCerts"
       ]
     }
   },
@@ -744,7 +747,8 @@
         "abap2ui5.allowUnauthorizedCerts": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Allow the embedded preview's local auth proxy to talk to systems whose **TLS certificate cannot be verified** - self-signed certificates, private CAs not in the OS trust store, hostname mismatches. SAP development systems typically serve self-signed certificates, which is why this is on by default.\n\n**Security tradeoff:** while this is enabled, the connection to the system is encrypted but not authenticated - a machine-in-the-middle could present its own certificate and read the traffic, including the SAP credentials the proxy injects. If your system has a properly trusted certificate, turn this off to get full TLS verification."
+          "scope": "machine",
+          "markdownDescription": "Allow the embedded preview's local auth proxy to talk to systems whose **TLS certificate cannot be verified** - self-signed certificates, private CAs not in the OS trust store, hostname mismatches. SAP development systems typically serve self-signed certificates, which is why this is on by default.\n\n**Security tradeoff:** while this is enabled, the connection to the system is encrypted but not authenticated - a machine-in-the-middle could present its own certificate and read the traffic, including the SAP credentials the proxy injects. If your system has a properly trusted certificate, turn this off to get full TLS verification.\n\nThis setting is read from your user settings only - a cloned repository cannot switch certificate verification off for you."
         },
         "abap2ui5.codeLens": {
           "type": "boolean",
@@ -801,7 +805,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Command that runs the [abap2UI5-linter](https://github.com/abap2UI5/linter) CLI **for the render gate** - the property gate is bundled with the extension and needs no command. Leave empty for the default: a local checkout under `#abap2ui5.mcp.reposRoot#` when present (runs with VS Code's own Node.js), otherwise `npx --yes github:abap2UI5/linter`.\n\nExample for a local clone: `node /home/me/linter/cli.mjs`\n\nThis setting names a program the extension starts, so it is read from your user settings only - a cloned repository cannot point it somewhere else."
+          "markdownDescription": "Command that runs the [abap2UI5-linter](https://github.com/abap2UI5/linter) CLI **for the render gate** - the property gate is bundled with the extension and needs no command. Leave empty for the default: a local checkout under `#abap2ui5.mcp.reposRoot#` when present (runs with VS Code's own Node.js), otherwise `npx --yes github:abap2UI5/linter` at the release commit of the linter this extension bundles.\n\nExample for a local clone: `node /home/me/linter/cli.mjs`\n\nThis setting names a program the extension starts, so it is read from your user settings only - a cloned repository cannot point it somewhere else."
         },
         "abap2ui5.viewCheck.distribution": {
           "type": "string",
@@ -828,12 +832,13 @@
         "abap2ui5.viewCheck.render": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Also run the render gate: the reconstructed view is loaded with a real `XMLView.create` in headless Chromium. Unlike the bundled property gate this needs the external checker - install it once with *\"abap2UI5: Install Render Gate\"* (downloads the checker bundle and Chromium, runs with VS Code's own runtime), or provide your own via `#abap2ui5.viewCheck.command#` / `#abap2ui5.mcp.reposRoot#`."
+          "markdownDescription": "Also run the render gate: the reconstructed view is loaded with a real `XMLView.create` in headless Chromium. Unlike the bundled property gate this needs the external checker - install it once with *\"abap2UI5: Install Render Gate\"* (downloads the checker bundle and Chromium, runs with VS Code's own runtime), or provide your own via `#abap2ui5.viewCheck.command#` / `#abap2ui5.mcp.reposRoot#`.\n\nThe render gate starts an external process over the repository's code, so this setting is read from your user settings only in Restricted Mode, and the gate does not run there at all until the workspace is trusted."
         },
         "abap2ui5.viewCheck.rollingBundle": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Download the render gate from the linter's **rolling** bundle instead of the immutable one published for the release commit of the linter version this extension build bundles.\n\nOff by default, and worth leaving off: the rolling bundle is rebuilt on every merge to the linter's main branch, so the checker running on your machine can then change without this extension being updated. Turn it on only to try an unreleased linter."
+          "scope": "machine",
+          "markdownDescription": "Download the render gate from the linter's **rolling** bundle instead of the immutable one published for the release commit of the linter version this extension build bundles.\n\nOff by default, and worth leaving off: the rolling bundle is rebuilt on every merge to the linter's main branch, so the checker running on your machine can then change without this extension being updated. Turn it on only to try an unreleased linter.\n\nIt decides which program *\"Install Render Gate\"* downloads and runs, so it is read from your user settings only - a repository's `.vscode/settings.json` cannot switch it on."
         },
         "abap2ui5.viewCheck.allow": {
           "type": "array",
@@ -1003,7 +1008,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, `samples`, `samples-stack`, and optionally `linter`, `mcp-server`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `SAMPLES_HOME` / `SAMPLES_STACK_HOME` / `AI_VIEW_CHECK_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx.\n\nWhat is found here decides which programs are started, so it is read from your user settings only."
+          "markdownDescription": "Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, `samples`, `samples-stack`, and optionally `linter`, `mcp-server`, `abap-cloud-gui`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `SAMPLES_HOME` / `SAMPLES_STACK_HOME` / `AI_VIEW_CHECK_HOME` / `ABAP_CLOUD_GUI_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx.\n\nWhat is found here decides which programs are started, so it is read from your user settings only."
         },
         "abap2ui5.report2cloud.path": {
           "type": "string",

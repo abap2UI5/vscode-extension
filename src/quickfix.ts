@@ -5,12 +5,23 @@ import * as path from "path";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
 import { RENDER_RULE } from "@abap2ui5/linter/findings";
 import { addToBaseline } from "./baselinefile";
-import { directiveLine, plannedFixes, suppressionEdits } from "./checkcore";
+import {
+  CRLF_RULE,
+  directiveLine,
+  editorFixPlan,
+  fixTitle,
+  suppressionEdits,
+} from "./checkcore";
 import { handlerStub } from "./handlerstub";
 import { plural } from "./text";
 import { clearBaselineCache } from "./lintconfig";
 import { CONFIG_SECTION } from "./settings";
-import { baselineFileFor, findingsNow, recheckOpenDocuments } from "./viewcheck";
+import {
+  baselineFileFor,
+  baselineRootFor,
+  findingsNow,
+  recheckOpenDocuments,
+} from "./viewcheck";
 
 /*
  * Quick fixes for the view-check findings.
@@ -47,8 +58,13 @@ export { VIEW_SELECTOR } from "./selector";
 import { VIEW_SELECTOR } from "./selector";
 
 
-/** The edits one finding's fixes describe, in document coordinates. */
+/** The edits one finding's fixes describe, in document coordinates - for
+ *  `crlf-line-ending` the document's line-ending change instead of its
+ *  `\r` deletions, which no editor position can address (`editorFixPlan`). */
 function editsOf(doc: vscode.TextDocument, finding: PropertyFinding): vscode.TextEdit[] {
+  if (finding.type === CRLF_RULE) {
+    return finding.fixes?.length ? [vscode.TextEdit.setEndOfLine(vscode.EndOfLine.LF)] : [];
+  }
   return (finding.fixes ?? []).map(
     (fix) =>
       new vscode.TextEdit(
@@ -59,8 +75,17 @@ function editsOf(doc: vscode.TextDocument, finding: PropertyFinding): vscode.Tex
 }
 
 /** The span a finding's fixes touch - what decides whether the lightbulb
- *  offers it at the cursor. */
-function spanOf(edits: vscode.TextEdit[]): vscode.Range {
+ *  offers it at the cursor. A line-ending change touches the whole file and
+ *  carries no range of its own: it is offered where the finding is. */
+function spanOf(
+  doc: vscode.TextDocument,
+  finding: PropertyFinding,
+  edits: vscode.TextEdit[]
+): vscode.Range {
+  if (finding.type === CRLF_RULE) {
+    const at = doc.positionAt(finding.offset ?? 0);
+    return new vscode.Range(at, at);
+  }
   return new vscode.Range(edits[0].range.start, edits[edits.length - 1].range.end);
 }
 
@@ -151,19 +176,13 @@ class ViewCheckActions implements vscode.CodeActionProvider {
     const fixable = findings.filter((f) => f.fixes?.length);
     for (const finding of fixable) {
       const edits = editsOf(doc, finding);
-      if (!edits.length || !touchesLines(range, spanOf(edits))) {
+      if (!edits.length || !touchesLines(range, spanOf(doc, finding, edits))) {
         continue;
       }
       // Named after what changes, not only which rule fired: "fix
       // obsolete-binder on _bind_edit" reads in the lightbulb menu without
-      // looking at the squiggle first.
-      const subject = finding.member ?? finding.value;
-      const action = new vscode.CodeAction(
-        subject
-          ? `abap2UI5: fix ${finding.type} on ${subject}`
-          : `abap2UI5: fix ${finding.type}`,
-        vscode.CodeActionKind.QuickFix
-      );
+      // looking at the squiggle first (`fixTitle`: never a bare number).
+      const action = new vscode.CodeAction(fixTitle(finding), vscode.CodeActionKind.QuickFix);
       action.edit = new vscode.WorkspaceEdit();
       action.edit.set(doc.uri, edits);
       action.diagnostics = context.diagnostics.filter(
@@ -326,7 +345,7 @@ function findingOnLine(
 }
 
 /**
- * Every fix in the file as one edit - `plannedFixes( )` decides which of them
+ * Every fix in the file as one edit - `editorFixPlan( )` decides which of them
  * survive together, in document coordinates here.
  */
 function applyAll(
@@ -335,31 +354,34 @@ function applyAll(
 ):
   | { edit: vscode.WorkspaceEdit; count: number; findings: number; deferred: number }
   | undefined {
-  const planned = plannedFixes(findings);
-  const edits = planned.map(
+  const plan = editorFixPlan(findings);
+  const edits = plan.spans.map(
     (fix) =>
       new vscode.TextEdit(
         new vscode.Range(doc.positionAt(fix.start), doc.positionAt(fix.end)),
         fix.text
       )
   );
+  // VS Code applies the text edits first and the line-ending change last, so
+  // the two go into one edit (and one undo step) safely
+  if (plan.toLf) {
+    edits.push(vscode.TextEdit.setEndOfLine(vscode.EndOfLine.LF));
+  }
   if (!edits.length) {
     return undefined;
   }
   // A finding may carry several fix spans, so the number of edits is not the
   // number of findings - and "fix all 3 finding(s)" for one finding with
   // three spans is a count of the wrong thing.
-  const applied = new Set(planned);
-  const covered = findings.filter((finding) =>
-    (finding.fixes ?? []).some((fix) => applied.has(fix))
-  ).length;
   const edit = new vscode.WorkspaceEdit();
   edit.set(doc.uri, edits);
   // overlapping spans are left for the next run, here as everywhere - the
   // count lets the caller say so instead of the fixes just not happening
   const deferred =
-    findings.reduce((n, f) => n + (f.fixes?.length ?? 0), 0) - planned.length;
-  return { edit, count: edits.length, findings: covered, deferred };
+    findings
+      .filter((f) => f.type !== CRLF_RULE)
+      .reduce((n, f) => n + (f.fixes?.length ?? 0), 0) - plan.spans.length;
+  return { edit, count: edits.length, findings: plan.findings, deferred };
 }
 
 /**
@@ -375,7 +397,8 @@ function applyAll(
  */
 export function fixableCount(doc: vscode.TextDocument): number {
   try {
-    return plannedFixes(findingsNow(doc)).length;
+    const plan = editorFixPlan(findingsNow(doc));
+    return plan.spans.length + (plan.toLf ? 1 : 0);
   } catch {
     return 0;
   }
@@ -393,7 +416,14 @@ export function registerQuickFix(
       "abap2ui5.addToBaseline",
       (baselineFile: string, sourceFile: string, finding: PropertyFinding) => {
         try {
-          const key = addToBaseline(baselineFile, sourceFile, finding);
+          // the arguments come from the code action, but the root does not:
+          // it is re-derived from the config that governs the source file
+          const key = addToBaseline(
+            baselineFile,
+            sourceFile,
+            finding,
+            baselineRootFor(sourceFile)
+          );
           log(`quick-fix: baselined ${key} in ${baselineFile}`);
           // the memo is keyed on mtime, and this write may land in the same
           // second as the read that filled it

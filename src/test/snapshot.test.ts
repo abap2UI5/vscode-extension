@@ -69,8 +69,35 @@ test("every hidden table loadSnapshot attaches, setSnapshotText attaches too", (
   setSnapshotText(GOOD);
   const mine = hiddenKeys(snapshot());
   const theirs = hiddenKeys(loadSnapshot(path.join(__dirname, "properties.json")) as object);
-  assert.deepEqual(mine, theirs, "setSnapshotText and loadSnapshot disagree about the hidden tables");
+  /* A superset, not equality: the linter release after 0.8.5 attaches
+   * `__typePatterns` and `__modelTypes`, and this module carries them
+   * already, so the bump that brings them in finds the browser host ready
+   * rather than a red build (or, worse, three rules quiet on vscode.dev). An
+   * older linter simply reads neither. */
+  assert.deepEqual(
+    theirs.filter((k) => !mine.includes(k)),
+    [],
+    "loadSnapshot attaches hidden tables setSnapshotText does not"
+  );
   assert.ok(theirs.includes("__enumSince"), "the linter no longer attaches __enumSince - the comparison lost its subject");
+});
+
+test("the DataType patterns and the model types ride along, empty when the file has none", () => {
+  setSnapshotText(
+    JSON.stringify({
+      controls: { "sap.m.Text": {} },
+      typePatterns: { "sap.ui.core.CSSSize": "^(auto|inherit|0)$" },
+      modelTypes: { "sap.ui.model.type.Date": { since: "1.4" } },
+    })
+  );
+  const data = snapshot() as unknown as Record<string, unknown>;
+  assert.deepEqual(data.__typePatterns, { "sap.ui.core.CSSSize": "^(auto|inherit|0)$" });
+  assert.deepEqual(data.__modelTypes, { "sap.ui.model.type.Date": { since: "1.4" } });
+  assert.ok(!Object.keys(data).includes("__typePatterns"), "a hidden table, not a control");
+  setSnapshotText(GOOD);
+  const bare = snapshot() as unknown as Record<string, unknown>;
+  assert.deepEqual(bare.__typePatterns, {}, "loadSnapshot attaches {} for an absent section - so does this");
+  assert.deepEqual(bare.__modelTypes, {});
 });
 
 test("malformed JSON leaves an empty cache without throwing", () => {

@@ -280,4 +280,13 @@ test("a folder name becomes a usable npm/package name", () => {
   assert.equal(projectNameFrom(".hidden"), "hidden");
   assert.equal(projectNameFrom("ok-name"), "ok-name");
   assert.equal(projectNameFrom("***"), "abap2ui5-app", "never an empty name");
+  // npm's own limits, which the character filter alone let through: a name
+  // over 214 characters, and the two reserved names, made a package.json
+  // that `npm install` refuses
+  const long = projectNameFrom(`${"a".repeat(213)} b`);
+  assert.equal(long.length, 213, "cut at 214 without a dangling separator");
+  assert.ok(/^a+$/.test(long));
+  assert.equal(projectNameFrom("x".repeat(300)).length, 214);
+  assert.equal(projectNameFrom("node_modules"), "abap2ui5-app");
+  assert.equal(projectNameFrom("Favicon.ico"), "abap2ui5-app");
 });

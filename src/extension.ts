@@ -11,6 +11,7 @@ import {
 } from "./rendergate";
 import {
   baselineFileFor,
+  baselineRootFor,
   findingsNow,
   recheckOpenDocuments,
   registerViewCheck,
@@ -682,7 +683,13 @@ export function activate(context: vscode.ExtensionContext): void {
     // the desktop-only baseline machinery, injected so the view itself stays
     // web-safe (see findingsview.ts)
     baselineFileFor,
-    addAllToBaseline,
+    // the files of one call share the baseline - and so the config naming it
+    addAllToBaseline: (baselineFile, files) =>
+      addAllToBaseline(
+        baselineFile,
+        files,
+        files.length ? baselineRootFor(files[0].file) : undefined
+      ),
     clearBaselineCache,
     recheckOpenDocuments,
   });

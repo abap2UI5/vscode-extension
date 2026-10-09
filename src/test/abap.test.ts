@@ -345,6 +345,26 @@ test("a METHOD line inside a string template is not an implementation", () => {
   );
 });
 
+test("a method's offset is its name, not a look-alike inside the keyword", () => {
+  // lower-case `method meth.` - the name used to be searched for in the
+  // matched line, and `meth` (or `e`, `od`, ...) is found inside `method`
+  const source =
+    "CLASS zcl_x IMPLEMENTATION.\r\n" +
+    "  method meth.\r\n" +
+    "  endmethod.\r\n" +
+    "  method e.\r\n" +
+    "  endmethod.\r\n" +
+    "ENDCLASS.\r\n";
+  const methods = methodImplementations(source);
+  assert.deepEqual(
+    methods.map((m) => [m.name, m.start, source.slice(m.start - 7, m.end)]),
+    [
+      ["meth", source.indexOf("meth."), "method meth"],
+      ["e", source.indexOf("e."), "method e"],
+    ]
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Whose method a call names - what F12 may jump to
 // ---------------------------------------------------------------------------

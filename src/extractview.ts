@@ -20,7 +20,7 @@
  * the samples use.
  */
 
-import { blankNonCode } from "./abapscan";
+import { blankNonCode, lineStartAt } from "./abapscan";
 
 export interface ExtractEdit {
   start: number;
@@ -305,7 +305,7 @@ export function planExtract(
   // where the statement's code begins, and the indent of that line
   const at = statement.start + (headCode.length - headCode.trimStart().length);
   const indent =
-    /^[ \t]*/.exec(source.slice(source.lastIndexOf("\n", at - 1) + 1, at))?.[0] ?? "    ";
+    /^[ \t]*/.exec(source.slice(lineStartAt(source, at), at))?.[0] ?? "    ";
 
   const edits: ExtractEdit[] = [];
   if (!captured) {

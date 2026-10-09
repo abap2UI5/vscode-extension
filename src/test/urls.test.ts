@@ -54,6 +54,42 @@ test("theme and language are set and removed as plain parameters", () => {
   assert.ok(back.includes("app_start=ZCL_A"));
 });
 
+test("switching the theme leaves every other parameter byte-identical", () => {
+  // `URLSearchParams.set` re-serialised the WHOLE query as form data on the
+  // first change: `%20` became `+`, `~` became `%7E`, `/` and `:` were
+  // escaped, a bare flag grew an `=` - in parameters nobody asked to change
+  const url =
+    "https://Host:44300/sap/bc/z2ui5?app_start=ZCL_A&sap-client=100" +
+    "&title=a%20b&path=/x:y~z&debug#frag";
+  assert.equal(
+    withParams(url, { "sap-ui-theme": "sap_horizon_dark" }),
+    "https://Host:44300/sap/bc/z2ui5?app_start=ZCL_A&sap-client=100" +
+      "&title=a%20b&path=/x:y~z&debug&sap-ui-theme=sap_horizon_dark#frag"
+  );
+  // replaced in place, a repeat folded into it
+  assert.equal(
+    withParams("https://h/x?sap-language=DE&a=~&sap-language=FR", { "sap-language": "EN" }),
+    "https://h/x?sap-language=EN&a=~"
+  );
+  // removed, the rest untouched; the last one out takes the `?` with it
+  assert.equal(
+    withParams("https://h/x?a=%7E&sap-client=100&b=c+d", { "sap-client": undefined }),
+    "https://h/x?a=%7E&b=c+d"
+  );
+  assert.equal(withParams("https://h/x?sap-client=100#f", { "sap-client": "" }), "https://h/x#f");
+  // nothing to do: the same string, not a normalised one
+  const odd = "https://HOST:443/x?a=b%20c&flag";
+  assert.equal(withParams(odd, { "sap-ui-theme": undefined, "sap-language": "" }), odd);
+  assert.equal(withParams("nonsense", { a: "b" }), "nonsense");
+});
+
+test("the logon parameters go without re-encoding the ones that stay", () => {
+  assert.equal(
+    withoutLogonParams("https://h/x?sap-user=U&p=a%20b~c&sap-password=P&flag"),
+    "https://h/x?p=a%20b~c&flag"
+  );
+});
+
 test("the sap-client is read off the launch URL for the ADT lookups", () => {
   assert.equal(sapClientOf(expandTemplate(TEMPLATE, "zcl_a")), "100");
   assert.equal(sapClientOf("https://host/sap/bc/z2ui5"), undefined);

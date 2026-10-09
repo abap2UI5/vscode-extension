@@ -35,6 +35,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list, and what an edited model document may push into the running app (`applyModelMessage`) |
 | `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
 | `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only - including the navigation map, the Control Properties view and the findings tree (fed by `webFindingsNow`, no baseline machinery) |
+| `src/web/linterdata.ts` | `vscode`-free: the linter's own data files in the web build (`data/icons.json`) - read by the caller through `workspace.fs`, seeded into the `fs` shim under the path the linter reads |
 | `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, repo config through `workspace.fs` (no render gate) |
 | `src/gate.ts` | The in-process property gate itself, shared by `viewcheck.ts` (desktop) and `webcheck.ts` (web) |
 | `src/diagnostics.ts` | Findings -> VS Code diagnostics (ranges, severities, rule links), shared by both checks |
@@ -50,12 +51,13 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
 | `src/compat.ts` | `vscode`-free: the bundled linter's compatibility record (`@abap2ui5/linter/compat`, copied next to the bundle by `esbuild.js` like the snapshot; null when the pin ships none) and what it says about a workspace's framework pin - the one parser of `abaplint.jsonc`'s `dependencies[].branch` (`scaffold.ts` uses it too), `compareRelease`, `compatVerdict`, the activation line |
 | `src/compatcheck.ts` | The framework-pin check's plumbing: a warning on the `branch` line of an open `abaplint.jsonc` pinned below what the bundled linter assumes, on open and save |
-| `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability, the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written |
+| `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability (`isCheckableSource` - what the linter's `checkAbapSource` judges, a viewless app class and `allClasses` included - and `isViewSource`, what the systemless preview and the mock generator need), the workspace fix's tally, the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written, what the view preview shows after a refresh that threw (`failedPreviewState`) |
 | `src/childproc.ts` | `vscode`-free: the ONE way a checker is started - shell quoting of program AND arguments, timeout, kill of the whole process tree, "nobody is waiting any more" |
 | `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
+| `src/baselinefile.ts` | `vscode`-free: reading and writing the repository's baseline file - the linter's own keys, a baseline that does not parse never silently replaced, and every write confined to the workspace folder holding the config (`baselineWriteRefusal`, see Conventions) |
 | `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, "add to baseline", and the one correction composed here - the WHEN branch for `event-without-handler` |
-| `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE |
+| `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE. The CASE region itself (`eventCaseRegion`, `ownLevel`) lives in `context.ts`, which restricts the event rename, highlights, lens and Go-to-Definition to the WHENs at its own level |
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
 | `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
 | `src/clientapi.ts` | The bundled `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion |
@@ -73,8 +75,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/examples.ts` | `vscode`-free: finds and ranks a control's uses in the sample catalogues |
 | `src/catalogue.ts` | `vscode`-free: parses the sample repositories' committed `catalogue.json` (three sibling shapes, pinned in `src/test/fixtures/catalogue-*.json`) and matches a control against the entries |
 | `src/exampleview.ts` | "Show Examples for this Control": catalogue discovery, the remote-catalogue fallback (fetch + day cache in memory and `globalState`), QuickPick, opens the hit (editor or GitHub) |
-| `src/annotations.ts` | `vscode`-free: what a line deserves to be told about it - `@since` per control/member, roundtrip cost per PUBLIC attribute |
-| `src/inlineview.ts` | The one decoration pass that renders all three inline annotations (findings, `@since`, cost) |
+| `src/annotations.ts` | `vscode`-free: what a line deserves to be told about it - `@since` and deprecation per control/member (of a builder chain, and of a raw XML view through the linter's `parseXml`, each element in its own namespace scope - `xmlNamespaceScopes`), roundtrip cost per PUBLIC attribute |
+| `src/inlineview.ts` | The one decoration pass that renders all three inline annotations (findings, `@since`/deprecation, cost) - for builder classes and raw XML views |
 | `src/abbreviation.ts` | `vscode`-free: Emmet-style abbreviations -> element tree -> chain (emitted by `xmltoabap.ts`) |
 | `src/appview.ts` | The "abap2UI5 Apps" tree: every z2ui5_if_app class with run/preview/check |
 | `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
@@ -91,6 +93,9 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
 | `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
+| `src/rendergate.ts` | "Install / Update Render Gate": downloads the linter release's checker bundle and Chromium into global storage, verifies it, and resolves the installed CLI (see Toolchain) |
+| `src/report.ts` | `vscode`-free: the shape and the redaction of "Copy Diagnostics for a Bug Report" - the report this extension writes about itself (per open document: scheme, checkability, governing config) |
+| `src/diagnosticsreport.ts` | The command's plumbing: collects what `report.ts` formats from the window (extensions, settings, documents, log lines, systems) |
 | `src/screenshot.ts` | "Take App Screenshot": finds the render gate's Chromium and renders the proxied URL headless |
 | `src/colors.ts` | Colour spans for colour-typed property values (the swatch/picker provider's logic) |
 | `src/xmltoabap.ts` | "Convert XML View to Builder Chain": XML parser + corpus-style chain emitter |
@@ -100,7 +105,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/agentsetup.ts` | `vscode`/`fs`/`path`-free: what "Add Agent Setup to Workspace" writes into an EXISTING project - app-template's `agentSetup` key executed over the snapshot, ported function by function from that repository's `create/agent-setup.mjs` (never overwrite, `package.json`/`.gitignore` only gain entries, the gates pointed at `.abapgit.xml`'s `STARTING_FOLDER`, nothing planned into the source folder), decided as a plan over a `WorkspaceProbe` before anything is written |
 | `src/agentsetupview.ts` | The command's plumbing, shared by both entries: the workspace folder, the modal confirmation listing what is written and skipped, a re-plan right before writing (a folder that changed under the dialog is refused), the writes through `workspace.fs`, the "abap2UI5 Agent Setup" output with the next steps |
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` (the template's `files.shared` and `files.named`, BOM stripped, plus its `template.json`) from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
-| `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot |
+| `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot, and the `*_HOME` variable each checkout is handed to mcp-server as (`checkoutHomes`) |
 | `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/mcp-server's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
 | `scripts/generate-settings.mjs` | Regenerates the settings table in `README.md` from `contributes.configuration`; `--check` fails when it is stale (`src/test/settings.test.ts`) |
 | `scripts/generate-commands.mjs` | Regenerates the command table in `README.md` from `contributes.commands`, with the keys off `contributes.keybindings`; `--check` fails when it is stale (`src/test/commands.test.ts`). abap2UI5/docs sends the reader here for it — *"the full settings and command tables are in the repository README"* — and before it there was no command table: 43 commands, one of them named in the file |
@@ -109,11 +114,16 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/navmap.ts` | App navigation graph: nav_app_call extraction, column layout, SVG rendering |
 | `src/navview.ts` | "Show App Navigation Map": workspace scan + the webview panel around the SVG |
 | `src/snapshot.ts` | Loads the bundled UI5 metadata once, for the gate and the language features |
-| `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over |
+| `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over - plus `lineStartAt`, the line start that is right at offset 0 too (never `lastIndexOf("\n", offset - 1)`, which reads -1 as 0) |
+| `src/classindex.ts` | `vscode`-free: the cross-file class index the linter's class-level rules read (superclass chain, `cs_event`, `outsideReads`) - built from the linter's own `classIndexOf`, assembled incrementally per file so a save recomputes one file, pinned to a full build in `classindex.test.ts`; disabled while the pinned linter exports no `classIndexOf` |
+| `src/classindexsync.ts` | `vscode`-free: WHEN that index is read and when the checks hear of it - LAZY (nothing is read until a check first asks; the extension activates on any `*.clas.abap`, and indexing samples-controls' 644 classes costs ~0.7 s of the shared host), no partial index ever handed out (undefined until the first scan is in, then one change notice), saved state only (disk files, plus open documents without one), debounced change notices, everything stopped on dispose - `classindexsync.test.ts` |
+| `src/classindexfeed.ts` | The plumbing around `classindexsync.ts` for both entries: the shared ABAP watcher, saves, opened/closed ADT documents, `workspace.fs` |
 | `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
+| `src/sharedscan.ts` | `vscode`-free: one scan in flight, joined by every caller that asks for the same thing while it runs and nothing changed since it started - what lets the app index, the class index and the apps tree share the cold scan at activation (`abapsources.ts`) |
 | `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
 | `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, and what a RENAME has to drop (never object identity against a memo) |
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
+| `src/linterrelease.ts` | `LINTER_RELEASE` — the linter version and release commit `esbuild.js` stamped (`LINTER_PIN`, `LINTER_COMMIT`), read there and nowhere else (`linterpin.test.ts` pins that) |
 | `src/text.ts` | `plural(count, noun)` — the one pluralizer behind every counted string users read (dependency-free) |
 | `src/abap.ts`, `src/urls.ts`, `src/context.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
 | `src/test/` | `node --test` suite over exactly those modules |
@@ -133,11 +143,11 @@ not committed.
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
-`abapscan.ts`, `appindex.ts`, `settings.ts`, `text.ts`,
+`abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `settings.ts`, `linterrelease.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `report2cloud.ts`,
+`unitrunner.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
@@ -296,12 +306,27 @@ identity (see Conventions).
   the extension spawns; machine scope keeps a cloned repository's
   `.vscode/settings.json` out of that decision. They are listed under
   `capabilities.untrustedWorkspaces.restrictedConfigurations`, together with
-  `systems`, `launchUrlTemplate`, `agent.enableAppTools` and `report2cloud.path` (the
-  abap-cloud-gui checkout whose report2cloud CLI the migrate command runs) - seven settings a
-  cloned repository must not be able to set. The last one is machine scope
+  `systems`, `launchUrlTemplate`, `agent.enableAppTools`, `report2cloud.path` (the
+  abap-cloud-gui checkout whose report2cloud CLI the migrate command runs),
+  `viewCheck.render`, `viewCheck.rollingBundle` and `allowUnauthorizedCerts` -
+  ten settings a cloned repository must not be able to set. `agent.enableAppTools` is machine scope
   too, for the same reason in another shape: it lets an agent act on the
   system AS THE USER, so only the user's own settings may turn it on
   (`agentapps.test.ts` pins its scope, default and restriction).
+  `allowUnauthorizedCerts` is machine scope as well - it decides whether the
+  proxy that injects the credentials verifies the system's certificate - and
+  so is `viewCheck.rollingBundle`, which decides which build of the render
+  gate "Install Render Gate" downloads and runs. `SETTING_POLICY` in
+  `manifest.test.ts` classifies EVERY setting (machine + restricted,
+  restricted, or open), so a new one cannot land unclassified. And
+  the render gate does not run at all in Restricted Mode (`viewcheck.ts`
+  asks `workspace.isTrusted`); its last-resort `npx` fallback is pinned to
+  `LINTER_COMMIT` like the bundle download (`checkcore.test.ts` pins both).
+- **A file the repository's config names is confined before it is written.**
+  The `baseline` of an `abap2ui5lint.jsonc` is replaced with JSON by "Add to
+  Baseline" / "Update Baseline"; `baselinefile.ts` refuses every write whose
+  target - symbolic links resolved - lies outside the workspace folder holding
+  that config (`baselineWriteRefusal`, a required `root` on every writer).
 - **The linter owns the rules, this extension owns the presentation.**
   Severity, wording, the `fixes` on a finding, the `rules` block and the
   `abap2ui5lint-disable…` directives all live in `@abap2ui5/linter` and are
@@ -391,6 +416,65 @@ Facts an agent cannot see from the code but will trip over:
   fails a test instead of going quiet. The XML branch runs `checkIcons`
   through the linter's `./icons` export (there was a time it could not, and
   the same file was judged differently by the editor and by CI).
+  Two inputs of the linter's pipeline arrive with the release AFTER the
+  pinned 0.8.5 and are wired already, behind `linterExport( )` (a namespace
+  lookup by name - a named import of a missing export would not bundle): the
+  cross-file `classIndex` `checkFiles` builds over a run (`classindex.ts`
+  assembles the same index over the workspace) and the `matchLineEndings`
+  pass `settle` ends with (until then `gate.ts` runs a port of it, pinned to
+  the linter's behaviour in `gate.parity.test.ts`, whose fixtures run as
+  CRLF too). Both switch on with the bump, without an edit here; after it,
+  the port is dead code (the test compares the two while both exist). A
+  third, `publicReadFromOutside`, stands the two public-attribute rules down
+  for a class another class reads, the same way.
+  The `settle` step is copied WHOLE, not just its calls: `applyDirectives`
+  takes `{ rules, file, ran, stoodDown }` (0.8.5 already does) - the rules
+  block for the directives' own findings (`unused-directive`,
+  `unknown-directive-rule`), which rules ran, and which stood down on the
+  source. The gate passed none of them for six releases, so a repository
+  that switched `unused-directive` off still saw it in the editor. One
+  stand-down lives in `checkAbapSource` itself and is exported by no
+  function - `unused-namespace-declaration` over a class whose view is only
+  partly reconstructed - so `gate.ts` ports it (`standDownUnusedNamespaces`),
+  pinned by parity fixtures.
+  The paths too, not only the inputs: `checkAbapSource` judges an APP class
+  that builds no view (its view comes from another class) by
+  `checkSourceRules` plus the `VIEWLESS_APP_RULE` subset of
+  `checkAbapRules`, and under the config's `allClasses` any class by
+  `checkSourceRules`; `properties: false` skips the property walk (an XML view
+  then gets nothing at all). The gate answered "nothing to check" or walked
+  anyway - so `isCheckableSource` (`checkcore.ts`) admits what the linter's
+  `collectFiles` collects (pinned to it in `checkcore.test.ts`), and
+  `CheckOptions` carries `properties` and `allClasses`. The preview and the
+  mock generator ask `isViewSource` instead: a viewless app has nothing to
+  render. More inputs of the next release are wired the same way: the
+  start-path model per document (`initModel` / `initModelShape` /
+  `initialFields` off `prepareAbap`), `sizeLimitRaised`, `containerPages`
+  (`collectContainerPages`, feature-detected) and the opt-in `portable-app`
+  (`./portable`, which the pinned typings do not declare: `gate.ts`
+  `require`s it, and `esbuild.js`'s `absentLinterExports` plugin resolves a
+  subpath the installed release does not export to an empty module, so no
+  unresolved `require` is left for node to satisfy from some other
+  `node_modules` at runtime; its profile `data/portable-v1.json` is copied
+  like `icons.json` and seeded into the web shim). Where no leaf subpath
+  exports the original (`declaresApp`, `VIEWLESS_APP_RULE`, the
+  `sizeLimitRaised` expression), `gate.ts` ports it, and "the stand-ins for
+  linter exports" in `gate.parity.test.ts` pin each port to the installed
+  `lib/index.mjs`, fail once a leaf module exports the original, and fail
+  on the bump's own pull request while a stand-in that waits for the next
+  release (the `./portable` require, `StartPath`, `matchLineEndingsPort`)
+  is still there.
+  One known difference is left on purpose: CI's class index covers the
+  files of the RUN (`checkFiles` builds it from what `collectFiles`
+  collected), the editor's every class of the workspace - a non-app helper
+  class that reads a popup's attributes counts here and not in CI. Measured
+  over samples-controls, samples, samples-stack, abap2UI5, sapgui and popups
+  it changes no finding anywhere; narrowing the editor would need `paths`,
+  `ignore` and `allClasses` per config to be exact, and the linter's "of the
+  run" is the half to fix.
+  Run `npm test` against a linter checkout before a bump (a copy of this
+  tree with `node_modules/@abap2ui5/linter` linked to `git archive` of the
+  linter's branch): the parity tests that skip at the pin run there.
 - **The rule reference is coupled by URL, not by import.** Every diagnostic's
   code links to `https://abap2ui5.github.io/linter/#<rule-id>`, which the
   linter's `generate-rules-page` emits one anchor per rule for. The rule ids
@@ -410,6 +494,17 @@ Facts an agent cannot see from the code but will trip over:
   `scripts/web-shims/*` because the linter computes a default snapshot path
   with them at import time. Nothing in the web graph may actually CALL `fs` —
   the snapshot arrives via `vscode.workspace.fs` and `setSnapshotText( )`.
+  The one read that cannot be routed around is the linter's own: its icon
+  rules load `data/icons.json` with `fs.readFileSync` (`checkAbapRules` takes
+  no `iconData`), and a failed read is an empty registry by design - so on
+  vscode.dev `unknown-icon`, `icon-too-new` and `icon-removed` were silently
+  off. The web entry therefore reads the packaged `data/icons.json` through
+  `workspace.fs` and seeds the `fs` shim with it (`src/web/linterdata.ts`,
+  `seedFile` in `scripts/web-shims/fs.js`) before the first check, under the
+  path the linter computes over the shims; `webshim.test.ts` pins that path
+  to the linter's formula and runs the icon rule through a bundle built with
+  `webConfig( )` itself (which `esbuild.js` exports for that). A new data
+  file the linter reads itself belongs in `LINTER_DATA_FILES`.
   A module that newly pulls `child_process`/`os`/`crypto` into the web graph
   breaks the web build, which is why the desktop-only plumbing stays behind
   `extension.ts` and the shared pieces live in `gate.ts`/`diagnostics.ts`/

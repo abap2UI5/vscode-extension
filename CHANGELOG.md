@@ -23,7 +23,7 @@
   latest `AGENTS.md`, `abap-check` and `ui5-check` skills, `check-pin.mjs`
   and `doctor.mjs`.
 - **The agent app tools follow the abap2UI5 protocol's frontend rules.**
-  The vendored agent client is now abap2UI5/mcp-server `d8d3b76`: a
+  The vendored agent client is now abap2UI5/mcp-server `a4d9f07`: a
   response of another protocol number is refused with both numbers named
   instead of being shown; an `app_act` with an event while another is still
   running waits for it instead of sending the same draft id twice; values
@@ -34,7 +34,6 @@
   the extension's transport through the auth proxy only carries their
   headers and the system's cookies, so the token is fetched once and the
   body re-sent once, never twice.
-
 - **Migrate Classic Report to abap2UI5.** A new command - in the Command
   Palette and in the context menu of a `*.prog.abap` - converts a classic
   ABAP report into an abap-cloud-gui report class with that addon's
@@ -62,6 +61,205 @@
   help (`SelectDialog`, `TableSelectDialog`) is a table of the snapshot, and
   `app_act` with `row` on its `confirm` picks that row as a click does; the
   items of a `MessagePopover` / `MessageView` are listed as messages.
+- **Security:**
+  - *Render gate.* Its last-resort `npx` fallback runs the linter release
+    this extension bundles instead of the linter's current main, and the
+    render gate does not run in an untrusted workspace (Restricted Mode).
+    `abap2ui5.viewCheck.render` can no longer be switched on by an untrusted
+    workspace's settings.
+  - *`abap2ui5.viewCheck.rollingBundle`* is read from your user settings
+    only: a repository's `.vscode/settings.json` can no longer make
+    *Install Render Gate* download the linter's rolling build instead of the
+    release this extension bundles. Off by default, as before.
+  - *`abap2ui5.allowUnauthorizedCerts`* is read from your user settings
+    only: a repository's `.vscode/settings.json` can no longer switch
+    certificate verification for the auth proxy on or off. Its default is
+    unchanged; a value you had set in a workspace's settings no longer
+    applies - set it in your User settings instead.
+  - *Baseline.* The "add … to the baseline" quick fix, *Add All Findings of
+    This Rule to the Baseline* and *Rebuild the View-Check Baseline*
+    refuse - with a message saying why - a `baseline` in
+    `abap2ui5lint.jsonc` that points outside the workspace folder holding
+    the config, a symbolic link out of it included. They used to overwrite
+    whatever JSON file the config named.
+  - *Add Agent Setup to Workspace* writes nothing through a symbolic link:
+    a project whose `.claude` (or `package.json`, or any other file of the
+    setup) is a link has that file skipped and named in the confirmation. A
+    cloned repository carrying `.claude -> ~/.claude` used to have the
+    template's permission allowlist written into your global Claude Code
+    settings.
+- **View check - the editor agrees with CI in more places:**
+  - *Disable directives follow the `rules` block.* A repository that
+    switched `unused-directive` off, re-graded `unknown-directive-rule` or
+    excluded a folder from them still saw them in the editor; and a waiver
+    of `unused-namespace-declaration` on a class the rule does not judge was
+    reported as unused.
+  - *`unused-namespace-declaration`* is no longer reported (nor its fix
+    offered, which deletes the declaration) on a class that writes the
+    prefix in a part of the view the check cannot reconstruct - CI has been
+    silent about those, because the view needs the declaration.
+  - *On vscode.dev / in the browser* the icon rules (`unknown-icon`,
+    `icon-too-new`, `icon-removed`) report again - the linter's icon list
+    could not be read there - and a `baseline` written as
+    `./../baseline.json`, `lint/../baseline.json` or an absolute path is
+    found again (only a leading `../` used to be resolved, so the findings
+    it waives were reported).
+  - *"Fix crlf-line-ending" converts the file now.* The linter's fix deletes
+    every `\r`, and an editor position cannot address the gap between `\r`
+    and `\n` - so the quick fix, *Fix All* and the workspace fix applied
+    empty edits and the warning stayed. They now switch the document's line
+    endings to LF, in the same edit (and undo step) as the other fixes.
+  - *Quick-fix titles name a line, not a number.* For the line-keyed rules
+    (`trailing-whitespace`, `source-line-too-long`) the lightbulb said
+    "fix trailing-whitespace on 12" - or, with the next linter release,
+    "on 3", the count of blanks. It now says "on line 12"; a fix over many
+    lines names none.
+  - *An app class whose view comes from another class* is checked, as CI
+    checks it: by the rules that read the class rather than a view - a
+    `_bind( )` on a private attribute, an obsolete call, the event wires,
+    the lifecycle dispatcher. The editor used to say "nothing to check".
+    *Preview View (No System)* and *Generate Mock Data for This App* still
+    ask for a class that builds its view itself.
+  - *`allClasses` and `properties` in `abap2ui5lint.jsonc` are honoured.*
+    With `allClasses`, every class is checked - one that builds no view by
+    the source rules, as CI does - and *Check All Views in the Workspace*
+    reaches it. With `properties: false` the walk over the view against the
+    UI5 metadata is skipped as in CI (in an XML view, the whole check), and a
+    waiver of one of its rules is no longer reported as unused.
+  - *An icon in a commented-out control of an XML view* is no longer
+    reported - CI reads the view with its comments blanked.
+  - *The `check_view_source` tool of the abap2UI5 System MCP server* treats
+    an unset `abap2ui5.viewCheck.distribution` as "not decided", like the
+    editor - it judged as SAPUI5 and so hid the SAPUI5-only-control hint.
+  - *Ready for the next linter release:* `rows-hidden-by-visible`,
+    `enum-bound-to-initial-field`, `navigation-lost-on-rebuild` and the
+    opt-in `portable-app` (its profile ships with the extension) are judged
+    with the same inputs CI gives them as soon as the bundled linter brings
+    them - the start-path model, whether the class raises the size limit,
+    the pages of a container, the portable profile.
+  - *Fix All View Findings in the Workspace* counts what it fixed in
+    findings, and says separately how many files it changed to LF line
+    endings - it used to add up its edits, a finding fixed in two places
+    twice and each line-ending change as one more "fix".
+  - *A waiver in an XML view never goes above its XML declaration* (nor in
+    front of a byte-order mark). With the root on the declaration's line (a
+    minified or generated view), the "suppress on this line" quick fix wrote
+    its comment in front of `<?xml …?>` - which every XML parser, UI5's
+    included, refuses, so the whole view stopped loading. The directive now
+    goes right behind the declaration.
+- **XML views:**
+  - *Namespaces are read per element*, as XML scopes them: an inner
+    `<VBox xmlns="sap.ui.layout.form">` re-resolved every unprefixed tag of
+    the view for completion, hover and the colour swatches, a prefix declared
+    in one subtree was offered in another, and a declaration in a comment
+    counted. Namespaces declared with single quotes (`xmlns:m='sap.m'`) are
+    read too, and so is a single-quoted colour value.
+  - *`@since` and deprecations inline*, as in a builder chain: the UI5
+    version a control or attribute arrived in, warned above
+    `abap2ui5.viewCheck.minUi5`, and the deprecation with its replacement.
+  - *`id`, `class` and `binding`* - on nearly every control of a real view,
+    but declared in no control's metadata - are offered and explained, in
+    the XML and in the builder chain alike.
+  - *Completion* offers nothing in front of the first tag (accepting an
+    offer there replaced the root tag's name) or inside a comment (a
+    `<word>` in the prose was taken for a tag).
+  - *Convert XML View to Builder Chain* puts no line break inside a literal
+    from a CRLF view: a long binding written over several lines is split
+    into `&&` chunks, and the cut could fall between `\r` and `\n`, leaving
+    a bare `\r` that abapGit refuses. Attribute values are read the way an
+    XML parser reads them: each line break and tab a blank, a `&#10;` still
+    a line break.
+- **Rename, navigation and events:**
+  - *F2 on an event* renames only the `WHEN` branches of the class's
+    `CASE client->get_event( )` (or `client->get( )-event`) - it used to
+    rewrite a same-named `WHEN 'EDIT'` of an unrelated `CASE mv_mode.` or of
+    a status switch nested in a handler too. Go to Definition, the
+    highlights, the "raised n× in the view" lens and completion in a `WHEN`
+    follow the same rule. A class without such a CASE keeps the old
+    behaviour.
+  - *F2, Go to Definition and the highlights on an event* answer only on
+    the event's name in `_event( )` - positional or `val =`. In any other
+    literal of the call (`arg = \`${$parameters>/value}\``, a `t_arg` row)
+    F2 offered a rename that then changed nothing, and an argument spelled
+    like an event jumped to that event's `WHEN`. The same goes for a `WHEN`
+    value no event is spelled like (``WHEN `Out of Stock` THEN`` in a
+    `SWITCH`, ``WHEN `%MSG` ``).
+  - *F2 on a bound attribute* no longer rewrites the word inside a string
+    template's text (`|The mv_title is …|`), another structure's component
+    embedded in one (`|{ ls_row-mv_title }|`) or a path into another model:
+    a class with a `DATA value` or `DATA text` had
+    `arg = \`${$parameters>/value}\``, `${$source>/text}` and
+    `{device>/text}` renamed along with the attribute, which broke the event
+    parameter or the device binding without a word. `|{ mv_title }|` is
+    still renamed.
+  - *Control ids.* ``a( n = `id` v = |inp_{ lv_i }| )`` no longer makes the
+    next attribute's name (`value`) a declared id - the id is the literal
+    right behind `v =`, or there is none.
+  - *Go to Definition and Go to Symbol in Workspace* land on the method's
+    name in a class written in lower case: `method meth.` used to put the
+    cursor on the `meth` of the keyword.
+  - *Outline.* A very large class (from about 120,000 method calls on) no
+    longer makes the view outline, and with it the breadcrumbs, fail.
+- **Preview and systems:**
+  - *Reload on activation.* Saving right after the preview reloaded (before
+    the system had answered which version the preview now shows) could
+    reload the preview again on the first poll for an activation that never
+    happened, and clear the *not activated* badge. The watch now waits for
+    the real activation.
+  - *Preview theme and language.* Switching them changes only the
+    `sap-ui-theme` / `sap-language` parameter of the launch URL: the other
+    parameters stay exactly as configured. Every launch used to re-encode
+    the whole query (`%20` became `+`, `~` became `%7E`, `/` and `:` were
+    escaped, a bare `?debug` became `debug=`).
+  - *Proxy.* A page declared as `windows-1252` or `iso-8859-1` shows its euro
+    signs, dashes and curly quotes the way a browser does, a page in another
+    charset (`iso-8859-2`, `shift_jis`, ...) is decoded as that charset
+    instead of as UTF-8, and a page in a charset that cannot be decoded is
+    passed through unchanged instead of being garbled.
+  - *`abap2ui5.systems`* entries of the wrong type (`"name": 100`, a `url`
+    that is not a string, a bare string in the list, an object instead of
+    the list) are skipped like any other malformed entry; they used to make
+    *Run App*, the system picker and the status bar fail with an error until
+    the setting was fixed by hand.
+  - *Preview View (No System)* shows why a render could not even start (a
+    temporary folder that could not be written, a checker that could not be
+    resolved) in the panel, over the last pictures. It used to keep saying
+    "rendering…" until the next save, with the reason only in the log.
+- **Editing, projects and agents:**
+  - *Control Properties view.* Removing the last attribute of a chain left
+    its closing `).` on a line of its own; the paren now moves up to the
+    line of the call that is the last one (`)->tag( \`Input\` ).`), unless
+    that line ends in a comment. Removing an attribute followed by a blank
+    line no longer takes the blank line with it.
+  - *Builder-chain abbreviations* (`Page>content>Button+Input`) expand
+    when a text or a value holds a lone parenthesis - `Text{1) First}+Button`
+    or `Input[placeholder="(optional"]+Button` used to be refused as "not an
+    abbreviation".
+  - *Framework-pin warning.* A pin kept in a comment of `abaplint.jsonc`
+    (`// "branch": "1.100.0"` above the real one, or a dependency commented
+    out) is no longer read as the pin, and a `{` in a comment no longer hides
+    the dependency it sits in.
+  - *Add Agent Setup to Workspace* says that a `package.json` holding
+    `null`, an array or a plain value is not a package manifest, instead of
+    calling it invalid JSON - and no longer plans to add entries to an
+    array-shaped one that it would have written back unchanged.
+  - *New Project from Template* and *Add Agent Setup to Workspace* keep the
+    `package.json` name within npm's rules: a folder name longer than 214
+    characters is cut, and a folder called `node_modules` or `favicon.ico`
+    gets `abap2ui5-app` - `npm install` refused the names they used to write.
+  - *Opening a workspace reads its classes once.* The app index, the class
+    index the view check uses and the apps tree each scanned the workspace
+    when the window opened, and the three scans ran at the same time - so
+    every class was read three times. They now share one scan (over
+    samples-controls' 644 classes: one read per file instead of three,
+    about half the time).
+  - *The MCP server finds abap-cloud-gui under the repos root.* An
+    `abap-cloud-gui` checkout under `abap2ui5.mcp.reposRoot` is now handed to
+    the server as `ABAP_CLOUD_GUI_HOME`, as the other checkouts are. The
+    server's `migrate_report` tool runs that addon's converter from a local
+    checkout only, and a server started through npx does not look beside your
+    repos root - so the agent's tool reported the checkout missing while
+    *Migrate Classic Report to abap2UI5* found it.
 
 ## 0.30.2
 

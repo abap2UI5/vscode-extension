@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+  failedPreviewState,
   parseScreenshotErrors,
   parseScreenshotOutput,
   scratchFileName,
@@ -14,7 +15,7 @@ import {
 } from "./checkcore";
 import { classNameOf } from "./abap";
 import { run } from "./childproc";
-import { checkerCommand, isCheckable, pickDocument, spawnEnv } from "./viewcheck";
+import { checkerCommand, hasOwnView, pickDocument, spawnEnv } from "./viewcheck";
 import { createNonce, viewPreviewHtml } from "./webview";
 
 /*
@@ -455,6 +456,15 @@ async function refresh(
   } catch (err) {
     // this runs from a save listener, where a rejection would land nowhere
     log(`view-preview: refresh failed - ${String(err)}`);
+    // and the panel was painted busy above: without this it kept saying
+    // "rendering…" until the next save, with the reason only in the log
+    if (target === panel) {
+      try {
+        paint(target, doc, failedPreviewState(shown, err), mock);
+      } catch {
+        // the panel went away between the check and the paint
+      }
+    }
   } finally {
     running = false;
     if (!panel) {
@@ -534,7 +544,7 @@ export function registerViewPreview(
 
     vscode.commands.registerCommand("abap2ui5.previewView", async () => {
       const doc = pickDocument();
-      if (!doc || !isCheckable(doc)) {
+      if (!doc || !hasOwnView(doc)) {
         vscode.window.showInformationMessage(
           "abap2UI5: no view here to preview - open an ABAP class building " +
             "views with z2ui5_cl_ui5_view_builder, or a *.view.xml."
@@ -548,7 +558,7 @@ export function registerViewPreview(
 
     vscode.commands.registerCommand("abap2ui5.previewDiff", async () => {
       const doc = pickDocument();
-      if (!doc || !isCheckable(doc)) {
+      if (!doc || !hasOwnView(doc)) {
         vscode.window.showInformationMessage(
           "abap2UI5: no view here to compare - open an ABAP class building " +
             "views with z2ui5_cl_ui5_view_builder, or a *.view.xml."

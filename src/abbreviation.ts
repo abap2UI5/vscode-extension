@@ -94,7 +94,14 @@ function parseToken(text: string): Token | undefined {
 
 /** The abbreviation as (separator, token) pairs. `>` and `+` inside `[]`,
  *  `{}` or a `(…)` group belong to a value or to the group -
- *  `Button[text=a+b]` and `(Label+Input)*2` are one token each. */
+ *  `Button[text=a+b]` and `(Label+Input)*2` are one token each.
+ *
+ *  A `{text}` or `[attributes]` block is skipped to its first closing
+ *  bracket - the same end `parseToken` reads it to - rather than counted:
+ *  counting every bracket kind together made a parenthesis INSIDE a text or
+ *  a value (`Text{1) First}+Button`, `Input[placeholder="(optional"]+Button`)
+ *  shift the group depth, the `+` was no longer seen, and the whole
+ *  abbreviation was refused. */
 function tokenize(text: string): Array<{ op: ">" | "+" | ""; text: string }> {
   const out: Array<{ op: ">" | "+" | ""; text: string }> = [];
   let depth = 0;
@@ -102,9 +109,15 @@ function tokenize(text: string): Array<{ op: ">" | "+" | ""; text: string }> {
   let op: ">" | "+" | "" = "";
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
-    if (ch === "[" || ch === "{" || ch === "(") {
+    if (ch === "{" || ch === "[") {
+      const close = text.indexOf(ch === "{" ? "}" : "]", i + 1);
+      if (close === -1) {
+        break; // unclosed: the rest is one token, which parseToken refuses
+      }
+      i = close;
+    } else if (ch === "(") {
       depth++;
-    } else if (ch === "]" || ch === "}" || ch === ")") {
+    } else if (ch === ")") {
       depth--;
     } else if ((ch === ">" || ch === "+") && depth === 0) {
       out.push({ op, text: text.slice(start, i) });

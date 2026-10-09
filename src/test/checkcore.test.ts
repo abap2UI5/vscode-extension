@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "fs";
 import * as path from "path";
-import { checkXmlSource } from "@abap2ui5/linter";
+import { checkXmlSource, collectFiles } from "@abap2ui5/linter";
 import { applyDirectives, defaultSeverityOf } from "@abap2ui5/linter/findings";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import {
@@ -11,6 +12,7 @@ import {
   diagnosticSeverityKey,
   directiveLine,
   isCheckableSource,
+  isViewSource,
   settleRenderErrors,
   suppressionEdits,
   SuppressionEdit,
@@ -23,6 +25,9 @@ import {
   parseScreenshotErrors,
   parseScreenshotOutput,
   plannedFixes,
+  editorFixPlan,
+  workspaceFixSummary,
+  fixTitle,
   screenshotArgs,
   screenshotUnsupported,
   shotLabel,
@@ -32,7 +37,9 @@ import {
   resolveCheckerCommand,
   splitCommandLine,
   scratchFileName,
+  failedPreviewState,
 } from "../checkcore";
+import { runGate } from "../gate";
 
 /*
  * The view check's `vscode`-free decisions: what is checkable, which
@@ -73,6 +80,63 @@ test("the abap language id suffices, and so does the file extension", () => {
 test("a log quoting builder code is not checkable", () => {
   assert.equal(isCheckableSource("notes.md", "markdown", BUILDER_CLASS), false);
   assert.equal(isCheckableSource("out.log", "log", BUILDER_CLASS), false);
+});
+
+const VIEWLESS_APP =
+  "CLASS zcl_viewless DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    INTERFACES z2ui5_if_app.\nENDCLASS.\n" +
+  "CLASS zcl_viewless IMPLEMENTATION.\n  METHOD z2ui5_if_app~main.\n" +
+  "    client->view_display( zcl_views=>main( client ) ).\n  ENDMETHOD.\nENDCLASS.\n";
+const PLAIN_CLASS =
+  "CLASS zcl_util DEFINITION PUBLIC.\nENDCLASS.\nCLASS zcl_util IMPLEMENTATION.\nENDCLASS.\n";
+
+test("an app class without a view is checkable, and every class under allClasses - but has no view of its own", () => {
+  assert.equal(isCheckableSource("zcl_viewless.clas.abap", "abap", VIEWLESS_APP), true);
+  assert.equal(isViewSource("zcl_viewless.clas.abap", "abap", VIEWLESS_APP), false);
+  assert.equal(isCheckableSource("zcl_util.clas.abap", "abap", PLAIN_CLASS), false);
+  assert.equal(isCheckableSource("zcl_util.clas.abap", "abap", PLAIN_CLASS, { allClasses: true }), true);
+  assert.equal(isViewSource("zcl_util.clas.abap", "abap", PLAIN_CLASS), false);
+  // allClasses is about classes: a test include, a report or a buffer without
+  // a class file name stays out, as it does in the linter's walk
+  assert.equal(
+    isCheckableSource("zcl_util.clas.testclasses.abap", "abap", PLAIN_CLASS, { allClasses: true }),
+    false
+  );
+  assert.equal(isCheckableSource("zreport.prog.abap", "abap", PLAIN_CLASS, { allClasses: true }), false);
+  assert.equal(isViewSource("zcl_app.clas.abap", "abap", BUILDER_CLASS), true);
+});
+
+test("checkable files are the ones the linter's collectFiles collects", () => {
+  /* The workspace sweep decides with cliCollects (the NAME half) and
+   * isCheckableSource (the CONTENT half); a file the CLI collects and the
+   * sweep skips is a class CI fails and "Check All Views" calls clean, and
+   * the other way round a rebuilt baseline names a file CI never sees. */
+  const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "abap2ui5-collect-"));
+  try {
+    const files: Record<string, string> = {
+      "zcl_app.clas.abap": BUILDER_CLASS,
+      "zcl_frozen.clas.abap": "CLASS zcl_frozen IMPLEMENTATION.\n  METHOD main.\n    DATA(v) = z2ui5_cl_xml_view=>factory( ).\n  ENDMETHOD.\nENDCLASS.\n",
+      "zcl_viewless.clas.abap": VIEWLESS_APP,
+      "zcl_util.clas.abap": PLAIN_CLASS,
+      "zcl_util.clas.testclasses.abap": VIEWLESS_APP,
+      "zcl_util.clas.locals_imp.abap": BUILDER_CLASS,
+    };
+    for (const [name, text] of Object.entries(files)) {
+      fs.writeFileSync(path.join(dir, name), text);
+    }
+    for (const allClasses of [false, true]) {
+      const collected = new Set(
+        collectFiles([dir], { allClasses } as Parameters<typeof collectFiles>[1]).map((f) =>
+          path.basename(f)
+        )
+      );
+      for (const [name, text] of Object.entries(files)) {
+        const mine = cliCollects(name) && isCheckableSource(name, "abap", text, { allClasses });
+        assert.equal(mine, collected.has(name), `${name} (allClasses ${allClasses})`);
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -140,10 +204,51 @@ test("a checkout under the repos root is found by its known names", () => {
 });
 
 test("with nothing installed npx from GitHub is the last resort", () => {
+  // a dev build with nothing stamped has no release to pin to
   const cmd = resolveCheckerCommand(NO_GATE);
   assert.equal(cmd.cmd, "npx");
   assert.deepEqual(cmd.args, ["--yes", "github:abap2UI5/linter"]);
   assert.equal(cmd.installed, false);
+});
+
+test("the npx fallback runs the bundled linter's release commit, not main", () => {
+  /*
+   * regression: the fallback ran `github:abap2UI5/linter` - whatever the
+   * linter's main said that day, fetched and executed on a setting a
+   * repository could switch on. A stamped build pins it to the commit its
+   * linter release was published from.
+   */
+  const commit = "41e3fbde14281181d81a121f629eb96164deb961";
+  const cmd = resolveCheckerCommand({ ...NO_GATE, linterCommit: commit });
+  assert.deepEqual(cmd.args, ["--yes", `github:abap2UI5/linter#${commit}`]);
+  // nothing that is not a full commit id is spliced into the spec
+  for (const odd of ["", "  ", "main", "41e3fbde1428", `${commit} --foo`]) {
+    assert.deepEqual(
+      resolveCheckerCommand({ ...NO_GATE, linterCommit: odd }).args,
+      ["--yes", "github:abap2UI5/linter"],
+      JSON.stringify(odd)
+    );
+  }
+  // a stamped commit changes nothing above the last rung
+  const explicit = resolveCheckerCommand({
+    ...NO_GATE,
+    explicit: "node cli.mjs",
+    linterCommit: commit,
+  });
+  assert.deepEqual(explicit.args, ["cli.mjs"]);
+});
+
+test("the render gate's switch and the TLS stance are not a repository's to set", () => {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")
+  );
+  const restricted: string[] =
+    pkg.capabilities.untrustedWorkspaces.restrictedConfigurations;
+  assert.ok(restricted.includes("abap2ui5.viewCheck.render"));
+  assert.ok(restricted.includes("abap2ui5.allowUnauthorizedCerts"));
+  const certs = pkg.contributes.configuration.properties["abap2ui5.allowUnauthorizedCerts"];
+  assert.equal(certs.scope, "machine", "a cloned repository must not switch TLS verification off");
+  assert.equal(certs.default, true, "the default is unchanged");
 });
 
 // ---------------------------------------------------------------------------
@@ -244,6 +349,7 @@ test("every way the render half did not run says so", () => {
     "spawn-failed",
     "no-report",
     "abandoned",
+    "skipped-untrusted",
   ] as const) {
     const note = renderGateNote(outcome);
     assert.match(note, /^ \(render gate skipped - .+\)$/, outcome);
@@ -287,6 +393,131 @@ test("a fix starting where the previous one ended still applies", () => {
     { fixes: [{ start: 5, end: 5, text: "$" }] },
   ]);
   assert.equal(planned.length, 2);
+});
+
+/** What VS Code makes of a text edit (ExtHostDocumentData.positionAt clamps
+ *  an offset between `\r` and `\n` to the end of the line; the text model
+ *  writes an inserted text in the document's own line ending), and of a
+ *  line-ending change - so a plan can be judged by its effect in the editor
+ *  rather than by its spans. */
+function applyLikeVsCode(
+  text: string,
+  plan: { spans: Array<{ start: number; end: number; text: string }>; toLf: boolean }
+): string {
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const clamp = (o: number) => (o > 0 && text[o - 1] === "\r" && text[o] === "\n" ? o - 1 : o);
+  let out = text;
+  for (const e of [...plan.spans].sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, clamp(e.start)) + e.text.replace(/\r\n|\r|\n/g, eol) + out.slice(clamp(e.end));
+  }
+  return plan.toLf ? out.replace(/\r\n/g, "\n") : out;
+}
+
+const HYGIENE = [
+  "CLASS zcl_eol DEFINITION PUBLIC.",
+  "  PUBLIC SECTION.   ",
+  "    INTERFACES z2ui5_if_app.",
+  "ENDCLASS.",
+  "CLASS zcl_eol IMPLEMENTATION.",
+  "  METHOD z2ui5_if_app~main.",
+  "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).",
+  "    view->ele( n = `View` ns = `mvc`",
+  "        )->a( n = `xmlns` v = `sap.m`",
+  "        )->a( n = `xmlns:mvc` v = `sap.ui.core.mvc`",
+  "        )->tag( n = `Text` ).  ",
+  "    client->view_display( view->stringify( ) ).",
+  "  ENDMETHOD.",
+  "ENDCLASS.",
+].join("\r\n");
+
+test("a CRLF file's fix all turns it LF in the editor - the \\r deletions alone do nothing there", () => {
+  const findings = runGate(HYGIENE, "src/zcl_eol.clas.abap", false, {
+    minUi5: "1.71",
+    allow: [],
+    rules: {},
+    distribution: null,
+  }).findings;
+  const types = new Set(findings.map((f) => f.type));
+  for (const rule of ["crlf-line-ending", "trailing-whitespace", "missing-final-newline"]) {
+    assert.ok(types.has(rule), `the fixture stopped producing ${rule}`);
+  }
+  // the bug: every `\r` deletion collapses to an empty range in VS Code
+  const raw = applyLikeVsCode(HYGIENE, { spans: plannedFixes(findings), toLf: false });
+  assert.ok(raw.includes("\r\n"), "the raw spans would have converted the file after all");
+  // the plan: the spans of the other rules, plus the line-ending change
+  const plan = editorFixPlan(findings);
+  assert.equal(plan.toLf, true);
+  assert.ok(plan.spans.every((e) => !(e.end - e.start === 1 && HYGIENE[e.start] === "\r")));
+  const fixed = applyLikeVsCode(HYGIENE, plan);
+  assert.ok(!fixed.includes("\r"), "CRs survived the fix all");
+  assert.ok(!/[ \t]$/m.test(fixed), "trailing blanks survived");
+  assert.ok(fixed.endsWith("\n"), "no final newline");
+  // and the fixed file is clean of all three
+  const again = new Set(
+    runGate(fixed, "src/zcl_eol.clas.abap", false, { minUi5: "1.71", allow: [], rules: {}, distribution: null }).findings.map(
+      (f) => f.type
+    )
+  );
+  for (const rule of ["crlf-line-ending", "trailing-whitespace", "missing-final-newline"]) {
+    assert.ok(!again.has(rule), `${rule} is still reported after the fix all`);
+  }
+  // the CRLF finding is counted once, as one finding - and as the one the
+  // line-ending change resolves
+  assert.equal(plan.findings, findings.filter((f) => f.fixes?.length).length);
+  assert.equal(plan.byLineEnding, 1);
+});
+
+test("the workspace fix counts findings, and names the line-ending change apart", () => {
+  /* It used to add up EDITS: every span, plus one for each file's
+   * setEndOfLine - a finding fixed with two spans counted twice and the
+   * line-ending change counted as one more "fix". */
+  assert.equal(workspaceFixSummary({ fixed: 3, toLf: 0, files: 2 }), "edited 2 files: 3 fixes");
+  assert.equal(
+    workspaceFixSummary({ fixed: 1, toLf: 1, files: 1 }),
+    "edited 1 file: 1 fix, 1 changed to LF line endings"
+  );
+  assert.equal(workspaceFixSummary({ fixed: 0, toLf: 2, files: 2 }), "edited 2 files: 2 changed to LF line endings");
+});
+
+test("an LF file's plan is plannedFixes unchanged", () => {
+  const findings = [
+    { type: "a", fixes: [{ start: 4, end: 8, text: "x" }] },
+    { type: "b", fixes: [{ start: 6, end: 7, text: "y" }] },
+  ];
+  const plan = editorFixPlan(findings);
+  assert.deepEqual(plan, { spans: plannedFixes(findings), toLf: false, findings: 1, byLineEnding: 0 });
+});
+
+test("a fix title names what changes, never a bare count or line number", () => {
+  // the pinned linter: the line number in `member`
+  assert.equal(
+    fixTitle({ type: "trailing-whitespace", member: "12", value: 3, line: 12, fixes: [{}] }),
+    "abap2UI5: fix trailing-whitespace on line 12"
+  );
+  // the next release: `member` gone (`dedupe`), the blank count in `value`
+  assert.equal(
+    fixTitle({ type: "trailing-whitespace", value: 3, line: 12, fixes: [{}] }),
+    "abap2UI5: fix trailing-whitespace on line 12"
+  );
+  assert.equal(
+    fixTitle({ type: "trailing-whitespace", value: "3", line: 4, fixes: [{}] }),
+    "abap2UI5: fix trailing-whitespace on line 4"
+  );
+  // a fix over many lines claims no line
+  assert.equal(
+    fixTitle({ type: "crlf-line-ending", value: 22, line: 1, fixes: [{}, {}] }),
+    "abap2UI5: fix crlf-line-ending"
+  );
+  // a name stays the subject, member first
+  assert.equal(
+    fixTitle({ type: "obsolete-binder", member: "_bind_edit", line: 9, fixes: [{}] }),
+    "abap2UI5: fix obsolete-binder on _bind_edit"
+  );
+  assert.equal(
+    fixTitle({ type: "unknown-property", member: "12", value: "nosuchprop", line: 9, fixes: [{}] }),
+    "abap2UI5: fix unknown-property on nosuchprop"
+  );
+  assert.equal(fixTitle({ type: "missing-final-newline", fixes: [{}] }), "abap2UI5: fix missing-final-newline");
 });
 
 test("findings without fixes contribute nothing to count or plan", () => {
@@ -839,6 +1070,47 @@ test("a single-line tag keeps disable-next-line, which the linter honours as bef
   );
 });
 
+test("a waiver never goes above an XML declaration - the view would not load", () => {
+  /* A comment in front of `<?xml …?>` makes the declaration not the first
+   * thing in the document: a fatal error to every XML parser, UI5's own
+   * included. With the root on the declaration's line (a minified or
+   * generated view), `disable-next-line` above the finding's line was
+   * exactly that - found fuzzing the waiver over every finding of the demo
+   * kit's views. */
+  for (const xml of [
+    '<?xml version="1.0" encoding="UTF-8"?><mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"><Button nosuchprop="x"/></mvc:View>',
+    '<?xml version="1.0"?><mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"><Button nosuchprop="x"/>\n</mvc:View>',
+    '<?xml version="1.0"?><mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"\n  nosuchprop="x">\n<Button/></mvc:View>',
+  ]) {
+    const edits = suppressionEdits(xml, findingLine(xml), true, "unknown-property");
+    const waived = applyEdits(xml, edits);
+    assert.match(waived, /^<\?xml /, `something was written before the declaration:\n${waived}`);
+    assert.deepEqual(
+      checkXmlSource(waived, { snapshot: SNAPSHOT, render: false }).findings.map((f) => f.type),
+      [],
+      `the waiver does not hold:\n${waived}`
+    );
+  }
+  // a byte-order mark in front of the declaration is not "something before
+  // it" - the waiver still goes behind the declaration, the mark stays first
+  const bom =
+    '\uFEFF<?xml version="1.0"?><mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"><Button nosuchprop="x"/></mvc:View>';
+  const waivedBom = applyEdits(bom, suppressionEdits(bom, findingLine(bom), true, "unknown-property"));
+  assert.match(waivedBom, /^\uFEFF<\?xml /, `something was written before the declaration:\n${waivedBom}`);
+  assert.ok(
+    !checkXmlSource(waivedBom, { snapshot: SNAPSHOT, render: false }).findings.some(
+      (f) => f.type === "unknown-property"
+    ),
+    `the waiver does not hold:\n${waivedBom}`
+  );
+  // with the declaration on a line of its own nothing changes
+  const own = '<?xml version="1.0"?>\n<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <Button nosuchprop="x"/>\n</mvc:View>';
+  assert.deepEqual(
+    suppressionEdits(own, findingLine(own), true, "unknown-property").map((e) => e.text),
+    ["  <!-- abap2ui5lint-disable-next-line unknown-property -->\n"]
+  );
+});
+
 test("the pair uses the file's own line ending", () => {
   const crlf = MULTI_LINE_TAG.replace(/\n/g, "\r\n");
   const edits = suppressionEdits(crlf, 3, true, "unknown-property");
@@ -1027,4 +1299,16 @@ test("a class on a frozen builder is checkable", () => {
   );
   // still not a license for quoting files
   assert.equal(isCheckableSource("notes.md", "markdown", FROZEN_CLASS), false);
+});
+
+test("a preview refresh that threw shows why, keeps the pictures and is not busy", () => {
+  // the panel is painted busy before the render; a refresh that ended in its
+  // catch only logged, and the panel said "rendering…" until the next save
+  const shown = { shots: [{ uri: "a.png", label: "1280x900" }], errors: ["old"] };
+  const state = failedPreviewState(shown, new Error("EACCES: permission denied, mkdir '/tmp/x/now'"));
+  assert.deepEqual(state.shots, shown.shots);
+  assert.deepEqual(state.errors, ["old"]);
+  assert.equal("busy" in state, false);
+  assert.match(state.problem, /could not be rendered - EACCES: permission denied/);
+  assert.match(failedPreviewState({ shots: [], errors: [] }, "boom").problem, /- boom\./);
 });

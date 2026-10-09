@@ -1,7 +1,8 @@
 import * as path from "path";
 import { renderRuleConfig, severityOf } from "@abap2ui5/linter/findings";
 import { usesBuilder } from "./abap";
-import { frozenBuilderOf, VIEW_XML_RE } from "./gate";
+import { declaresApp, frozenBuilderOf, VIEW_XML_RE } from "./gate";
+import { plural } from "./text";
 
 /*
  * The `vscode`-free decisions behind the view check: what counts as
@@ -11,13 +12,14 @@ import { frozenBuilderOf, VIEW_XML_RE } from "./gate";
  * parts that need an editor - and asks here for everything that does not.
  */
 
-/** Checkable = a view/fragment XML, or an ABAP source calling the generic
- *  builder's factory - or a frozen builder's, which the gate answers with the
- *  linter's own `frozen-view-builder` finding. "ABAP source" means the abap
- *  language id or an *.abap file name - ABAP extensions differ in what they
- *  register, but a log or markdown file merely QUOTING builder code must not
- *  qualify. */
-export function isCheckableSource(
+/** A view of its own = a view/fragment XML, or an ABAP source calling the
+ *  generic builder's factory - or a frozen builder's, which the gate answers
+ *  with the linter's own `frozen-view-builder` finding. "ABAP source" means
+ *  the abap language id or an *.abap file name - ABAP extensions differ in
+ *  what they register, but a log or markdown file merely QUOTING builder
+ *  code must not qualify. What the systemless preview and the mock generator
+ *  need: something that builds a view. */
+export function isViewSource(
   fileName: string,
   languageId: string | undefined,
   text: string
@@ -25,10 +27,43 @@ export function isCheckableSource(
   if (VIEW_XML_RE.test(fileName)) {
     return true;
   }
-  if (languageId !== "abap" && !/\.abap$/i.test(fileName)) {
+  if (!isAbapSource(fileName, languageId)) {
     return false;
   }
   return usesBuilder(text) || frozenBuilderOf(text) !== undefined;
+}
+
+function isAbapSource(fileName: string, languageId: string | undefined): boolean {
+  return languageId === "abap" || /\.abap$/i.test(fileName);
+}
+
+/**
+ * Checkable = what the linter's `checkAbapSource` judges: a view source
+ * ({@link isViewSource}), an APP class that builds no view (its view comes
+ * from another class - CI judges it by the class rules, `declaresApp`), and,
+ * under the config's `allClasses`, every `*.clas.abap` that is not a test
+ * include (judged by the source-side rules). The view check used to stop at
+ * the first, so CI's findings on the other two never reached the editor.
+ */
+export function isCheckableSource(
+  fileName: string,
+  languageId: string | undefined,
+  text: string,
+  opts: { allClasses?: boolean } = {}
+): boolean {
+  if (isViewSource(fileName, languageId, text)) {
+    return true;
+  }
+  if (!isAbapSource(fileName, languageId)) {
+    return false;
+  }
+  return declaresApp(text) || Boolean(opts.allClasses && isAllClassesFile(fileName));
+}
+
+/** A file `allClasses` makes CI collect: a `*.clas.abap` that is not a
+ *  `*.testclasses.abap` (the linter's walk skips those first). */
+export function isAllClassesFile(fileName: string): boolean {
+  return /\.clas\.abap$/i.test(fileName) && !/\.testclasses\.abap$/i.test(fileName);
 }
 
 /**
@@ -202,13 +237,30 @@ export interface CheckerCommandInput {
   /** The checkout names probed under the repos root, `cli.mjs` inside. */
   checkoutDirs: readonly string[];
   exists: (file: string) => boolean;
+  /** The release commit of the bundled linter (`LINTER_COMMIT`, stamped by
+   *  esbuild.js from `linterRelease`) - what the npx fallback is pinned to.
+   *  Empty in a dev build with nothing stamped. */
+  linterCommit?: string;
+}
+
+/** The npx spec of the linter the last-resort fallback runs: the release
+ *  commit this build ships when it is stamped, the repository's default
+ *  branch only in a dev build without one. Unpinned, an installed extension
+ *  ran whatever the linter's main said that day - code nobody had tested
+ *  with this build, fetched and executed on a setting a repository can
+ *  switch on. */
+export function linterNpxSpec(commit: string | undefined): string {
+  const pinned = (commit ?? "").trim();
+  return /^[0-9a-f]{40}$/.test(pinned)
+    ? `github:abap2UI5/linter#${pinned}`
+    : "github:abap2UI5/linter";
 }
 
 /** The command used to run the external checker CLI for the render gate. An
  *  explicit setting wins; then a gate installed via "Install Render Gate";
  *  then a local linter checkout under the repos root (both run
- *  with VS Code's own Node.js); npx fetching from GitHub is the last
- *  resort. */
+ *  with VS Code's own Node.js); npx fetching from GitHub - at the bundled
+ *  linter's release commit - is the last resort. */
 export function resolveCheckerCommand(input: CheckerCommandInput): CheckerCommand {
   const explicit = input.explicit.trim();
   if (explicit) {
@@ -234,7 +286,7 @@ export function resolveCheckerCommand(input: CheckerCommandInput): CheckerComman
   }
   return {
     cmd: "npx",
-    args: ["--yes", "github:abap2UI5/linter"],
+    args: ["--yes", linterNpxSpec(input.linterCommit)],
     env: {},
     installed: false,
   };
@@ -440,6 +492,26 @@ export function parseScreenshotErrors(stderr: string): string[] {
   return out;
 }
 
+/**
+ * What the view-preview panel shows after a refresh that THREW (a scratch
+ * file that could not be written, a checker that could not be resolved): the
+ * last pictures kept, the reason above them - and no `busy`. The panel is
+ * painted busy before the render starts, and a refresh that ended in its
+ * catch used to only log, so the panel said "rendering…" over the old
+ * pictures until the next save, with nothing on screen saying why.
+ */
+export function failedPreviewState<S>(
+  shown: { shots: S[]; errors: string[] },
+  err: unknown
+): { shots: S[]; errors: string[]; problem: string } {
+  const why = err instanceof Error ? err.message : String(err);
+  return {
+    shots: shown.shots,
+    errors: shown.errors,
+    problem: `The preview could not be rendered - ${why}. Saving again runs it afresh.`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // What "fix all" would do
 // ---------------------------------------------------------------------------
@@ -477,6 +549,95 @@ export function plannedFixes(
     cursor = fix.end;
   }
   return planned;
+}
+
+/** The rule whose fix is a line-ending change, not a set of spans. */
+export const CRLF_RULE = "crlf-line-ending";
+
+/**
+ * What a set of findings' fixes become in the EDITOR - `plannedFixes( )`, with
+ * the one rule whose spans an editor cannot apply taken out.
+ *
+ * `crlf-line-ending` fixes a CRLF file by deleting every `\r`, one span each.
+ * That is right for `--fix`, which rewrites the text, and a no-op in VS Code:
+ * a position cannot address the gap between `\r` and `\n` (`positionAt`
+ * clamps an offset there to the end of the line), so each deletion arrived
+ * as an EMPTY range and the lightbulb's "fix crlf-line-ending" - and every
+ * "fix all" that included it - changed nothing and left the warning
+ * standing. The editor's own way to say "this file is LF" is a line-ending
+ * change of the document (`TextEdit.setEndOfLine`), which `toLf` asks for;
+ * the caller writes it.
+ *
+ * `findings` counts the findings the plan resolves - the CRLF one included -
+ * for the "fix all N findings" title; `byLineEnding` how many of them the
+ * line-ending change resolves rather than a span.
+ */
+export function editorFixPlan(
+  findings: Array<{ type?: string; fixes?: PlannedFix[] }>
+): { spans: PlannedFix[]; toLf: boolean; findings: number; byLineEnding: number } {
+  const crlf = findings.filter((f) => f.type === CRLF_RULE && f.fixes?.length);
+  const rest = findings.filter((f) => f.type !== CRLF_RULE);
+  const spans = plannedFixes(rest);
+  const applied = new Set(spans);
+  const covered = rest.filter((f) => (f.fixes ?? []).some((fix) => applied.has(fix))).length;
+  return {
+    spans,
+    toLf: crlf.length > 0,
+    findings: covered + crlf.length,
+    byLineEnding: crlf.length,
+  };
+}
+
+/**
+ * What the workspace fix says it did. Its tally used to add the edits up -
+ * every span, plus one for the line-ending change of each CRLF file - so a
+ * finding fixed by two spans counted twice and "converted this file to LF"
+ * counted as one more fix beside them. It counts FINDINGS now (what the
+ * per-file "fix all N findings" counts too), and names the line-ending
+ * change separately.
+ */
+export function workspaceFixSummary(t: { fixed: number; toLf: number; files: number }): string {
+  const parts: string[] = [];
+  if (t.fixed) {
+    parts.push(plural(t.fixed, "fix"));
+  }
+  if (t.toLf) {
+    parts.push(`${t.toLf} changed to LF line endings`);
+  }
+  return `edited ${plural(t.files, "file")}: ${parts.join(", ") || "nothing"}`;
+}
+
+/**
+ * The lightbulb title of one finding's fix: "abap2UI5: fix <rule> on
+ * <subject>", the subject being what changes.
+ *
+ * `member ?? value` used to be the subject, and for the line-keyed rules
+ * neither is a name: the pinned linter keyed `trailing-whitespace` and
+ * `source-line-too-long` by the line number in `member` ("fix
+ * trailing-whitespace on 12"), and the next one moves it to `dedupe`, which
+ * left `value` - the count of blanks - as the subject ("fix
+ * trailing-whitespace on 3"). So a subject made of digits alone is no
+ * subject; a single-span fix then says which LINE it changes, and a fix of
+ * many spans (every `\r` of the file) says nothing it cannot back up.
+ */
+export function fixTitle(finding: {
+  type: string;
+  member?: unknown;
+  value?: unknown;
+  line?: number;
+  fixes?: unknown[];
+}): string {
+  const named = [finding.member, finding.value]
+    .filter((v): v is string | number => typeof v === "string" || typeof v === "number")
+    .map((v) => String(v).trim())
+    .find((v) => v !== "" && !/^\d+$/.test(v));
+  if (named) {
+    return `abap2UI5: fix ${finding.type} on ${named}`;
+  }
+  if (typeof finding.line === "number" && finding.line > 0 && (finding.fixes?.length ?? 0) === 1) {
+    return `abap2UI5: fix ${finding.type} on line ${finding.line}`;
+  }
+  return `abap2UI5: fix ${finding.type}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -522,7 +683,10 @@ export type RenderGateOutcome =
   /** Not started: the repo's `abap2ui5lint.jsonc` says `render: false`, so
    *  CI does not render either - a "passed" here would claim a gate the
    *  repository switched off. */
-  | "off-by-config";
+  | "off-by-config"
+  /** Not started: the workspace is not trusted (Restricted Mode), and the
+   *  render gate starts an external process over the repository's code. */
+  | "skipped-untrusted";
 
 /**
  * The parenthesis appended to what the check says about itself, so a "view
@@ -549,6 +713,8 @@ export function renderGateNote(outcome: RenderGateOutcome): string {
       return " (render gate skipped - superseded by a newer check)";
     case "off-by-config":
       return " (render gate off by config)";
+    case "skipped-untrusted":
+      return " (render gate skipped - the workspace is not trusted)";
   }
 }
 
@@ -1067,6 +1233,30 @@ export function suppressionEdits(
     isXml ? `<!-- ${directive} -->` : `" ${directive}`;
   const span = directiveLine(text, line, isXml);
   const indent = indentOf(span.open);
+  /* Nothing may stand before an XML declaration - not even a comment: a
+   * `<?xml …?>` that is not the first thing in the document is a fatal
+   * error to every XML parser, UI5's included, so a waiver written above a
+   * view that keeps its root on the declaration's line (a minified view, a
+   * generated one) made the whole view fail to load. The directive goes
+   * right behind the declaration instead, as a `disable` - which covers its
+   * own line - closed after the line the tag ends on. */
+  const prolog = isXml
+    ? /^\uFEFF?[ \t]*<\?xml\b[^]*?\?>/.exec(text.slice(startOf(span.open)))
+    : null;
+  // the declaration is the first thing in the file - a byte-order mark
+  // before it is not a thing (`trim` takes it, and \s matches it)
+  if (prolog && !text.slice(0, startOf(span.open)).trim()) {
+    const after = span.close + 1;
+    return [
+      {
+        offset: startOf(span.open) + prolog[0].length,
+        text: comment(`abap2ui5lint-disable ${rule}`),
+      },
+      after < starts.length
+        ? { offset: starts[after], text: `${comment("abap2ui5lint-enable")}${eol}` }
+        : { offset: text.length, text: `${eol}${comment("abap2ui5lint-enable")}` },
+    ];
+  }
   if (!isXml || span.open === span.close || line === span.open) {
     // a directive above `open` protects exactly the finding's line
     return [

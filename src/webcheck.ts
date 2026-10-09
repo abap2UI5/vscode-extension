@@ -1,11 +1,13 @@
 import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
-import { frozenBuilderOf, GateOptions, runGate, VIEW_XML_RE } from "./gate";
+import { GateOptions, runGate, VIEW_XML_RE } from "./gate";
+import { isAllClassesFile, isCheckableSource } from "./checkcore";
 import { preparedAbapOf } from "./language";
+import { onDidChangeClassIndex, registerClassIndex, workspaceClassIndex } from "./classindexfeed";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
 import { plural } from "./text";
-import { isShadowScheme, usesBuilder } from "./abap";
+import { isShadowScheme } from "./abap";
 import type { CheckOptions, SettingsOptions } from "./lintconfig";
 import {
   applyBaselineMap,
@@ -185,7 +187,10 @@ function gateOptions(
   opts: CheckOptions,
   isXml: boolean
 ): GateOptions {
-  return isXml ? opts : { ...opts, prep: preparedAbapOf(doc) };
+  // the workspace's class index, as on desktop (classindexfeed.ts)
+  return isXml
+    ? opts
+    : { ...opts, prep: preparedAbapOf(doc), classIndex: workspaceClassIndex() };
 }
 
 /** What the configured baseline waives for this path, if it has one. */
@@ -293,13 +298,19 @@ async function sweepWorkspaceWeb(
           }
         }
         const isXml = VIEW_XML_RE.test(uri.path);
-        if (!isXml && !usesBuilder(text) && !frozenBuilderOf(text)) {
+        const opts = optionsForPath(uri.path);
+        // what the linter's collectFiles judges - see checkcore.isCheckableSource
+        if (!isXml && !isCheckableSource(uri.path, "abap", text, { allClasses: opts.allClasses })) {
           continue;
         }
-        const opts = optionsForPath(uri.path);
         let gate;
         try {
-          gate = runGate(text, uri.path, isXml, opts);
+          gate = runGate(
+            text,
+            uri.path,
+            isXml,
+            isXml ? opts : { ...opts, classIndex: workspaceClassIndex() }
+          );
         } catch (err) {
           // one file that cannot be parsed is not a reason to stop the sweep
           log(`web: ${uri.path} skipped - ${String(err)}`);
@@ -390,14 +401,12 @@ function isCheckable(doc: vscode.TextDocument): boolean {
   if (isShadowScheme(doc.uri.scheme)) {
     return false;
   }
-  if (VIEW_XML_RE.test(doc.fileName)) {
+  if (isCheckableSource(doc.fileName, doc.languageId, doc.getText())) {
     return true;
   }
-  if (doc.languageId !== "abap" && !/\.abap$/i.test(doc.fileName)) {
-    return false;
-  }
-  const text = doc.getText();
-  return usesBuilder(text) || frozenBuilderOf(text) !== undefined;
+  // the repository config's `allClasses`, asked only for a class the content
+  // test turned down - the same decision as the desktop isCheckable
+  return isAllClassesFile(doc.fileName) && options(doc).allClasses === true;
 }
 
 /** Findings per document, memoised on its version - the same contract
@@ -542,9 +551,16 @@ export function registerWebCheck(
     }
   };
 
+  // the other classes are part of every ABAP verdict, on vscode.dev too
+  registerClassIndex(context);
+
   context.subscriptions.push(
     diagnostics,
     { dispose: () => timers.forEach((t) => clearTimeout(t)) },
+    onDidChangeClassIndex(() => {
+      memos.clear();
+      recheckOpen();
+    }),
     vscode.commands.registerCommand("abap2ui5.checkViews", () => {
       const doc = vscode.window.activeTextEditor?.document;
       if (doc) {

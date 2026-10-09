@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
+import { LINTER_RELEASE } from "../linterrelease";
 
 /*
  * The bundled linter is the npm release `@abap2ui5/linter`, pinned EXACTLY,
@@ -74,11 +75,32 @@ test("what is installed is what the manifests say", () => {
 });
 
 test("esbuild stamps the version and the commit into the bundle", () => {
-  assert.equal(process.env.LINTER_PIN, spec, "LINTER_PIN is not the bundled version");
+  assert.equal(LINTER_RELEASE.version, spec, "LINTER_PIN is not the bundled version");
   assert.equal(
-    process.env.LINTER_COMMIT,
+    LINTER_RELEASE.commit,
     release.commit,
     "LINTER_COMMIT is not the recorded release commit - esbuild.js stamps it " +
       "only while linterRelease.version matches the lock"
   );
+});
+
+test("the stamp is read in one place - linterrelease.ts", () => {
+  /* The render gate's bundle URL, its npx fallback and the bug report each
+   * read process.env.LINTER_COMMIT / LINTER_PIN themselves once; two readers
+   * of one stamp are two places a fallback can drift apart. */
+  const readers: string[] = [];
+  const walk = (dir: string): void => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name !== "test" && e.name !== "vendor") {
+          walk(p);
+        }
+      } else if (/\.ts$/.test(e.name) && /process\.env\.LINTER_(?:PIN|COMMIT)\b/.test(fs.readFileSync(p, "utf8"))) {
+        readers.push(path.relative(ROOT, p).replace(/\\/g, "/"));
+      }
+    }
+  };
+  walk(path.join(ROOT, "src"));
+  assert.deepEqual(readers, ["src/linterrelease.ts"]);
 });

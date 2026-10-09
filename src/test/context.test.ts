@@ -12,6 +12,7 @@ import {
   whenBranchOf,
   whenLiteralAt,
   xmlContextAt,
+  xmlNsMapAt,
   xmlNsMap,
 } from "../context";
 
@@ -181,6 +182,43 @@ test("raw XML: between two tags there is nothing to offer", () => {
   assert.equal(xmlAt('<mvc:View xmlns="sap.m">\n  ‸\n</mvc:View>'), undefined);
 });
 
+test("raw XML: namespaces are scoped to the element that declares them", () => {
+  const head =
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n' +
+    "  <Page>\n" +
+    '    <VBox xmlns="sap.ui.layout.form" xmlns:f="sap.f">\n' +
+    "      <f:Card/>\n" +
+    "    </VBox>\n";
+  // an inner default namespace re-resolves its own subtree only
+  assert.equal(xmlAt(head + "    <Button ‸")?.control, "sap.m.Button");
+  // ... and a prefix declared in a closed subtree is not declared here
+  assert.equal(xmlAt(head + "    <f:Ca‸"), undefined);
+  // inside the declaring subtree both hold
+  const inner =
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n' +
+    '  <VBox xmlns="sap.ui.layout.form" xmlns:f="sap.f">\n';
+  assert.equal(xmlAt(inner + "    <f:Card ‸")?.control, "sap.f.Card");
+  assert.equal(xmlAt(inner + "    <SimpleForm ‸")?.control, "sap.ui.layout.form.SimpleForm");
+  // an element's own declarations count for that element
+  assert.equal(
+    xmlAt('<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <f:Card xmlns:f=\'sap.f\' ‸')?.control,
+    "sap.f.Card"
+  );
+  // between tags: the innermost open element's scope
+  const between = inner + "    ‸";
+  const offset = between.indexOf("‸");
+  assert.equal(xmlNsMapAt(between.replace("‸", ""), offset)[""], "sap.ui.layout.form");
+});
+
+test("raw XML: a declaration inside a comment declares nothing", () => {
+  const source =
+    '<!-- was: <mvc:View xmlns:f="sap.f" xmlns="sap.ui.layout.form"> -->\n' +
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n';
+  assert.deepEqual(xmlNsMap(source), { mvc: "sap.ui.core.mvc", "": "sap.m" });
+  assert.equal(xmlAt(source + "  <f:Ca‸"), undefined);
+  assert.equal(xmlAt(source + "  <Button ‸")?.control, "sap.m.Button");
+});
+
 // ---------------------------------------------------------------------------
 // Binding paths
 // ---------------------------------------------------------------------------
@@ -330,6 +368,17 @@ test("a second factory( ) starts a second root", () => {
   assert.equal(roots.length, 2);
 });
 
+test("the outline of a class with very many calls does not overflow the stack", () => {
+  // Regression (corpus fuzz, synthetic scale-up): the last call's end was
+  // taken with Math.max(...calls) - one argument per call - and from about
+  // 120,000 calls on the outline threw RangeError instead of answering
+  const { viewOutline } = require("../context") as typeof import("../context");
+  const src =
+    HEAD + "    )->tag( n = `Text` ).\n" + "    x( ).\n".repeat(200000);
+  const roots = viewOutline(src);
+  assert.equal(roots.length, 1);
+});
+
 test("event navigation finds the WHEN branch and the way back", () => {
   const {
     eventNameAt,
@@ -359,6 +408,52 @@ test("a literal outside an _event call is not an event", () => {
   const { eventNameAt } = require("../context") as typeof import("../context");
   const src = HEAD + "    )->tag( n = `Text` )->a( n = `text` v = `GO` ).";
   assert.equal(eventNameAt(src, src.lastIndexOf("`GO`") + 2), undefined);
+});
+
+test("only the name literal of an _event call is the event", () => {
+  /*
+   * Regression (corpus fuzz): any literal inside `_event( )` counted, so F2
+   * in `arg = \`${$parameters>/value}\`` offered to rename that as an
+   * event and then renamed nothing, and an `arg` spelled like an event
+   * jumped to its WHEN branch.
+   */
+  const { eventNameAt, eventNameSpans } = require("../context") as typeof import("../context");
+  const src =
+    HEAD +
+    "    )->tag( n = `Input` )->a( n = `change` v = client->_event(\n" +
+    "        val = `VALIDATE` arg = `${$parameters>/value}` ) )\n" +
+    "    )->tag( n = `Button` )->a( n = `press` v = client->_event( `GO` t_arg = VALUE #( ( `SAVE` ) ) ) ).\n" +
+    "    CASE client->get( )-event.\n" +
+    "      WHEN `SAVE`.\n" +
+    "    ENDCASE.\n";
+  const at = (needle: string) => src.indexOf(needle) + 2;
+  assert.equal(eventNameAt(src, at("${$parameters")), undefined, "an arg = literal is no event name");
+  assert.equal(eventNameAt(src, at("`SAVE` )")), undefined, "a t_arg row is no event name");
+  assert.equal(eventNameAt(src, at("`VALIDATE`"))?.name, "VALIDATE", "val = still is");
+  assert.equal(eventNameAt(src, at("`GO`"))?.name, "GO", "and so is the positional one");
+  // what eventNameAt answers is always one of the spans a rename writes
+  for (const needle of ["`VALIDATE`", "`GO`"]) {
+    const ev = eventNameAt(src, at(needle))!;
+    assert.ok(eventNameSpans(src, ev.name).some((s) => s.start === ev.start));
+  }
+});
+
+test("a WHEN value no event can be spelled is no event", () => {
+  // Regression (corpus fuzz): `WHEN \`Out of Stock\` THEN` in a SWITCH, a
+  // `WHEN \`%MSG\``, `WHEN \`/N\`` - whenNameAt answered with the value,
+  // whenBranches (what F2 writes) never had it, and the rename was empty
+  const { whenNameAt } = require("../context") as typeof import("../context");
+  const src = [
+    "    DATA(state) = SWITCH string( lv_status",
+    "      WHEN `Out of Stock` THEN `Warning`",
+    "      WHEN `IN_STOCK` THEN `Success` ).",
+    "    CASE lv_code.",
+    "      WHEN `/N`.",
+    "    ENDCASE.",
+  ].join("\n");
+  assert.equal(whenNameAt(src, src.indexOf("Out of") + 2), undefined);
+  assert.equal(whenNameAt(src, src.indexOf("/N") + 1), undefined);
+  assert.equal(whenNameAt(src, src.indexOf("IN_STOCK") + 2)?.name, "IN_STOCK");
 });
 
 test("whenBranches and eventNameSpans see every naming of an event", () => {
@@ -608,6 +703,76 @@ test("every alternative of WHEN 'A' OR 'B' is a branch of its own", () => {
   // an OR outside a WHEN chain arms nothing
   const cond = "IF lv_a = 'X' OR lv_b = 'Y'.";
   assert.equal(whenNameAt(cond, cond.indexOf("Y") + 1), undefined);
+});
+
+test("a WHEN of another CASE beside the dispatch is not an event branch", () => {
+  /*
+   * F2 on the event `EDIT` used to rewrite the `WHEN 'EDIT'` of a
+   * `CASE mv_mode.` too - and Go-to-Definition, highlights and the lens
+   * took it for a handler. Only the WHENs at the own level of the CASE
+   * over the event are branches when the class has one.
+   */
+  const { whenNameAt } = require("../context") as typeof import("../context");
+  const source = [
+    "CLASS zcl_app IMPLEMENTATION.",
+    "  METHOD z2ui5_if_app~main.",
+    "    CASE mv_mode.",
+    "      WHEN 'EDIT'.",
+    "        lv_first = abap_true.",
+    "    ENDCASE.",
+    "    CASE client->get( )-event.",
+    "      WHEN 'EDIT'.",
+    "        CASE mv_status.",
+    "          WHEN 'EDIT'.",
+    "            lv_nested = abap_true.",
+    "        ENDCASE.",
+    "        mv_mode = 'EDIT'.",
+    "    ENDCASE.",
+    "    CASE mv_mode.",
+    "      WHEN 'EDIT'.",
+    "        lv_editable = abap_true.",
+    "    ENDCASE.",
+    "    view->tag( `Button` )->a( n = `press` v = client->_event( `EDIT` ) ).",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+  ].join("\n");
+  const lineOf = (offset: number) => source.slice(0, offset).split("\n").length;
+  assert.deepEqual(
+    eventNameSpans(source, "EDIT").map((span) => lineOf(span.start)),
+    [8, 19],
+    "only the dispatch's WHEN and the raise are renamed"
+  );
+  assert.deepEqual(
+    whenBranches(source).map((b) => lineOf(b.start)),
+    [8]
+  );
+  assert.equal(lineOf(whenBranchOf(source, "EDIT")!), 8);
+  // the cursor on the unrelated WHENs is no event at all
+  const lines = source.split("\n");
+  const offsetOfLine = (line: number) =>
+    lines.slice(0, line - 1).join("\n").length + 1;
+  for (const line of [4, 10, 16]) {
+    const inLiteral = offsetOfLine(line) + lines[line - 1].indexOf("EDIT") + 1;
+    assert.equal(whenNameAt(source, inLiteral), undefined, `line ${line}`);
+    assert.equal(whenLiteralAt(source, inLiteral), undefined, `line ${line}`);
+  }
+  const inDispatch = offsetOfLine(8) + lines[7].indexOf("EDIT") + 1;
+  assert.equal(whenNameAt(source, inDispatch)?.name, "EDIT");
+});
+
+test("without a CASE over the event, every WHEN still counts", () => {
+  // a dispatcher over a local (`CASE lv_event.`) has no head to find - the
+  // fallback keeps its branches wired rather than going silent
+  const source = [
+    "    DATA(lv_event) = client->get( )-event.",
+    "    CASE lv_event.",
+    "      WHEN 'GO'.",
+    "    ENDCASE.",
+    "    CASE mv_mode.",
+    "      WHEN 'GO'.",
+    "    ENDCASE.",
+  ].join("\n");
+  assert.equal(whenBranches(source).length, 2);
 });
 
 test("a > inside a quoted attribute value does not end the XML tag", () => {

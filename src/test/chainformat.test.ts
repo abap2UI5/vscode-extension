@@ -86,6 +86,24 @@ test("a scrambled CRLF chain keeps CRLF, never mixed endings", () => {
   assert.ok(!/[^\r]\n/.test(out), "a lone \\n means a mixed-ending file");
 });
 
+test("a CRLF chain line under a comment line is re-indented without a stray \\r", () => {
+  // Regression (corpus fuzz): the rule's whitespace run behind a comment line
+  // starts after the comment's \r, and the fix was written over the \n alone
+  const lines = CANONICAL.split("\n");
+  const at = lines.findIndex((line) => line.includes("`Button`"));
+  const commented = [...lines.slice(0, at), "                \" the button", ...lines.slice(at)];
+  const canonical = commented.join("\r\n");
+  assert.deepEqual(chainFormatEdits(canonical), [], "canonical stays untouched");
+  const scrambled = [
+    ...commented.slice(0, at + 1),
+    "                          " + commented[at + 1].trimStart(),
+    ...commented.slice(at + 2),
+  ].join("\r\n");
+  const out = applyChainEdits(scrambled, chainFormatEdits(scrambled));
+  assert.ok(!out.includes("\r\r"), "no doubled \\r");
+  assert.equal(out, canonical);
+});
+
 test("an explicit LF ending is honoured over a CRLF-looking source", () => {
   // the editor passes the document's own EndOfLine - a document VS Code holds
   // as LF must be formatted with LF even if a stray \r\n is in the text

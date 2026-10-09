@@ -14,11 +14,11 @@ import {
   renderGateState,
 } from "./rendergate";
 import { VIEW_CHECK_DIRS } from "./repolayout";
+import { LINTER_RELEASE } from "./linterrelease";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
-import { isShadowScheme, usesBuilder } from "./abap";
+import { isShadowScheme } from "./abap";
 import {
   configRelative,
-  frozenBuilderOf,
   GateOptions,
   GateResult,
   runGate,
@@ -31,20 +31,29 @@ import {
   CheckerCommand,
   cliCollects,
   FindingSeverity,
+  isAllClassesFile,
   isCheckableSource,
+  isViewSource,
   parseRenderReport,
   checkerCwd,
   RenderGateOutcome,
   renderGateNote,
   RenderResult,
-  plannedFixes,
+  editorFixPlan,
   resolveCheckerCommand,
   scratchFileName,
   settleRenderErrors,
+  workspaceFixSummary,
 } from "./checkcore";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
+import {
+  classIndexStamp,
+  onDidChangeClassIndex,
+  registerClassIndex,
+  workspaceClassIndex,
+} from "./classindexfeed";
 import { plural } from "./text";
-import { rebuildBaseline } from "./baselinefile";
+import { baselineWriteRefusal, rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
   CheckOptions,
@@ -52,6 +61,7 @@ import {
   clearConfigCache,
   configGeneration,
   describeOptions,
+  findConfigFile,
   resolveOptions,
 } from "./lintconfig";
 
@@ -130,7 +140,19 @@ export function isCheckable(doc: vscode.TextDocument): boolean {
   if (isShadowScheme(doc.uri.scheme)) {
     return false;
   }
-  return isCheckableSource(doc.fileName, doc.languageId, doc.getText());
+  if (isCheckableSource(doc.fileName, doc.languageId, doc.getText())) {
+    return true;
+  }
+  // `allClasses` is the repository config's word - asked only for a class
+  // the content test turned down (the options are cached per config mtime)
+  return isAllClassesFile(doc.fileName) && optionsFor(doc).allClasses === true;
+}
+
+/** Does the document build a view of its own - what the systemless preview
+ *  and the mock generator need (an app class whose view comes from another
+ *  class is checkable, but has nothing to render or to mock). */
+export function hasOwnView(doc: vscode.TextDocument): boolean {
+  return !isShadowScheme(doc.uri.scheme) && isViewSource(doc.fileName, doc.languageId, doc.getText());
 }
 
 /** The document to check on demand: the active editor when it is checkable,
@@ -172,6 +194,22 @@ export function baselineFileFor(doc: vscode.TextDocument): string | undefined {
   return doc.uri.scheme === "file" ? optionsFor(doc).baseline : undefined;
 }
 
+/** The folder a baseline named by `configFile` must lie in to be written:
+ *  the workspace folder holding that config, or - for a config outside every
+ *  open folder, which a cloned repository cannot put there - the config's own
+ *  directory. See `baselineWriteRefusal`. */
+function baselineRootOfConfig(configFile: string): string {
+  const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(configFile));
+  return folder?.uri.scheme === "file" ? folder.uri.fsPath : path.dirname(configFile);
+}
+
+/** The same root for a source file, through the config that governs it -
+ *  undefined when none does (then there is no baseline to write either). */
+export function baselineRootFor(sourceFile: string): string | undefined {
+  const configFile = findConfigFile(path.dirname(sourceFile));
+  return configFile ? baselineRootOfConfig(configFile) : undefined;
+}
+
 function optionsFor(doc: vscode.TextDocument): CheckOptions {
   const cfg = config();
   return resolveOptions(discoveryDir(doc), {
@@ -190,7 +228,11 @@ function gateOptionsFor(
   options: CheckOptions,
   isXml: boolean
 ): GateOptions {
-  return isXml ? options : { ...options, prep: preparedAbapOf(doc) };
+  // the workspace's class index: what CI's checkFiles judges the class-level
+  // rules with (classindexfeed.ts), undefined while the linter takes none
+  return isXml
+    ? options
+    : { ...options, prep: preparedAbapOf(doc), classIndex: workspaceClassIndex() };
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +254,7 @@ export function checkerCommand(): CheckerCommand {
     reposRoot: config().get<string>("mcp.reposRoot", ""),
     checkoutDirs: VIEW_CHECK_DIRS,
     exists: (file) => fs.existsSync(file),
+    linterCommit: LINTER_RELEASE.commit,
   });
 }
 
@@ -612,6 +655,13 @@ async function checkDocument(
        * started, and the message says which gate did not run. */
       renderOff = true;
       helperNote = renderGateNote("off-by-config");
+    } else if (!vscode.workspace.isTrusted) {
+      /* Restricted Mode: the render gate is an external process over the
+       * repository's code - and its last-resort fallback fetches one - so it
+       * waits for the workspace to be trusted. `viewCheck.render` itself is
+       * a restricted setting too: a cloned repository cannot switch it on. */
+      log("view-check: render gate not run - the workspace is not trusted");
+      helperNote = renderGateNote("skipped-untrusted");
     } else if (state.kind === "failed") {
       log(`view-check: render gate not run - ${state.reason}`);
       helperNote = renderGateNote("skipped-not-started");
@@ -847,11 +897,20 @@ async function sweepWorkspace(
       // always with the text - it is already in memory, and carrying it even
       // on a cache hit means a cache cleared mid-sweep (a config change) can
       // still be gated instead of skipped
-      return { stamp: `v${target.open.version}`, text: target.open.getText() };
+      return {
+        stamp: `v${target.open.version}|${classIndexStamp(target.uri.toString())}`,
+        text: target.open.getText(),
+      };
     }
     let stamp: string;
     try {
-      stamp = `m${(await vscode.workspace.fs.stat(target.uri)).mtime}`;
+      /* The text is not all a class is judged on: what the class index says
+       * about its superclass chain and its readers is too, so that is part
+       * of the stamp - an edited superclass re-gates its subclasses, and
+       * nothing else. */
+      stamp =
+        `m${(await vscode.workspace.fs.stat(target.uri)).mtime}` +
+        `|${classIndexStamp(target.uri.toString())}`;
     } catch {
       return undefined;
     }
@@ -942,13 +1001,21 @@ async function sweepWorkspace(
           }
         }
         const isXml = VIEW_XML_RE.test(uri.path);
-        if (!isXml && !usesBuilder(text) && !frozenBuilderOf(text)) {
+        // the content half of the linter's collectFiles: a builder (or
+        // frozen-builder) class, an app class without a view, and under
+        // `allClasses` every class
+        if (!isXml && !isCheckableSource(uri.path, "abap", text, { allClasses: opts.allClasses })) {
           sweepCache.set(key, { stamp: io.stamp, findings: [], skip: true });
           continue;
         }
         let gate: GateResult;
         try {
-          gate = runGate(text, uri.scheme === "file" ? uri.fsPath : uri.path, isXml, opts);
+          gate = runGate(
+            text,
+            uri.scheme === "file" ? uri.fsPath : uri.path,
+            isXml,
+            isXml ? opts : { ...opts, classIndex: workspaceClassIndex() }
+          );
         } catch (err) {
           // one file that cannot be parsed is not a reason to abandon the sweep
           log(`view-check: ${labelOf(uri)} skipped - ${String(err)}`);
@@ -1123,12 +1190,19 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
           return;
         }
         const edit = new vscode.WorkspaceEdit();
-        let fixes = 0;
+        /** Findings a span edit corrects, and files given an LF line ending -
+         *  counted apart (`workspaceFixSummary`). */
+        let fixed = 0;
+        let toLf = 0;
         let files = 0;
         let moved = 0;
         for (const file of swept.files) {
-          const planned = plannedFixes(file.findings);
-          if (!planned.length) {
+          // `editorFixPlan`: a CRLF file is turned LF by a line-ending
+          // change, not by its `\r` deletions, which no editor position
+          // addresses
+          const plan = editorFixPlan(file.findings);
+          const planned = plan.spans;
+          if (!planned.length && !plan.toLf) {
             continue;
           }
           const doc = await vscode.workspace.openTextDocument(file.uri);
@@ -1147,17 +1221,25 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
             moved++;
             continue;
           }
-          for (const fix of planned) {
-            edit.replace(
-              file.uri,
-              new vscode.Range(doc.positionAt(fix.start), doc.positionAt(fix.end)),
-              fix.text,
-              // through the refactor preview: a workspace's worth of edits
-              // is reviewed, not sprung
-              { needsConfirmation: true, label: "abap2UI5 mechanical fix" }
-            );
+          // through the refactor preview: a workspace's worth of edits is
+          // reviewed, not sprung
+          const meta = { needsConfirmation: true, label: "abap2UI5 mechanical fix" };
+          const edits: Array<[vscode.TextEdit, vscode.WorkspaceEditEntryMetadata]> = planned.map(
+            (fix) => [
+              new vscode.TextEdit(
+                new vscode.Range(doc.positionAt(fix.start), doc.positionAt(fix.end)),
+                fix.text
+              ),
+              meta,
+            ]
+          );
+          if (plan.toLf) {
+            edits.push([vscode.TextEdit.setEndOfLine(vscode.EndOfLine.LF), meta]);
           }
-          fixes += planned.length;
+          edit.set(file.uri, edits);
+          // the CRLF finding is resolved by the line-ending change, not a span
+          fixed += plan.findings - plan.byLineEnding;
+          toLf += plan.toLf ? 1 : 0;
           files++;
         }
         if (moved) {
@@ -1169,7 +1251,7 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
           ? ` ${plural(moved, "file")} edited while the sweep ran ` +
             `${moved === 1 ? "was" : "were"} left alone.`
           : "";
-        if (!fixes) {
+        if (!files) {
           vscode.window.showInformationMessage(
             `abap2UI5: nothing in ${plural(swept.files.length, "file")} can be corrected mechanically.` +
               skipped
@@ -1182,12 +1264,13 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
           );
           return;
         }
-        log(`view-check: workspace fix - ${fixes} fix(es) in ${files} file(s)`);
+        const summary = workspaceFixSummary({ fixed, toLf, files });
+        log(`view-check: workspace fix - ${summary}`);
         /* Overlapping fixes are left for the next run, here as everywhere -
          * so the count is what was applied, not what remains, and saying so is
          * what tells someone to run it again. */
         vscode.window.showInformationMessage(
-          `abap2UI5: applied ${plural(fixes, "fix")} in ${plural(files, "file")}. ` +
+          `abap2UI5: ${summary}. ` +
             "Run it again if fixes overlapped; the files are edited, not saved." +
             skipped
         );
@@ -1252,6 +1335,15 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
           );
         }
       });
+    return;
+  }
+  // refused before the sweep, not after it: rebuildBaseline asks again
+  const baselineRoot = rootOptions.configFile
+    ? baselineRootOfConfig(rootOptions.configFile)
+    : undefined;
+  const refusal = baselineWriteRefusal(baselineFile, baselineRoot);
+  if (refusal) {
+    vscode.window.showWarningMessage(`abap2UI5: ${refusal}`);
     return;
   }
   const confirmed = await vscode.window.showWarningMessage(
@@ -1334,7 +1426,8 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
           mine.map((file) => ({
             file: file.uri.fsPath,
             findings: file.findings,
-          }))
+          })),
+          baselineRoot
         );
         // the file just changed; its memo is keyed on an mtime that may not
         // have moved yet
@@ -1403,6 +1496,18 @@ export function registerViewCheck(
     }
   };
   recheckAll = recheckOpen;
+
+  // the other classes are part of every ABAP verdict: when the index's
+  // content moves (a superclass saved with a cs_event, a caller reading an
+  // attribute), what is open is judged again - memos first, they were
+  // computed under the old index
+  registerClassIndex(context);
+  context.subscriptions.push(
+    onDidChangeClassIndex(() => {
+      memos.clear();
+      recheckOpen();
+    })
+  );
 
   // A config file is part of the answer for every file it governs, so a
   // change to one invalidates the cache and re-checks what is open.

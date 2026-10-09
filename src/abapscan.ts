@@ -302,6 +302,96 @@ export function blankNonCode(source: string): string {
 }
 
 /**
+ * Like `blankNonCode`, except that the embedded expressions of string
+ * templates stay: `|Hello { lv_name }|` keeps ` lv_name ` and blanks the
+ * text, the bars and the braces. Literals inside an embed are blanked, and a
+ * template nested in an embed is read the same way.
+ *
+ * `blankNonCode` blanks a template whole, which is right for the readers
+ * that look for statements - but a reader that looks for an IDENTIFIER has
+ * to see the ones a template embeds, and must not take the template's text
+ * for code. F2 on an attribute read the raw source instead and rewrote
+ * `|The mv_title is …|` (text) and `|{ ls_row-mv_title }|` (another
+ * structure's component, its `ls_row-` invisible in the blanked copy).
+ */
+export function blankNonCodeKeepEmbeds(source: string): string {
+  const ranges: Array<[number, number]> = [];
+  for (const span of abapSpans(source)) {
+    if (span.kind === "template") {
+      embedCode(source, span.from, span.to, ranges);
+    }
+  }
+  const blanked = blankNonCode(source);
+  if (!ranges.length) {
+    return blanked;
+  }
+  let out = "";
+  let prev = 0;
+  for (const [from, to] of ranges) {
+    out += blanked.slice(prev, from) + source.slice(from, to);
+    prev = to;
+  }
+  return out + blanked.slice(prev);
+}
+
+/** The code ranges inside the embeds of the template spanning `[from, to)`
+ *  (`from` on its opening bar), in order, literals and nested template text
+ *  left out. */
+function embedCode(
+  source: string,
+  from: number,
+  to: number,
+  ranges: Array<[number, number]>
+): void {
+  let j = from + 1;
+  while (j < to) {
+    const c = source[j];
+    if (c === "\\") {
+      j += 2;
+      continue;
+    }
+    if (c === "|") {
+      return;
+    }
+    if (c !== "{") {
+      j++;
+      continue;
+    }
+    const after = Math.min(scanEmbedded(source, j), to);
+    const end = source[after - 1] === "}" ? after - 1 : after;
+    let k = j + 1;
+    let codeFrom = k;
+    while (k < end) {
+      const d = source[k];
+      if (d === "'" || d === "`") {
+        if (k > codeFrom) {
+          ranges.push([codeFrom, k]);
+        }
+        k = scanLiteral(source, k);
+        codeFrom = k;
+        continue;
+      }
+      if (d === "|") {
+        if (k > codeFrom) {
+          ranges.push([codeFrom, k]);
+        }
+        const nested = scanTemplate(source, k);
+        const nestedTo = nested.closed ? nested.end + 1 : nested.end;
+        embedCode(source, k, nestedTo, ranges);
+        k = nestedTo;
+        codeFrom = k;
+        continue;
+      }
+      k++;
+    }
+    if (end > codeFrom) {
+      ranges.push([codeFrom, Math.min(end, to)]);
+    }
+    j = after;
+  }
+}
+
+/**
  * The source with only its COMMENTS blanked - literals and templates stay as
  * they are, same length, same offsets.
  *
@@ -448,4 +538,17 @@ export function declaredNames(
     at += part.length + 1; // the comma the split ate
   }
   return out;
+}
+
+/**
+ * Start of the line `offset` is on - 0 for the first line, whatever the
+ * source starts with.
+ *
+ * Not `source.lastIndexOf("\n", offset - 1) + 1`: at offset 0 that asks for
+ * a search from -1, which `lastIndexOf` reads as 0 - so a source starting
+ * with a newline put "the start of the first line" at 1, past the offset it
+ * was asked about (the same trap `xmlContextAt` fell into with `<`).
+ */
+export function lineStartAt(source: string, offset: number): number {
+  return offset > 0 ? source.lastIndexOf("\n", offset - 1) + 1 : 0;
 }

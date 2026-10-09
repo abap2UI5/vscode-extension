@@ -36,10 +36,12 @@ const EXPECTED_COMMANDS = [
 
 /** A view whose one property does not exist - `unknown-property`, an error.
  *  XML rather than ABAP because the host has no `abap` language id to give
- *  an untitled document, while `*.view.xml` is recognised by its name. */
+ *  an untitled document, while `*.view.xml` is recognised by its name. Its
+ *  icon is in no release - `unknown-icon`, which needs the linter's
+ *  `data/icons.json` seeded into the `fs` shim (`src/web/linterdata.ts`). */
 const BAD_VIEW =
   '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n' +
-  '  <Button text="Go" nosuchprop="x"/>\n' +
+  '  <Button text="Go" nosuchprop="x" icon="sap-icon://nosuchicon"/>\n' +
   "</mvc:View>\n";
 
 async function waitFor<T>(
@@ -91,10 +93,12 @@ export async function run(): Promise<void> {
       ? String((d.code as { value: string | number }).value)
       : String(d.code)
   );
-  if (!codes.includes("unknown-property")) {
-    throw new Error(
-      `the web check published ${found.length} diagnostic(s) but not the ` +
-        `expected unknown-property: ${codes.join(", ")}`
-    );
+  for (const expected of ["unknown-property", "unknown-icon"]) {
+    if (!codes.includes(expected)) {
+      throw new Error(
+        `the web check published ${found.length} diagnostic(s) but not the ` +
+          `expected ${expected}: ${codes.join(", ")}`
+      );
+    }
   }
 }

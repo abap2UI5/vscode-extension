@@ -89,15 +89,31 @@ export function chainFormatEdits(
         typeof fix?.text === "string" && eol === "\r\n"
           ? fix.text.replace(/\r\n|\n/g, "\r\n")
           : fix?.text;
+      /* Behind a comment line the rule's whitespace run starts at the `\n`,
+       * after the comment's `\r` (the comment runs to the `\n`). A fix
+       * starting with the `\r\n` written over that slice would leave the
+       * comment's `\r` in front of it - `\r\r\n` - so the edit starts at the
+       * `\r` instead. The editor clamped the offset back to the line end and
+       * hid it; `applyChainEdits` did not. */
+      let start = fix?.start;
       if (
-        typeof fix?.start === "number" &&
+        typeof start === "number" &&
+        typeof fixText === "string" &&
+        fixText.startsWith("\r\n") &&
+        text[start] === "\n" &&
+        text[start - 1] === "\r"
+      ) {
+        start--;
+      }
+      if (
+        typeof start === "number" &&
         typeof fix?.end === "number" &&
         typeof fixText === "string" &&
-        fix.start <= fix.end &&
+        start <= fix.end &&
         fix.end <= text.length &&
-        text.slice(fix.start, fix.end) !== fixText
+        text.slice(start, fix.end) !== fixText
       ) {
-        edits.push({ start: fix.start, end: fix.end, text: fixText });
+        edits.push({ start, end: fix.end, text: fixText });
       }
     }
   }

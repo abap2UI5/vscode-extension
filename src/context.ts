@@ -107,15 +107,150 @@ function abapNsMapUncached(source: string): Record<string, string> {
   return map;
 }
 
-/** The `xmlns` declarations of a raw view/fragment XML. */
-export function xmlNsMap(source: string): Record<string, string> {
+/** The `xmlns` declarations written in one tag's attribute text - in either
+ *  quote, as XML allows: reading `"` alone left every prefix of a view
+ *  written with `xmlns:m='sap.m'` unknown, so its `m:` controls completed and
+ *  hovered as nothing and an unprefixed one was taken for sap.m whatever the
+ *  default namespace said. */
+function nsDeclarations(attrText: string): Record<string, string> {
   const map: Record<string, string> = {};
-  const re = /xmlns(?::([\w.]+))?\s*=\s*"([^"]+)"/g;
+  const re = /(?:^|\s)xmlns(?::([\w.-]+))?\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(source))) {
-    map[m[1] ?? ""] = m[2];
+  while ((m = re.exec(attrText))) {
+    map[m[1] ?? ""] = m[2] ?? m[3];
   }
   return map;
+}
+
+/** One element tag of a raw XML document, with the namespaces in scope at
+ *  it (its own declarations included). */
+export interface ScopedXmlTag {
+  /** Offset of the `<`. */
+  start: number;
+  /** Offset of the `>` ending the tag, or -1 for one still being typed (it
+   *  then runs to the next `<` or the end of the text). */
+  end: number;
+  name: string;
+  /** Offset where the attribute text starts (right behind the name). */
+  attrsAt: number;
+  attrText: string;
+  close: boolean;
+  selfClose: boolean;
+  /** Prefix -> namespace in scope at this element; `""` is the default. */
+  ns: Record<string, string>;
+}
+
+/**
+ * Every element tag of a raw view/fragment XML, in order, each with the
+ * namespaces in scope at it - scoped as XML scopes them: a declaration binds
+ * the element that carries it and that element's subtree, not its siblings
+ * and not the elements above it (the linter resolves its controls the same
+ * way since it scoped them per element). Comments, CDATA sections,
+ * processing instructions and the doctype are skipped, so an `xmlns` or a
+ * `<Tag>` in a comment's prose is neither a declaration nor an element.
+ *
+ * Read as one document-wide map, an inner `<VBox xmlns="sap.ui.layout.form">`
+ * re-resolved every unprefixed tag of the view, a prefix declared in one
+ * subtree passed as declared in another, and a commented-out declaration
+ * counted.
+ */
+export function xmlScopedTags(source: string): ScopedXmlTag[] {
+  const out: ScopedXmlTag[] = [];
+  const stack: Array<Record<string, string>> = [{}];
+  let i = 0;
+  while ((i = source.indexOf("<", i)) >= 0) {
+    const skip = (opener: string, closer: string): boolean => {
+      if (!source.startsWith(opener, i)) {
+        return false;
+      }
+      const e = source.indexOf(closer, i + opener.length);
+      i = e < 0 ? source.length : e + closer.length;
+      return true;
+    };
+    if (skip("<!--", "-->") || skip("<![CDATA[", "]]>") || skip("<?", "?>") || skip("<!", ">")) {
+      continue;
+    }
+    const close = source[i + 1] === "/";
+    const nameAt = i + (close ? 2 : 1);
+    const name = /^[\w:.-]+/.exec(source.slice(nameAt, nameAt + 256))?.[0];
+    if (!name) {
+      i++;
+      continue;
+    }
+    // the `>` that ends the tag - one inside a quoted value ends nothing -
+    // or, for a tag still being typed, the next `<` outside a quote
+    let end = -1;
+    let stop = source.length;
+    let quote: string | undefined;
+    for (let j = nameAt + name.length; j < source.length; j++) {
+      const c = source[j];
+      if (quote) {
+        if (c === quote) {
+          quote = undefined;
+        }
+      } else if (c === '"' || c === "'") {
+        quote = c;
+      } else if (c === ">") {
+        end = j;
+        stop = j;
+        break;
+      } else if (c === "<") {
+        stop = j;
+        break;
+      }
+    }
+    const attrsAt = nameAt + name.length;
+    const attrText = source.slice(attrsAt, stop);
+    if (close) {
+      if (stack.length > 1) {
+        stack.pop();
+      }
+      out.push({ start: i, end, name, attrsAt, attrText, close, selfClose: false, ns: stack[stack.length - 1] });
+    } else {
+      const own = nsDeclarations(attrText);
+      const outer = stack[stack.length - 1];
+      const ns = Object.keys(own).length ? { ...outer, ...own } : outer;
+      const selfClose = end >= 0 && /\/\s*$/.test(attrText);
+      out.push({ start: i, end, name, attrsAt, attrText, close, selfClose, ns });
+      if (!selfClose) {
+        stack.push(ns);
+      }
+    }
+    i = end < 0 ? stop : end + 1;
+  }
+  return out;
+}
+
+/**
+ * The namespaces in scope at `offset` of a raw view/fragment XML (see
+ * `xmlScopedTags`): inside a tag, that element's own declarations included;
+ * between tags, the scope of the innermost element still open there.
+ */
+export function xmlNsMapAt(source: string, offset: number): Record<string, string> {
+  const open: Array<Record<string, string>> = [{}];
+  for (const tag of xmlScopedTags(source)) {
+    if (tag.start >= offset) {
+      break;
+    }
+    const tagStop = tag.end >= 0 ? tag.end : tag.attrsAt + tag.attrText.length;
+    if (offset <= tagStop) {
+      return tag.ns; // inside this tag
+    }
+    if (tag.close) {
+      if (open.length > 1) {
+        open.pop();
+      }
+    } else if (!tag.selfClose) {
+      open.push(tag.ns);
+    }
+  }
+  return open[open.length - 1];
+}
+
+/** The namespaces the document's top-level element declares - the scope
+ *  every element without declarations of its own sees (comments skipped). */
+export function xmlNsMap(source: string): Record<string, string> {
+  return xmlScopedTags(source).find((tag) => !tag.close)?.ns ?? {};
 }
 
 /** Library for a namespace prefix, falling back to sap.m for the default one
@@ -869,7 +1004,13 @@ export function viewOutline(source: string): OutlineNode[] {
       stack.push(name);
     }
   }
-  widenOpen(calls.length ? Math.max(...calls.map((c) => c.close ?? c.open)) : 0);
+  // a loop, not `Math.max(...calls)`: one argument per call of the class
+  // overflowed the stack from about 120,000 calls on, and the outline threw
+  let last = 0;
+  for (const call of calls) {
+    last = Math.max(last, call.close ?? call.open);
+  }
+  widenOpen(last);
 
   // A parent must span its children - an unclosed container ends where its
   // last child does.
@@ -1139,7 +1280,14 @@ export interface NamedSpan {
 }
 
 /** The event name the cursor sits on inside a `client->_event( … )` call
- *  (any of its spellings: positional, `val =`, `_event_display`). */
+ *  (any of its spellings: positional, `val =`, `_event_display`).
+ *
+ *  Only the NAME literal - the one `eventRaises` reads: positional or
+ *  `val =`, and spelled like an event. Any literal of the call used to count,
+ *  so the cursor in `arg = \`${$parameters>/value}\`` was "on an event":
+ *  F2 offered to rename `${$parameters>/value}` as one and then changed
+ *  nothing, the highlights lit up nothing, and an `arg` that happened to
+ *  spell an event jumped to that event's WHEN. */
 export function eventNameAt(
   source: string,
   offset: number
@@ -1149,8 +1297,14 @@ export function eventNameAt(
   if (!literal || !call || !/^_event\w*$/i.test(call.name)) {
     return undefined;
   }
+  const arg = argNameBefore(source, call.open + 1, literal.start - 1);
+  if (arg !== undefined && arg !== "val") {
+    return undefined;
+  }
   const name = source.slice(literal.start, literal.end);
-  return name ? { name, start: literal.start, end: literal.end } : undefined;
+  return /^[\w-]+$/.test(name)
+    ? { name, start: literal.start, end: literal.end }
+    : undefined;
 }
 
 /**
@@ -1274,6 +1428,131 @@ export function bindableAttributes(source: string): BindableAttribute[] {
   return out;
 }
 
+/** The head of a CASE over the event - the same two spellings the linter's
+ *  `event-without-handler` reads its handlers from. */
+const CASE_OVER_EVENT_HEAD =
+  /\b(CASE)\s+[^.]*?(?:get_event\s*\(\s*\)|get\s*\(\s*\)-event)[^.]*\./gi;
+
+/** A `CASE client->get_event( )` (or `CASE client->get( )-event`) block -
+ *  the dispatcher whose WHEN branches are the event handlers. */
+export interface CaseRegion {
+  /** Offset of the `CASE` keyword. */
+  from: number;
+  /** One past `ENDCASE`'s last character. */
+  to: number;
+  /** Start of the body: one past the head's period. */
+  bodyAt: number;
+  /** Offset of the `ENDCASE` keyword. */
+  endcaseAt: number;
+  /** Nested CASE … ENDCASE blocks inside the body, as `[from, to)`. */
+  inner: Array<[number, number]>;
+  /** The `CASE` keyword as written - `CASE` or `case`. */
+  keyword: string;
+}
+
+/**
+ * The CASE whose head was matched at `headAt` (`headLength` long), up to ITS
+ * OWN ENDCASE, nested CASE blocks counted through (a status switch inside one
+ * handler is not the dispatcher, and its `WHEN OTHERS` is not the
+ * dispatcher's either). Undefined for an unclosed CASE mid-edit.
+ */
+function caseRegionFrom(
+  code: string,
+  headAt: number,
+  headLength: number,
+  keyword: string
+): CaseRegion | undefined {
+  const bodyAt = headAt + headLength;
+  const inner: Array<[number, number]> = [];
+  let depth = 1;
+  let open: number | undefined;
+  // only a CASE that starts a statement opens a block - the one in
+  // `TO UPPER CASE` or `IGNORING CASE` is part of another statement, and
+  // counting it let the dispatcher's own ENDCASE close it instead
+  const re = /(?<=(?:^|[.:,])\s*)\b(CASE)\b|\b(ENDCASE)\b/gi;
+  re.lastIndex = bodyAt;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code))) {
+    if (m[1]) {
+      depth++;
+      if (depth === 2) {
+        open = m.index;
+      }
+    } else {
+      depth--;
+      if (depth === 1 && open !== undefined) {
+        inner.push([open, m.index + m[0].length]);
+        open = undefined;
+      }
+      if (depth === 0) {
+        return {
+          from: headAt,
+          to: m.index + m[0].length,
+          bodyAt,
+          endcaseAt: m.index,
+          inner,
+          keyword,
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Every CASE over the event in `code` - which must be the `blankNonCode`
+ * copy of the source, so a CASE in a comment or a literal is not one. A
+ * class may dispatch in more than one method, so this is a list; a head
+ * whose block never closes (mid-edit) is left out.
+ */
+export function eventCaseRegions(code: string): CaseRegion[] {
+  const out: CaseRegion[] = [];
+  const re = new RegExp(CASE_OVER_EVENT_HEAD.source, CASE_OVER_EVENT_HEAD.flags);
+  let head: RegExpExecArray | null;
+  while ((head = re.exec(code))) {
+    const region = caseRegionFrom(code, head.index, head[0].length, head[1]);
+    if (region) {
+      out.push(region);
+      re.lastIndex = Math.max(re.lastIndex, region.to);
+    }
+  }
+  return out;
+}
+
+/** The first CASE over the event (see `eventCaseRegions`) - where the
+ *  handler-stub quick fix adds a branch. */
+export function eventCaseRegion(code: string): CaseRegion | undefined {
+  const re = new RegExp(CASE_OVER_EVENT_HEAD.source, CASE_OVER_EVENT_HEAD.flags);
+  const head = re.exec(code);
+  return head ? caseRegionFrom(code, head.index, head[0].length, head[1]) : undefined;
+}
+
+/** Is `offset` at the CASE's own level - inside its body, outside every
+ *  nested block? */
+export function ownLevel(region: CaseRegion, offset: number): boolean {
+  return (
+    offset >= region.bodyAt &&
+    offset < region.endcaseAt &&
+    !region.inner.some(([from, to]) => offset >= from && offset < to)
+  );
+}
+
+/**
+ * Whether a WHEN at `offset` is a branch of the event dispatch: at the own
+ * level of a CASE over the event - or, when the source has no such CASE at
+ * all, any WHEN (a dispatcher spelled some other way, e.g. over a local
+ * `lv_event`, still gets its wires). Without that restriction a
+ * `CASE mv_mode. WHEN 'EDIT'.` beside the dispatch was renamed, highlighted
+ * and lensed along with the event `EDIT`.
+ */
+function dispatchFilter(source: string): (offset: number) => boolean {
+  const regions = eventCaseRegions(blankNonCode(source));
+  if (!regions.length) {
+    return () => true;
+  }
+  return (offset) => regions.some((region) => ownLevel(region, offset));
+}
+
 /** How far back the WHEN test reads. Wide enough for any real alternative
  *  chain (`WHEN 'A' OR 'B' OR …` across lines) - the old 200 silently lost
  *  completion and rename on the last literals of a long one - and bounded so
@@ -1294,13 +1573,22 @@ export function whenLiteralAt(
     Math.max(0, literal.start - WHEN_LOOKBACK),
     literal.start
   );
-  if (!/\bWHEN\s*(?:(['`])[\w-]+\1\s+OR\s+)*['`]$/i.test(before)) {
+  const when = /\bWHEN\s*(?:(['`])[\w-]+\1\s+OR\s+)*['`]$/i.exec(before);
+  if (!when) {
+    return undefined;
+  }
+  // a WHEN of another CASE (`CASE mv_mode.`) is not a branch of the dispatch
+  const whenAt = literal.start - before.length + when.index;
+  if (!dispatchFilter(source)(whenAt)) {
     return undefined;
   }
   return { start: literal.start, end: literal.end };
 }
 
-/** The event name the cursor sits on inside a `WHEN '…'` of the dispatch. */
+/** The event name the cursor sits on inside a `WHEN '…'` of the dispatch -
+ *  spelled the way `whenBranches` reads one. `WHEN \`Out of Stock\` THEN`,
+ *  `WHEN \`%MSG\`` or `WHEN \`/N\`` is a value, not an event, and F2 there
+ *  used to offer a rename that then changed nothing. */
 export function whenNameAt(
   source: string,
   offset: number
@@ -1310,7 +1598,7 @@ export function whenNameAt(
     return undefined;
   }
   const name = source.slice(span.start, span.end);
-  return name ? { name, ...span } : undefined;
+  return /^[\w-]+$/.test(name) ? { name, ...span } : undefined;
 }
 
 /*
@@ -1381,23 +1669,37 @@ export function eventUsagesOf(source: string, name: string): number[] {
     .map((raise) => raise.at);
 }
 
-/** Every `WHEN '<name>'` of the source - what the usage lens hangs on. Each
- *  alternative of a `WHEN 'A' OR 'B'` is its own branch. */
+/** Every `WHEN '<name>'` of the event dispatch - what the usage lens hangs
+ *  on. Each alternative of a `WHEN 'A' OR 'B'` is its own branch. Only the
+ *  WHENs at the own level of a `CASE client->get_event( )` count when the
+ *  class has one (a nested status switch or a `CASE mv_mode.` beside it
+ *  is not the dispatch); without such a CASE, every WHEN does. */
 export function whenBranches(source: string): NamedSpan[] {
   const out: NamedSpan[] = [];
   const code = blankComments(source);
+  const inDispatch = dispatchFilter(source);
   const re = /\bWHEN\s+/gi;
+  /* Sticky, so each literal and each `OR` is matched AT the position rather
+   * than on a `code.slice(at)` copy of the rest of the class - one copy per
+   * WHEN made a long dispatch quadratic in the size of the source. */
+  const litRe = /(['`])([\w-]+)\1/y;
+  const orRe = /\s+OR\s+/iy;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code))) {
     let at = m.index + m[0].length;
+    const own = inDispatch(m.index);
     for (;;) {
-      const lit = /^(['`])([\w-]+)\1/.exec(code.slice(at));
+      litRe.lastIndex = at;
+      const lit = litRe.exec(code);
       if (!lit) {
         break;
       }
-      out.push({ name: lit[2], start: at + 1, end: at + 1 + lit[2].length });
+      if (own) {
+        out.push({ name: lit[2], start: at + 1, end: at + 1 + lit[2].length });
+      }
       at += lit[0].length;
-      const or = /^\s+OR\s+/i.exec(code.slice(at));
+      orRe.lastIndex = at;
+      const or = orRe.exec(code);
       if (!or) {
         break;
       }
@@ -1548,9 +1850,24 @@ export function xmlContextAt(
   offset: number
 ): WriteContext | undefined {
   // The tag the cursor sits in: the last `<` not yet closed by a `>`.
-  const open = source.lastIndexOf("<", offset - 1);
+  // Nothing lies before offset 0 - and `lastIndexOf` reads a negative start
+  // as 0, which found the document's own first `<` AFTER the cursor: a
+  // completion there replaced the root tag's name (`mvc:View`, prefix and
+  // all) with whatever control was picked.
+  const open = offset > 0 ? source.lastIndexOf("<", offset - 1) : -1;
   if (open < 0) {
     return undefined;
+  }
+  /* Inside a comment nothing is written: a `<footer>` in the prose of a
+   * `<!-- … -->` was taken for a tag, and completion offered controls in
+   * the middle of a sentence. The comment's own `<!` is refused below; this
+   * is for a `<` it contains. */
+  const comment = source.lastIndexOf("<!--", offset - 1);
+  if (comment >= 0 && comment < open) {
+    const end = source.indexOf("-->", comment + 4);
+    if (end < 0 || end + 3 > offset) {
+      return undefined;
+    }
   }
   const closed = xmlTagEnd(source, open);
   if (closed >= 0 && closed < offset) {
@@ -1559,7 +1876,8 @@ export function xmlContextAt(
   if (source[open + 1] === "/" || source[open + 1] === "!" || source[open + 1] === "?") {
     return undefined;
   }
-  const ns = xmlNsMap(source);
+  // the namespaces in scope at THIS element - its own declarations included
+  const ns = xmlNsMapAt(source, offset);
   const tagEnd = /[\s/>]/.exec(source.slice(open + 1))?.index;
   const nameEnd = open + 1 + (tagEnd ?? offset - open - 1);
 

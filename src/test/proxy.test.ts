@@ -855,7 +855,7 @@ test("an ISO-8859-1 page is injected without mangling its umlauts", () => {
   // toString("utf8") turned every umlaut on them into a replacement character
   const body = Buffer.from("<html><head></head><body>Anmeldung fehlgeschlagen: Prüfen</body></html>", "latin1");
   const text = decodeBody(body, "text/html; charset=iso-8859-1");
-  assert.ok(text.includes("Prüfen"), "decoded with the declared charset");
+  assert.ok(text?.includes("Prüfen"), "decoded with the declared charset");
   assert.equal(
     withUtf8Charset("text/html; charset=iso-8859-1"),
     "text/html; charset=utf-8",
@@ -865,8 +865,93 @@ test("an ISO-8859-1 page is injected without mangling its umlauts", () => {
 
 test("a body without a declared charset is read as UTF-8", () => {
   const text = decodeBody(Buffer.from("<html>Prüfen</html>", "utf8"), "text/html");
-  assert.ok(text.includes("Prüfen"));
+  assert.ok(text?.includes("Prüfen"));
   assert.equal(withUtf8Charset("text/html"), "text/html; charset=utf-8");
+});
+
+test("windows-1252 and ISO-8859-1 are decoded the way a browser does", () => {
+  /*
+   * regression: both were read as latin1, so the 0x80-0x9F range came out as
+   * C1 controls - a browser decodes both labels as windows-1252 and shows a
+   * euro sign and a dash there. "Preis: 5 € – gültig" in windows-1252:
+   */
+  const bytes = Buffer.from([
+    0x50, 0x72, 0x65, 0x69, 0x73, 0x3a, 0x20, 0x35, 0x20, 0x80, 0x20, 0x96,
+    0x20, 0x67, 0xfc, 0x6c, 0x74, 0x69, 0x67,
+  ]);
+  for (const label of ["windows-1252", "iso-8859-1", "ISO_8859-1:1987", "us-ascii", "cp1252"]) {
+    assert.equal(
+      decodeBody(bytes, `text/html; charset=${label}`),
+      "Preis: 5 € – gültig",
+      label
+    );
+  }
+  // every byte of the range, against the Encoding Standard's index
+  const high = Buffer.from(Array.from({ length: 32 }, (_, i) => 0x80 + i));
+  assert.equal(
+    decodeBody(high, "text/html; charset=windows-1252"),
+    "€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008dŽ\u008f\u0090‘’“”•–—˜™š›œ\u009džŸ"
+  );
+});
+
+test("another single-byte charset is decoded as itself, not as UTF-8", () => {
+  // regression: everything but the latin1 labels was read as UTF-8
+  const polish = Buffer.from([0x5a, 0xb3, 0xf3, 0xb6, 0xe6]); // ISO-8859-2
+  assert.equal(decodeBody(polish, "text/html; charset=iso-8859-2"), "Złóść");
+  const meta = Buffer.concat([
+    Buffer.from('<meta charset="iso-8859-2">', "latin1"),
+    polish,
+  ]);
+  assert.equal(decodeBody(meta, "text/html"), '<meta charset="iso-8859-2">Złóść');
+});
+
+test("a charset nobody knows is not decoded at all", () => {
+  // re-encoding a guess would mangle the page - the caller passes it through
+  assert.equal(
+    decodeBody(Buffer.from("<html>x</html>"), "text/html; charset=x-no-such-charset"),
+    undefined
+  );
+});
+
+test("a page in an unknown charset passes the proxy byte for byte", async () => {
+  const bytes = Buffer.concat([
+    Buffer.from("<html><head></head><body>", "latin1"),
+    Buffer.from([0xa4, 0xe9, 0x80, 0xff]),
+    Buffer.from("</body></html>", "latin1"),
+  ]);
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html; charset=x-no-such-charset" });
+    res.end(bytes);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(origin, "user", "pass");
+    const answer = await new Promise<{ type: string; body: Buffer }>((resolve, reject) => {
+      http
+        .get(
+          `${proxy.origin}/sap/bc/z2ui5`,
+          { headers: { "sec-fetch-dest": "document" } },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (c: Buffer) => chunks.push(c));
+            res.on("end", () =>
+              resolve({
+                type: String(res.headers["content-type"]),
+                body: Buffer.concat(chunks),
+              })
+            );
+          }
+        )
+        .on("error", reject);
+    });
+    assert.ok(answer.body.equals(bytes), "the body is untouched");
+    assert.equal(answer.type, "text/html; charset=x-no-such-charset");
+  } finally {
+    await proxy.stop();
+    server.close();
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1786,15 +1871,15 @@ test("frame-ancestors is dropped from each of two CSP headers, nothing else", as
 
 test("a document without a header charset is read by its <meta charset>", () => {
   const body = Buffer.from('<html><head><meta charset="ISO-8859-1"></head>Prüfen</html>', "latin1");
-  assert.match(decodeBody(body, "text/html"), /Prüfen/);
+  assert.match(decodeBody(body, "text/html") ?? "", /Prüfen/);
   const equiv = Buffer.from(
     '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">Größe',
     "latin1"
   );
-  assert.match(decodeBody(equiv, "text/html"), /Größe/);
+  assert.match(decodeBody(equiv, "text/html") ?? "", /Größe/);
   // the header still wins over the meta
   assert.match(
-    decodeBody(Buffer.from('<meta charset="iso-8859-1">Prüfen', "utf8"), "text/html; charset=utf-8"),
+    decodeBody(Buffer.from('<meta charset="iso-8859-1">Prüfen', "utf8"), "text/html; charset=utf-8") ?? "",
     /Prüfen/
   );
 });

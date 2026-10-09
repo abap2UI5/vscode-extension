@@ -348,6 +348,19 @@ test("hover on an attribute name in a view.xml explains the whole name", () => {
   assert.equal(source.slice(offer.start, offer.end), "text");
 });
 
+test("before the first tag of a view.xml there is nothing to complete", () => {
+  // `lastIndexOf("<", -1)` searches from 0: the cursor at the very start of
+  // the file was taken to be inside the root tag, and accepting an offer
+  // replaced the root tag's name (`mvc:View`, prefix and all) behind it
+  const source = '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">\n  <Button text="Go"/>\n</mvc:View>';
+  assert.equal(completionAt(source, "main.view.xml", 0, data, noShape), undefined);
+  assert.equal(hoverAt(source, "main.view.xml", 0, data, noShape), undefined);
+  // one character in, the root tag's name is still offered
+  const offer = completionAt(source, "main.view.xml", 1, data, noShape);
+  assert.ok(offer);
+  assert.ok(offer.start <= 1 && 1 <= offer.end);
+});
+
 test("hover in dead space stays quiet", () => {
   const { source, offset } = at("DATA(x) = ‸1.");
   assert.equal(
@@ -562,4 +575,65 @@ test("the _bind argument completes in the val = form and in any spelling", () =>
     CLASS_HEAD + HEAD + "    )->tag( n = `Input` )->a( n = `value` v = client->_bind( name ‸"
   );
   assert.equal(done, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// XML views - found by fuzzing the demo kit's ~970 views (round 5)
+// ---------------------------------------------------------------------------
+
+function completeXml(marked: string) {
+  const { source, offset } = at(marked);
+  return completionAt(source, "main.view.xml", offset, data, noShape);
+}
+
+function hoverXml(marked: string) {
+  const { source, offset } = at(marked);
+  return hoverAt(source, "main.view.xml", offset, data, noShape);
+}
+
+test("a view whose namespaces are single-quoted completes its prefixes", () => {
+  /* XML allows either quote, and `xmlContextAt` reads values in both - but
+   * the namespace map read `"` only, so with `xmlns:t='sap.ui.table'` the
+   * `t:` controls completed as nothing and an unprefixed tag was taken for
+   * sap.m whatever the default namespace said. */
+  const head = `<mvc:View xmlns:mvc='sap.ui.core.mvc' xmlns='sap.ui.table' xmlns:m='sap.m'>\n`;
+  const prefixed = completeXml(head + "  <m:Butt‸");
+  assert.ok(prefixed?.entries.some((e) => e.label === "Button"), "m: is sap.m");
+  const member = completeXml(head + "  <Table ‸");
+  assert.ok(member?.entries.some((e) => e.label === "selectionMode"), "the default namespace is sap.ui.table");
+  assert.ok(!member?.entries.some((e) => e.label === "mode"), "not sap.m.Table's members");
+});
+
+test("inside an XML comment nothing is completed or explained", () => {
+  // the abap2UI5 frontend's own DeveloperTools fragment has prose like this
+  const source = `<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core">\n  <!-- 1.71 has a <footer> tag here, see the docs -->\n  <Button text="x"/>\n</core:FragmentDefinition>`;
+  for (const word of ["<footer>", "footer>", "tag here"]) {
+    const offset = source.indexOf(word) + 2;
+    assert.equal(completionAt(source, "main.view.xml", offset, data, noShape), undefined, word);
+    assert.equal(hoverAt(source, "main.view.xml", offset, data, noShape), undefined, word);
+  }
+  // after the comment the tags complete again
+  const button = source.indexOf("<Button ") + 8;
+  assert.ok(completionAt(source, "main.view.xml", button, data, noShape)?.entries.length);
+});
+
+test("id, class and binding are offered and explained on every known control", () => {
+  /* The XML view handles them itself, so no control's metadata declares
+   * them - and they are on nearly every control of a real view. Completion
+   * listed the snapshot's members alone, and a hover on `id` said nothing. */
+  const head = `<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n`;
+  const offer = completeXml(head + `  <Button ‸`);
+  const labels = offer?.entries.map((e) => e.label) ?? [];
+  for (const name of ["id", "class", "binding"]) {
+    assert.ok(labels.includes(name), `${name} is offered`);
+  }
+  const id = offer!.entries.find((e) => e.label === "id")!;
+  const text = offer!.entries.find((e) => e.label === "text")!;
+  assert.ok(text.sortText! < id.sortText!, "after the control's own properties");
+  assert.match(hoverXml(head + `  <Button cl‸ass="sapUiSmallMargin"/>`)?.text ?? "", /CSS classes/);
+  assert.match(hoverXml(head + `  <Button i‸d="go"/>`)?.text ?? "", /unique in the view/);
+  // the builder writes the same attributes
+  assert.ok(completeAbap(HEAD + "    )->tag( n = `Button` )->a( n = `‸` )")?.entries.some((e) => e.label === "class"));
+  // an unknown control gets nothing invented for it
+  assert.equal(hoverXml(head + `  <NoSuchControl i‸d="go"/>`), undefined);
 });
