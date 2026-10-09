@@ -37,7 +37,7 @@ import {
   RenderGateOutcome,
   renderGateNote,
   RenderResult,
-  plannedFixes,
+  editorFixPlan,
   resolveCheckerCommand,
   scratchFileName,
   settleRenderErrors,
@@ -1152,8 +1152,12 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
         let files = 0;
         let moved = 0;
         for (const file of swept.files) {
-          const planned = plannedFixes(file.findings);
-          if (!planned.length) {
+          // `editorFixPlan`: a CRLF file is turned LF by a line-ending
+          // change, not by its `\r` deletions, which no editor position
+          // addresses
+          const plan = editorFixPlan(file.findings);
+          const planned = plan.spans;
+          if (!planned.length && !plan.toLf) {
             continue;
           }
           const doc = await vscode.workspace.openTextDocument(file.uri);
@@ -1172,17 +1176,23 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
             moved++;
             continue;
           }
-          for (const fix of planned) {
-            edit.replace(
-              file.uri,
-              new vscode.Range(doc.positionAt(fix.start), doc.positionAt(fix.end)),
-              fix.text,
-              // through the refactor preview: a workspace's worth of edits
-              // is reviewed, not sprung
-              { needsConfirmation: true, label: "abap2UI5 mechanical fix" }
-            );
+          // through the refactor preview: a workspace's worth of edits is
+          // reviewed, not sprung
+          const meta = { needsConfirmation: true, label: "abap2UI5 mechanical fix" };
+          const edits: Array<[vscode.TextEdit, vscode.WorkspaceEditEntryMetadata]> = planned.map(
+            (fix) => [
+              new vscode.TextEdit(
+                new vscode.Range(doc.positionAt(fix.start), doc.positionAt(fix.end)),
+                fix.text
+              ),
+              meta,
+            ]
+          );
+          if (plan.toLf) {
+            edits.push([vscode.TextEdit.setEndOfLine(vscode.EndOfLine.LF), meta]);
           }
-          fixes += planned.length;
+          edit.set(file.uri, edits);
+          fixes += edits.length;
           files++;
         }
         if (moved) {

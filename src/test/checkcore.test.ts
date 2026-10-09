@@ -24,6 +24,8 @@ import {
   parseScreenshotErrors,
   parseScreenshotOutput,
   plannedFixes,
+  editorFixPlan,
+  fixTitle,
   screenshotArgs,
   screenshotUnsupported,
   shotLabel,
@@ -35,6 +37,7 @@ import {
   scratchFileName,
   failedPreviewState,
 } from "../checkcore";
+import { runGate } from "../gate";
 
 /*
  * The view check's `vscode`-free decisions: what is checkable, which
@@ -331,6 +334,117 @@ test("a fix starting where the previous one ended still applies", () => {
     { fixes: [{ start: 5, end: 5, text: "$" }] },
   ]);
   assert.equal(planned.length, 2);
+});
+
+/** What VS Code makes of a text edit (ExtHostDocumentData.positionAt clamps
+ *  an offset between `\r` and `\n` to the end of the line; the text model
+ *  writes an inserted text in the document's own line ending), and of a
+ *  line-ending change - so a plan can be judged by its effect in the editor
+ *  rather than by its spans. */
+function applyLikeVsCode(
+  text: string,
+  plan: { spans: Array<{ start: number; end: number; text: string }>; toLf: boolean }
+): string {
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const clamp = (o: number) => (o > 0 && text[o - 1] === "\r" && text[o] === "\n" ? o - 1 : o);
+  let out = text;
+  for (const e of [...plan.spans].sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, clamp(e.start)) + e.text.replace(/\r\n|\r|\n/g, eol) + out.slice(clamp(e.end));
+  }
+  return plan.toLf ? out.replace(/\r\n/g, "\n") : out;
+}
+
+const HYGIENE = [
+  "CLASS zcl_eol DEFINITION PUBLIC.",
+  "  PUBLIC SECTION.   ",
+  "    INTERFACES z2ui5_if_app.",
+  "ENDCLASS.",
+  "CLASS zcl_eol IMPLEMENTATION.",
+  "  METHOD z2ui5_if_app~main.",
+  "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).",
+  "    view->ele( n = `View` ns = `mvc`",
+  "        )->a( n = `xmlns` v = `sap.m`",
+  "        )->a( n = `xmlns:mvc` v = `sap.ui.core.mvc`",
+  "        )->tag( n = `Text` ).  ",
+  "    client->view_display( view->stringify( ) ).",
+  "  ENDMETHOD.",
+  "ENDCLASS.",
+].join("\r\n");
+
+test("a CRLF file's fix all turns it LF in the editor - the \\r deletions alone do nothing there", () => {
+  const findings = runGate(HYGIENE, "src/zcl_eol.clas.abap", false, {
+    minUi5: "1.71",
+    allow: [],
+    rules: {},
+    distribution: null,
+  }).findings;
+  const types = new Set(findings.map((f) => f.type));
+  for (const rule of ["crlf-line-ending", "trailing-whitespace", "missing-final-newline"]) {
+    assert.ok(types.has(rule), `the fixture stopped producing ${rule}`);
+  }
+  // the bug: every `\r` deletion collapses to an empty range in VS Code
+  const raw = applyLikeVsCode(HYGIENE, { spans: plannedFixes(findings), toLf: false });
+  assert.ok(raw.includes("\r\n"), "the raw spans would have converted the file after all");
+  // the plan: the spans of the other rules, plus the line-ending change
+  const plan = editorFixPlan(findings);
+  assert.equal(plan.toLf, true);
+  assert.ok(plan.spans.every((e) => !(e.end - e.start === 1 && HYGIENE[e.start] === "\r")));
+  const fixed = applyLikeVsCode(HYGIENE, plan);
+  assert.ok(!fixed.includes("\r"), "CRs survived the fix all");
+  assert.ok(!/[ \t]$/m.test(fixed), "trailing blanks survived");
+  assert.ok(fixed.endsWith("\n"), "no final newline");
+  // and the fixed file is clean of all three
+  const again = new Set(
+    runGate(fixed, "src/zcl_eol.clas.abap", false, { minUi5: "1.71", allow: [], rules: {}, distribution: null }).findings.map(
+      (f) => f.type
+    )
+  );
+  for (const rule of ["crlf-line-ending", "trailing-whitespace", "missing-final-newline"]) {
+    assert.ok(!again.has(rule), `${rule} is still reported after the fix all`);
+  }
+  // the CRLF finding is counted once, as one finding
+  assert.equal(plan.findings, findings.filter((f) => f.fixes?.length).length);
+});
+
+test("an LF file's plan is plannedFixes unchanged", () => {
+  const findings = [
+    { type: "a", fixes: [{ start: 4, end: 8, text: "x" }] },
+    { type: "b", fixes: [{ start: 6, end: 7, text: "y" }] },
+  ];
+  const plan = editorFixPlan(findings);
+  assert.deepEqual(plan, { spans: plannedFixes(findings), toLf: false, findings: 1 });
+});
+
+test("a fix title names what changes, never a bare count or line number", () => {
+  // the pinned linter: the line number in `member`
+  assert.equal(
+    fixTitle({ type: "trailing-whitespace", member: "12", value: 3, line: 12, fixes: [{}] }),
+    "abap2UI5: fix trailing-whitespace on line 12"
+  );
+  // the next release: `member` gone (`dedupe`), the blank count in `value`
+  assert.equal(
+    fixTitle({ type: "trailing-whitespace", value: 3, line: 12, fixes: [{}] }),
+    "abap2UI5: fix trailing-whitespace on line 12"
+  );
+  assert.equal(
+    fixTitle({ type: "trailing-whitespace", value: "3", line: 4, fixes: [{}] }),
+    "abap2UI5: fix trailing-whitespace on line 4"
+  );
+  // a fix over many lines claims no line
+  assert.equal(
+    fixTitle({ type: "crlf-line-ending", value: 22, line: 1, fixes: [{}, {}] }),
+    "abap2UI5: fix crlf-line-ending"
+  );
+  // a name stays the subject, member first
+  assert.equal(
+    fixTitle({ type: "obsolete-binder", member: "_bind_edit", line: 9, fixes: [{}] }),
+    "abap2UI5: fix obsolete-binder on _bind_edit"
+  );
+  assert.equal(
+    fixTitle({ type: "unknown-property", member: "12", value: "nosuchprop", line: 9, fixes: [{}] }),
+    "abap2UI5: fix unknown-property on nosuchprop"
+  );
+  assert.equal(fixTitle({ type: "missing-final-newline", fixes: [{}] }), "abap2UI5: fix missing-final-newline");
 });
 
 test("findings without fixes contribute nothing to count or plan", () => {

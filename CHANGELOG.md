@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **"Fix crlf-line-ending" converts the file now.** The linter's fix deletes
+  every `\r`, and an editor position cannot address the gap between `\r`
+  and `\n` - so the quick fix, *Fix All* and the workspace fix applied
+  empty edits and the warning stayed. They now switch the document's line
+  endings to LF, in the same edit (and undo step) as the other fixes.
+- **Quick-fix titles name a line, not a number.** For the line-keyed rules
+  (`trailing-whitespace`, `source-line-too-long`) the lightbulb said
+  "fix trailing-whitespace on 12" - or, with the next linter release, "on 3",
+  the count of blanks. It now says "on line 12"; a fix over many lines
+  names none.
 - **Removing an attribute in the Control Properties view keeps the chain
   tidy.** Removing the last attribute of a chain left its closing `).` on a
   line of its own; the paren now moves up to the line of the call that is

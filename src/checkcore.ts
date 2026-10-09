@@ -516,6 +516,70 @@ export function plannedFixes(
   return planned;
 }
 
+/** The rule whose fix is a line-ending change, not a set of spans. */
+export const CRLF_RULE = "crlf-line-ending";
+
+/**
+ * What a set of findings' fixes become in the EDITOR - `plannedFixes( )`, with
+ * the one rule whose spans an editor cannot apply taken out.
+ *
+ * `crlf-line-ending` fixes a CRLF file by deleting every `\r`, one span each.
+ * That is right for `--fix`, which rewrites the text, and a no-op in VS Code:
+ * a position cannot address the gap between `\r` and `\n` (`positionAt`
+ * clamps an offset there to the end of the line), so each deletion arrived
+ * as an EMPTY range and the lightbulb's "fix crlf-line-ending" - and every
+ * "fix all" that included it - changed nothing and left the warning
+ * standing. The editor's own way to say "this file is LF" is a line-ending
+ * change of the document (`TextEdit.setEndOfLine`), which `toLf` asks for;
+ * the caller writes it.
+ *
+ * `findings` counts the findings the plan resolves - the CRLF one included -
+ * for the "fix all N findings" title.
+ */
+export function editorFixPlan(
+  findings: Array<{ type?: string; fixes?: PlannedFix[] }>
+): { spans: PlannedFix[]; toLf: boolean; findings: number } {
+  const crlf = findings.filter((f) => f.type === CRLF_RULE && f.fixes?.length);
+  const rest = findings.filter((f) => f.type !== CRLF_RULE);
+  const spans = plannedFixes(rest);
+  const applied = new Set(spans);
+  const covered = rest.filter((f) => (f.fixes ?? []).some((fix) => applied.has(fix))).length;
+  return { spans, toLf: crlf.length > 0, findings: covered + crlf.length };
+}
+
+/**
+ * The lightbulb title of one finding's fix: "abap2UI5: fix <rule> on
+ * <subject>", the subject being what changes.
+ *
+ * `member ?? value` used to be the subject, and for the line-keyed rules
+ * neither is a name: the pinned linter keyed `trailing-whitespace` and
+ * `source-line-too-long` by the line number in `member` ("fix
+ * trailing-whitespace on 12"), and the next one moves it to `dedupe`, which
+ * left `value` - the count of blanks - as the subject ("fix
+ * trailing-whitespace on 3"). So a subject made of digits alone is no
+ * subject; a single-span fix then says which LINE it changes, and a fix of
+ * many spans (every `\r` of the file) says nothing it cannot back up.
+ */
+export function fixTitle(finding: {
+  type: string;
+  member?: unknown;
+  value?: unknown;
+  line?: number;
+  fixes?: unknown[];
+}): string {
+  const named = [finding.member, finding.value]
+    .filter((v): v is string | number => typeof v === "string" || typeof v === "number")
+    .map((v) => String(v).trim())
+    .find((v) => v !== "" && !/^\d+$/.test(v));
+  if (named) {
+    return `abap2UI5: fix ${finding.type} on ${named}`;
+  }
+  if (typeof finding.line === "number" && finding.line > 0 && (finding.fixes?.length ?? 0) === 1) {
+    return `abap2UI5: fix ${finding.type} on line ${finding.line}`;
+  }
+  return `abap2UI5: fix ${finding.type}`;
+}
+
 // ---------------------------------------------------------------------------
 // The render gate's report
 // ---------------------------------------------------------------------------
