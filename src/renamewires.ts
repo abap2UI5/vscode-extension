@@ -334,8 +334,16 @@ export function idSpans(source: string, id: string): NamedSpan[] {
  *  inside a view literal: the `/` opening the path, not one between two
  *  segments. `{/MT_TAB/COLUMN}`'s COLUMN is a field of the row type, not the
  *  attribute - matching every `/SEG` used to rewrite it whenever a declared
- *  name happened to read the same (and `sap-icon://…` URLs with it). */
-const ROOT_PATH_SEGMENT = /(^|[^\w/])\/([A-Z_][A-Z0-9_]*)/gi;
+ *  name happened to read the same (and `sap-icon://…` URLs with it).
+ *
+ *  Nor one behind a `>`: `${$parameters>/value}`, `${$source>/text}` and
+ *  `{device>/system}` address a NAMED model - the event's parameters, the
+ *  source control, the device model - never the app's attributes. They are
+ *  all over the corpus (`arg = \`${$parameters>/value}\`` in hundreds of
+ *  samples), and a class with a `DATA value` had F2 rewrite the event
+ *  parameter into `${$parameters>/NEW_NAME}`, which the frontend then
+ *  resolved to nothing. */
+const ROOT_PATH_SEGMENT = /(^|[^\w/>])\/([A-Z_][A-Z0-9_]*)/gi;
 
 /** Statements that declare a CLASS ATTRIBUTE - what a binding path can
  *  resolve to. `TYPES` deliberately does not count: a structure field is

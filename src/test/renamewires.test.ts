@@ -140,6 +140,49 @@ ENDCLASS.`;
   assert.ok(spans.some((s) => s.start === root), "the root path is renamed");
 });
 
+test("a path into a named model is not the attribute", () => {
+  /*
+   * Regression (corpus fuzz): `${$parameters>/value}` is the event's own
+   * parameter, `${$source>/text}` the source control's property and
+   * `{device>/system}` the device model - none of them the app's attribute.
+   * A class declaring `DATA value` had F2 rewrite the event argument along
+   * with the attribute, and the frontend then sent nothing for it.
+   */
+  const source = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    DATA value TYPE string.
+    DATA text TYPE string.
+ENDCLASS.
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->tag( \`Input\`
+        )->a( n = \`value\`  v = \`{/VALUE}\`
+        )->a( n = \`change\` v = client->_event( val = \`VALIDATE\` arg = \`\${$parameters>/value}\` )
+        )->a( n = \`description\` v = \`{device>/text}\`
+        )->a( n = \`tooltip\` v = \`\${$source>/text}\` ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+  const value = attributeSpans(source, "value");
+  assert.deepEqual(
+    value.map((s) => source.slice(s.start - 1, s.end)),
+    [" value", "/VALUE"],
+    "the declaration and the default-model path - not $parameters>/value"
+  );
+  assert.equal(
+    attributeAt(source, source.indexOf("$parameters>/value") + "$parameters>/".length),
+    undefined,
+    "the event parameter is not offered for an attribute rename"
+  );
+  const text = attributeSpans(source, "text");
+  assert.ok(
+    !text.some((s) => s.kind === "path"),
+    "device>/text and $source>/text address other models"
+  );
+});
+
 test("an icon URL is not a binding path", () => {
   const source = `CLASS zcl_app DEFINITION PUBLIC.
   PUBLIC SECTION.

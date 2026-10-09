@@ -159,6 +159,11 @@
     the list) are skipped like any other malformed entry; they used to make
     *Run App*, the system picker and the status bar fail with an error until
     the setting was fixed by hand.
+  - *F2 on a bound attribute* leaves paths into another model alone: a
+    class with a `DATA value` or `DATA text` had
+    `arg = \`${$parameters>/value}\``, `${$source>/text}` and
+    `{device>/text}` renamed along with the attribute, which broke the event
+    parameter or the device binding without a word.
 
 
 ## 0.30.2
