@@ -1018,6 +1018,18 @@ test("a waiver never goes above an XML declaration - the view would not load", (
       `the waiver does not hold:\n${waived}`
     );
   }
+  // a byte-order mark in front of the declaration is not "something before
+  // it" - the waiver still goes behind the declaration, the mark stays first
+  const bom =
+    '\uFEFF<?xml version="1.0"?><mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"><Button nosuchprop="x"/></mvc:View>';
+  const waivedBom = applyEdits(bom, suppressionEdits(bom, findingLine(bom), true, "unknown-property"));
+  assert.match(waivedBom, /^\uFEFF<\?xml /, `something was written before the declaration:\n${waivedBom}`);
+  assert.ok(
+    !checkXmlSource(waivedBom, { snapshot: SNAPSHOT, render: false }).findings.some(
+      (f) => f.type === "unknown-property"
+    ),
+    `the waiver does not hold:\n${waivedBom}`
+  );
   // with the declaration on a line of its own nothing changes
   const own = '<?xml version="1.0"?>\n<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <Button nosuchprop="x"/>\n</mvc:View>';
   assert.deepEqual(

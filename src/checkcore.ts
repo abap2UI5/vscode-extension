@@ -1180,8 +1180,12 @@ export function suppressionEdits(
    * generated one) made the whole view fail to load. The directive goes
    * right behind the declaration instead, as a `disable` - which covers its
    * own line - closed after the line the tag ends on. */
-  const prolog = isXml ? /^[ \t]*<\?xml\b[^]*?\?>/.exec(text.slice(startOf(span.open))) : null;
-  if (prolog && startOf(span.open) === text.search(/\S/)) {
+  const prolog = isXml
+    ? /^\uFEFF?[ \t]*<\?xml\b[^]*?\?>/.exec(text.slice(startOf(span.open)))
+    : null;
+  // the declaration is the first thing in the file - a byte-order mark
+  // before it is not a thing (`trim` takes it, and \s matches it)
+  if (prolog && !text.slice(0, startOf(span.open)).trim()) {
     const after = span.close + 1;
     return [
       {
