@@ -997,6 +997,35 @@ test("a single-line tag keeps disable-next-line, which the linter honours as bef
   );
 });
 
+test("a waiver never goes above an XML declaration - the view would not load", () => {
+  /* A comment in front of `<?xml …?>` makes the declaration not the first
+   * thing in the document: a fatal error to every XML parser, UI5's own
+   * included. With the root on the declaration's line (a minified or
+   * generated view), `disable-next-line` above the finding's line was
+   * exactly that - found fuzzing the waiver over every finding of the demo
+   * kit's views. */
+  for (const xml of [
+    '<?xml version="1.0" encoding="UTF-8"?><mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"><Button nosuchprop="x"/></mvc:View>',
+    '<?xml version="1.0"?><mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"><Button nosuchprop="x"/>\n</mvc:View>',
+    '<?xml version="1.0"?><mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"\n  nosuchprop="x">\n<Button/></mvc:View>',
+  ]) {
+    const edits = suppressionEdits(xml, findingLine(xml), true, "unknown-property");
+    const waived = applyEdits(xml, edits);
+    assert.match(waived, /^<\?xml /, `something was written before the declaration:\n${waived}`);
+    assert.deepEqual(
+      checkXmlSource(waived, { snapshot: SNAPSHOT, render: false }).findings.map((f) => f.type),
+      [],
+      `the waiver does not hold:\n${waived}`
+    );
+  }
+  // with the declaration on a line of its own nothing changes
+  const own = '<?xml version="1.0"?>\n<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <Button nosuchprop="x"/>\n</mvc:View>';
+  assert.deepEqual(
+    suppressionEdits(own, findingLine(own), true, "unknown-property").map((e) => e.text),
+    ["  <!-- abap2ui5lint-disable-next-line unknown-property -->\n"]
+  );
+});
+
 test("the pair uses the file's own line ending", () => {
   const crlf = MULTI_LINE_TAG.replace(/\n/g, "\r\n");
   const edits = suppressionEdits(crlf, 3, true, "unknown-property");

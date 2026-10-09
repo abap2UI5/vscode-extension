@@ -1173,6 +1173,26 @@ export function suppressionEdits(
     isXml ? `<!-- ${directive} -->` : `" ${directive}`;
   const span = directiveLine(text, line, isXml);
   const indent = indentOf(span.open);
+  /* Nothing may stand before an XML declaration - not even a comment: a
+   * `<?xml …?>` that is not the first thing in the document is a fatal
+   * error to every XML parser, UI5's included, so a waiver written above a
+   * view that keeps its root on the declaration's line (a minified view, a
+   * generated one) made the whole view fail to load. The directive goes
+   * right behind the declaration instead, as a `disable` - which covers its
+   * own line - closed after the line the tag ends on. */
+  const prolog = isXml ? /^[ \t]*<\?xml\b[^]*?\?>/.exec(text.slice(startOf(span.open))) : null;
+  if (prolog && startOf(span.open) === text.search(/\S/)) {
+    const after = span.close + 1;
+    return [
+      {
+        offset: startOf(span.open) + prolog[0].length,
+        text: comment(`abap2ui5lint-disable ${rule}`),
+      },
+      after < starts.length
+        ? { offset: starts[after], text: `${comment("abap2ui5lint-enable")}${eol}` }
+        : { offset: text.length, text: `${eol}${comment("abap2ui5lint-enable")}` },
+    ];
+  }
   if (!isXml || span.open === span.close || line === span.open) {
     // a directive above `open` protects exactly the finding's line
     return [

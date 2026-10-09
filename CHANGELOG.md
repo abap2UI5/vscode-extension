@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A waiver in an XML view never goes above its XML declaration.** With
+  the root on the declaration's line (a minified or generated view), the
+  "suppress on this line" quick fix wrote its comment in front of
+  `<?xml …?>` - which every XML parser, UI5's included, refuses, so the
+  whole view stopped loading. The directive now goes right behind the
+  declaration.
 - **Convert XML View to Builder Chain: no line break inside a literal from
   a CRLF view.** A long binding written over several lines (the demo kit's
   Checkout view) is split into `&&` chunks, and in a CRLF file the cut could
