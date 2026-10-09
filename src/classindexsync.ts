@@ -102,7 +102,11 @@ export class ClassIndexSync {
     if (!this.demand()) {
       return undefined;
     }
-    return this.store.index();
+    try {
+      return this.store.index();
+    } catch {
+      return undefined; // the linter choked on a class: judged without, as before
+    }
   }
 
   /** What a check of the file behind `key` reads out of the index - for a
@@ -112,7 +116,11 @@ export class ClassIndexSync {
     if (!this.demand()) {
       return "";
     }
-    return this.store.depsOf(this.store.nameOf(key));
+    try {
+      return this.store.depsOf(this.store.nameOf(key));
+    } catch {
+      return "";
+    }
   }
 
   /** A file was created, changed or deleted on disk (`key`), or - undefined -
@@ -129,7 +137,7 @@ export class ClassIndexSync {
     if (!this.started || this.disposed) {
       return;
     }
-    this.store.set(key, text);
+    this.put(key, text);
     this.settle();
   }
 
@@ -139,7 +147,7 @@ export class ClassIndexSync {
     if (!this.started || this.disposed || this.onDisk.has(key)) {
       return;
     }
-    this.store.set(key, text);
+    this.put(key, text);
     this.settle();
   }
 
@@ -210,7 +218,7 @@ export class ClassIndexSync {
       if (!source.fromEditor) {
         this.onDisk.add(source.key);
       }
-      this.store.set(source.key, source.text);
+      this.put(source.key, source.text);
       if (++n % SCAN_SLICE === 0) {
         await (this.deps.yieldTurn?.() ?? new Promise((r) => setTimeout(r, 0)));
       }
@@ -230,6 +238,17 @@ export class ClassIndexSync {
     this.ready = true;
     this.lastGeneration = this.store.generation;
     this.deps.onChange();
+  }
+
+  /** One file's text into the store. A class the linter's builder throws
+   *  over is left out rather than ending the scan (or, from an event
+   *  handler, surfacing as an error nobody can act on). */
+  private put(key: string, text: string): void {
+    try {
+      this.store.set(key, text);
+    } catch {
+      this.store.delete(key);
+    }
   }
 
   private async readOne(key: string): Promise<void> {

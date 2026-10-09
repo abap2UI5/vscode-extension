@@ -284,3 +284,18 @@ test("the scan yields between slices, and dispose stops it, its timer and later 
   assert.equal(h.scans(), 1);
   assert.equal(h.sync.index(), undefined);
 });
+
+test("a class the linter's builder throws over is left out, not the end of the scan", async () => {
+  const throwing: ClassIndexOf = (sources) => {
+    if (sources.some((s) => s.includes("boom"))) {
+      throw new Error("boom");
+    }
+    return factsOnly(sources);
+  };
+  const h = harness({ "file:///a": cls("zcl_a"), "file:///b": `${cls("zcl_b")}* boom` }, { indexOf: throwing });
+  h.sync.index();
+  await settle();
+  assert.deepEqual(names(h.sync.index()), ["zcl_a"]);
+  h.sync.saved("file:///a", `${cls("zcl_a")}* boom`);
+  assert.deepEqual(names(h.sync.index()), [], "the class that now throws is out");
+});
