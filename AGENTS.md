@@ -112,7 +112,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/snapshot.ts` | Loads the bundled UI5 metadata once, for the gate and the language features |
 | `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over - plus `lineStartAt`, the line start that is right at offset 0 too (never `lastIndexOf("\n", offset - 1)`, which reads -1 as 0) |
 | `src/classindex.ts` | `vscode`-free: the cross-file class index the linter's class-level rules read (superclass chain, `cs_event`, `outsideReads`) - built from the linter's own `classIndexOf`, assembled incrementally per file so a save recomputes one file, pinned to a full build in `classindex.test.ts`; disabled while the pinned linter exports no `classIndexOf` |
-| `src/classindexfeed.ts` | Feeds that index from the saved workspace (the shared ABAP watcher, saves, ADT documents) for both entries, and says when its content moved so the checks drop their memos and re-check what is open |
+| `src/classindexsync.ts` | `vscode`-free: WHEN that index is read and when the checks hear of it - LAZY (nothing is read until a check first asks; the extension activates on any `*.clas.abap`, and indexing samples-controls' 644 classes costs ~0.7 s of the shared host), no partial index ever handed out (undefined until the first scan is in, then one change notice), saved state only (disk files, plus open documents without one), debounced change notices, everything stopped on dispose - `classindexsync.test.ts` |
+| `src/classindexfeed.ts` | The plumbing around `classindexsync.ts` for both entries: the shared ABAP watcher, saves, opened/closed ADT documents, `workspace.fs` |
 | `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
 | `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
 | `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, and what a RENAME has to drop (never object identity against a memo) |
@@ -136,7 +137,7 @@ not committed.
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
-`abapscan.ts`, `appindex.ts`, `classindex.ts`, `settings.ts`, `text.ts`,
+`abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `settings.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
