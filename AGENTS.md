@@ -418,7 +418,22 @@ Facts an agent cannot see from the code but will trip over:
   pass `settle` ends with (until then `gate.ts` runs a port of it, pinned to
   the linter's behaviour in `gate.parity.test.ts`, whose fixtures run as
   CRLF too). Both switch on with the bump, without an edit here; after it,
-  the port is dead code (the test compares the two while both exist).
+  the port is dead code (the test compares the two while both exist). A
+  third, `publicReadFromOutside`, stands the two public-attribute rules down
+  for a class another class reads, the same way.
+  The `settle` step is copied WHOLE, not just its calls: `applyDirectives`
+  takes `{ rules, file, ran, stoodDown }` (0.8.5 already does) - the rules
+  block for the directives' own findings (`unused-directive`,
+  `unknown-directive-rule`), which rules ran, and which stood down on the
+  source. The gate passed none of them for six releases, so a repository
+  that switched `unused-directive` off still saw it in the editor. One
+  stand-down lives in `checkAbapSource` itself and is exported by no
+  function - `unused-namespace-declaration` over a class whose view is only
+  partly reconstructed - so `gate.ts` ports it (`standDownUnusedNamespaces`),
+  pinned by parity fixtures. Run `npm test` against a linter checkout before
+  a bump (a copy of this tree with `node_modules/@abap2ui5/linter` linked to
+  `git archive` of the linter's branch): the parity tests that skip at the
+  pin run there.
 - **The rule reference is coupled by URL, not by import.** Every diagnostic's
   code links to `https://abap2ui5.github.io/linter/#<rule-id>`, which the
   linter's `generate-rules-page` emits one anchor per rule for. The rule ids

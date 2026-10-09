@@ -8,6 +8,7 @@
  * snapshot is handed in by `snapshot.ts`).
  */
 
+import * as abapRules from "@abap2ui5/linter/abap-rules";
 import {
   checkAbapRules,
   elementBoundSlots,
@@ -22,6 +23,7 @@ import {
   DEFAULT_TRUE_BOOLEAN,
   parseXml,
   PropertyFinding,
+  WALK_ONLY_RULES,
 } from "@abap2ui5/linter/properties";
 import { checkIcons } from "@abap2ui5/linter/icons";
 import {
@@ -33,6 +35,7 @@ import {
 } from "@abap2ui5/linter/findings";
 import * as linterFix from "@abap2ui5/linter/fix";
 import { snapshot } from "./snapshot";
+import { blankComments } from "./abapscan";
 import type { CheckOptions } from "./lintconfig";
 
 /**
@@ -106,6 +109,84 @@ export function matchLineEndings<F extends FixFinding>(findings: F[], source: st
   return LINTER_MATCH_EOL
     ? (LINTER_MATCH_EOL(findings, source) as F[])
     : matchLineEndingsPort(findings, source);
+}
+
+/** The linter's "another class reads this class's public attributes" test
+ *  (from the release after 0.8.5 on): with it, `checkAbapSource` stands the
+ *  two public-attribute rules down for the class, and a waiver of either is
+ *  unjudged rather than unused. */
+export const LINTER_PUBLIC_READ_FROM_OUTSIDE = linterExport<
+  (source: string, classIndex?: ReadonlyMap<string, unknown> | null) => boolean
+>(abapRules, "publicReadFromOutside");
+
+/**
+ * The linter's stand-down of `unused-namespace-declaration` - a port of the
+ * block in `checkAbapSource` (lib/index.mjs), which exports no function for
+ * it. The rule is a claim about the WHOLE view, only as good as the
+ * reconstruction behind it: a class whose reconstruction is incomplete
+ * (`unplacedTokens`), or that writes the prefix in more builder literals
+ * (`ns = \`form\``, `\`form:SimpleForm\``) than its reconstructed documents
+ * carry, may use it exactly where nobody looked - and the finding came with a
+ * deleting fix that broke the view. Without the port the editor reported it,
+ * and the lightbulb offered that fix, on classes CI is silent about.
+ *
+ * Returns the surviving findings and the rules that stood down (for
+ * `applyDirectives`: a waiver of a rule that did not judge the class is not
+ * "unused"). The literal count reads the source with its comments blanked
+ * (`blankComments`, the linter reads it through its own `scrub`).
+ */
+export function standDownUnusedNamespaces<F extends { type: string; member?: unknown }>(
+  findings: F[],
+  source: string,
+  prep: Pick<PreparedAbap, "unplacedTokens" | "nodes">
+): { findings: F[]; stoodDown: string[] } {
+  const RULE = "unused-namespace-declaration";
+  const incomplete = prep.unplacedTokens > 0;
+  const stoodDown = incomplete ? [RULE] : [];
+  if (!findings.some((f) => f.type === RULE)) {
+    return { findings, stoodDown };
+  }
+  const code = blankComments(source);
+  const inSource = (prefix: string): number => {
+    const p = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return (
+      (code.match(new RegExp(`\\bns\\s*=\\s*[\`']${p}[\`']`, "gi")) ?? []).length +
+      (code.match(new RegExp(`[(=]\\s*[\`']${p}:[A-Za-z]`, "gi")) ?? []).length
+    );
+  };
+  const inDocs = new Map<string, number>();
+  const count = (p: string) => inDocs.set(p, (inDocs.get(p) ?? 0) + 1);
+  const walk = (node: PreparedAbap["nodes"][number]): void => {
+    if (node.name) {
+      if (node.ns) {
+        count(node.ns);
+      } else if (String(node.name).includes(":")) {
+        count(String(node.name).split(":")[0]);
+      }
+      for (const [n] of node.attrs ?? []) {
+        const at = String(n).indexOf(":");
+        if (at > 0 && !String(n).startsWith("xmlns")) {
+          count(String(n).slice(0, at));
+        }
+      }
+    }
+    for (const child of node.children ?? []) {
+      walk(child);
+    }
+  };
+  for (const root of prep.nodes ?? []) {
+    walk(root);
+  }
+  const kept = findings.filter(
+    (f) =>
+      f.type !== RULE ||
+      (!incomplete &&
+        inSource(String(f.member ?? "")) <= (inDocs.get(String(f.member ?? "")) ?? 0))
+  );
+  if (kept.length < findings.length && !stoodDown.length) {
+    stoodDown.push(RULE);
+  }
+  return { findings: kept, stoodDown };
 }
 
 export const VIEW_XML_RE = /\.(view|fragment)\.xml$/i;
@@ -242,20 +323,36 @@ export function runGate(
   let helperNote = "";
   /** ABAP only: the builder is called but nothing was reconstructable. */
   let noView = false;
+  /** Rules that ran and withdrew their verdict on this source - a waiver of
+   *  one is unjudged, not unused (the linter's `stoodDown`). */
+  const stoodDown: string[] = [];
 
   // the linter's `settle`, plus the config-relative spelling of the file for
   // `rules.*.exclude` - see `configRelative`
-  const settled = (raw: PropertyFinding[]): PropertyFinding[] => {
+  const rel = configRelative(fileName, options.configFile);
+  const settled = (raw: PropertyFinding[], stoodDown: string[] = []): PropertyFinding[] => {
     annotate(raw, text);
     let out = applyRules(raw, options.rules, fileName);
-    const rel = configRelative(fileName, options.configFile);
     if (rel !== undefined && rel !== fileName) {
       out = applyRules(out, options.rules, rel);
     }
+    /* The directives with what the linter's settle tells them: the `rules`
+     * block and the file (a directive's OWN findings - unused-directive,
+     * unknown-directive-rule - are switched off, re-graded and excluded like
+     * any other; without it a repository that turned `unused-directive` off
+     * still saw it in the editor), which rules ran (with no snapshot the
+     * property walk did not, and a waiver of one of its rules is unjudged,
+     * not unused) and which stood down on this source. */
+    const directed = applyDirectives(out, text, {
+      rules: options.rules,
+      file: rel ?? fileName,
+      ran: (id) => Boolean(data) || !WALK_ONLY_RULES.has(id),
+      stoodDown,
+    });
     // last, as the linter's settle does: the fixes of what survived speak
     // the file's line ending (which needs to know whether crlf-line-ending
     // survived the rules block and the directives)
-    return matchLineEndings(applyDirectives(out, text), text);
+    return matchLineEndings(directed, text);
   };
 
   if (isXml) {
@@ -377,6 +474,11 @@ export function runGate(
       mergeFields(enumFields, collectEnumBoundFields(node, data));
       mergeFields(boolFields, collectEnumBoundFields(node, data, DEFAULT_TRUE_BOOLEAN));
     }
+    // the stand-down checkAbapSource applies right here, before the
+    // structural and class-level findings join (see the function)
+    const namespaces = standDownUnusedNamespaces(findings, text, prep);
+    findings.splice(0, findings.length, ...namespaces.findings);
+    stoodDown.push(...namespaces.stoodDown);
     // Structural defects of the builder chain itself - an excess shut( )
     // asserts at RUNTIME, so this is the loudest thing the gate can find and
     // it was the one part of the pipeline this module never copied.
@@ -404,6 +506,11 @@ export function runGate(
         ...(options.classIndex ? { classIndex: options.classIndex } : {}),
       } as Parameters<typeof checkAbapRules>[1])
     );
+    // a stand-down that depends on the other classes leaves a waiver of the
+    // two public-attribute rules unjudged (a linter release after 0.8.5)
+    if (LINTER_PUBLIC_READ_FROM_OUTSIDE?.(text, options.classIndex ?? null)) {
+      stoodDown.push("unused-public-attribute", "unbound-public-attribute");
+    }
     /* Every fix the pipeline attaches, in the linter's one call: the
      * undeclared-namespace declaration, the `json = abap_true` deletion and
      * the did-you-mean rewrites. Calling only the first of the three meant
@@ -419,7 +526,7 @@ export function runGate(
   // severity, wording and the line/column behind each recorded offset - the
   // directives are keyed by line, so annotation has to happen before they
   // are applied; both live in `settled`
-  const out = settled(findings);
+  const out = settled(findings, stoodDown);
   if (noView) {
     // usesBuilder matched, but nothing was reconstructable: the ABAP-side
     // rules had their say above, the view rules had nothing to look at. With

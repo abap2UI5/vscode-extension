@@ -4,7 +4,14 @@ import * as fs from "fs";
 import * as path from "path";
 import { checkAbapSource, checkXmlSource } from "@abap2ui5/linter";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
-import { LINTER_MATCH_EOL, matchLineEndings, matchLineEndingsPort, runGate } from "../gate";
+import {
+  LINTER_MATCH_EOL,
+  LINTER_PUBLIC_READ_FROM_OUTSIDE,
+  matchLineEndings,
+  matchLineEndingsPort,
+  runGate,
+} from "../gate";
+import { LINTER_CLASS_INDEX_OF } from "../classindex";
 import type { CheckOptions } from "../lintconfig";
 
 /*
@@ -312,6 +319,45 @@ CLASS zcl_parity IMPLEMENTATION.
 ENDCLASS.
 `;
 ABAP_FIXTURES["a bare factory that builds no element"] = EMPTY_BUILDER;
+
+/* The linter's stand-down of unused-namespace-declaration: a class that
+ * writes the prefix in more builder literals (`form:SimpleForm`) than its
+ * reconstructed view carries uses it in a part of the view nobody here saw,
+ * so the rule stays silent - and its deleting --fix with it. The gate
+ * reported it, and the lightbulb offered to delete a declaration the view
+ * needs. */
+const helperBuilt = (directive: string): string => `CLASS zcl_parity DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    "! the edit form - added by the subclass that edits
+    METHODS add_form IMPORTING parent TYPE REF TO z2ui5_cl_ui5_view_builder.
+ENDCLASS.
+
+CLASS zcl_parity IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+${directive}    DATA(page) = view->ele( n = \`View\` ns = \`mvc\`
+        )->a( n = \`xmlns\`      v = \`sap.m\`
+        )->a( n = \`xmlns:mvc\`  v = \`sap.ui.core.mvc\`
+        )->a( n = \`xmlns:form\` v = \`sap.ui.layout.form\`
+        )->ele( n = \`Page\` ).
+    page->ele( n = \`Text\` )->a( n = \`text\` v = \`x\` ).
+
+    client->view_display( view->stringify( ) ).
+
+  ENDMETHOD.
+
+  METHOD add_form.
+    parent->ele( n = \`form:SimpleForm\` )->tag( n = \`Text\` )->a( n = \`text\` v = \`y\` ).
+  ENDMETHOD.
+ENDCLASS.
+`;
+ABAP_FIXTURES["a prefix the class writes outside its reconstructed view (the rule stands down)"] =
+  helperBuilt("");
+ABAP_FIXTURES["a waiver of a rule that stood down is not unused"] = helperBuilt(
+  '    " abap2ui5lint-disable-next-line unused-namespace-declaration\n'
+);
 
 /** Fixtures that need a floor of their own - the same comparison, with both
  *  sides told the same `minUi5`. */
@@ -731,4 +777,109 @@ test("a precomputed prep produces exactly the findings the gate derives itself",
     compared++;
   }
   assert.ok(compared >= 5, "the fixture table went missing");
+});
+
+test("the directives hear the rules block, as the linter's settle tells them", () => {
+  /* A directive's own findings (unused-directive, unknown-directive-rule)
+   * pass through the `rules` block like every other finding - in the
+   * linter's settle, which hands applyDirectives the rules and the file. The
+   * gate called it with neither, so a repository that switched
+   * `unused-directive` off, re-graded `unknown-directive-rule` or excluded a
+   * folder still saw them in the editor. */
+  const source = clazz(`            )->tag( n = \`Text\`
+                " abap2ui5lint-disable-next-line unknown-property
+                )->a( n = \`text\` v = \`fine\`
+                " abap2ui5lint-disable-next-line no-such-rule
+                )->a( n = \`wrapping\` v = \`true\``);
+  const file = "src/zcl_parity.clas.abap";
+  const variants: Array<Record<string, unknown>> = [
+    {},
+    { "unused-directive": "off" },
+    { "unknown-directive-rule": "error" },
+    { "unused-directive": { exclude: ["^src/"] }, "unknown-directive-rule": false },
+  ];
+  const control = runGate(source, file, false, OPTIONS).findings.map((f) => f.type);
+  assert.ok(
+    control.includes("unused-directive") && control.includes("unknown-directive-rule"),
+    `the fixture stopped producing both directive findings - the test measures nothing (${control.join(", ")})`
+  );
+  for (const rules of variants) {
+    const mine = runGate(source, file, false, { ...OPTIONS, rules });
+    const theirs = checkAbapSource(source, { ...linterOptions(file), rules });
+    assert.deepEqual(reduce(mine.findings), reduce(theirs.findings), JSON.stringify(rules));
+  }
+});
+
+test("a stood-down rule's waiver is unjudged, not unused - and the stand-down is the linter's", () => {
+  const source = ABAP_FIXTURES["a waiver of a rule that stood down is not unused"];
+  const mine = runGate(source, "src/zcl_parity.clas.abap", false, OPTIONS).findings;
+  assert.ok(!mine.some((f) => f.type === "unused-namespace-declaration"), "the rule stood down");
+  assert.ok(!mine.some((f) => f.type === "unused-directive"), "its waiver is not unused");
+  // and the same class with the literal the view does not carry taken out:
+  // the rule judges it again, and the declaration is reported
+  const judged = runGate(
+    ABAP_FIXTURES["a prefix the class writes outside its reconstructed view (the rule stands down)"]
+      .replace("`form:SimpleForm`", "`SimpleForm`"),
+    "src/zcl_parity.clas.abap",
+    false,
+    OPTIONS
+  ).findings;
+  assert.ok(
+    judged.some((f) => f.type === "unused-namespace-declaration"),
+    "the fixture stopped producing the finding - the test measures nothing"
+  );
+});
+
+test("a public attribute another class reads: the rules stand down, and their waiver is unjudged", (t) => {
+  /* From the release after 0.8.5 on, checkAbapSource stands the two
+   * public-attribute rules down for a class whose public attributes another
+   * class of the run reads (`publicReadFromOutside` over the class index) -
+   * and tells applyDirectives so, or the waiver that used to be needed would
+   * turn into an unused-directive the moment the index arrived. */
+  if (!LINTER_PUBLIC_READ_FROM_OUTSIDE || !LINTER_CLASS_INDEX_OF) {
+    t.skip("the pinned linter has no publicReadFromOutside / classIndexOf");
+    return;
+  }
+  const popup = `CLASS zcl_px_popup DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    " abap2ui5lint-disable-next-line unused-public-attribute
+    DATA ms_result TYPE string.
+    DATA mv_title TYPE string.
+ENDCLASS.
+
+CLASS zcl_px_popup IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
+        )->a( n = \`xmlns\` v = \`sap.m\`
+        )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
+        )->ele( \`Page\`
+            )->a( n = \`title\` v = client->_bind( mv_title )
+        )->end( ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.
+`;
+  const caller = `CLASS zcl_px_caller DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+ENDCLASS.
+
+CLASS zcl_px_caller IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    DATA lo_popup TYPE REF TO zcl_px_popup.
+    lo_popup ?= client->get_app( client->get( )-s_draft-id_prev_app ).
+    DATA(lv_result) = lo_popup->ms_result.
+  ENDMETHOD.
+ENDCLASS.
+`;
+  const classIndex = LINTER_CLASS_INDEX_OF([popup, caller]);
+  const file = "src/zcl_px_popup.clas.abap";
+  const mine = runGate(popup, file, false, { ...OPTIONS, classIndex });
+  const theirs = checkAbapSource(popup, { ...linterOptions(file), classIndex } as Parameters<
+    typeof checkAbapSource
+  >[1]);
+  assert.deepEqual(reduce(mine.findings), reduce(theirs.findings));
+  assert.ok(!mine.findings.some((f) => f.type === "unused-directive"), "the waiver is unjudged, not unused");
 });
