@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Removing an attribute in the Control Properties view keeps the chain
+  tidy.** Removing the last attribute of a chain left its closing `).` on a
+  line of its own; the paren now moves up to the line of the call that is
+  the last one (`)->tag( \`Input\` ).`), unless that line ends in a
+  comment. Removing an attribute followed by a blank line no longer takes
+  the blank line with it.
 - **The MCP server finds abap-cloud-gui under the repos root.** An
   `abap-cloud-gui` checkout under `abap2ui5.mcp.reposRoot` is now handed to
   the server as `ABAP_CLOUD_GUI_HOME`, as the other checkouts are. The
