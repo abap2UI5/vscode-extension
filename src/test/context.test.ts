@@ -361,6 +361,34 @@ test("a literal outside an _event call is not an event", () => {
   assert.equal(eventNameAt(src, src.lastIndexOf("`GO`") + 2), undefined);
 });
 
+test("only the name literal of an _event call is the event", () => {
+  /*
+   * Regression (corpus fuzz): any literal inside `_event( )` counted, so F2
+   * in `arg = \`${$parameters>/value}\`` offered to rename that as an
+   * event and then renamed nothing, and an `arg` spelled like an event
+   * jumped to its WHEN branch.
+   */
+  const { eventNameAt, eventNameSpans } = require("../context") as typeof import("../context");
+  const src =
+    HEAD +
+    "    )->tag( n = `Input` )->a( n = `change` v = client->_event(\n" +
+    "        val = `VALIDATE` arg = `${$parameters>/value}` ) )\n" +
+    "    )->tag( n = `Button` )->a( n = `press` v = client->_event( `GO` t_arg = VALUE #( ( `SAVE` ) ) ) ).\n" +
+    "    CASE client->get( )-event.\n" +
+    "      WHEN `SAVE`.\n" +
+    "    ENDCASE.\n";
+  const at = (needle: string) => src.indexOf(needle) + 2;
+  assert.equal(eventNameAt(src, at("${$parameters")), undefined, "an arg = literal is no event name");
+  assert.equal(eventNameAt(src, at("`SAVE` )")), undefined, "a t_arg row is no event name");
+  assert.equal(eventNameAt(src, at("`VALIDATE`"))?.name, "VALIDATE", "val = still is");
+  assert.equal(eventNameAt(src, at("`GO`"))?.name, "GO", "and so is the positional one");
+  // what eventNameAt answers is always one of the spans a rename writes
+  for (const needle of ["`VALIDATE`", "`GO`"]) {
+    const ev = eventNameAt(src, at(needle))!;
+    assert.ok(eventNameSpans(src, ev.name).some((s) => s.start === ev.start));
+  }
+});
+
 test("whenBranches and eventNameSpans see every naming of an event", () => {
   const {
     eventNameSpans,

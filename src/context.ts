@@ -1139,7 +1139,14 @@ export interface NamedSpan {
 }
 
 /** The event name the cursor sits on inside a `client->_event( … )` call
- *  (any of its spellings: positional, `val =`, `_event_display`). */
+ *  (any of its spellings: positional, `val =`, `_event_display`).
+ *
+ *  Only the NAME literal - the one `eventRaises` reads: positional or
+ *  `val =`, and spelled like an event. Any literal of the call used to count,
+ *  so the cursor in `arg = \`${$parameters>/value}\`` was "on an event":
+ *  F2 offered to rename `${$parameters>/value}` as one and then changed
+ *  nothing, the highlights lit up nothing, and an `arg` that happened to
+ *  spell an event jumped to that event's WHEN. */
 export function eventNameAt(
   source: string,
   offset: number
@@ -1149,8 +1156,14 @@ export function eventNameAt(
   if (!literal || !call || !/^_event\w*$/i.test(call.name)) {
     return undefined;
   }
+  const arg = argNameBefore(source, call.open + 1, literal.start - 1);
+  if (arg !== undefined && arg !== "val") {
+    return undefined;
+  }
   const name = source.slice(literal.start, literal.end);
-  return name ? { name, start: literal.start, end: literal.end } : undefined;
+  return /^[\w-]+$/.test(name)
+    ? { name, start: literal.start, end: literal.end }
+    : undefined;
 }
 
 /**

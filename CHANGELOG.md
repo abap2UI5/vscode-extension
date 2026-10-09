@@ -164,6 +164,11 @@
     `arg = \`${$parameters>/value}\``, `${$source>/text}` and
     `{device>/text}` renamed along with the attribute, which broke the event
     parameter or the device binding without a word.
+  - *F2, Go to Definition and the highlights on an event* answer only on
+    the event's name in `_event( )` - positional or `val =`. In any other
+    literal of the call (`arg = \`${$parameters>/value}\``, a `t_arg` row)
+    F2 offered a rename that then changed nothing, and an argument spelled
+    like an event jumped to that event's `WHEN`.
 
 
 ## 0.30.2
