@@ -107,13 +107,17 @@ function abapNsMapUncached(source: string): Record<string, string> {
   return map;
 }
 
-/** The `xmlns` declarations of a raw view/fragment XML. */
+/** The `xmlns` declarations of a raw view/fragment XML - in either quote,
+ *  as XML allows: reading `"` alone left every prefix of a view written with
+ *  `xmlns:m='sap.m'` unknown, so its `m:` controls completed and hovered as
+ *  nothing and an unprefixed one was taken for sap.m whatever the default
+ *  namespace said. */
 export function xmlNsMap(source: string): Record<string, string> {
   const map: Record<string, string> = {};
-  const re = /xmlns(?::([\w.]+))?\s*=\s*"([^"]+)"/g;
+  const re = /xmlns(?::([\w.]+))?\s*=\s*(?:"([^"]+)"|'([^']+)')/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(source))) {
-    map[m[1] ?? ""] = m[2];
+    map[m[1] ?? ""] = m[2] ?? m[3];
   }
   return map;
 }
@@ -1722,6 +1726,17 @@ export function xmlContextAt(
   const open = offset > 0 ? source.lastIndexOf("<", offset - 1) : -1;
   if (open < 0) {
     return undefined;
+  }
+  /* Inside a comment nothing is written: a `<footer>` in the prose of a
+   * `<!-- … -->` was taken for a tag, and completion offered controls in
+   * the middle of a sentence. The comment's own `<!` is refused below; this
+   * is for a `<` it contains. */
+  const comment = source.lastIndexOf("<!--", offset - 1);
+  if (comment >= 0 && comment < open) {
+    const end = source.indexOf("-->", comment + 4);
+    if (end < 0 || end + 3 > offset) {
+      return undefined;
+    }
   }
   const closed = xmlTagEnd(source, open);
   if (closed >= 0 && closed < offset) {

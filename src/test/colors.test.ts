@@ -179,3 +179,12 @@ test("a fresh factory( ) starts the ownership over", () => {
   });
   assert.deepEqual(owners, ["sap.m.ObjectStatus", "sap.m.Avatar"]);
 });
+
+test("a single-quoted colour value gets its swatch too", () => {
+  // XML allows either quote; reading `"` alone left `iconColor='#123456'`
+  // without a swatch (found fuzzing the demo kit's views)
+  const xml = `<mvc:View xmlns='sap.m' xmlns:mvc='sap.ui.core.mvc'>\n  <ObjectStatus iconColor='#123456' text="it's"/>\n</mvc:View>`;
+  const spans = xmlColorSpans(xml, (control, member) => control === "sap.m.ObjectStatus" && member === "iconColor");
+  assert.equal(spans.length, 1);
+  assert.equal(xml.slice(spans[0].start, spans[0].end), "#123456");
+});

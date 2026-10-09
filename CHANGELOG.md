@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **XML views: single quotes, comments and `id`/`class`.** A view whose
+  namespaces are declared with single quotes (`xmlns:m='sap.m'`) completed
+  and explained its prefixed controls as nothing, and took every unprefixed
+  tag for sap.m; a single-quoted colour value had no swatch. Inside an XML
+  comment, a `<word>` in the prose was taken for a tag and completed. And
+  `id`, `class` and `binding` - on nearly every control of a real view, but
+  declared in no control's metadata - are now offered and explained, in the
+  XML and in the builder chain alike.
 - **"Fix crlf-line-ending" converts the file now.** The linter's fix deletes
   every `\r`, and an editor position cannot address the gap between `\r`
   and `\n` - so the quick fix, *Fix All* and the workspace fix applied

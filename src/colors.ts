@@ -292,7 +292,8 @@ export function abapColorSpans(
 }
 
 const XML_TAG_RE = /<([\w:.]+)((?:[^>"']|"[^"]*"|'[^']*')*?)\/?>/g;
-const XML_ATTR_RE = /([\w:.-]+)\s*=\s*"([^"]*)"/g;
+// either quote, as XML allows (and as `xmlContextAt` reads values)
+const XML_ATTR_RE = /([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 
 /** Colour values in a raw view/fragment XML. */
 export function xmlColorSpans(
@@ -313,12 +314,13 @@ export function xmlColorSpans(
       if (!isColorMember(control, attr[1])) {
         continue;
       }
-      const color = parseCssColor(attr[2]);
+      const value = attr[2] ?? attr[3];
+      const color = parseCssColor(value);
       if (!color) {
         continue;
       }
-      const start = attrsAt + attr.index + attr[0].length - 1 - attr[2].length;
-      out.push({ start, end: start + attr[2].length, color });
+      const start = attrsAt + attr.index + attr[0].length - 1 - value.length;
+      out.push({ start, end: start + value.length, color });
     }
   }
   return out;
