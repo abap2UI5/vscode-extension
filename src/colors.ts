@@ -16,7 +16,7 @@ import {
   ContainerStack,
   DEFAULT_LIBRARY,
   splitName,
-  xmlNsMap,
+  xmlScopedTags,
 } from "./context";
 import { blankComments } from "./abapscan";
 
@@ -291,26 +291,28 @@ export function abapColorSpans(
   return out;
 }
 
-const XML_TAG_RE = /<([\w:.]+)((?:[^>"']|"[^"]*"|'[^']*')*?)\/?>/g;
 // either quote, as XML allows (and as `xmlContextAt` reads values)
 const XML_ATTR_RE = /([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 
-/** Colour values in a raw view/fragment XML. */
+/** Colour values in a raw view/fragment XML - each tag resolved against the
+ *  namespaces in scope at it, and nothing inside a comment
+ *  (`xmlScopedTags`). */
 export function xmlColorSpans(
   source: string,
   isColorMember: IsColorMember
 ): ColorSpan[] {
-  const ns = xmlNsMap(source);
   const out: ColorSpan[] = [];
-  for (const tag of source.matchAll(XML_TAG_RE)) {
-    const { prefix, local } = splitName(tag[1]);
-    const library = ns[prefix] ?? (prefix ? undefined : DEFAULT_LIBRARY);
+  for (const tag of xmlScopedTags(source)) {
+    if (tag.close) {
+      continue;
+    }
+    const { prefix, local } = splitName(tag.name);
+    const library = tag.ns[prefix] ?? (prefix ? undefined : DEFAULT_LIBRARY);
     if (!library) {
       continue;
     }
     const control = `${library}.${local}`;
-    const attrsAt = tag.index + 1 + tag[1].length;
-    for (const attr of tag[2].matchAll(XML_ATTR_RE)) {
+    for (const attr of tag.attrText.matchAll(XML_ATTR_RE)) {
       if (!isColorMember(control, attr[1])) {
         continue;
       }
@@ -319,7 +321,7 @@ export function xmlColorSpans(
       if (!color) {
         continue;
       }
-      const start = attrsAt + attr.index + attr[0].length - 1 - value.length;
+      const start = tag.attrsAt + attr.index + attr[0].length - 1 - value.length;
       out.push({ start, end: start + value.length, color });
     }
   }

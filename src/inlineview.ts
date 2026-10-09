@@ -11,8 +11,12 @@ import {
   Annotation,
   costAnnotations,
   deprecationAnnotations,
+  NamespaceScope,
   sinceAnnotations,
+  xmlNamespaceScopes,
 } from "./annotations";
+import { parseXml } from "@abap2ui5/linter/properties";
+import type { ViewNode } from "@abap2ui5/linter/reconstruct";
 import { usesBuilder } from "./abap";
 import { VIEW_XML_RE } from "./languagecore";
 import { preparedAbapOf } from "./language";
@@ -116,43 +120,76 @@ export function registerInlineAnnotations(
    *  document. The reconstruction comes out of the language features'
    *  version-keyed memo, so a paint after a completion (or of a second
    *  editor on the same document) does not parse the class again. */
+  /** The deprecation and `@since` annotations of a view tree - the class's
+   *  reconstruction or a raw view's parse, resolved against `ns`. */
+  const versionLines = (nodes: readonly ViewNode[], ns: NamespaceScope): Annotation[] => {
+    const data = snapshot();
+    const showDeprecated = config().get<boolean>("inlineDeprecated", true);
+    const showSince = config().get<boolean>("inlineSince", true);
+    if (!data || !(showDeprecated || showSince)) {
+      return [];
+    }
+    const floor = config().get<string>("viewCheck.minUi5", "1.71");
+    const out: Annotation[] = [];
+    // deprecations first - where a line carries both, the deprecation is
+    // the one worth the line's single annotation
+    if (showDeprecated) {
+      out.push(
+        ...deprecationAnnotations(nodes, ns, {
+          control: (control) =>
+            deprecationText(controlInfo(data, control)?.deprecated),
+          member: (control, member) =>
+            deprecationText(memberInfo(data, control, member)?.deprecated),
+        })
+      );
+    }
+    if (showSince) {
+      out.push(
+        ...sinceAnnotations(nodes, ns, floor, {
+          control: (control) => controlInfo(data, control)?.since,
+          member: (control, member) => memberInfo(data, control, member)?.since,
+        })
+      );
+    }
+    return out;
+  };
+
+  /** A raw view's parse per document version - the paint runs per visible
+   *  editor and per findings change, the text only changes with a version. */
+  const xmlParses = new WeakMap<vscode.TextDocument, { version: number; root: ViewNode }>();
+  const xmlRootOf = (doc: vscode.TextDocument): ViewNode | undefined => {
+    const memo = xmlParses.get(doc);
+    if (memo?.version === doc.version) {
+      return memo.root;
+    }
+    try {
+      const root = parseXml(doc.getText()) as ViewNode;
+      xmlParses.set(doc, { version: doc.version, root });
+      return root;
+    } catch {
+      return undefined; // a buffer mid-edit the parser gives up on
+    }
+  };
+
   const metadataLines = (doc: vscode.TextDocument): Annotation[] => {
+    if (VIEW_XML_RE.test(doc.fileName)) {
+      /* A raw view or fragment: the same `@since` and deprecation the builder
+       * chain gets, off the linter's own parse (every node and attribute
+       * carries its offset), each element resolved against the namespaces
+       * in scope at it. No roundtrip cost - a raw view ships no attributes. */
+      const root = xmlRootOf(doc);
+      return root ? versionLines(root.children, xmlNamespaceScopes(root)) : [];
+    }
     const text = doc.getText();
     if (!usesBuilder(text)) {
       return [];
     }
-    const data = snapshot();
-    const floor = config().get<string>("viewCheck.minUi5", "1.71");
     const out: Annotation[] = [];
     const prep = preparedAbapOf(doc);
     if (!prep) {
       return []; // an unparsable buffer mid-edit is not worth reporting
     }
-    const showDeprecated = config().get<boolean>("inlineDeprecated", true);
-    const showSince = config().get<boolean>("inlineSince", true);
-    if (data && (showDeprecated || showSince)) {
-      const ns = abapNsMap(text);
-      // deprecations first - where a line carries both, the deprecation is
-      // the one worth the line's single annotation
-      if (showDeprecated) {
-        out.push(
-          ...deprecationAnnotations(prep.nodes, ns, {
-            control: (control) =>
-              deprecationText(controlInfo(data, control)?.deprecated),
-            member: (control, member) =>
-              deprecationText(memberInfo(data, control, member)?.deprecated),
-          })
-        );
-      }
-      if (showSince) {
-        out.push(
-          ...sinceAnnotations(prep.nodes, ns, floor, {
-            control: (control) => controlInfo(data, control)?.since,
-            member: (control, member) => memberInfo(data, control, member)?.since,
-          })
-        );
-      }
-    }
+    out.push(...versionLines(prep.nodes, abapNsMap(text)));
     if (config().get<boolean>("inlineRoundtripCost", true)) {
       const mock = mockModel(doc);
       out.push(...costAnnotations(text, mock ?? prep.model, mock !== undefined));

@@ -12,7 +12,7 @@ import {
   whenLiteralAt,
   WriteContext,
   xmlContextAt,
-  xmlNsMap,
+  xmlNsMapAt,
 } from "./context";
 import {
   absoluteOffers,
@@ -428,7 +428,7 @@ export function completionAt(
   }
 
   if (context.kind === "namespace") {
-    const map = VIEW_XML_RE.test(fileName) ? xmlNsMap(text) : abapNsMap(text);
+    const map = VIEW_XML_RE.test(fileName) ? xmlNsMapAt(text, offset) : abapNsMap(text);
     return {
       ...span,
       entries: Object.entries(map)

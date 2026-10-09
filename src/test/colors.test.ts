@@ -128,6 +128,27 @@ test("xmlColorSpans resolves the tag's control and filters by member", () => {
   assert.equal(XML.slice(spans[0].start, spans[0].end), "rgb(24, 115, 180)");
 });
 
+test("xmlColorSpans: a tag resolves in its own scope, and a commented-out tag is none", () => {
+  const xml = `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">
+  <!-- <ObjectStatus iconColor="#ff0000"/> -->
+  <VBox xmlns="sap.ui.layout">
+    <ObjectStatus iconColor="#00ff00"/>
+  </VBox>
+  <ObjectStatus iconColor="#0000ff"/>
+</mvc:View>`;
+  const asked: string[] = [];
+  const spans = xmlColorSpans(xml, (control, member) => {
+    asked.push(control);
+    return control === "sap.m.ObjectStatus" && member === "iconColor";
+  });
+  assert.deepEqual(
+    spans.map((span) => xml.slice(span.start, span.end)),
+    ["#0000ff"],
+    "the commented tag is no control, the inner one is sap.ui.layout's"
+  );
+  assert.ok(asked.includes("sap.ui.layout.ObjectStatus"));
+});
+
 test("the picker gets a second spelling to cycle to", () => {
   // formatCssColor's form first - that is what accepting writes
   assert.deepEqual(

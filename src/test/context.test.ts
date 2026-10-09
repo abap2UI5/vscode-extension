@@ -12,6 +12,7 @@ import {
   whenBranchOf,
   whenLiteralAt,
   xmlContextAt,
+  xmlNsMapAt,
   xmlNsMap,
 } from "../context";
 
@@ -179,6 +180,43 @@ test("raw XML: the tag name, an attribute and a value", () => {
 test("raw XML: between two tags there is nothing to offer", () => {
   assert.deepEqual(xmlNsMap('<mvc:View xmlns="sap.m">'), { "": "sap.m" });
   assert.equal(xmlAt('<mvc:View xmlns="sap.m">\n  ‸\n</mvc:View>'), undefined);
+});
+
+test("raw XML: namespaces are scoped to the element that declares them", () => {
+  const head =
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n' +
+    "  <Page>\n" +
+    '    <VBox xmlns="sap.ui.layout.form" xmlns:f="sap.f">\n' +
+    "      <f:Card/>\n" +
+    "    </VBox>\n";
+  // an inner default namespace re-resolves its own subtree only
+  assert.equal(xmlAt(head + "    <Button ‸")?.control, "sap.m.Button");
+  // ... and a prefix declared in a closed subtree is not declared here
+  assert.equal(xmlAt(head + "    <f:Ca‸"), undefined);
+  // inside the declaring subtree both hold
+  const inner =
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n' +
+    '  <VBox xmlns="sap.ui.layout.form" xmlns:f="sap.f">\n';
+  assert.equal(xmlAt(inner + "    <f:Card ‸")?.control, "sap.f.Card");
+  assert.equal(xmlAt(inner + "    <SimpleForm ‸")?.control, "sap.ui.layout.form.SimpleForm");
+  // an element's own declarations count for that element
+  assert.equal(
+    xmlAt('<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n  <f:Card xmlns:f=\'sap.f\' ‸')?.control,
+    "sap.f.Card"
+  );
+  // between tags: the innermost open element's scope
+  const between = inner + "    ‸";
+  const offset = between.indexOf("‸");
+  assert.equal(xmlNsMapAt(between.replace("‸", ""), offset)[""], "sap.ui.layout.form");
+});
+
+test("raw XML: a declaration inside a comment declares nothing", () => {
+  const source =
+    '<!-- was: <mvc:View xmlns:f="sap.f" xmlns="sap.ui.layout.form"> -->\n' +
+    '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">\n';
+  assert.deepEqual(xmlNsMap(source), { mvc: "sap.ui.core.mvc", "": "sap.m" });
+  assert.equal(xmlAt(source + "  <f:Ca‸"), undefined);
+  assert.equal(xmlAt(source + "  <Button ‸")?.control, "sap.m.Button");
 });
 
 // ---------------------------------------------------------------------------
