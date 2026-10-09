@@ -1,7 +1,7 @@
 import * as path from "path";
 import { renderRuleConfig, severityOf } from "@abap2ui5/linter/findings";
 import { usesBuilder } from "./abap";
-import { frozenBuilderOf, VIEW_XML_RE } from "./gate";
+import { declaresApp, frozenBuilderOf, VIEW_XML_RE } from "./gate";
 
 /*
  * The `vscode`-free decisions behind the view check: what counts as
@@ -11,13 +11,14 @@ import { frozenBuilderOf, VIEW_XML_RE } from "./gate";
  * parts that need an editor - and asks here for everything that does not.
  */
 
-/** Checkable = a view/fragment XML, or an ABAP source calling the generic
- *  builder's factory - or a frozen builder's, which the gate answers with the
- *  linter's own `frozen-view-builder` finding. "ABAP source" means the abap
- *  language id or an *.abap file name - ABAP extensions differ in what they
- *  register, but a log or markdown file merely QUOTING builder code must not
- *  qualify. */
-export function isCheckableSource(
+/** A view of its own = a view/fragment XML, or an ABAP source calling the
+ *  generic builder's factory - or a frozen builder's, which the gate answers
+ *  with the linter's own `frozen-view-builder` finding. "ABAP source" means
+ *  the abap language id or an *.abap file name - ABAP extensions differ in
+ *  what they register, but a log or markdown file merely QUOTING builder
+ *  code must not qualify. What the systemless preview and the mock generator
+ *  need: something that builds a view. */
+export function isViewSource(
   fileName: string,
   languageId: string | undefined,
   text: string
@@ -25,10 +26,43 @@ export function isCheckableSource(
   if (VIEW_XML_RE.test(fileName)) {
     return true;
   }
-  if (languageId !== "abap" && !/\.abap$/i.test(fileName)) {
+  if (!isAbapSource(fileName, languageId)) {
     return false;
   }
   return usesBuilder(text) || frozenBuilderOf(text) !== undefined;
+}
+
+function isAbapSource(fileName: string, languageId: string | undefined): boolean {
+  return languageId === "abap" || /\.abap$/i.test(fileName);
+}
+
+/**
+ * Checkable = what the linter's `checkAbapSource` judges: a view source
+ * ({@link isViewSource}), an APP class that builds no view (its view comes
+ * from another class - CI judges it by the class rules, `declaresApp`), and,
+ * under the config's `allClasses`, every `*.clas.abap` that is not a test
+ * include (judged by the source-side rules). The view check used to stop at
+ * the first, so CI's findings on the other two never reached the editor.
+ */
+export function isCheckableSource(
+  fileName: string,
+  languageId: string | undefined,
+  text: string,
+  opts: { allClasses?: boolean } = {}
+): boolean {
+  if (isViewSource(fileName, languageId, text)) {
+    return true;
+  }
+  if (!isAbapSource(fileName, languageId)) {
+    return false;
+  }
+  return declaresApp(text) || Boolean(opts.allClasses && isAllClassesFile(fileName));
+}
+
+/** A file `allClasses` makes CI collect: a `*.clas.abap` that is not a
+ *  `*.testclasses.abap` (the linter's walk skips those first). */
+export function isAllClassesFile(fileName: string): boolean {
+  return /\.clas\.abap$/i.test(fileName) && !/\.testclasses\.abap$/i.test(fileName);
 }
 
 /**

@@ -51,7 +51,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
 | `src/compat.ts` | `vscode`-free: the bundled linter's compatibility record (`@abap2ui5/linter/compat`, copied next to the bundle by `esbuild.js` like the snapshot; null when the pin ships none) and what it says about a workspace's framework pin - the one parser of `abaplint.jsonc`'s `dependencies[].branch` (`scaffold.ts` uses it too), `compareRelease`, `compatVerdict`, the activation line |
 | `src/compatcheck.ts` | The framework-pin check's plumbing: a warning on the `branch` line of an open `abaplint.jsonc` pinned below what the bundled linter assumes, on open and save |
-| `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability, the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written, what the view preview shows after a refresh that threw (`failedPreviewState`) |
+| `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability (`isCheckableSource` - what the linter's `checkAbapSource` judges, a viewless app class and `allClasses` included - and `isViewSource`, what the systemless preview and the mock generator need), the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written, what the view preview shows after a refresh that threw (`failedPreviewState`) |
 | `src/childproc.ts` | `vscode`-free: the ONE way a checker is started - shell quoting of program AND arguments, timeout, kill of the whole process tree, "nobody is waiting any more" |
 | `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
@@ -434,10 +434,45 @@ Facts an agent cannot see from the code but will trip over:
   stand-down lives in `checkAbapSource` itself and is exported by no
   function - `unused-namespace-declaration` over a class whose view is only
   partly reconstructed - so `gate.ts` ports it (`standDownUnusedNamespaces`),
-  pinned by parity fixtures. Run `npm test` against a linter checkout before
-  a bump (a copy of this tree with `node_modules/@abap2ui5/linter` linked to
-  `git archive` of the linter's branch): the parity tests that skip at the
-  pin run there.
+  pinned by parity fixtures.
+  The paths too, not only the inputs: `checkAbapSource` judges an APP class
+  that builds no view (its view comes from another class) by
+  `checkSourceRules` plus the `VIEWLESS_APP_RULE` subset of
+  `checkAbapRules`, and under the config's `allClasses` any class by
+  `checkSourceRules`; `properties: false` skips the property walk (an XML view
+  then gets nothing at all). The gate answered "nothing to check" or walked
+  anyway - so `isCheckableSource` (`checkcore.ts`) admits what the linter's
+  `collectFiles` collects (pinned to it in `checkcore.test.ts`), and
+  `CheckOptions` carries `properties` and `allClasses`. The preview and the
+  mock generator ask `isViewSource` instead: a viewless app has nothing to
+  render. More inputs of the next release are wired the same way: the
+  start-path model per document (`initModel` / `initModelShape` /
+  `initialFields` off `prepareAbap`), `sizeLimitRaised`, `containerPages`
+  (`collectContainerPages`, feature-detected) and the opt-in `portable-app`
+  (`./portable`, which the pinned typings do not declare: `gate.ts`
+  `require`s it, and `esbuild.js`'s `absentLinterExports` plugin resolves a
+  subpath the installed release does not export to an empty module, so no
+  unresolved `require` is left for node to satisfy from some other
+  `node_modules` at runtime; its profile `data/portable-v1.json` is copied
+  like `icons.json` and seeded into the web shim). Where no leaf subpath
+  exports the original (`declaresApp`, `VIEWLESS_APP_RULE`, the
+  `sizeLimitRaised` expression), `gate.ts` ports it, and "the stand-ins for
+  linter exports" in `gate.parity.test.ts` pin each port to the installed
+  `lib/index.mjs`, fail once a leaf module exports the original, and fail
+  on the bump's own pull request while a stand-in that waits for the next
+  release (the `./portable` require, `StartPath`, `matchLineEndingsPort`)
+  is still there.
+  One known difference is left on purpose: CI's class index covers the
+  files of the RUN (`checkFiles` builds it from what `collectFiles`
+  collected), the editor's every class of the workspace - a non-app helper
+  class that reads a popup's attributes counts here and not in CI. Measured
+  over samples-controls, samples, samples-stack, abap2UI5, sapgui and popups
+  it changes no finding anywhere; narrowing the editor would need `paths`,
+  `ignore` and `allClasses` per config to be exact, and the linter's "of the
+  run" is the half to fix.
+  Run `npm test` against a linter checkout before a bump (a copy of this
+  tree with `node_modules/@abap2ui5/linter` linked to `git archive` of the
+  linter's branch): the parity tests that skip at the pin run there.
 - **The rule reference is coupled by URL, not by import.** Every diagnostic's
   code links to `https://abap2ui5.github.io/linter/#<rule-id>`, which the
   linter's `generate-rules-page` emits one anchor per rule for. The rule ids

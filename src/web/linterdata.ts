@@ -27,10 +27,17 @@ import * as fs from "fs";
 export interface LinterDataFile {
   path: string;
   packaged: string[];
+  /** A file only some linter releases ship (`esbuild.js` copies it when the
+   *  bundled one does): a failed read is then not worth a log line. */
+  optional?: boolean;
 }
 
 export const LINTER_DATA_FILES: readonly LinterDataFile[] = [
   { path: "/data/icons.json", packaged: ["data", "icons.json"] },
+  /* The portable profile of the opt-in `portable-app` rule - read by
+   * gate.ts the way the linter's index.mjs reads it (`PORTABLE_PROFILE_URL`),
+   * from the release after 0.8.5 on. */
+  { path: "/data/portable-v1.json", packaged: ["data", "portable-v1.json"], optional: true },
 ];
 
 type Seed = (file: string, text: string) => void;
@@ -54,6 +61,9 @@ export async function seedLinterData(
     try {
       seed(file.path, await read(file.packaged));
     } catch (err) {
+      if (file.optional) {
+        continue;
+      }
       failed.push(
         `${file.packaged.join("/")}: ${err instanceof Error ? err.message : String(err)}`
       );

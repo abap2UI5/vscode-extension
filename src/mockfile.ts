@@ -4,7 +4,7 @@ import { classNameOf } from "./abap";
 import { preparedAbapOf } from "./language";
 import { mockJson, mockSkeleton } from "./mockgen";
 import { plural } from "./text";
-import { isCheckable, pickDocument } from "./viewcheck";
+import { hasOwnView, pickDocument } from "./viewcheck";
 
 /*
  * "Generate Mock Data for This App" - the plumbing around `mockgen.ts`.
@@ -51,7 +51,7 @@ export function registerMockFile(
       "abap2ui5.generateMock",
       async (node?: { uri?: vscode.Uri }) => {
         const doc = await documentFor(node);
-        if (!doc || !isCheckable(doc) || doc.languageId !== "abap") {
+        if (!doc || !hasOwnView(doc) || doc.languageId !== "abap") {
           vscode.window.showInformationMessage(
             "abap2UI5: no app here to mock - open an ABAP class building " +
               "views with z2ui5_cl_ui5_view_builder."

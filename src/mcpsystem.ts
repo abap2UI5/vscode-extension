@@ -306,7 +306,10 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
         const rules = cfg.get<Record<string, unknown>>("viewCheck.rules");
         const gate = runGate(source, filename, isXml, {
           minUi5: cfg.get<string>("viewCheck.minUi5", "1.71"),
-          distribution: cfg.get<string>("viewCheck.distribution", "sapui5"),
+          // "" is the setting's default and means "not decided" - the
+          // linter's own answer, never "sapui5" (which silences
+          // sapui5-only-control: see gate.ts and viewcheck.ts)
+          distribution: cfg.get<string>("viewCheck.distribution", "") || null,
           allow: cfg.get<string[]>("viewCheck.allow", []),
           rules: rules && Object.keys(rules).length > 0 ? rules : undefined,
           // judged against the window's other classes, as the editor is

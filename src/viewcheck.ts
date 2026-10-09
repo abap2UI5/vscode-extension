@@ -15,10 +15,9 @@ import {
 } from "./rendergate";
 import { VIEW_CHECK_DIRS } from "./repolayout";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
-import { isShadowScheme, usesBuilder } from "./abap";
+import { isShadowScheme } from "./abap";
 import {
   configRelative,
-  frozenBuilderOf,
   GateOptions,
   GateResult,
   runGate,
@@ -31,7 +30,9 @@ import {
   CheckerCommand,
   cliCollects,
   FindingSeverity,
+  isAllClassesFile,
   isCheckableSource,
+  isViewSource,
   parseRenderReport,
   checkerCwd,
   RenderGateOutcome,
@@ -137,7 +138,19 @@ export function isCheckable(doc: vscode.TextDocument): boolean {
   if (isShadowScheme(doc.uri.scheme)) {
     return false;
   }
-  return isCheckableSource(doc.fileName, doc.languageId, doc.getText());
+  if (isCheckableSource(doc.fileName, doc.languageId, doc.getText())) {
+    return true;
+  }
+  // `allClasses` is the repository config's word - asked only for a class
+  // the content test turned down (the options are cached per config mtime)
+  return isAllClassesFile(doc.fileName) && optionsFor(doc).allClasses === true;
+}
+
+/** Does the document build a view of its own - what the systemless preview
+ *  and the mock generator need (an app class whose view comes from another
+ *  class is checkable, but has nothing to render or to mock). */
+export function hasOwnView(doc: vscode.TextDocument): boolean {
+  return !isShadowScheme(doc.uri.scheme) && isViewSource(doc.fileName, doc.languageId, doc.getText());
 }
 
 /** The document to check on demand: the active editor when it is checkable,
@@ -986,7 +999,10 @@ async function sweepWorkspace(
           }
         }
         const isXml = VIEW_XML_RE.test(uri.path);
-        if (!isXml && !usesBuilder(text) && !frozenBuilderOf(text)) {
+        // the content half of the linter's collectFiles: a builder (or
+        // frozen-builder) class, an app class without a view, and under
+        // `allClasses` every class
+        if (!isXml && !isCheckableSource(uri.path, "abap", text, { allClasses: opts.allClasses })) {
           sweepCache.set(key, { stamp: io.stamp, findings: [], skip: true });
           continue;
         }

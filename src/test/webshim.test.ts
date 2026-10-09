@@ -247,6 +247,33 @@ test("the icon data is seeded where the bundled linter looks for it in the web b
   );
 });
 
+test("the portable profile is seeded where the bundled linter computes it in the web build", (t) => {
+  const portable = nodePath.join(LINTER_LIB, "portable.mjs");
+  if (!fs.existsSync(portable)) {
+    t.skip("the pinned linter has no portable-app rule (and no profile to seed)");
+    return;
+  }
+  const { LINTER_DATA_FILES } = require("../web/linterdata") as typeof import("../web/linterdata");
+  // the linter's formula, which gate.ts evaluates through the url shim
+  assert.match(
+    fs.readFileSync(portable, "utf8"),
+    /PORTABLE_PROFILE_URL = new URL\('\.\.\/data\/portable-v1\.json', import\.meta\.url\)/,
+    "the linter locates its portable profile differently now - update src/web/linterdata.ts"
+  );
+  const metaUrl = /import_meta_url = "([^"]+)"/.exec(
+    fs.readFileSync(nodePath.join(ROOT, "scripts", "import-meta-url-web-shim.mjs"), "utf8")
+  )?.[1];
+  assert.ok(metaUrl);
+  const urlShim = require("../../scripts/web-shims/url.js");
+  const expected = urlShim.fileURLToPath(new URL("../data/portable-v1.json", metaUrl).href);
+  const seeded = LINTER_DATA_FILES.find((file) => file.packaged.join("/") === "data/portable-v1.json");
+  assert.equal(seeded?.path, expected);
+  assert.ok(
+    fs.existsSync(nodePath.join(ROOT, ...seeded!.packaged)),
+    "esbuild.js copies data/portable-v1.json into the extension root"
+  );
+});
+
 test("the icon rules fire in the web bundle once the data is seeded", async () => {
   /*
    * Regression (web build audit): in the browser `fs` is the shim, the
@@ -270,7 +297,9 @@ import { setSnapshotText } from ${src("snapshot")};
 export async function probe(read: (p: string[]) => Promise<string>, snapshot: string, source: string) {
   const failed = await seedLinterData(read);
   setSnapshotText(snapshot);
-  return { failed, types: runGate(source, "/repo/zcl_app.clas.abap", false, { minUi5: "1.71" } as never).findings.map((f) => f.type) };
+  const typesOf = (rules?: Record<string, unknown>) =>
+    runGate(source, "/repo/zcl_app.clas.abap", false, { minUi5: "1.71", rules } as never).findings.map((f) => f.type);
+  return { failed, types: typesOf(), portable: typesOf({ "portable-app": "error" }) };
 }
 `
     );
@@ -298,6 +327,8 @@ export async function probe(read: (p: string[]) => Promise<string>, snapshot: st
       "        )->tag( `Button`",
       "            )->a( n = `icon` v = `sap-icon://nosuchicon` ).",
       "    client->view_display( view->stringify( ) ).",
+      // outside the portable profile: a nested view
+      "    client->nest_view_display( val = view->stringify( ) id = `x` method_insert = `addItem` ).",
       "  ENDMETHOD.",
       "ENDCLASS.",
     ].join("\n");
@@ -310,6 +341,16 @@ export async function probe(read: (p: string[]) => Promise<string>, snapshot: st
     assert.ok(
       result.types.includes("unknown-icon"),
       `unknown-icon is missing from the web build's findings: ${result.types.join(", ")}`
+    );
+    /* The opt-in portable-app rule reads its profile through the same seeded
+     * shim (gate.ts, the way the linter's index.mjs reads it) - on a linter
+     * that has the rule; at the pin the `./portable` require resolves to an
+     * empty module (esbuild.js, absentLinterExports) and nothing is reported. */
+    const hasPortable = fs.existsSync(nodePath.join(LINTER_LIB, "portable.mjs"));
+    assert.equal(
+      result.portable.includes("portable-app"),
+      hasPortable,
+      `portable-app in the web build: ${result.portable.join(", ")}`
     );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

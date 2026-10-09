@@ -155,6 +155,11 @@ export function optionsFromConfig(
     // the repo-level path patterns the CLI's walk prunes - what the workspace
     // sweep has to prune too, or a rebuilt baseline names files CI never sees
     ignore: raw.ignore,
+    // `properties: false` (no property gate) and `allClasses` (every class
+    // collected, a viewless one judged by the source rules) - both change
+    // what CI reports, so both reach the gate
+    properties: raw.properties,
+    allClasses: raw.allClasses,
   };
 }
 

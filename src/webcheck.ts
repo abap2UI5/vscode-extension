@@ -1,12 +1,13 @@
 import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
-import { frozenBuilderOf, GateOptions, runGate, VIEW_XML_RE } from "./gate";
+import { GateOptions, runGate, VIEW_XML_RE } from "./gate";
+import { isAllClassesFile, isCheckableSource } from "./checkcore";
 import { preparedAbapOf } from "./language";
 import { onDidChangeClassIndex, registerClassIndex, workspaceClassIndex } from "./classindexfeed";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
 import { plural } from "./text";
-import { isShadowScheme, usesBuilder } from "./abap";
+import { isShadowScheme } from "./abap";
 import type { CheckOptions, SettingsOptions } from "./lintconfig";
 import {
   applyBaselineMap,
@@ -297,10 +298,11 @@ async function sweepWorkspaceWeb(
           }
         }
         const isXml = VIEW_XML_RE.test(uri.path);
-        if (!isXml && !usesBuilder(text) && !frozenBuilderOf(text)) {
+        const opts = optionsForPath(uri.path);
+        // what the linter's collectFiles judges - see checkcore.isCheckableSource
+        if (!isXml && !isCheckableSource(uri.path, "abap", text, { allClasses: opts.allClasses })) {
           continue;
         }
-        const opts = optionsForPath(uri.path);
         let gate;
         try {
           gate = runGate(
@@ -399,14 +401,12 @@ function isCheckable(doc: vscode.TextDocument): boolean {
   if (isShadowScheme(doc.uri.scheme)) {
     return false;
   }
-  if (VIEW_XML_RE.test(doc.fileName)) {
+  if (isCheckableSource(doc.fileName, doc.languageId, doc.getText())) {
     return true;
   }
-  if (doc.languageId !== "abap" && !/\.abap$/i.test(doc.fileName)) {
-    return false;
-  }
-  const text = doc.getText();
-  return usesBuilder(text) || frozenBuilderOf(text) !== undefined;
+  // the repository config's `allClasses`, asked only for a class the content
+  // test turned down - the same decision as the desktop isCheckable
+  return isAllClassesFile(doc.fileName) && options(doc).allClasses === true;
 }
 
 /** Findings per document, memoised on its version - the same contract

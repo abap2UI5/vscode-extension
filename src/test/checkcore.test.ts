@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
-import { checkXmlSource } from "@abap2ui5/linter";
+import { checkXmlSource, collectFiles } from "@abap2ui5/linter";
 import { applyDirectives, defaultSeverityOf } from "@abap2ui5/linter/findings";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import {
@@ -12,6 +12,7 @@ import {
   diagnosticSeverityKey,
   directiveLine,
   isCheckableSource,
+  isViewSource,
   settleRenderErrors,
   suppressionEdits,
   SuppressionEdit,
@@ -78,6 +79,63 @@ test("the abap language id suffices, and so does the file extension", () => {
 test("a log quoting builder code is not checkable", () => {
   assert.equal(isCheckableSource("notes.md", "markdown", BUILDER_CLASS), false);
   assert.equal(isCheckableSource("out.log", "log", BUILDER_CLASS), false);
+});
+
+const VIEWLESS_APP =
+  "CLASS zcl_viewless DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    INTERFACES z2ui5_if_app.\nENDCLASS.\n" +
+  "CLASS zcl_viewless IMPLEMENTATION.\n  METHOD z2ui5_if_app~main.\n" +
+  "    client->view_display( zcl_views=>main( client ) ).\n  ENDMETHOD.\nENDCLASS.\n";
+const PLAIN_CLASS =
+  "CLASS zcl_util DEFINITION PUBLIC.\nENDCLASS.\nCLASS zcl_util IMPLEMENTATION.\nENDCLASS.\n";
+
+test("an app class without a view is checkable, and every class under allClasses - but has no view of its own", () => {
+  assert.equal(isCheckableSource("zcl_viewless.clas.abap", "abap", VIEWLESS_APP), true);
+  assert.equal(isViewSource("zcl_viewless.clas.abap", "abap", VIEWLESS_APP), false);
+  assert.equal(isCheckableSource("zcl_util.clas.abap", "abap", PLAIN_CLASS), false);
+  assert.equal(isCheckableSource("zcl_util.clas.abap", "abap", PLAIN_CLASS, { allClasses: true }), true);
+  assert.equal(isViewSource("zcl_util.clas.abap", "abap", PLAIN_CLASS), false);
+  // allClasses is about classes: a test include, a report or a buffer without
+  // a class file name stays out, as it does in the linter's walk
+  assert.equal(
+    isCheckableSource("zcl_util.clas.testclasses.abap", "abap", PLAIN_CLASS, { allClasses: true }),
+    false
+  );
+  assert.equal(isCheckableSource("zreport.prog.abap", "abap", PLAIN_CLASS, { allClasses: true }), false);
+  assert.equal(isViewSource("zcl_app.clas.abap", "abap", BUILDER_CLASS), true);
+});
+
+test("checkable files are the ones the linter's collectFiles collects", () => {
+  /* The workspace sweep decides with cliCollects (the NAME half) and
+   * isCheckableSource (the CONTENT half); a file the CLI collects and the
+   * sweep skips is a class CI fails and "Check All Views" calls clean, and
+   * the other way round a rebuilt baseline names a file CI never sees. */
+  const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "abap2ui5-collect-"));
+  try {
+    const files: Record<string, string> = {
+      "zcl_app.clas.abap": BUILDER_CLASS,
+      "zcl_frozen.clas.abap": "CLASS zcl_frozen IMPLEMENTATION.\n  METHOD main.\n    DATA(v) = z2ui5_cl_xml_view=>factory( ).\n  ENDMETHOD.\nENDCLASS.\n",
+      "zcl_viewless.clas.abap": VIEWLESS_APP,
+      "zcl_util.clas.abap": PLAIN_CLASS,
+      "zcl_util.clas.testclasses.abap": VIEWLESS_APP,
+      "zcl_util.clas.locals_imp.abap": BUILDER_CLASS,
+    };
+    for (const [name, text] of Object.entries(files)) {
+      fs.writeFileSync(path.join(dir, name), text);
+    }
+    for (const allClasses of [false, true]) {
+      const collected = new Set(
+        collectFiles([dir], { allClasses } as Parameters<typeof collectFiles>[1]).map((f) =>
+          path.basename(f)
+        )
+      );
+      for (const [name, text] of Object.entries(files)) {
+        const mine = cliCollects(name) && isCheckableSource(name, "abap", text, { allClasses });
+        assert.equal(mine, collected.has(name), `${name} (allClasses ${allClasses})`);
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ import {
 } from "./checkcore";
 import { classNameOf } from "./abap";
 import { run } from "./childproc";
-import { checkerCommand, isCheckable, pickDocument, spawnEnv } from "./viewcheck";
+import { checkerCommand, hasOwnView, pickDocument, spawnEnv } from "./viewcheck";
 import { createNonce, viewPreviewHtml } from "./webview";
 
 /*
@@ -544,7 +544,7 @@ export function registerViewPreview(
 
     vscode.commands.registerCommand("abap2ui5.previewView", async () => {
       const doc = pickDocument();
-      if (!doc || !isCheckable(doc)) {
+      if (!doc || !hasOwnView(doc)) {
         vscode.window.showInformationMessage(
           "abap2UI5: no view here to preview - open an ABAP class building " +
             "views with z2ui5_cl_ui5_view_builder, or a *.view.xml."
@@ -558,7 +558,7 @@ export function registerViewPreview(
 
     vscode.commands.registerCommand("abap2ui5.previewDiff", async () => {
       const doc = pickDocument();
-      if (!doc || !isCheckable(doc)) {
+      if (!doc || !hasOwnView(doc)) {
         vscode.window.showInformationMessage(
           "abap2UI5: no view here to compare - open an ABAP class building " +
             "views with z2ui5_cl_ui5_view_builder, or a *.view.xml."

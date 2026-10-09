@@ -114,6 +114,29 @@
     "fix trailing-whitespace on 12" - or, with the next linter release,
     "on 3", the count of blanks. It now says "on line 12"; a fix over many
     lines names none.
+  - *An app class whose view comes from another class* is checked, as CI
+    checks it: by the rules that read the class rather than a view - a
+    `_bind( )` on a private attribute, an obsolete call, the event wires,
+    the lifecycle dispatcher. The editor used to say "nothing to check".
+    *Preview View (No System)* and *Generate Mock Data for This App* still
+    ask for a class that builds its view itself.
+  - *`allClasses` and `properties` in `abap2ui5lint.jsonc` are honoured.*
+    With `allClasses`, every class is checked - one that builds no view by
+    the source rules, as CI does - and *Check All Views in the Workspace*
+    reaches it. With `properties: false` the walk over the view against the
+    UI5 metadata is skipped as in CI (in an XML view, the whole check), and a
+    waiver of one of its rules is no longer reported as unused.
+  - *An icon in a commented-out control of an XML view* is no longer
+    reported - CI reads the view with its comments blanked.
+  - *The `check_view_source` tool of the abap2UI5 System MCP server* treats
+    an unset `abap2ui5.viewCheck.distribution` as "not decided", like the
+    editor - it judged as SAPUI5 and so hid the SAPUI5-only-control hint.
+  - *Ready for the next linter release:* `rows-hidden-by-visible`,
+    `enum-bound-to-initial-field`, `navigation-lost-on-rebuild` and the
+    opt-in `portable-app` (its profile ships with the extension) are judged
+    with the same inputs CI gives them as soon as the bundled linter brings
+    them - the start-path model, whether the class raises the size limit,
+    the pages of a container, the portable profile.
   - *A waiver in an XML view never goes above its XML declaration* (nor in
     front of a byte-order mark). With the root on the declaration's line (a
     minified or generated view), the "suppress on this line" quick fix wrote

@@ -48,7 +48,23 @@ function copySnapshot() {
     path.join(data, "icons.json"),
     path.join("data", "icons.json")
   );
+  /* The portable profile the opt-in `portable-app` rule judges against goes
+   * the same way as icons.json - the linter computes its path from
+   * `import.meta.url` + "../data" (`PORTABLE_PROFILE_URL`), and gate.ts reads
+   * it there. A release from before the rule ships none: then a copy from an
+   * earlier build is removed rather than kept stale. */
+  copyIfShipped(path.join(data, "portable-v1.json"), path.join("data", "portable-v1.json"));
   copyCompat(data, "dist");
+}
+
+/** Copies a data file the bundled linter release may not ship yet; removes a
+ *  stale copy when it does not. */
+function copyIfShipped(source, target) {
+  if (fs.existsSync(source)) {
+    fs.copyFileSync(source, target);
+  } else {
+    fs.rmSync(target, { force: true });
+  }
 }
 
 /** The linter's compatibility record (`data/compat.json`, its `./compat`
@@ -64,13 +80,36 @@ function copyCompat(data, outDir) {
   } catch {
     source = path.join(data, "compat.json");
   }
-  const target = path.join(outDir, "compat.json");
-  if (fs.existsSync(source)) {
-    fs.copyFileSync(source, target);
-  } else {
-    fs.rmSync(target, { force: true });
-  }
+  copyIfShipped(source, path.join(outDir, "compat.json"));
 }
+
+/** Linter subpaths the gate reaches for that a release may not export yet
+ *  (gate.ts requires them inside a try and feature-detects what came back).
+ *  One the installed release does not export resolves to an EMPTY module
+ *  here, so the bundle never asks node for it at runtime - an unresolved
+ *  `require` would otherwise stay in the bundle and could pick up some other
+ *  copy of the linter from a parent `node_modules` of the extension. */
+const LATER_LINTER_SUBPATHS = ["@abap2ui5/linter/portable"];
+const absentLinterExports = {
+  name: "absent-linter-exports",
+  setup(build) {
+    const filter = new RegExp(
+      `^(?:${LATER_LINTER_SUBPATHS.map((s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|")})$`
+    );
+    build.onResolve({ filter }, (args) => {
+      try {
+        require.resolve(args.path);
+        return undefined; // exported: resolved and bundled as usual
+      } catch {
+        return { path: args.path, namespace: "absent-linter-export" };
+      }
+    });
+    build.onLoad({ filter: /.*/, namespace: "absent-linter-export" }, () => ({
+      contents: "module.exports = {};",
+      loader: "js",
+    }));
+  },
+};
 
 /** The linter release this build bundles, stamped into the desktop bundle.
  *
@@ -122,6 +161,7 @@ const ESM_IN_CJS = {
     "process.env.LINTER_COMMIT": JSON.stringify(LINTER.commit),
   },
   inject: ["scripts/import-meta-url-shim.mjs"],
+  plugins: [absentLinterExports],
 };
 
 /**
@@ -205,6 +245,7 @@ function webConfig() {
       "scripts/import-meta-url-web-shim.mjs",
       "scripts/web-shims/process.mjs",
     ],
+    plugins: [absentLinterExports],
     logLevel: "info",
   };
 }

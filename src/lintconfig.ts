@@ -40,6 +40,14 @@ export interface CheckOptions {
   ignore?: string[];
   /** Per-rule severity overrides / switch-offs, as the linter interprets it. */
   rules?: Record<string, unknown>;
+  /** The config's `properties` switch. `false` turns the PROPERTY GATE off -
+   *  the walk over the view against the metadata snapshot - in CI, so the
+   *  gate skips it too (the ABAP-side rules run either way). */
+  properties?: boolean;
+  /** The config's `allClasses`: CI collects every `*.clas.abap`, and judges
+   *  one that builds no view by the source-side rules - so the editor checks
+   *  such a class too, and the workspace sweep reaches it. */
+  allClasses?: boolean;
   /** The adoption baseline file (absolute) - findings it covers are dropped,
    *  exactly as `--baseline` drops them in CI. */
   baseline?: string;
