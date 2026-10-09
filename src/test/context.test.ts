@@ -330,6 +330,17 @@ test("a second factory( ) starts a second root", () => {
   assert.equal(roots.length, 2);
 });
 
+test("the outline of a class with very many calls does not overflow the stack", () => {
+  // Regression (corpus fuzz, synthetic scale-up): the last call's end was
+  // taken with Math.max(...calls) - one argument per call - and from about
+  // 120,000 calls on the outline threw RangeError instead of answering
+  const { viewOutline } = require("../context") as typeof import("../context");
+  const src =
+    HEAD + "    )->tag( n = `Text` ).\n" + "    x( ).\n".repeat(200000);
+  const roots = viewOutline(src);
+  assert.equal(roots.length, 1);
+});
+
 test("event navigation finds the WHEN branch and the way back", () => {
   const {
     eventNameAt,

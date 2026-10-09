@@ -869,7 +869,13 @@ export function viewOutline(source: string): OutlineNode[] {
       stack.push(name);
     }
   }
-  widenOpen(calls.length ? Math.max(...calls.map((c) => c.close ?? c.open)) : 0);
+  // a loop, not `Math.max(...calls)`: one argument per call of the class
+  // overflowed the stack from about 120,000 calls on, and the outline threw
+  let last = 0;
+  for (const call of calls) {
+    last = Math.max(last, call.close ?? call.open);
+  }
+  widenOpen(last);
 
   // A parent must span its children - an unclosed container ends where its
   // last child does.

@@ -175,6 +175,8 @@
     `unknown-icon`, `icon-too-new` and `icon-removed` never fired there,
     because the linter's icon list could not be read in the browser - the
     desktop editor and CI reported them.
+  - *Outline.* A very large class (from about 120,000 method calls on) no
+    longer makes the view outline, and with it the breadcrumbs, fail.
 
 
 ## 0.30.2
