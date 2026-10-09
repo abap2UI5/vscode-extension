@@ -66,6 +66,22 @@ export function decodeEntities(text: string): string {
 }
 
 const ATTR_RE = /([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+
+/**
+ * An attribute value as an XML parser - UI5's included - hands it on: every
+ * line break (`\r\n` as ONE) and every tab a blank (XML 1.0 §3.3.3,
+ * attribute-value normalisation), BEFORE character references are expanded,
+ * so a `&#10;` written on purpose survives as the line break it spells.
+ *
+ * Leaving it to `lit( )` replaced `\n` alone: a CRLF view whose long binding
+ * value was split into `&&` chunks could have the cut fall between `\r` and
+ * `\n`, and the chunk then ended in a bare `\r` - a line break inside an
+ * ABAP literal for every editor and for abapGit, which refuses literals
+ * across lines.
+ */
+function normalizeAttributeValue(raw: string): string {
+  return raw.replace(/\r\n|[\r\n\t]/g, " ");
+}
 /** What is left of an attribute once the quoted ones are taken out: a name,
  *  an `=`, and a value with no quotes around it. */
 const UNQUOTED_ATTR_RE = /([\w:.-]+)\s*=\s*([^\s"'=]+)/g;
@@ -167,7 +183,7 @@ export function parseXml(text: string): ParsedXml {
     const attrs: Array<[string, string]> = [];
     const attrText = body.slice(name.length);
     for (const m of attrText.matchAll(ATTR_RE)) {
-      attrs.push([m[1], decodeEntities(m[2] ?? m[3] ?? "")]);
+      attrs.push([m[1], decodeEntities(normalizeAttributeValue(m[2] ?? m[3] ?? ""))]);
     }
     // An unquoted value (`enabled=true`) is not XML, and a pasted snippet has
     // them. The attribute is dropped like the other unreadable pieces - and
@@ -203,7 +219,9 @@ const MAX_LINE = 255;
 
 /** An ABAP backtick literal: the backtick escapes by doubling. */
 function lit(value: string): string {
-  return "`" + value.replace(/`/g, "``").replace(/\r?\n/g, " ") + "`";
+  // a line break that reached here was written as a character reference
+  // (`&#10;`, `&#13;`) - a literal cannot hold one, so it is a blank
+  return "`" + value.replace(/`/g, "``").replace(/\r\n|[\r\n]/g, " ") + "`";
 }
 
 /** Attribute names that are events on the controls people paste, for the

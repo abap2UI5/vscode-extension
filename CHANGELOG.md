@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Convert XML View to Builder Chain: no line break inside a literal from
+  a CRLF view.** A long binding written over several lines (the demo kit's
+  Checkout view) is split into `&&` chunks, and in a CRLF file the cut could
+  fall between `\r` and `\n`, leaving a bare `\r` in a literal - a line
+  break that abapGit refuses. Attribute values are now read the way an XML
+  parser (UI5's included) reads them: each line break and tab a blank, a
+  `&#10;` still a line break.
 - **XML views: single quotes, comments and `id`/`class`.** A view whose
   namespaces are declared with single quotes (`xmlns:m='sap.m'`) completed
   and explained its prefixed controls as nothing, and took every unprefixed
