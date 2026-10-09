@@ -243,6 +243,12 @@
     `package.json` name within npm's rules: a folder name longer than 214
     characters is cut, and a folder called `node_modules` or `favicon.ico`
     gets `abap2ui5-app` - `npm install` refused the names they used to write.
+  - *Opening a workspace reads its classes once.* The app index, the class
+    index the view check uses and the apps tree each scanned the workspace
+    when the window opened, and the three scans ran at the same time - so
+    every class was read three times. They now share one scan (over
+    samples-controls' 644 classes: one read per file instead of three,
+    about half the time).
   - *The MCP server finds abap-cloud-gui under the repos root.* An
     `abap-cloud-gui` checkout under `abap2ui5.mcp.reposRoot` is now handed to
     the server as `ABAP_CLOUD_GUI_HOME`, as the other checkouts are. The

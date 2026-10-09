@@ -119,6 +119,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/classindexsync.ts` | `vscode`-free: WHEN that index is read and when the checks hear of it - LAZY (nothing is read until a check first asks; the extension activates on any `*.clas.abap`, and indexing samples-controls' 644 classes costs ~0.7 s of the shared host), no partial index ever handed out (undefined until the first scan is in, then one change notice), saved state only (disk files, plus open documents without one), debounced change notices, everything stopped on dispose - `classindexsync.test.ts` |
 | `src/classindexfeed.ts` | The plumbing around `classindexsync.ts` for both entries: the shared ABAP watcher, saves, opened/closed ADT documents, `workspace.fs` |
 | `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
+| `src/sharedscan.ts` | `vscode`-free: one scan in flight, joined by every caller that asks for the same thing while it runs and nothing changed since it started - what lets the app index, the class index and the apps tree share the cold scan at activation (`abapsources.ts`) |
 | `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
 | `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, and what a RENAME has to drop (never object identity against a memo) |
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
@@ -141,7 +142,7 @@ not committed.
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
-`abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `settings.ts`, `text.ts`,
+`abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `settings.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
