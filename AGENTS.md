@@ -55,6 +55,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/childproc.ts` | `vscode`-free: the ONE way a checker is started - shell quoting of program AND arguments, timeout, kill of the whole process tree, "nobody is waiting any more" |
 | `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
+| `src/baselinefile.ts` | `vscode`-free: reading and writing the repository's baseline file - the linter's own keys, a baseline that does not parse never silently replaced, and every write confined to the workspace folder holding the config (`baselineWriteRefusal`, see Conventions) |
 | `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, "add to baseline", and the one correction composed here - the WHEN branch for `event-without-handler` |
 | `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE. The CASE region itself (`eventCaseRegion`, `ownLevel`) lives in `context.ts`, which restricts the event rename, highlights, lens and Go-to-Definition to the WHENs at its own level |
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
@@ -74,8 +75,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/examples.ts` | `vscode`-free: finds and ranks a control's uses in the sample catalogues |
 | `src/catalogue.ts` | `vscode`-free: parses the sample repositories' committed `catalogue.json` (three sibling shapes, pinned in `src/test/fixtures/catalogue-*.json`) and matches a control against the entries |
 | `src/exampleview.ts` | "Show Examples for this Control": catalogue discovery, the remote-catalogue fallback (fetch + day cache in memory and `globalState`), QuickPick, opens the hit (editor or GitHub) |
-| `src/annotations.ts` | `vscode`-free: what a line deserves to be told about it - `@since` per control/member, roundtrip cost per PUBLIC attribute |
-| `src/inlineview.ts` | The one decoration pass that renders all three inline annotations (findings, `@since`, cost) |
+| `src/annotations.ts` | `vscode`-free: what a line deserves to be told about it - `@since` and deprecation per control/member (of a builder chain, and of a raw XML view through the linter's `parseXml`, each element in its own namespace scope - `xmlNamespaceScopes`), roundtrip cost per PUBLIC attribute |
+| `src/inlineview.ts` | The one decoration pass that renders all three inline annotations (findings, `@since`/deprecation, cost) - for builder classes and raw XML views |
 | `src/abbreviation.ts` | `vscode`-free: Emmet-style abbreviations -> element tree -> chain (emitted by `xmltoabap.ts`) |
 | `src/appview.ts` | The "abap2UI5 Apps" tree: every z2ui5_if_app class with run/preview/check |
 | `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
@@ -92,6 +93,9 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
 | `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
+| `src/rendergate.ts` | "Install / Update Render Gate": downloads the linter release's checker bundle and Chromium into global storage, verifies it, and resolves the installed CLI (see Toolchain) |
+| `src/report.ts` | `vscode`-free: the shape and the redaction of "Copy Diagnostics for a Bug Report" - the report this extension writes about itself (per open document: scheme, checkability, governing config) |
+| `src/diagnosticsreport.ts` | The command's plumbing: collects what `report.ts` formats from the window (extensions, settings, documents, log lines, systems) |
 | `src/screenshot.ts` | "Take App Screenshot": finds the render gate's Chromium and renders the proxied URL headless |
 | `src/colors.ts` | Colour spans for colour-typed property values (the swatch/picker provider's logic) |
 | `src/xmltoabap.ts` | "Convert XML View to Builder Chain": XML parser + corpus-style chain emitter |
@@ -141,7 +145,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `report2cloud.ts`,
+`unitrunner.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
