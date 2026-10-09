@@ -1544,12 +1544,18 @@ export function whenBranches(source: string): NamedSpan[] {
   const code = blankComments(source);
   const inDispatch = dispatchFilter(source);
   const re = /\bWHEN\s+/gi;
+  /* Sticky, so each literal and each `OR` is matched AT the position rather
+   * than on a `code.slice(at)` copy of the rest of the class - one copy per
+   * WHEN made a long dispatch quadratic in the size of the source. */
+  const litRe = /(['`])([\w-]+)\1/y;
+  const orRe = /\s+OR\s+/iy;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code))) {
     let at = m.index + m[0].length;
     const own = inDispatch(m.index);
     for (;;) {
-      const lit = /^(['`])([\w-]+)\1/.exec(code.slice(at));
+      litRe.lastIndex = at;
+      const lit = litRe.exec(code);
       if (!lit) {
         break;
       }
@@ -1557,7 +1563,8 @@ export function whenBranches(source: string): NamedSpan[] {
         out.push({ name: lit[2], start: at + 1, end: at + 1 + lit[2].length });
       }
       at += lit[0].length;
-      const or = /^\s+OR\s+/i.exec(code.slice(at));
+      orRe.lastIndex = at;
+      const or = orRe.exec(code);
       if (!or) {
         break;
       }

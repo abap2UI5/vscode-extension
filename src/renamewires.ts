@@ -263,13 +263,15 @@ function idLiteralScan(source: string, includeEmpty: boolean): IdLiteral[] {
  * nothing at all at runtime, not even a console line.
  */
 export function declaredIds(source: string): string[] {
-  const out: string[] = [];
+  // a Set for the membership test: `out.includes` per literal was quadratic
+  // in the ids of a class, and a generated form declares hundreds
+  const seen = new Set<string>();
   for (const literal of idLiterals(source)) {
-    if (literal.role === "declaration" && !out.includes(literal.name)) {
-      out.push(literal.name);
+    if (literal.role === "declaration") {
+      seen.add(literal.name);
     }
   }
-  return out;
+  return [...seen];
 }
 
 /** An id being written in a wire, with what may go there. */
