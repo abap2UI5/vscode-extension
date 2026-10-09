@@ -2,6 +2,7 @@ import * as path from "path";
 import { renderRuleConfig, severityOf } from "@abap2ui5/linter/findings";
 import { usesBuilder } from "./abap";
 import { declaresApp, frozenBuilderOf, VIEW_XML_RE } from "./gate";
+import { plural } from "./text";
 
 /*
  * The `vscode`-free decisions behind the view check: what counts as
@@ -568,17 +569,42 @@ export const CRLF_RULE = "crlf-line-ending";
  * the caller writes it.
  *
  * `findings` counts the findings the plan resolves - the CRLF one included -
- * for the "fix all N findings" title.
+ * for the "fix all N findings" title; `byLineEnding` how many of them the
+ * line-ending change resolves rather than a span.
  */
 export function editorFixPlan(
   findings: Array<{ type?: string; fixes?: PlannedFix[] }>
-): { spans: PlannedFix[]; toLf: boolean; findings: number } {
+): { spans: PlannedFix[]; toLf: boolean; findings: number; byLineEnding: number } {
   const crlf = findings.filter((f) => f.type === CRLF_RULE && f.fixes?.length);
   const rest = findings.filter((f) => f.type !== CRLF_RULE);
   const spans = plannedFixes(rest);
   const applied = new Set(spans);
   const covered = rest.filter((f) => (f.fixes ?? []).some((fix) => applied.has(fix))).length;
-  return { spans, toLf: crlf.length > 0, findings: covered + crlf.length };
+  return {
+    spans,
+    toLf: crlf.length > 0,
+    findings: covered + crlf.length,
+    byLineEnding: crlf.length,
+  };
+}
+
+/**
+ * What the workspace fix says it did. Its tally used to add the edits up -
+ * every span, plus one for the line-ending change of each CRLF file - so a
+ * finding fixed by two spans counted twice and "converted this file to LF"
+ * counted as one more fix beside them. It counts FINDINGS now (what the
+ * per-file "fix all N findings" counts too), and names the line-ending
+ * change separately.
+ */
+export function workspaceFixSummary(t: { fixed: number; toLf: number; files: number }): string {
+  const parts: string[] = [];
+  if (t.fixed) {
+    parts.push(plural(t.fixed, "fix"));
+  }
+  if (t.toLf) {
+    parts.push(`${t.toLf} changed to LF line endings`);
+  }
+  return `edited ${plural(t.files, "file")}: ${parts.join(", ") || "nothing"}`;
 }
 
 /**

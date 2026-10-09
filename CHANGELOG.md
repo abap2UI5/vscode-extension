@@ -137,6 +137,10 @@
     with the same inputs CI gives them as soon as the bundled linter brings
     them - the start-path model, whether the class raises the size limit,
     the pages of a container, the portable profile.
+  - *Fix All View Findings in the Workspace* counts what it fixed in
+    findings, and says separately how many files it changed to LF line
+    endings - it used to add up its edits, a finding fixed in two places
+    twice and each line-ending change as one more "fix".
   - *A waiver in an XML view never goes above its XML declaration* (nor in
     front of a byte-order mark). With the root on the declaration's line (a
     minified or generated view), the "suppress on this line" quick fix wrote

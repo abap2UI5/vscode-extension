@@ -51,7 +51,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
 | `src/compat.ts` | `vscode`-free: the bundled linter's compatibility record (`@abap2ui5/linter/compat`, copied next to the bundle by `esbuild.js` like the snapshot; null when the pin ships none) and what it says about a workspace's framework pin - the one parser of `abaplint.jsonc`'s `dependencies[].branch` (`scaffold.ts` uses it too), `compareRelease`, `compatVerdict`, the activation line |
 | `src/compatcheck.ts` | The framework-pin check's plumbing: a warning on the `branch` line of an open `abaplint.jsonc` pinned below what the bundled linter assumes, on open and save |
-| `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability (`isCheckableSource` - what the linter's `checkAbapSource` judges, a viewless app class and `allClasses` included - and `isViewSource`, what the systemless preview and the mock generator need), the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written, what the view preview shows after a refresh that threw (`failedPreviewState`) |
+| `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability (`isCheckableSource` - what the linter's `checkAbapSource` judges, a viewless app class and `allClasses` included - and `isViewSource`, what the systemless preview and the mock generator need), the workspace fix's tally, the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written, what the view preview shows after a refresh that threw (`failedPreviewState`) |
 | `src/childproc.ts` | `vscode`-free: the ONE way a checker is started - shell quoting of program AND arguments, timeout, kill of the whole process tree, "nobody is waiting any more" |
 | `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
@@ -123,6 +123,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
 | `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, and what a RENAME has to drop (never object identity against a memo) |
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
+| `src/linterrelease.ts` | `LINTER_RELEASE` — the linter version and release commit `esbuild.js` stamped (`LINTER_PIN`, `LINTER_COMMIT`), read there and nowhere else (`linterpin.test.ts` pins that) |
 | `src/text.ts` | `plural(count, noun)` — the one pluralizer behind every counted string users read (dependency-free) |
 | `src/abap.ts`, `src/urls.ts`, `src/context.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
 | `src/test/` | `node --test` suite over exactly those modules |
@@ -142,7 +143,7 @@ not committed.
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
-`abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `settings.ts`, `text.ts`,
+`abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `settings.ts`, `linterrelease.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,

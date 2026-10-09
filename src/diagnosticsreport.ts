@@ -7,6 +7,7 @@ import { usesBuilder } from "./abap";
 import { labelOf } from "./abapsources";
 import { DIAG_SOURCE } from "./diagnostics";
 import { renderGateCli } from "./rendergate";
+import { LINTER_RELEASE } from "./linterrelease";
 import { activeSystem, allSystems } from "./systems";
 import { Session } from "./session";
 import * as path from "path";
@@ -117,7 +118,7 @@ export function registerDiagnosticsReport(
           installed: !!cli,
           cli,
           // the bundled linter's npm version, stamped by esbuild.js
-          pin: process.env.LINTER_PIN || undefined,
+          pin: LINTER_RELEASE.version || undefined,
         },
         systems: {
           configured: allSystems().length,

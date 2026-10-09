@@ -14,6 +14,7 @@ import {
   renderGateState,
 } from "./rendergate";
 import { VIEW_CHECK_DIRS } from "./repolayout";
+import { LINTER_RELEASE } from "./linterrelease";
 import { snapshotError, snapshotUi5Version } from "./snapshot";
 import { isShadowScheme } from "./abap";
 import {
@@ -42,6 +43,7 @@ import {
   resolveCheckerCommand,
   scratchFileName,
   settleRenderErrors,
+  workspaceFixSummary,
 } from "./checkcore";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
 import {
@@ -252,7 +254,7 @@ export function checkerCommand(): CheckerCommand {
     reposRoot: config().get<string>("mcp.reposRoot", ""),
     checkoutDirs: VIEW_CHECK_DIRS,
     exists: (file) => fs.existsSync(file),
-    linterCommit: process.env.LINTER_COMMIT || "",
+    linterCommit: LINTER_RELEASE.commit,
   });
 }
 
@@ -1188,7 +1190,10 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
           return;
         }
         const edit = new vscode.WorkspaceEdit();
-        let fixes = 0;
+        /** Findings a span edit corrects, and files given an LF line ending -
+         *  counted apart (`workspaceFixSummary`). */
+        let fixed = 0;
+        let toLf = 0;
         let files = 0;
         let moved = 0;
         for (const file of swept.files) {
@@ -1232,7 +1237,9 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
             edits.push([vscode.TextEdit.setEndOfLine(vscode.EndOfLine.LF), meta]);
           }
           edit.set(file.uri, edits);
-          fixes += edits.length;
+          // the CRLF finding is resolved by the line-ending change, not a span
+          fixed += plan.findings - plan.byLineEnding;
+          toLf += plan.toLf ? 1 : 0;
           files++;
         }
         if (moved) {
@@ -1244,7 +1251,7 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
           ? ` ${plural(moved, "file")} edited while the sweep ran ` +
             `${moved === 1 ? "was" : "were"} left alone.`
           : "";
-        if (!fixes) {
+        if (!files) {
           vscode.window.showInformationMessage(
             `abap2UI5: nothing in ${plural(swept.files.length, "file")} can be corrected mechanically.` +
               skipped
@@ -1257,12 +1264,13 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
           );
           return;
         }
-        log(`view-check: workspace fix - ${fixes} fix(es) in ${files} file(s)`);
+        const summary = workspaceFixSummary({ fixed, toLf, files });
+        log(`view-check: workspace fix - ${summary}`);
         /* Overlapping fixes are left for the next run, here as everywhere -
          * so the count is what was applied, not what remains, and saying so is
          * what tells someone to run it again. */
         vscode.window.showInformationMessage(
-          `abap2UI5: applied ${plural(fixes, "fix")} in ${plural(files, "file")}. ` +
+          `abap2UI5: ${summary}. ` +
             "Run it again if fixes overlapped; the files are edited, not saved." +
             skipped
         );

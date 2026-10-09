@@ -26,6 +26,7 @@ import {
   parseScreenshotOutput,
   plannedFixes,
   editorFixPlan,
+  workspaceFixSummary,
   fixTitle,
   screenshotArgs,
   screenshotUnsupported,
@@ -460,8 +461,22 @@ test("a CRLF file's fix all turns it LF in the editor - the \\r deletions alone 
   for (const rule of ["crlf-line-ending", "trailing-whitespace", "missing-final-newline"]) {
     assert.ok(!again.has(rule), `${rule} is still reported after the fix all`);
   }
-  // the CRLF finding is counted once, as one finding
+  // the CRLF finding is counted once, as one finding - and as the one the
+  // line-ending change resolves
   assert.equal(plan.findings, findings.filter((f) => f.fixes?.length).length);
+  assert.equal(plan.byLineEnding, 1);
+});
+
+test("the workspace fix counts findings, and names the line-ending change apart", () => {
+  /* It used to add up EDITS: every span, plus one for each file's
+   * setEndOfLine - a finding fixed with two spans counted twice and the
+   * line-ending change counted as one more "fix". */
+  assert.equal(workspaceFixSummary({ fixed: 3, toLf: 0, files: 2 }), "edited 2 files: 3 fixes");
+  assert.equal(
+    workspaceFixSummary({ fixed: 1, toLf: 1, files: 1 }),
+    "edited 1 file: 1 fix, 1 changed to LF line endings"
+  );
+  assert.equal(workspaceFixSummary({ fixed: 0, toLf: 2, files: 2 }), "edited 2 files: 2 changed to LF line endings");
 });
 
 test("an LF file's plan is plannedFixes unchanged", () => {
@@ -470,7 +485,7 @@ test("an LF file's plan is plannedFixes unchanged", () => {
     { type: "b", fixes: [{ start: 6, end: 7, text: "y" }] },
   ];
   const plan = editorFixPlan(findings);
-  assert.deepEqual(plan, { spans: plannedFixes(findings), toLf: false, findings: 1 });
+  assert.deepEqual(plan, { spans: plannedFixes(findings), toLf: false, findings: 1, byLineEnding: 0 });
 });
 
 test("a fix title names what changes, never a bare count or line number", () => {

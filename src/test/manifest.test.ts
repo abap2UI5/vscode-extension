@@ -501,16 +501,7 @@ test("every setting is classified for what a cloned repository may set", () => {
   for (const key of restricted) {
     assert.ok(properties[key], `restrictedConfigurations names ${key}, which is no setting`);
   }
-});
-
-test("the rolling render-gate bundle is the user's choice, and off", () => {
-  const raw = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
-  const setting = raw.contributes.configuration.properties["abap2ui5.viewCheck.rollingBundle"];
-  assert.equal(setting.default, false, "the default is unchanged");
-  assert.equal(setting.scope, "machine");
-  assert.ok(
-    raw.capabilities.untrustedWorkspaces.restrictedConfigurations.includes(
-      "abap2ui5.viewCheck.rollingBundle"
-    )
-  );
+  // the rolling render-gate bundle is the user's choice (machine scope and
+  // restricted, pinned above) - and off unless they make it
+  assert.equal(properties["abap2ui5.viewCheck.rollingBundle"].default, false);
 });

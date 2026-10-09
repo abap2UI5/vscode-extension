@@ -25,6 +25,7 @@ import {
 } from "../gate";
 import { LINTER_CLASS_INDEX_OF } from "../classindex";
 import type { CheckOptions } from "../lintconfig";
+import { LINTER_RELEASE } from "../linterrelease";
 
 /*
  * The gate against the linter's own pipeline.
@@ -1198,7 +1199,7 @@ test("the stand-ins for linter exports: gone with the bump", () => {
    * says 0.8.5 - and dead code the moment it is not. LINTER_PIN is stamped
    * from package-lock.json, so this fails on the bump's own pull request. */
   const BUMP_FROM = "0.8.5";
-  if (process.env.LINTER_PIN === BUMP_FROM) {
+  if (LINTER_RELEASE.version === BUMP_FROM) {
     return;
   }
   const gate = fs.readFileSync(path.join(__dirname, "..", "src", "gate.ts"), "utf8");
