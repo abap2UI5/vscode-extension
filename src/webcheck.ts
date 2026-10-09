@@ -3,6 +3,7 @@ import { CONFIG_SECTION } from "./settings";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { frozenBuilderOf, GateOptions, runGate, VIEW_XML_RE } from "./gate";
 import { preparedAbapOf } from "./language";
+import { onDidChangeClassIndex, registerClassIndex, workspaceClassIndex } from "./classindexfeed";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
 import { plural } from "./text";
 import { isShadowScheme, usesBuilder } from "./abap";
@@ -185,7 +186,10 @@ function gateOptions(
   opts: CheckOptions,
   isXml: boolean
 ): GateOptions {
-  return isXml ? opts : { ...opts, prep: preparedAbapOf(doc) };
+  // the workspace's class index, as on desktop (classindexfeed.ts)
+  return isXml
+    ? opts
+    : { ...opts, prep: preparedAbapOf(doc), classIndex: workspaceClassIndex() };
 }
 
 /** What the configured baseline waives for this path, if it has one. */
@@ -299,7 +303,12 @@ async function sweepWorkspaceWeb(
         const opts = optionsForPath(uri.path);
         let gate;
         try {
-          gate = runGate(text, uri.path, isXml, opts);
+          gate = runGate(
+            text,
+            uri.path,
+            isXml,
+            isXml ? opts : { ...opts, classIndex: workspaceClassIndex() }
+          );
         } catch (err) {
           // one file that cannot be parsed is not a reason to stop the sweep
           log(`web: ${uri.path} skipped - ${String(err)}`);
@@ -542,9 +551,16 @@ export function registerWebCheck(
     }
   };
 
+  // the other classes are part of every ABAP verdict, on vscode.dev too
+  registerClassIndex(context);
+
   context.subscriptions.push(
     diagnostics,
     { dispose: () => timers.forEach((t) => clearTimeout(t)) },
+    onDidChangeClassIndex(() => {
+      memos.clear();
+      recheckOpen();
+    }),
     vscode.commands.registerCommand("abap2ui5.checkViews", () => {
       const doc = vscode.window.activeTextEditor?.document;
       if (doc) {

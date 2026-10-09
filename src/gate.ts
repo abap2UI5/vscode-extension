@@ -177,6 +177,17 @@ export type PreparedAbap = ReturnType<typeof prepareAbap>;
 export interface GateOptions extends CheckOptions {
   /** MUST be `prepareAbap` of exactly the `text` handed to `runGate`. */
   prep?: PreparedAbap;
+  /**
+   * The other classes of the workspace, as the linter's `classIndexOf( )`
+   * describes them (`classindex.ts` keeps it). CI's `checkFiles` builds this
+   * index over the files of the run and judges the class-level rules with it
+   * - an INHERITED `cs_event` is the class's own (frontend-action-as-backend-
+   * event), a public attribute another class reads is read
+   * (`outsideReads`). Without it the editor reported what CI silences.
+   * Undefined when the pinned linter has no `classIndexOf`; a linter whose
+   * `checkAbapRules` takes no index ignores it.
+   */
+  classIndex?: ReadonlyMap<string, unknown>;
 }
 
 export interface GateResult {
@@ -388,7 +399,10 @@ export function runGate(
         // it every repo was judged against the 1.71 default, so a higher floor
         // reported icons in the editor that CI called fine
         minUi5,
-      })
+        // the cross-file facts CI's checkFiles judges with (see GateOptions);
+        // spread in, because the pinned typings may not name the option yet
+        ...(options.classIndex ? { classIndex: options.classIndex } : {}),
+      } as Parameters<typeof checkAbapRules>[1])
     );
     /* Every fix the pipeline attaches, in the linter's one call: the
      * undeclared-namespace declaration, the `json = abap_true` deletion and

@@ -111,6 +111,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/navview.ts` | "Show App Navigation Map": workspace scan + the webview panel around the SVG |
 | `src/snapshot.ts` | Loads the bundled UI5 metadata once, for the gate and the language features |
 | `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over - plus `lineStartAt`, the line start that is right at offset 0 too (never `lastIndexOf("\n", offset - 1)`, which reads -1 as 0) |
+| `src/classindex.ts` | `vscode`-free: the cross-file class index the linter's class-level rules read (superclass chain, `cs_event`, `outsideReads`) - built from the linter's own `classIndexOf`, assembled incrementally per file so a save recomputes one file, pinned to a full build in `classindex.test.ts`; disabled while the pinned linter exports no `classIndexOf` |
+| `src/classindexfeed.ts` | Feeds that index from the saved workspace (the shared ABAP watcher, saves, ADT documents) for both entries, and says when its content moved so the checks drop their memos and re-check what is open |
 | `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
 | `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
 | `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, and what a RENAME has to drop (never object identity against a memo) |
@@ -134,7 +136,7 @@ not committed.
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
-`abapscan.ts`, `appindex.ts`, `settings.ts`, `text.ts`,
+`abapscan.ts`, `appindex.ts`, `classindex.ts`, `settings.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
@@ -407,6 +409,15 @@ Facts an agent cannot see from the code but will trip over:
   fails a test instead of going quiet. The XML branch runs `checkIcons`
   through the linter's `./icons` export (there was a time it could not, and
   the same file was judged differently by the editor and by CI).
+  Two inputs of the linter's pipeline arrive with the release AFTER the
+  pinned 0.8.5 and are wired already, behind `linterExport( )` (a namespace
+  lookup by name - a named import of a missing export would not bundle): the
+  cross-file `classIndex` `checkFiles` builds over a run (`classindex.ts`
+  assembles the same index over the workspace) and the `matchLineEndings`
+  pass `settle` ends with (until then `gate.ts` runs a port of it, pinned to
+  the linter's behaviour in `gate.parity.test.ts`, whose fixtures run as
+  CRLF too). Both switch on with the bump, without an edit here; after it,
+  the port is dead code (the test compares the two while both exist).
 - **The rule reference is coupled by URL, not by import.** Every diagnostic's
   code links to `https://abap2ui5.github.io/linter/#<rule-id>`, which the
   linter's `generate-rules-page` emits one anchor per rule for. The rule ids

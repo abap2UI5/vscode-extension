@@ -43,6 +43,12 @@ import {
   settleRenderErrors,
 } from "./checkcore";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
+import {
+  classIndexStamp,
+  onDidChangeClassIndex,
+  registerClassIndex,
+  workspaceClassIndex,
+} from "./classindexfeed";
 import { plural } from "./text";
 import { baselineWriteRefusal, rebuildBaseline } from "./baselinefile";
 import {
@@ -207,7 +213,11 @@ function gateOptionsFor(
   options: CheckOptions,
   isXml: boolean
 ): GateOptions {
-  return isXml ? options : { ...options, prep: preparedAbapOf(doc) };
+  // the workspace's class index: what CI's checkFiles judges the class-level
+  // rules with (classindexfeed.ts), undefined while the linter takes none
+  return isXml
+    ? options
+    : { ...options, prep: preparedAbapOf(doc), classIndex: workspaceClassIndex() };
 }
 
 // ---------------------------------------------------------------------------
@@ -872,11 +882,20 @@ async function sweepWorkspace(
       // always with the text - it is already in memory, and carrying it even
       // on a cache hit means a cache cleared mid-sweep (a config change) can
       // still be gated instead of skipped
-      return { stamp: `v${target.open.version}`, text: target.open.getText() };
+      return {
+        stamp: `v${target.open.version}|${classIndexStamp(target.uri.toString())}`,
+        text: target.open.getText(),
+      };
     }
     let stamp: string;
     try {
-      stamp = `m${(await vscode.workspace.fs.stat(target.uri)).mtime}`;
+      /* The text is not all a class is judged on: what the class index says
+       * about its superclass chain and its readers is too, so that is part
+       * of the stamp - an edited superclass re-gates its subclasses, and
+       * nothing else. */
+      stamp =
+        `m${(await vscode.workspace.fs.stat(target.uri)).mtime}` +
+        `|${classIndexStamp(target.uri.toString())}`;
     } catch {
       return undefined;
     }
@@ -973,7 +992,12 @@ async function sweepWorkspace(
         }
         let gate: GateResult;
         try {
-          gate = runGate(text, uri.scheme === "file" ? uri.fsPath : uri.path, isXml, opts);
+          gate = runGate(
+            text,
+            uri.scheme === "file" ? uri.fsPath : uri.path,
+            isXml,
+            isXml ? opts : { ...opts, classIndex: workspaceClassIndex() }
+          );
         } catch (err) {
           // one file that cannot be parsed is not a reason to abandon the sweep
           log(`view-check: ${labelOf(uri)} skipped - ${String(err)}`);
@@ -1448,6 +1472,18 @@ export function registerViewCheck(
     }
   };
   recheckAll = recheckOpen;
+
+  // the other classes are part of every ABAP verdict: when the index's
+  // content moves (a superclass saved with a cs_event, a caller reading an
+  // attribute), what is open is judged again - memos first, they were
+  // computed under the old index
+  registerClassIndex(context);
+  context.subscriptions.push(
+    onDidChangeClassIndex(() => {
+      memos.clear();
+      recheckOpen();
+    })
+  );
 
   // A config file is part of the answer for every file it governs, so a
   // change to one invalidates the cache and re-checks what is open.

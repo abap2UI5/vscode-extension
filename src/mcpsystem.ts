@@ -19,6 +19,7 @@ import {
 import { snapshot } from "./snapshot";
 import { isLoopbackHost, type SapProxy } from "./proxy";
 import { runGate, VIEW_XML_RE } from "./gate";
+import { workspaceClassIndex } from "./classindexfeed";
 import { withParams } from "./urls";
 import { CONFIG_SECTION } from "./settings";
 
@@ -308,6 +309,8 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
           distribution: cfg.get<string>("viewCheck.distribution", "sapui5"),
           allow: cfg.get<string[]>("viewCheck.allow", []),
           rules: rules && Object.keys(rules).length > 0 ? rules : undefined,
+          // judged against the window's other classes, as the editor is
+          classIndex: isXml ? undefined : workspaceClassIndex(),
         });
         if (gate.nothingChecked) {
           return textResult(`nothing checked - ${gate.nothingChecked}`);
