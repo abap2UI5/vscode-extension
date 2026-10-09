@@ -7,7 +7,7 @@
  * edit out - covered by the test suite.
  */
 
-import { blankComments } from "./abapscan";
+import { blankComments, lineStartAt } from "./abapscan";
 import { ChainAttribute, ControlCall } from "./context";
 
 export interface SpanEdit {
@@ -151,7 +151,8 @@ export function removeAttributeEdit(
     // attribute above it is no reason to close the gap
     let end = closeLineStart;
     for (;;) {
-      const prevStart = source.lastIndexOf("\n", end - 2) + 1;
+      // the line before the one starting at `end` (whose `\n` is end - 1)
+      const prevStart = lineStartAt(source, end - 1);
       if (prevStart <= lineStart || source.slice(prevStart, end).trim()) {
         break;
       }
@@ -198,7 +199,7 @@ function joinOntoPreviousLine(
   if (!/^\s*[.,]?\s*$/.test(rest) || lineStart === 0) {
     return undefined;
   }
-  const prevStart = source.lastIndexOf("\n", lineStart - 2) + 1;
+  const prevStart = lineStartAt(source, lineStart - 1);
   const prevRaw = source.slice(prevStart, lineStart - 1).replace(/\r$/, "");
   const content = prevRaw.replace(/[ \t]+$/, "");
   if (!content.trim() || content.startsWith("*")) {
