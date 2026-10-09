@@ -171,6 +171,10 @@
     like an event jumped to that event's `WHEN`. The same goes for a `WHEN`
     value no event is spelled like (``WHEN `Out of Stock` THEN`` in a
     `SWITCH`, ``WHEN `%MSG` ``).
+  - *View check on vscode.dev / in the browser* reports icons again:
+    `unknown-icon`, `icon-too-new` and `icon-removed` never fired there,
+    because the linter's icon list could not be read in the browser - the
+    desktop editor and CI reported them.
 
 
 ## 0.30.2

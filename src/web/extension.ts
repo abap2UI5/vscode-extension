@@ -9,6 +9,7 @@ import { registerConvert } from "../convert";
 import { registerNavMap } from "../navview";
 import { registerPropertyEditor } from "../propview";
 import { registerFindingsView } from "../findingsview";
+import { seedLinterData } from "./linterdata";
 
 /*
  * The web extension host entry (vscode.dev, github.dev, browser-based SAP
@@ -56,6 +57,18 @@ export async function activate(
       "web: dist/properties.json could not be read - the property gate and " +
         `completion have no metadata (${err instanceof Error ? err.message : String(err)})`
     );
+  }
+
+  // the linter's icon data, before the first check can cache an empty registry
+  const unseeded = await seedLinterData(async (packaged) =>
+    new TextDecoder().decode(
+      await vscode.workspace.fs.readFile(
+        vscode.Uri.joinPath(context.extensionUri, ...packaged)
+      )
+    )
+  );
+  for (const failure of unseeded) {
+    log(`web: the linter's data file could not be read - its rules report nothing (${failure})`);
   }
 
   registerLanguageFeatures(context, log);

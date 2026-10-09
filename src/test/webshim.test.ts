@@ -207,3 +207,111 @@ test("esbuild defines every process member the pinned linter reads", () => {
     "the pinned linter reads process members the web build does not define"
   );
 });
+
+// ---------------------------------------------------------------------------
+// The linter's own data files (src/web/linterdata.ts)
+// ---------------------------------------------------------------------------
+
+test("the fs shim answers a seeded file and nothing else", () => {
+  const fsShim = require("../../scripts/web-shims/fs.js");
+  assert.equal(fsShim.existsSync("/seeded/by/the/test.json"), false);
+  assert.throws(() => fsShim.readFileSync("/seeded/by/the/test.json", "utf8"));
+  fsShim.seedFile("/seeded/by/the/test.json", "{}");
+  assert.equal(fsShim.existsSync("/seeded/by/the/test.json"), true);
+  assert.equal(fsShim.readFileSync("/seeded/by/the/test.json", "utf8"), "{}");
+  assert.throws(() => fsShim.readFileSync("/not/seeded.json", "utf8"));
+});
+
+test("the icon data is seeded where the bundled linter looks for it in the web build", () => {
+  const { LINTER_DATA_FILES } = require("../web/linterdata") as typeof import("../web/linterdata");
+  // the linter's own formula - a change to it has to fail here, not on vscode.dev
+  const icons = fs.readFileSync(nodePath.join(LINTER_LIB, "icons.mjs"), "utf8");
+  assert.match(
+    icons,
+    /path\.join\(path\.dirname\(fileURLToPath\(import\.meta\.url\)\), '\.\.', 'data', 'icons\.json'\)/,
+    "the linter computes its icon path differently now - update src/web/linterdata.ts"
+  );
+  // ... evaluated over the web build's shims
+  const metaUrl = /import_meta_url = "([^"]+)"/.exec(
+    fs.readFileSync(nodePath.join(ROOT, "scripts", "import-meta-url-web-shim.mjs"), "utf8")
+  )?.[1];
+  assert.ok(metaUrl, "the web import.meta.url shim names a url");
+  const urlShim = require("../../scripts/web-shims/url.js");
+  const expected = shim.join(shim.dirname(urlShim.fileURLToPath(metaUrl)), "..", "data", "icons.json");
+  const seeded = LINTER_DATA_FILES.find((file) => file.packaged.join("/") === "data/icons.json");
+  assert.equal(seeded?.path, expected);
+  // and the packaged copy is where esbuild.js puts it
+  assert.ok(
+    fs.existsSync(nodePath.join(ROOT, ...seeded!.packaged)),
+    "esbuild.js copies data/icons.json into the extension root"
+  );
+});
+
+test("the icon rules fire in the web bundle once the data is seeded", async () => {
+  /*
+   * Regression (web build audit): in the browser `fs` is the shim, the
+   * linter's loadIcons read nothing, and unknown-icon never fired on
+   * vscode.dev - the desktop editor and CI reported it. Built with the web
+   * configuration itself, so the aliases, defines and injects are the ones
+   * that ship.
+   */
+  // resolved at run time: the esbuild API cannot be bundled into this test
+  const esbuild = require(nodePath.join(ROOT, "node_modules", "esbuild"));
+  const { webConfig } = require(nodePath.join(ROOT, "esbuild.js"));
+  const dir = fs.mkdtempSync(nodePath.join(require("os").tmpdir(), "abap2ui5-webshim-"));
+  try {
+    const entry = nodePath.join(dir, "probe.ts");
+    const src = (file: string) => JSON.stringify(nodePath.join(ROOT, "src", file));
+    fs.writeFileSync(
+      entry,
+      `import { seedLinterData } from ${src("web/linterdata")};
+import { runGate } from ${src("gate")};
+import { setSnapshotText } from ${src("snapshot")};
+export async function probe(read: (p: string[]) => Promise<string>, snapshot: string, source: string) {
+  const failed = await seedLinterData(read);
+  setSnapshotText(snapshot);
+  return { failed, types: runGate(source, "/repo/zcl_app.clas.abap", false, { minUi5: "1.71" } as never).findings.map((f) => f.type) };
+}
+`
+    );
+    const out = nodePath.join(dir, "probe.js");
+    const config = webConfig();
+    await esbuild.build({
+      ...config,
+      absWorkingDir: ROOT,
+      entryPoints: [entry],
+      outfile: out,
+      minify: false,
+      sourcemap: false,
+      logLevel: "silent",
+    });
+    const { probe } = require(out);
+    const source = [
+      "CLASS zcl_app DEFINITION PUBLIC.",
+      "  PUBLIC SECTION.",
+      "    INTERFACES z2ui5_if_app.",
+      "ENDCLASS.",
+      "CLASS zcl_app IMPLEMENTATION.",
+      "  METHOD z2ui5_if_app~main.",
+      "    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).",
+      "    view->ele( `Page`",
+      "        )->tag( `Button`",
+      "            )->a( n = `icon` v = `sap-icon://nosuchicon` ).",
+      "    client->view_display( view->stringify( ) ).",
+      "  ENDMETHOD.",
+      "ENDCLASS.",
+    ].join("\n");
+    const result = await probe(
+      async (packaged: string[]) => fs.readFileSync(nodePath.join(ROOT, ...packaged), "utf8"),
+      fs.readFileSync(nodePath.join(__dirname, "properties.json"), "utf8"),
+      source
+    );
+    assert.deepEqual(result.failed, []);
+    assert.ok(
+      result.types.includes("unknown-icon"),
+      `unknown-icon is missing from the web build's findings: ${result.types.join(", ")}`
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

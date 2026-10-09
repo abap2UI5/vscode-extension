@@ -287,7 +287,13 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// `webshim.test.ts` builds a probe with the web configuration itself, so the
+// shims are tested inside the bundle shape they exist for
+module.exports = { webConfig };
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

@@ -35,6 +35,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list, and what an edited model document may push into the running app (`applyModelMessage`) |
 | `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
 | `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only - including the navigation map, the Control Properties view and the findings tree (fed by `webFindingsNow`, no baseline machinery) |
+| `src/web/linterdata.ts` | `vscode`-free: the linter's own data files in the web build (`data/icons.json`) - read by the caller through `workspace.fs`, seeded into the `fs` shim under the path the linter reads |
 | `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, repo config through `workspace.fs` (no render gate) |
 | `src/gate.ts` | The in-process property gate itself, shared by `viewcheck.ts` (desktop) and `webcheck.ts` (web) |
 | `src/diagnostics.ts` | Findings -> VS Code diagnostics (ranges, severities, rule links), shared by both checks |
@@ -425,6 +426,17 @@ Facts an agent cannot see from the code but will trip over:
   `scripts/web-shims/*` because the linter computes a default snapshot path
   with them at import time. Nothing in the web graph may actually CALL `fs` —
   the snapshot arrives via `vscode.workspace.fs` and `setSnapshotText( )`.
+  The one read that cannot be routed around is the linter's own: its icon
+  rules load `data/icons.json` with `fs.readFileSync` (`checkAbapRules` takes
+  no `iconData`), and a failed read is an empty registry by design - so on
+  vscode.dev `unknown-icon`, `icon-too-new` and `icon-removed` were silently
+  off. The web entry therefore reads the packaged `data/icons.json` through
+  `workspace.fs` and seeds the `fs` shim with it (`src/web/linterdata.ts`,
+  `seedFile` in `scripts/web-shims/fs.js`) before the first check, under the
+  path the linter computes over the shims; `webshim.test.ts` pins that path
+  to the linter's formula and runs the icon rule through a bundle built with
+  `webConfig( )` itself (which `esbuild.js` exports for that). A new data
+  file the linter reads itself belongs in `LINTER_DATA_FILES`.
   A module that newly pulls `child_process`/`os`/`crypto` into the web graph
   breaks the web build, which is why the desktop-only plumbing stays behind
   `extension.ts` and the shared pieces live in `gate.ts`/`diagnostics.ts`/
