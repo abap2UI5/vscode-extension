@@ -31,8 +31,82 @@ import {
   attachSourceFixes,
   attachSuggestionFixes,
 } from "@abap2ui5/linter/findings";
+import * as linterFix from "@abap2ui5/linter/fix";
 import { snapshot } from "./snapshot";
 import type { CheckOptions } from "./lintconfig";
+
+/**
+ * A linter export the PINNED release may not have yet - the function, or
+ * undefined. The gate runs against whatever `@abap2ui5/linter` it is built
+ * with, and an input the next release adds (the class index, the line-ending
+ * pass) has to switch on with the bump rather than wait for an edit here; a
+ * named import of a missing export would not even bundle. The name is a
+ * parameter on purpose: read as a constant property of the namespace,
+ * esbuild resolves it at build time and warns that it is always undefined.
+ */
+export function linterExport<T>(ns: object, name: string): T | undefined {
+  const value = (ns as Record<string, unknown>)[name];
+  return typeof value === "function" ? (value as T) : undefined;
+}
+
+type FixFinding = { type: string; fixes?: Array<{ start: number; end: number; text: string }> };
+
+/** The linter's own pass when it has one (its `settle` step, from the release
+ *  after 0.8.5 on), else {@link matchLineEndingsPort}. */
+export const LINTER_MATCH_EOL = linterExport<(findings: FixFinding[], source: string) => FixFinding[]>(
+  linterFix,
+  "matchLineEndings"
+);
+
+/**
+ * Makes every fix write the line ending the file will have - a port of the
+ * linter's `matchLineEndings` (lib/fix.mjs), used while the pinned release
+ * does not export it. The rules write replacement text with `\n`; in a file
+ * whose line breaks are mostly CRLF every `\n` of a fix text becomes `\r\n`
+ * (a `\n` at the very start of a text inserted right behind a `\r` completes
+ * that line break and stays). While a `crlf-line-ending` finding is among
+ * them it is the other way round: its fix turns the file into LF, so every
+ * other text writes LF too. Mutates and returns `findings`.
+ *
+ * VS Code would normalise an inserted text to the document's line ending
+ * anyway, so the lightbulb never wrote a mixed file; what this changes is the
+ * findings themselves - what the MCP system server hands an agent, and what
+ * `gate.parity.test.ts` compares against the CLI's `--fix`.
+ */
+export function matchLineEndingsPort<F extends FixFinding>(findings: F[], source: string): F[] {
+  const text = String(source ?? "");
+  const toLf = findings.some((f) => f.type === "crlf-line-ending");
+  if (!toLf) {
+    const crlf = text.split("\r\n").length - 1;
+    if (!crlf || crlf * 2 <= text.split("\n").length - 1) {
+      return findings;
+    }
+  }
+  for (const f of findings) {
+    if (f.type === "crlf-line-ending") {
+      continue;
+    }
+    for (const e of f.fixes ?? []) {
+      if (typeof e.text !== "string" || !e.text.includes("\n")) {
+        continue;
+      }
+      e.text = toLf
+        ? e.text.replace(/\r\n/g, "\n")
+        : e.text.replace(/\r?\n/g, (nl, at: number) =>
+            at === 0 && nl === "\n" && text[e.start - 1] === "\r" ? nl : "\r\n"
+          );
+    }
+  }
+  return findings;
+}
+
+/** The line-ending pass the gate's `settle` ends with - the linter's when the
+ *  pinned release exports it. */
+export function matchLineEndings<F extends FixFinding>(findings: F[], source: string): F[] {
+  return LINTER_MATCH_EOL
+    ? (LINTER_MATCH_EOL(findings, source) as F[])
+    : matchLineEndingsPort(findings, source);
+}
 
 export const VIEW_XML_RE = /\.(view|fragment)\.xml$/i;
 
@@ -167,7 +241,10 @@ export function runGate(
     if (rel !== undefined && rel !== fileName) {
       out = applyRules(out, options.rules, rel);
     }
-    return applyDirectives(out, text);
+    // last, as the linter's settle does: the fixes of what survived speak
+    // the file's line ending (which needs to know whether crlf-line-ending
+    // survived the rules block and the directives)
+    return matchLineEndings(applyDirectives(out, text), text);
   };
 
   if (isXml) {

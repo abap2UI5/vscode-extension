@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { checkAbapSource, checkXmlSource } from "@abap2ui5/linter";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
-import { runGate } from "../gate";
+import { LINTER_MATCH_EOL, matchLineEndings, matchLineEndingsPort, runGate } from "../gate";
 import type { CheckOptions } from "../lintconfig";
 
 /*
@@ -378,6 +378,140 @@ for (const [name, xml] of Object.entries(XML_FIXTURES)) {
   });
 }
 
+
+/* --- CRLF ------------------------------------------------------------------
+ *
+ * Every fixture above is LF, and so was every fixture here until a CRLF file
+ * was found to be judged by a different path: `crlf-line-ending` fires (its
+ * fix rewrites every line break), the line-keyed rules count `\r` as
+ * neither content nor blank, and the fixes that insert lines have to write
+ * the file's own line ending - the linter's `settle` ends with
+ * `matchLineEndings` from the release after 0.8.5 on, and the gate runs the
+ * same pass (`matchLineEndings` in gate.ts: the linter's when exported, its
+ * port until then). The CLI side is passed through the same function, which
+ * is a no-op on a linter that already ran it - so this compares the
+ * pipelines, and the line-ending pass is pinned on its own below. */
+
+const crlf = (text: string): string => text.replace(/\r?\n/g, "\r\n");
+
+/** A class whose fix INSERTS a line - the case the line-ending pass is for. */
+const CTOR_IN_PRIVATE = `CLASS zcl_parity DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+  PRIVATE SECTION.
+    CLASS-METHODS class_constructor.
+ENDCLASS.
+
+CLASS zcl_parity IMPLEMENTATION.
+  METHOD class_constructor.
+  ENDMETHOD.
+  METHOD z2ui5_if_app~main.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`View\` ns = \`mvc\`
+        )->a( n = \`xmlns\`     v = \`sap.m\`
+        )->a( n = \`xmlns:mvc\` v = \`sap.ui.core.mvc\`
+        )->ele( n = \`Page\`
+            )->tag( n = \`Text\`
+                )->a( n = \`text\` v = \`x\` ).
+    client->view_display( view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.
+`;
+
+const CRLF_ABAP: Record<string, string> = {
+  "a class whose fix inserts a line": CTOR_IN_PRIVATE,
+  ...ABAP_FIXTURES,
+};
+
+for (const rules of [{}, { "crlf-line-ending": false }]) {
+  const label = Object.keys(rules).length ? "crlf-line-ending off" : "every rule on";
+  for (const [name, lf] of Object.entries(CRLF_ABAP)) {
+    test(`the gate agrees with checkAbapSource on a CRLF file (${label}) - ${name}`, () => {
+      const file = "src/zcl_parity.clas.abap";
+      const source = crlf(lf);
+      const mine = runGate(source, file, false, { ...OPTIONS, rules });
+      const theirs = checkAbapSource(source, { ...linterOptions(file), rules });
+      assert.deepEqual(
+        reduce(mine.findings),
+        reduce(matchLineEndings(theirs.findings as Parameters<typeof matchLineEndings>[0], source)),
+        "gate.ts and checkAbapSource disagree on a CRLF source"
+      );
+    });
+  }
+  for (const [name, lf] of Object.entries(XML_FIXTURES)) {
+    test(`the gate agrees with checkXmlSource on a CRLF file (${label}) - ${name}`, () => {
+      const file = "src/view.view.xml";
+      const source = crlf(lf);
+      const mine = runGate(source, file, true, { ...OPTIONS, rules });
+      const theirs = checkXmlSource(source, { ...linterOptions(file), rules });
+      assert.deepEqual(
+        reduce(mine.findings),
+        reduce(matchLineEndings(theirs.findings as Parameters<typeof matchLineEndings>[0], source)),
+        "gate.ts and checkXmlSource disagree on a CRLF source"
+      );
+    });
+  }
+}
+
+test("a CRLF file's fixes write CRLF, and LF while crlf-line-ending converts it", () => {
+  const file = "src/zcl_parity.clas.abap";
+  const source = crlf(CTOR_IN_PRIVATE);
+  const kept = runGate(source, file, false, { ...OPTIONS, rules: { "crlf-line-ending": false } });
+  const inserted = kept.findings.find((f) => f.type === "class-constructor-visibility");
+  const texts = (inserted?.fixes ?? []).map((e) => e.text).filter((t) => t.includes("\n"));
+  assert.ok(texts.length, "the fixture stopped producing a multi-line fix - the test measures nothing");
+  for (const t of texts) {
+    assert.ok(!/(^|[^\r])\n/.test(t.replace(/^\n/, "")), `a bare LF in a CRLF file's fix: ${JSON.stringify(t)}`);
+  }
+  // crlf-line-ending's own fix makes the file LF - every other text follows
+  const converted = runGate(source, file, false, OPTIONS);
+  assert.ok(converted.findings.some((f) => f.type === "crlf-line-ending"));
+  for (const f of converted.findings) {
+    for (const e of f.fixes ?? []) {
+      assert.ok(!e.text.includes("\r\n"), `${f.type} writes CRLF into a file being made LF`);
+    }
+  }
+  // and an LF file is left exactly as the rules wrote it
+  const lf = runGate(CTOR_IN_PRIVATE, file, false, OPTIONS);
+  for (const f of lf.findings) {
+    for (const e of f.fixes ?? []) {
+      assert.ok(!e.text.includes("\r"), `${f.type} writes a CR into an LF file`);
+    }
+  }
+});
+
+test("the line-ending port behaves as the linter's matchLineEndings", () => {
+  const fx = (type: string, start: number, text: string) => ({ type, fixes: [{ start, end: start, text }] });
+  // mostly CRLF: every LF of a fix text becomes CRLF
+  const crlfSource = "a\r\nb\r\nc\r\n";
+  assert.equal(matchLineEndingsPort([fx("r", 3, "x\ny\n")], crlfSource)[0].fixes[0].text, "x\r\ny\r\n");
+  // a text starting with LF right behind a CR completes that line break
+  assert.equal(matchLineEndingsPort([fx("r", 2, "\nz")], crlfSource)[0].fixes[0].text, "\nz");
+  // already CRLF stays CRLF
+  assert.equal(matchLineEndingsPort([fx("r", 3, "x\r\ny")], crlfSource)[0].fixes[0].text, "x\r\ny");
+  // mostly LF (one CRLF among four breaks): untouched
+  assert.equal(matchLineEndingsPort([fx("r", 0, "x\ny")], "a\nb\nc\r\nd\n")[0].fixes[0].text, "x\ny");
+  // half and half is not "mostly CRLF"
+  assert.equal(matchLineEndingsPort([fx("r", 0, "x\ny")], "a\r\nb\n")[0].fixes[0].text, "x\ny");
+  // with crlf-line-ending among them every text is LF, its own fix untouched
+  const conv = matchLineEndingsPort(
+    [fx("r", 0, "x\r\ny"), { type: "crlf-line-ending", fixes: [{ start: 1, end: 2, text: "" }] }],
+    "a\nb"
+  );
+  assert.equal(conv[0].fixes[0].text, "x\ny");
+  assert.equal(conv[1].fixes[0].text, "");
+  // when the pinned linter exports its own, the two agree on all of the above
+  if (LINTER_MATCH_EOL) {
+    for (const [findings, source] of [
+      [[fx("r", 3, "x\ny\n")], crlfSource],
+      [[fx("r", 2, "\nz")], crlfSource],
+      [[fx("r", 0, "x\ny")], "a\nb\nc\r\nd\n"],
+    ] as const) {
+      const copy = () => JSON.parse(JSON.stringify(findings));
+      assert.deepEqual(LINTER_MATCH_EOL(copy(), source), matchLineEndingsPort(copy(), source));
+    }
+  }
+});
 
 test("the fixtures actually produce findings - a vacuous parity proves nothing", () => {
   const types = new Set<string>();
