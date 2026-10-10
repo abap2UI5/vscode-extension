@@ -6,6 +6,7 @@ import {
   appClassEntryOf,
   buildAppIndex,
   isAppEntry,
+  sameAppClassEntry,
 } from "./appindex";
 import {
   abapSources,
@@ -221,9 +222,15 @@ function ensureStarted(): void {
  *  (appindex.ts) - it used to be an object-identity check against the
  *  `docNames` memo, which every lookup and every background rebuild
  *  refreshes as a side effect, so a rebuild landing between the rename
- *  keystroke and the save left the stale name in place. */
+ *  keystroke and the save left the stale name in place.
+ *
+ *  The change is announced only when the entry differs from what the index
+ *  held for that name (`sameAppClassEntry`) or a name was renamed away: the
+ *  apps tree re-rendered whole on every save and every open, almost all of
+ *  which change nothing it shows. */
 function updateFromDocument(doc: vscode.TextDocument): void {
   const entry = docEntry(doc);
+  const previous = index.get(entry.name);
   const stale = index.update(doc.uri.toString(), entry.name, entry);
   if (stale !== undefined) {
     const other = openByName.get(stale);
@@ -235,7 +242,9 @@ function updateFromDocument(doc: vscode.TextDocument): void {
     }
   }
   openByName.set(entry.name, doc);
-  refreshed.fire();
+  if (stale !== undefined || !sameAppClassEntry(previous, entry)) {
+    refreshed.fire();
+  }
 }
 
 /**
@@ -279,6 +288,7 @@ async function flushPendingFiles(): Promise<void> {
       }
       onDisk.add(key);
       const entry = appClassEntryOf({ key, path: uri.path, text, fromEditor: false });
+      const previous = index.get(entry.name);
       const stale = index.update(key, entry.name, entry);
       if (stale !== undefined) {
         const other = openByName.get(stale);
@@ -286,7 +296,11 @@ async function flushPendingFiles(): Promise<void> {
           index.restore(stale, docEntry(other));
         }
       }
-      moved = true;
+      // a file saved without a change to what the tree shows (the usual
+      // save) does not re-render it
+      if (stale !== undefined || !sameAppClassEntry(previous, entry)) {
+        moved = true;
+      }
     })
   );
   if (moved) {

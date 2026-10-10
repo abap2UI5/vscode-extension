@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AppClassIndex, BUILD_SLICE, buildAppIndex, isAppEntry } from "../appindex";
+import { AppClassIndex, BUILD_SLICE, buildAppIndex, isAppEntry, sameAppClassEntry } from "../appindex";
 import { AppClassInfo, appClassInfoOf } from "../abap";
 
 /*
@@ -184,4 +184,35 @@ test("remove drops a file's entry only when the entry is that file's", () => {
   assert.equal(index.get("ZCL_A"), undefined);
   assert.equal(index.remove("file:///never", (e) => e.key), undefined);
   assert.equal([...index.entries()].length, 0);
+});
+
+test("a save that changes nothing the tree shows is no change of the index", () => {
+  // appclasses.ts fires `onDidRefreshAppClasses` only when the updated
+  // entry differs from the previous one - the apps tree re-rendered whole on
+  // every save and every open before
+  const entry = {
+    name: "ZCL_APP",
+    key: "file:///zcl_app.clas.abap",
+    isApp: true,
+    superclass: undefined,
+    usesBuilder: true,
+    fromEditor: false,
+  };
+  assert.ok(sameAppClassEntry(entry, { ...entry }), "the same answers: no announcement");
+  assert.ok(!sameAppClassEntry(undefined, entry), "a class the index did not know");
+  assert.ok(!sameAppClassEntry(entry, undefined));
+  assert.ok(sameAppClassEntry(undefined, undefined));
+  for (const change of [
+    { isApp: false },
+    { superclass: "ZCL_BASE" },
+    { usesBuilder: false },
+    { fromEditor: true },
+    { key: "adt://sys/ZCL_APP" },
+    { name: "ZCL_APP2" },
+  ] as const) {
+    assert.ok(
+      !sameAppClassEntry(entry, { ...entry, ...change }),
+      `${JSON.stringify(change)} is what the tree or the walk reads`
+    );
+  }
 });

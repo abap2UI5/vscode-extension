@@ -78,7 +78,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/annotations.ts` | `vscode`-free: what a line deserves to be told about it - `@since` and deprecation per control/member (of a builder chain, and of a raw XML view through the linter's `parseXml`, each element in its own namespace scope - `xmlNamespaceScopes`), roundtrip cost per PUBLIC attribute |
 | `src/inlineview.ts` | The one decoration pass that renders all three inline annotations (findings, `@since`/deprecation, cost) - for builder classes and raw XML views |
 | `src/abbreviation.ts` | `vscode`-free: Emmet-style abbreviations -> element tree -> chain (emitted by `xmltoabap.ts`) |
-| `src/appview.ts` | The "abap2UI5 Apps" tree: every z2ui5_if_app class with run/preview/check - listed from the app-class index (`appClassEntries`), never from a sweep of its own, so a save moves one node |
+| `src/appview.ts` | The "abap2UI5 Apps" tree: every z2ui5_if_app class with run/preview/check - listed from the app-class index (`appClassEntries`), never from a sweep of its own, so a save moves one node - and the index announces a save or an open only when the entry changed (`sameAppClassEntry`), so most do not re-render the tree |
 | `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix / Run unit tests (when a `*.clas.testclasses.abap` sits beside the class) above the class definition |

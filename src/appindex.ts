@@ -44,6 +44,31 @@ export interface AppClassEntry extends AppClassInfo {
   fromEditor: boolean;
 }
 
+/**
+ * Whether two entries say the same about a class - everything the walk and
+ * the apps tree read. A save or an open of an ABAP document updates its
+ * entry in place, and the index used to announce a change for every one of
+ * them: the tree then dropped its list and re-rendered whole for a save that
+ * changed nothing it shows (the usual save). Only an entry that differs
+ * here is worth telling the tree about.
+ */
+export function sameAppClassEntry(
+  a: AppClassEntry | undefined,
+  b: AppClassEntry | undefined
+): boolean {
+  if (!a || !b) {
+    return a === b;
+  }
+  return (
+    a.name === b.name &&
+    a.key === b.key &&
+    a.isApp === b.isApp &&
+    a.superclass === b.superclass &&
+    a.usesBuilder === b.usesBuilder &&
+    a.fromEditor === b.fromEditor
+  );
+}
+
 /** A class the scan found, as `abapsources.ts` lists them. */
 export interface AppSource {
   key: string;

@@ -28,7 +28,8 @@
   shows up, in slices that leave the editor responsive, and a change on
   disk re-reads that one file instead of everything. The Apps tree is a
   view of that index, so a save moves one node rather than re-reading the
-  workspace, and the text the extension keeps of your classes is validated
+  workspace - and a save or an open that changes nothing the tree shows
+  (the usual one) does not re-render it at all - and the text the extension keeps of your classes is validated
   cheaply when it is old and let go when it has not been used for a while.
 
 - **Add Agent Setup to Workspace.** A new command makes the project in the
