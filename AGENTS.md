@@ -78,7 +78,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/annotations.ts` | `vscode`-free: what a line deserves to be told about it - `@since` and deprecation per control/member (of a builder chain, and of a raw XML view through the linter's `parseXml`, each element in its own namespace scope - `xmlNamespaceScopes`), roundtrip cost per PUBLIC attribute |
 | `src/inlineview.ts` | The one decoration pass that renders all three inline annotations (findings, `@since`/deprecation, cost) - for builder classes and raw XML views |
 | `src/abbreviation.ts` | `vscode`-free: Emmet-style abbreviations -> element tree -> chain (emitted by `xmltoabap.ts`) |
-| `src/appview.ts` | The "abap2UI5 Apps" tree: every z2ui5_if_app class with run/preview/check |
+| `src/appview.ts` | The "abap2UI5 Apps" tree: every z2ui5_if_app class with run/preview/check - listed from the app-class index (`appClassEntries`), never from a sweep of its own, so a save moves one node |
 | `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix / Run unit tests (when a `*.clas.testclasses.abap` sits beside the class) above the class definition |
@@ -117,13 +117,13 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/navview.ts` | "Show App Navigation Map": workspace scan + the webview panel around the SVG |
 | `src/snapshot.ts` | Loads the bundled UI5 metadata once, for the gate and the language features |
 | `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over - plus `lineStartAt`, the line start that is right at offset 0 too (never `lastIndexOf("\n", offset - 1)`, which reads -1 as 0) |
-| `src/classindex.ts` | `vscode`-free: the cross-file class index the linter's class-level rules read (superclass chain, `cs_event`, `outsideReads`) - built from the linter's own `classIndexOf`, assembled incrementally per file so a save recomputes one file, pinned to a full build in `classindex.test.ts`; disabled while the pinned linter exports no `classIndexOf` |
+| `src/classindex.ts` | `vscode`-free: the cross-file class index the linter's class-level rules read (superclass chain, `cs_event`, `outsideReads`) - built from the linter's own `classIndexOf`, assembled incrementally per file so a save recomputes one file, pinned to a full build in `classindex.test.ts`; disabled while the pinned linter exports no `classIndexOf`. Holds a file's text (and word set) only when the file reads through a reference (`->`, the one case `readsOf` re-reads it), a content hash (`hashOf`) for every other |
 | `src/classindexsync.ts` | `vscode`-free: WHEN that index is read and when the checks hear of it - LAZY (nothing is read until a check first asks; the extension activates on any `*.clas.abap`, and indexing samples-controls' 644 classes costs ~0.7 s of the shared host), no partial index ever handed out (undefined until the first scan is in, then one change notice), saved state only (disk files, plus open documents without one), debounced change notices, everything stopped on dispose - `classindexsync.test.ts` |
 | `src/classindexfeed.ts` | The plumbing around `classindexsync.ts` for both entries: the shared ABAP watcher, saves, opened/closed ADT documents, `workspace.fs` |
-| `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
+| `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk. The shared text cache behind it: reads twelve at a time (`mapInPool`), entries validated by a `stat` once past the TTL rather than re-read, the whole cache dropped five minutes after the last sweep - the comment block there says why each |
 | `src/sharedscan.ts` | `vscode`-free: one scan in flight, joined by every caller that asks for the same thing while it runs and nothing changed since it started - what lets the app index, the class index and the apps tree share the cold scan at activation (`abapsources.ts`) |
-| `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
-| `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, and what a RENAME has to drop (never object identity against a memo) |
+| `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81). LAZY - nothing is read until the window shows an ABAP document, a class with a superclass is asked about or the apps tree asks (the extension activates on any XML file); a watcher event re-reads that one file, a burst or a folder change rebuilds whole |
+| `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, what a RENAME has to drop (never object identity against a memo), the entries the apps tree shows (`AppClassEntry`), the rebuild in slices of `BUILD_SLICE` with a yield between them that a newer rebuild supersedes (`buildAppIndex`), the chain walk over entries (`isAppEntry`) |
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
 | `src/linterrelease.ts` | `LINTER_RELEASE` — the linter version and release commit `esbuild.js` stamped (`LINTER_PIN`, `LINTER_COMMIT`), read there and nowhere else (`linterpin.test.ts` pins that) |
 | `src/text.ts` | `plural(count, noun)` — the one pluralizer behind every counted string users read (dependency-free) |
@@ -270,8 +270,23 @@ identity (see Conventions).
   base class holding the interface is a common house pattern and used to make
   the whole extension go quiet on every app built that way. The lookup is
   synchronous by necessity (a CodeLens provider cannot await a scan), so the
-  index is rebuilt in the background; an unknown base class means "not an
-  app", never a guess.
+  index is built in the background - lazily, in slices, and the first ask
+  starts it; an unknown base class means "not an app", never a guess.
+- **Activation stays cheap for a window without ABAP.** `onLanguage:xml`
+  activates the whole extension for any XML file, and there is no narrower
+  event. So nothing sweeps the workspace at activation: the app-class index
+  (`appclasses.ts`), the class index (`classindexsync.ts`), the apps tree
+  (built from the former) and the UI5 snapshot (`snapshot.ts`, read at the
+  first gate or completion) all wait for the first ABAP document, the first
+  check or the first ask. What activation still does: loads the bundle (0.66
+  MB), creates the session's channels and status item, reads the 1.5 KB
+  `dist/compat.json`, registers the commands, providers and the four
+  FileSystemWatchers (ABAP sources, test includes, lint configs, baselines),
+  re-checks the checkable documents already open, and probes
+  `mcp.reposRoot` with a few `existsSync` when that setting is set. The web
+  entry additionally reads its three data files (snapshot, client API, icon
+  data) concurrently, because a browser host has no `fs` to read them lazily
+  with.
 - **The preview reloads on activation, not on save.** A saved ABAP class is
   still inactive on the server, so reloading would show the old version. Keys
   that other ABAP extensions own (F9, Ctrl+F3) are taken over only with a

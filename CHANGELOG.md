@@ -21,6 +21,15 @@
   second time. The first scan of a workspace reads its classes twelve at a
   time instead of one after the other, and the web build reads its data
   files at activation concurrently.
+- **A window without ABAP in it no longer scans the workspace on
+  activation.** The extension activates for any XML file; the index of app
+  classes (what lets F9, the lenses and the Apps tree recognise a class
+  that inherits `z2ui5_if_app`) is now built when the first ABAP document
+  shows up, in slices that leave the editor responsive, and a change on
+  disk re-reads that one file instead of everything. The Apps tree is a
+  view of that index, so a save moves one node rather than re-reading the
+  workspace, and the text the extension keeps of your classes is validated
+  cheaply when it is old and let go when it has not been used for a while.
 
 - **Add Agent Setup to Workspace.** A new command makes the project in the
   open folder ready for an AI agent - most abap2UI5 projects did not start
