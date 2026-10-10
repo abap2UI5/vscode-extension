@@ -5,6 +5,7 @@ import type { ViewNode } from "@abap2ui5/linter/reconstruct";
 import { parseXml } from "@abap2ui5/linter/properties";
 import {
   costAnnotations,
+  decorationSignature,
   deprecationAnnotations,
   publicAttributes,
   sinceAnnotations,
@@ -256,5 +257,52 @@ test("a raw XML view is annotated too, each element in its own namespace scope",
       ["<f:Card", "1.64"],
       ["headerP", "1.65"],
     ]
+  );
+});
+
+test("a paint that would set what the editor already shows is told apart from one that would not", () => {
+  // inlineview.ts skips setDecorations when the signature of a style's list
+  // is what that editor was last given - the pass runs twice per typing
+  // pause (300 ms after the keystroke, again when the diagnostics land)
+  const range = (line: number, from: number, to: number) => ({
+    start: { line, character: from },
+    end: { line, character: to },
+  });
+  const finding = {
+    range: range(4, 0, 30),
+    renderOptions: { after: { contentText: "unknown-property: nosuch" } },
+  };
+  const since = {
+    range: range(7, 0, 20),
+    hoverMessage: { value: "**@since 1.120**" },
+    renderOptions: { after: { contentText: "since 1.120" } },
+  };
+  assert.equal(decorationSignature([finding, since]), decorationSignature([finding, since]));
+  assert.equal(decorationSignature([]), decorationSignature([]));
+  assert.notEqual(decorationSignature([finding]), decorationSignature([]), "findings gone: repaint");
+  assert.notEqual(
+    decorationSignature([finding, since]),
+    decorationSignature([since, finding]),
+    "order is part of what is painted"
+  );
+  assert.notEqual(
+    decorationSignature([finding]),
+    decorationSignature([{ ...finding, range: range(5, 0, 30) }]),
+    "the line moved"
+  );
+  assert.notEqual(
+    decorationSignature([finding]),
+    decorationSignature([{ ...finding, renderOptions: { after: { contentText: "fixed" } } }]),
+    "the text changed"
+  );
+  assert.notEqual(
+    decorationSignature([since]),
+    decorationSignature([{ ...since, hoverMessage: "plain" }]),
+    "the hover changed"
+  );
+  // a string hover and a MarkdownString of the same text paint the same
+  assert.equal(
+    decorationSignature([{ ...since, hoverMessage: "x" }]),
+    decorationSignature([{ ...since, hoverMessage: { value: "x" } }])
   );
 });
