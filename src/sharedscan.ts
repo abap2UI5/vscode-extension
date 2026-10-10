@@ -33,3 +33,35 @@ export class SharedScan<T> {
     return entry.promise;
   }
 }
+
+/**
+ * `items` mapped through `work` with at most `width` calls in flight, the
+ * results in the items' order - what the cold scan reads the workspace's
+ * files with. Each read is a round trip to the extension host's file
+ * service, and one after the other left that latency unoverlapped: 644
+ * files were 644 serial round trips. `work` may answer undefined to leave
+ * the item out; a `stop` that answers true before an item is dispatched
+ * ends the walk there (the reads in flight still finish), which is how a
+ * cancellation token reaches it.
+ */
+export async function mapInPool<T, R>(
+  items: readonly T[],
+  width: number,
+  work: (item: T) => Promise<R | undefined>,
+  stop?: () => boolean
+): Promise<R[]> {
+  const slots = new Array<R | undefined>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length && !stop?.()) {
+      const index = next++;
+      slots[index] = await work(items[index]);
+    }
+  };
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.max(1, Math.min(width, items.length)); i++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+  return slots.filter((r): r is R => r !== undefined);
+}

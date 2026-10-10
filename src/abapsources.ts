@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { isAbapSourceDocument } from "./abap";
 import { sourceLabel } from "./checkcore";
-import { SharedScan } from "./sharedscan";
+import { SharedScan, mapInPool } from "./sharedscan";
 
 /*
  * "Which ABAP does this window know about?" - the one answer four features
@@ -89,6 +89,9 @@ export function isAbapDocument(doc: vscode.TextDocument): boolean {
 
 /** How long a cached text is trusted without the watcher saying anything. */
 const CACHE_TTL_MS = 30000;
+
+/** How many file reads the cold scan keeps in flight at once. */
+const READ_POOL_WIDTH = 12;
 
 /** Above this many remembered files the cache is dropped whole rather than
  *  grown - it is a working set, not an index. */
@@ -235,20 +238,26 @@ async function scanOnce(
   const now = Date.now();
 
   const files = await vscode.workspace.findFiles(ABAP_SOURCE_GLOB, EXCLUDE, limit);
-  for (const uri of files) {
-    if (token?.isCancellationRequested) {
-      break;
-    }
-    const key = uri.toString();
+  // The reads go out `READ_POOL_WIDTH` at a time: each is a round trip to
+  // the file service, and one after the other left 644 classes as 644
+  // serial round trips. The answer keeps the glob's order regardless of
+  // which read lands first (the index and the tree are built from it).
+  const read = await mapInPool(
+    files,
+    READ_POOL_WIDTH,
+    async (uri) => {
+      const text = await readFile(uri, now);
+      return text === undefined ? undefined : { uri, text, fromEditor: false };
+    },
+    () => token?.isCancellationRequested === true
+  );
+  for (const source of read) {
+    const key = source.uri.toString();
     if (seen.has(key)) {
       continue;
     }
-    const text = await readFile(uri, now);
-    if (text === undefined) {
-      continue;
-    }
     seen.add(key);
-    out.push({ uri, text, fromEditor: false });
+    out.push(source);
   }
 
   for (const doc of vscode.workspace.textDocuments) {
