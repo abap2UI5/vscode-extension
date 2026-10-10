@@ -212,3 +212,26 @@ function joinOntoPreviousLine(
   }
   return { start: prevStart + content.length, end: cutEnd, text: " )" };
 }
+
+/**
+ * Whether two messages the form is sent say the same thing - what lets the
+ * view skip a post. `refresh( )` runs on every cursor pause, and a cursor
+ * moving inside ordinary ABAP posted the same `{ type: "none" }` to the
+ * webview each time; a cursor moving inside one control block re-posted the
+ * identical form. The messages are plain data (strings, numbers, booleans,
+ * arrays, plain objects), so their JSON is their identity; anything else
+ * (a function, a cyclic value) counts as different, never as equal.
+ */
+export function sameMessage(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a === undefined || b === undefined) {
+    return false;
+  }
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}

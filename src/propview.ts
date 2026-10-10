@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { ControlCall, controlCallAt } from "./context";
-import { removeAttributeEdit, setAttributeEdit } from "./propedit";
+import { removeAttributeEdit, sameMessage, setAttributeEdit } from "./propedit";
 import { createNonce, propertyEditorHtml } from "./webview";
 import { memberInfo, membersOf, Snapshot, valuesFor, deprecationText } from "./metadata";
 import { snapshot } from "./snapshot";
@@ -44,6 +44,20 @@ export class PropertyEditorProvider implements vscode.WebviewViewProvider {
   /** The last scan, keyed by uri, version and cursor offset - visibility
    *  toggles and debounced duplicate events re-render without re-scanning. */
   private lastScan?: { key: string; call: ControlCall | undefined };
+  /** The last message the webview was sent - an identical one is not sent
+   *  again (`sameMessage`). Forgotten whenever the view is (re)resolved or
+   *  becomes visible: a hidden webview view is torn down by the host, and
+   *  what it showed before has to be posted afresh. */
+  private lastPosted: unknown;
+
+  /** Posts `message` unless it is what the webview already shows. */
+  private post(view: vscode.WebviewView, message: unknown): void {
+    if (sameMessage(this.lastPosted, message)) {
+      return;
+    }
+    this.lastPosted = message;
+    void view.webview.postMessage(message);
+  }
 
   constructor(private readonly log: (m: string) => void) {}
 
@@ -62,7 +76,11 @@ export class PropertyEditorProvider implements vscode.WebviewViewProvider {
         );
       });
     });
-    view.onDidChangeVisibility(() => this.refresh());
+    view.onDidChangeVisibility(() => {
+      this.lastPosted = undefined;
+      this.refresh();
+    });
+    this.lastPosted = undefined;
     this.refresh();
   }
 
@@ -81,7 +99,7 @@ export class PropertyEditorProvider implements vscode.WebviewViewProvider {
       !usesBuilder(text)
     ) {
       this.shown = undefined;
-      void view.webview.postMessage({
+      this.post(view, {
         type: "none",
         reason:
           "Open an ABAP class that builds views with z2ui5_cl_ui5_view_builder - the " +
@@ -104,7 +122,7 @@ export class PropertyEditorProvider implements vscode.WebviewViewProvider {
     }
     if (!call) {
       this.shown = undefined;
-      void view.webview.postMessage({
+      this.post(view, {
         type: "none",
         reason:
           "Place the cursor on an ele( ) / tag( ) builder call - its " +
@@ -113,7 +131,7 @@ export class PropertyEditorProvider implements vscode.WebviewViewProvider {
       return;
     }
     this.shown = { uri: editor.document.uri, tokenStart: call.tokenStart };
-    void view.webview.postMessage(controlMessage(snapshot(), call));
+    this.post(view, controlMessage(snapshot(), call));
   }
 
   private async onMessage(msg: unknown): Promise<void> {
