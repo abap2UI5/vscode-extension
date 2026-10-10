@@ -24,8 +24,11 @@
   test include on every pass; the reconstructed XML preview reuses the
   reconstruction the editor already has instead of parsing the class a
   second time. The first scan of a workspace reads its classes twelve at a
-  time instead of one after the other, and the web build reads its data
-  files at activation concurrently.
+  time instead of one after the other, and the web build (vscode.dev, the
+  browser-based Business Application Studio) registers its features first
+  and reads its 600 KB of data after, concurrently - a command or a view
+  used to wait for the slowest read; a check asked for before the data is
+  in waits for it.
 - **A window without ABAP in it no longer scans the workspace on
   activation.** The extension activates for any XML file; the index of app
   classes (what lets F9, the lenses and the Apps tree recognise a class

@@ -34,9 +34,10 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/connectcheck.ts` | `vscode`-free: what the connection check's probes MEAN - launch-URL shape, DNS/TCP/TLS failure and HTTP-status classification, bootstrap-page detection - behind "Check System Connection" |
 | `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list, and what an edited model document may push into the running app (`applyModelMessage`) |
 | `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
-| `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only - including the navigation map, the Control Properties view and the findings tree (fed by `webFindingsNow`, no baseline machinery) |
+| `src/web/startup.ts` | `vscode`-free: the web activation's ORDER - the registrations first, the data reads after, and the `DataGate` that holds the checks until the reads are in (a gate run before them would memoise an empty icon registry in the linter for the session; completion and hover need no holding) - `webstartup.test.ts`, since the in-host smoke test cannot run everywhere |
+| `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): registers the in-process features first, then loads the snapshot via `workspace.fs` (`startWeb`), registers the in-process features only - including the navigation map, the Control Properties view and the findings tree (fed by `webFindingsNow`, no baseline machinery) |
 | `src/web/linterdata.ts` | `vscode`-free: the linter's own data files in the web build (`data/icons.json`) - read by the caller through `workspace.fs`, seeded into the `fs` shim under the path the linter reads |
-| `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, repo config through `workspace.fs` (no render gate) |
+| `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, repo config through `workspace.fs` (no render gate); every gate run waits on the entry's `DataGate`, and `webFindingsNow` answers nothing until it opens |
 | `src/gate.ts` | The in-process property gate itself, shared by `viewcheck.ts` (desktop) and `webcheck.ts` (web) |
 | `src/diagnostics.ts` | Findings -> VS Code diagnostics (ranges, severities, rule links), shared by both checks; `placeFindings` / `toDiagnosticsPlaced` split the two halves for the sweep, which places a disk file's findings while it has the text and publishes them later without it |
 | `src/selector.ts` | The document selector all view providers share |
@@ -152,7 +153,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`,
+`unitrunner.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
@@ -291,7 +292,8 @@ identity (see Conventions).
   `mcp.reposRoot` with a few `existsSync` when that setting is set. The web
   entry additionally reads its three data files (snapshot, client API, icon
   data) concurrently, because a browser host has no `fs` to read them lazily
-  with.
+  with - after its registrations, not before them (`web/startup.ts`); only
+  the checks wait for the reads.
 - **The preview reloads on activation, not on save.** A saved ABAP class is
   still inactive on the server, so reloading would show the old version. Keys
   that other ABAP extensions own (F9, Ctrl+F3) are taken over only with a

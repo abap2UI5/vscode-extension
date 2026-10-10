@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
 import { recheckSchedule } from "./checkschedule";
+import { DataGate } from "./web/startup";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { GateOptions, runGate, VIEW_XML_RE } from "./gate";
 import { isAllClassesFile, isCheckableSource } from "./checkcore";
@@ -416,7 +417,19 @@ function isCheckable(doc: vscode.TextDocument): boolean {
  *  back is one gate run, not two. */
 const memos = new Map<string, { version: number; findings: PropertyFinding[] }>();
 
+/** Opened by the web entry once its data reads are in (`src/web/startup.ts`):
+ *  a gate run before them would memoise an empty icon registry in the
+ *  linter for the session. Open from the start when nobody holds it. */
+let dataGate: DataGate = (() => {
+  const open = new DataGate();
+  open.release();
+  return open;
+})();
+
 export function webFindingsNow(doc: vscode.TextDocument): PropertyFinding[] {
+  if (!dataGate.isOpen) {
+    return []; // the check this would memoise has not been allowed to run yet
+  }
   const key = doc.uri.toString();
   const memo = memos.get(key);
   if (memo && memo.version === doc.version) {
@@ -445,8 +458,12 @@ export function webFindingsNow(doc: vscode.TextDocument): PropertyFinding[] {
 
 export function registerWebCheck(
   context: vscode.ExtensionContext,
-  log: (m: string) => void
+  log: (m: string) => void,
+  gate?: DataGate
 ): void {
+  if (gate) {
+    dataGate = gate;
+  }
   const diagnostics =
     vscode.languages.createDiagnosticCollection("abap2ui5-view-check");
   const timers = new Map<string, NodeJS.Timeout>();
@@ -532,7 +549,13 @@ export function registerWebCheck(
       key,
       setTimeout(() => {
         timers.delete(key);
-        check(doc, false);
+        // held until the data reads are in - at activation the first
+        // checks are scheduled before the snapshot and the icon data land
+        dataGate.whenOpen(() => {
+          if (!doc.isClosed) {
+            check(doc, false);
+          }
+        });
       }, delay)
     );
   };
@@ -570,12 +593,12 @@ export function registerWebCheck(
     vscode.commands.registerCommand("abap2ui5.checkViews", () => {
       const doc = vscode.window.activeTextEditor?.document;
       if (doc) {
-        check(doc, true);
+        dataGate.whenOpen(() => check(doc, true));
       }
     }),
     // The workspace sweep, sized for the browser host - see sweepWorkspaceWeb.
     vscode.commands.registerCommand("abap2ui5.checkWorkspace", () =>
-      sweepWorkspaceWeb(diagnostics, log)
+      dataGate.whenOpen(() => void sweepWorkspaceWeb(diagnostics, log))
     ),
     // The same two settings the desktop check honours. Turning live checking
     // off and still being checked on every keystroke in the browser is the
