@@ -1,12 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import appTemplate from "../data/app-template.json";
 import {
   GUIDE_MARKER,
-  NAMED_FILES,
-  PLACEHOLDER_CLASS,
-  TEMPLATE_FILES,
-  TEMPLATE_SPEC,
-  VERBATIM_FILES,
   applyClass,
   applyElement,
   applyJsonKey,
@@ -20,7 +16,22 @@ import {
   scaffoldText,
   starterClassSource,
   substitutePath,
+  namedFilePaths,
+  placeholderClass,
+  setAppTemplate,
+  templateFiles,
+  templateSpec,
+  verbatimFilePaths,
 } from "../scaffold";
+
+// the snapshot is read from next to the bundle at runtime - the suite hands
+// the generated file in directly
+setAppTemplate(appTemplate);
+const TEMPLATE_FILES = templateFiles();
+const TEMPLATE_SPEC = templateSpec();
+const VERBATIM_FILES = verbatimFilePaths();
+const NAMED_FILES = namedFilePaths();
+const PLACEHOLDER_CLASS = placeholderClass();
 
 /*
  * The drift gate over "New Project from Template".

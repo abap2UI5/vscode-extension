@@ -7,8 +7,8 @@
  * the abap2UI5 client API itself - _bind, _event, view_display, the popup
  * family - had nothing: the methods every app calls were the one part of the
  * surface with no editor knowledge. This script parses the interface source
- * (ABAP Doc + METHODS signatures) into a JSON the extension bundles, so the
- * knowledge ships offline like the snapshot does.
+ * (ABAP Doc + METHODS signatures) into a JSON the extension ships next to
+ * its bundle, so the knowledge is there offline like the snapshot is.
  *
  *   node scripts/generate-client-api.mjs /path/to/abap2UI5
  *   node scripts/generate-client-api.mjs            (fetches from GitHub main)
@@ -32,8 +32,10 @@ import {
 } from "./lib/snapshot.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-// under src/ so tsc (rootDir: src, resolveJsonModule) can import it; esbuild
-// inlines it into both bundles, so the web build needs no fs for it either
+// under src/ so tsc (rootDir: src, resolveJsonModule) can type it; esbuild
+// COPIES it next to the bundle (dist/client-api.json, dist-test/ for the
+// suite) rather than inlining it - src/clientapi.ts reads it on the first
+// `client->` completion, the web entry through workspace.fs at activation
 const OUT = path.join(ROOT, "src", "data", "client-api.json");
 const INTF_PATH = "src/02/z2ui5_if_client.intf.abap";
 const RAW_URL = `https://raw.githubusercontent.com/abap2UI5/abap2UI5/main/${INTF_PATH}`;

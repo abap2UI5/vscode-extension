@@ -5,6 +5,13 @@ import { APP_TEMPLATE, APP_TEMPLATES, templateSource } from "../template";
 import { whenBranchOf } from "../context";
 import { isAppClass, usesBuilder } from "../abap";
 import { modelRootsOfSource } from "../previewcore";
+import appTemplate from "../data/app-template.json";
+import { setAppTemplate } from "../scaffold";
+
+// the scaffold's snapshot is read from next to the bundle at runtime - the
+// suite hands the generated file in (the scaffold tests below `require` the
+// module mid-test, which is the same module instance)
+setAppTemplate(appTemplate);
 
 /*
  * The template gallery as a contract. `snippets.test.ts` already proves

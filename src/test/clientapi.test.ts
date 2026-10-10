@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   API_REFERENCE_PAGE,
+  clientApiError,
+  setClientApiText,
   apiReferenceAnchor,
   apiReferenceUrl,
   clientCallAt,
@@ -153,4 +155,23 @@ test("the open client call and its written parameter are recognised", () => {
   // a closed call is over
   assert.equal(clientSignatureContext("client->_event( `GO` ) "), undefined);
   assert.equal(clientSignatureContext("no call here"), undefined);
+});
+
+/* The reference is read from next to the bundle (`dist/client-api.json`,
+ * `dist-test/` for the suite) on first use - this is the gate that the
+ * copy lands where `clientapi.ts` looks for it. */
+test("the client API file is found next to the bundle", () => {
+  assert.equal(clientApiError(), undefined);
+  assert.ok(clientMethods().length > 20);
+});
+
+// LAST on purpose: it replaces the loaded reference for the rest of this file
+test("a reference that does not parse is empty, with the reason", () => {
+  setClientApiText("{ not json");
+  assert.match(clientApiError() ?? "", /JSON/);
+  assert.deepEqual(clientMethods(), []);
+  assert.equal(clientMethod("view_display"), undefined);
+  setClientApiText(JSON.stringify({ methods: [{ name: "View_Display", signature: "", doc: "" }] }));
+  assert.equal(clientApiError(), undefined);
+  assert.equal(clientMethod("VIEW_DISPLAY")?.name, "View_Display");
 });

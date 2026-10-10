@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import appTemplate from "../data/app-template.json";
 import {
-  AGENT_SETUP,
+  agentSetupSpec,
   adaptSourceFolder,
   agentSetupReport,
   confirmationDetail,
@@ -17,7 +18,12 @@ import {
   type AgentSetupPlan,
   type WorkspaceProbe,
 } from "../agentsetup";
-import { TEMPLATE_FILES, TEMPLATE_SPEC } from "../scaffold";
+import { setAppTemplate, templateFiles, templateSpec } from "../scaffold";
+
+setAppTemplate(appTemplate);
+const TEMPLATE_FILES = templateFiles();
+const TEMPLATE_SPEC = templateSpec();
+const AGENT_SETUP = agentSetupSpec();
 
 /*
  * "Add Agent Setup to Workspace" over an in-memory folder.

@@ -55,6 +55,24 @@ function copySnapshot() {
    * earlier build is removed rather than kept stale. */
   copyIfShipped(path.join(data, "portable-v1.json"), path.join("data", "portable-v1.json"));
   copyCompat(data, "dist");
+  copyOwnData("dist");
+}
+
+/** The extension's own generated data that is read at runtime rather than
+ *  bundled: app-template's snapshot (300 KB, "New Project from Template"
+ *  and "Add Agent Setup to Workspace" read it through `workspace.fs` on
+ *  first use, `src/apptemplatefile.ts`) and the z2ui5_if_client reference
+ *  (`clientapi.ts` reads it beside the bundle on the first `client->`
+ *  completion, the web entry through `workspace.fs` at activation). As
+ *  imported JSON modules the two were a third of the desktop bundle, parsed
+ *  by every window that activated the extension. The test build gets the
+ *  same copies: `clientapi.ts` resolves its file next to its own bundle. */
+const OWN_DATA_FILES = ["app-template.json", "client-api.json"];
+function copyOwnData(outDir) {
+  fs.mkdirSync(outDir, { recursive: true });
+  for (const file of OWN_DATA_FILES) {
+    fs.copyFileSync(path.join("src", "data", file), path.join(outDir, file));
+  }
 }
 
 /** Copies a data file the bundled linter release may not ship yet; removes a
@@ -199,6 +217,8 @@ async function buildTests() {
     path.join(path.dirname(require.resolve("@abap2ui5/linter/properties")), "..", "data"),
     "dist-test"
   );
+  // clientapi.ts reads client-api.json next to the bundle it runs in
+  copyOwnData("dist-test");
 }
 
 /**
@@ -315,16 +335,32 @@ async function main() {
     logLevel: "info",
   });
   const webCtx = await esbuild.context(webConfig());
+  // `tar`, for the render-gate installer alone, as its own file next to the
+  // bundle - rendergate.ts loads it on first use (see src/rendergate-tar.ts)
+  const tarCtx = await esbuild.context({
+    entryPoints: ["src/rendergate-tar.ts"],
+    bundle: true,
+    format: "cjs",
+    minify: production,
+    sourcemap: !production,
+    sourcesContent: false,
+    platform: "node",
+    outfile: "dist/rendergate-tar.js",
+    logLevel: "info",
+  });
 
   if (watch) {
     await ctx.watch();
     await webCtx.watch();
+    await tarCtx.watch();
     console.log("[watch] esbuild is watching for changes...");
   } else {
     await ctx.rebuild();
     await webCtx.rebuild();
+    await tarCtx.rebuild();
     await ctx.dispose();
     await webCtx.dispose();
+    await tarCtx.dispose();
   }
 }
 

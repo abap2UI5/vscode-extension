@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **The extension activates with a third less to load.** The project
+  template (300 KB) and the `client->` method reference (59 KB) are no
+  longer part of the code every window parses on activation: they ship next
+  to it and are read the first time "New Project from Template", "Add Agent
+  Setup to Workspace" or a `client->` completion needs them. The archive
+  library the render-gate installer uses (86 KB) is loaded the first time
+  that installer runs. The activation bundle went from 1.1 MB to 0.66 MB,
+  the vscode.dev bundle from 0.75 MB to 0.39 MB; nothing you can do changed.
+- **Less work on every keystroke and save.** Whether a file is one the view
+  check judges is decided once per edit instead of on every keystroke (for a
+  class that is not an app, that decision read the repository config's
+  timestamps each time); the lenses above a class no longer re-evaluate on
+  every diagnostic another extension publishes, only when one of abap2UI5's
+  own findings moved, and the "Run unit tests" lens no longer looks for the
+  test include on every pass; the reconstructed XML preview reuses the
+  reconstruction the editor already has instead of parsing the class a
+  second time. The first scan of a workspace reads its classes twelve at a
+  time instead of one after the other, and the web build reads its data
+  files at activation concurrently.
+
 - **Add Agent Setup to Workspace.** A new command makes the project in the
   open folder ready for an AI agent - most abap2UI5 projects did not start
   from app-template and have no briefing for one. It adds what

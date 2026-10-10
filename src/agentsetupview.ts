@@ -8,6 +8,7 @@ import {
   type AgentSetupPlan,
   type WorkspaceProbe,
 } from "./agentsetup";
+import { ensureAppTemplate } from "./apptemplatefile";
 
 /*
  * "Add Agent Setup to Workspace" - abap2ui5.addAgentSetup.
@@ -76,7 +77,7 @@ async function pickFolder(arg: unknown): Promise<vscode.WorkspaceFolder | undefi
 
 let channel: vscode.OutputChannel | undefined;
 
-async function addAgentSetup(arg: unknown): Promise<void> {
+async function addAgentSetup(context: vscode.ExtensionContext, arg: unknown): Promise<void> {
   const folder = await pickFolder(arg);
   if (!folder) {
     return;
@@ -84,6 +85,9 @@ async function addAgentSetup(arg: unknown): Promise<void> {
   const probe = probeFor(folder.uri);
   const plan = async (): Promise<AgentSetupPlan | undefined> => {
     try {
+      // the snapshot the plan is made from, read from next to the bundle on
+      // first use
+      await ensureAppTemplate(context);
       return await planFromSnapshot(probe, folder.name);
     } catch (err) {
       void vscode.window.showErrorMessage(
@@ -181,7 +185,7 @@ async function addAgentSetup(arg: unknown): Promise<void> {
 export function registerAgentSetup(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("abap2ui5.addAgentSetup", (arg: unknown) =>
-      addAgentSetup(arg)
+      addAgentSetup(context, arg)
     ),
     {
       dispose: () => {

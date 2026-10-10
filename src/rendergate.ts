@@ -6,9 +6,26 @@ import { spawn } from "child_process";
 import { createHash } from "crypto";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
-import * as tar from "tar";
+import { createRequire } from "module";
 import { CONFIG_SECTION } from "./settings";
 import { bundleTrust } from "./checkcore";
+
+/**
+ * `tar` is 86 KB of the bundle for the one command that installs the render
+ * gate, so `esbuild.js` builds it into its own file next to the bundle
+ * (`dist/rendergate-tar.js`, from `src/rendergate-tar.ts`) and it is loaded
+ * here on first use. Through `createRequire`, not `require`: the bundler
+ * would inline a literal `require("tar")`, and it must leave this one for
+ * node to resolve at runtime.
+ */
+type Tar = typeof import("./rendergate-tar");
+let tarModule: Tar | undefined;
+function loadTar(): Tar {
+  if (!tarModule) {
+    tarModule = createRequire(__filename)(path.join(__dirname, "rendergate-tar.js")) as Tar;
+  }
+  return tarModule;
+}
 
 /*
  * Self-installing render gate: downloads the self-contained checker bundle
@@ -371,7 +388,7 @@ export async function installRenderGate(
         clearTimeout(timeout);
 
         progress.report({ message: "extracting..." });
-        await tar.x({ file: tgz, cwd: staging });
+        await loadTar().x({ file: tgz, cwd: staging });
         await fs.promises.rm(tgz, { force: true });
         if (!fs.existsSync(path.join(staging, "cli.mjs"))) {
           throw new Error("bundle did not contain cli.mjs");

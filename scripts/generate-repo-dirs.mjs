@@ -14,8 +14,9 @@
  * Why a snapshot and not an import: mcp-server is not a dependency of this
  * extension - it is a program the extension may START, from a checkout or via
  * npx, and it is not there at all in the web build. So the content ships
- * inside the bundle, the same way app-template.json and client-api.json do,
- * and the same weekly gate keeps it honest.
+ * inside the bundle (this one is 700 bytes and read at activation - the two
+ * larger snapshots, app-template.json and client-api.json, ship next to the
+ * bundle instead), and the same weekly gate keeps it honest.
  *
  *   node scripts/generate-repo-dirs.mjs /path/to/mcp-server
  *   node scripts/generate-repo-dirs.mjs           (fetches from GitHub main)

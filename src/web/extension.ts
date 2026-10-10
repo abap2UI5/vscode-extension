@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { setSnapshotText, snapshotError } from "../snapshot";
+import { clientApiError, setClientApiText } from "../clientapi";
 import { registerLanguageFeatures } from "../language";
 import { registerXmlPreview } from "../xmlpreview";
 import { registerWebCheck, webFindingsNow } from "../webcheck";
@@ -43,17 +44,17 @@ export async function activate(
       "activated (web build - language features and property gate)"
   );
 
-  // The two data reads go out together - each is a round trip to the
-  // browser host's file system, and neither depends on the other. The
-  // registrations wait for both: the first check must not cache an empty
-  // snapshot or an empty icon registry.
+  // The data reads go out together - each is a round trip to the browser
+  // host's file system, and none depends on another. The registrations wait
+  // for all of them: the first check must not cache an empty snapshot or an
+  // empty icon registry, nor the first hover an empty client reference.
   const readPackaged = async (...segments: string[]) =>
     new TextDecoder().decode(
       await vscode.workspace.fs.readFile(
         vscode.Uri.joinPath(context.extensionUri, ...segments)
       )
     );
-  const [snapshotFailure, unseeded] = await Promise.all([
+  const [snapshotFailure, clientApiFailure, unseeded] = await Promise.all([
     readPackaged("dist", "properties.json").then(
       (text) => {
         setSnapshotText(text);
@@ -65,11 +66,25 @@ export async function activate(
         "web: dist/properties.json could not be read - the property gate and " +
         `completion have no metadata (${err instanceof Error ? err.message : String(err)})`
     ),
+    // the z2ui5_if_client reference behind the `client->` completion and hover
+    readPackaged("dist", "client-api.json").then(
+      (text) => {
+        setClientApiText(text);
+        return clientApiError()
+          ? `web: the bundled client API could not be parsed (${clientApiError()})`
+          : undefined;
+      },
+      (err: unknown) =>
+        "web: dist/client-api.json could not be read - the client-> completion " +
+        `and hover have no reference (${err instanceof Error ? err.message : String(err)})`
+    ),
     // the linter's icon data, before the first check can cache an empty registry
     seedLinterData((packaged) => readPackaged(...packaged)),
   ]);
-  if (snapshotFailure) {
-    log(snapshotFailure);
+  for (const failure of [snapshotFailure, clientApiFailure]) {
+    if (failure) {
+      log(failure);
+    }
   }
   for (const failure of unseeded) {
     log(`web: the linter's data file could not be read - its rules report nothing (${failure})`);

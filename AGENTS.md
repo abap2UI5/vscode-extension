@@ -60,7 +60,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE. The CASE region itself (`eventCaseRegion`, `ownLevel`) lives in `context.ts`, which restricts the event rename, highlights, lens and Go-to-Definition to the WHENs at its own level |
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
 | `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
-| `src/clientapi.ts` | The bundled `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion |
+| `src/clientapi.ts` | The `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion - `vscode`-free; read from `dist/client-api.json` beside the bundle on first use (the web entry hands the text in, like `snapshot.ts`) |
 | `src/chainformat.ts` | Format Document for builder chains: hands on the linter's own `chain-house-layout` fixes (never a second layout algorithm) |
 | `src/renderloc.ts` | Places a render-gate error message on the source line quoting its token |
 | `scripts/generate-client-api.mjs` | Regenerates `src/data/client-api.json` from `z2ui5_if_client.intf.abap` (local checkout or GitHub raw) |
@@ -93,7 +93,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
 | `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
-| `src/rendergate.ts` | "Install / Update Render Gate": downloads the linter release's checker bundle and Chromium into global storage, verifies it, and resolves the installed CLI (see Toolchain) |
+| `src/rendergate.ts` | "Install / Update Render Gate": downloads the linter release's checker bundle and Chromium into global storage, verifies it, and resolves the installed CLI (see Toolchain). `tar` is loaded on first use from `dist/rendergate-tar.js`, the bundle `esbuild.js` builds from `src/rendergate-tar.ts` - 86 KB that stays out of the activation bundle |
 | `src/report.ts` | `vscode`-free: the shape and the redaction of "Copy Diagnostics for a Bug Report" - the report this extension writes about itself (per open document: scheme, checkability, governing config) |
 | `src/diagnosticsreport.ts` | The command's plumbing: collects what `report.ts` formats from the window (extensions, settings, documents, log lines, systems) |
 | `src/screenshot.ts` | "Take App Screenshot": finds the render gate's Chromium and renders the proxied URL headless |
@@ -101,10 +101,12 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/xmltoabap.ts` | "Convert XML View to Builder Chain": XML parser + corpus-style chain emitter |
 | `src/convert.ts` | The convert command's plumbing (source pick, result document) |
 | `src/wizard.ts` | "New App from Template" (gallery pick, class name input) and "New Project from Template" (class name input, writing app-template's project - the gallery stays with the former, because the template's test include asserts on the template's own starter class) |
-| `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's shared files copied from `src/data/app-template.json`, its named files (starter class, sidecar, test include, abapGit descriptors) substituted from the same snapshot the way `template.json`'s `substitutions` describe, and the three composed files written here |
+| `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's shared files copied from the `src/data/app-template.json` snapshot, its named files (starter class, sidecar, test include, abapGit descriptors) substituted from the same snapshot the way `template.json`'s `substitutions` describe, and the three composed files written here. The snapshot is NOT bundled: it is handed in through `setAppTemplate` / `loadAppTemplate` (the suite passes the file, `apptemplate.test.ts` pins the registry) and `templateFiles( )` / `templateSpec( )` throw until it is |
+| `src/apptemplatefile.ts` | Where that snapshot comes from at runtime, for both entries: `dist/app-template.json` next to the bundle (copied by `esbuild.js`), read through `workspace.fs` the first time "New Project from Template" or "Add Agent Setup to Workspace" runs - never at activation |
 | `src/agentsetup.ts` | `vscode`/`fs`/`path`-free: what "Add Agent Setup to Workspace" writes into an EXISTING project - app-template's `agentSetup` key executed over the snapshot, ported function by function from that repository's `create/agent-setup.mjs` (never overwrite, `package.json`/`.gitignore` only gain entries, the gates pointed at `.abapgit.xml`'s `STARTING_FOLDER`, nothing planned into the source folder), decided as a plan over a `WorkspaceProbe` before anything is written |
 | `src/agentsetupview.ts` | The command's plumbing, shared by both entries: the workspace folder, the modal confirmation listing what is written and skipped, a re-plan right before writing (a folder that changed under the dialog is refused), the writes through `workspace.fs`, the "abap2UI5 Agent Setup" output with the next steps |
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` (the template's `files.shared` and `files.named`, BOM stripped, plus its `template.json`) from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
+| `src/rendergate-tar.ts` | The entry of the `dist/rendergate-tar.js` bundle (`tar` alone) `rendergate.ts` loads on first use |
 | `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot, and the `*_HOME` variable each checkout is handed to mcp-server as (`checkoutHomes`) |
 | `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/mcp-server's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
 | `scripts/generate-settings.mjs` | Regenerates the settings table in `README.md` from `contributes.configuration`; `--check` fails when it is stale (`src/test/settings.test.ts`) |
@@ -131,7 +133,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `scripts/lib/snapshot.mjs` | The one lifecycle the three snapshot generators share: upstream read (local checkout or GitHub raw), shape check, `--check` byte-compare, write |
 | `snippets/` | ABAP snippets contributed to the editor |
 | `media/` | Icons: `icon.svg` (panel), `icon-light/dark.svg` (preview tab), `icon.png` (gallery) |
-| `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js`, and `src/test/` into `dist-test/` |
+| `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js` (plus `src/rendergate-tar.ts` into `dist/rendergate-tar.js`), `src/web/extension.ts` into `dist/web/extension.js`, and `src/test/` into `dist-test/`; copies the linter's data files and the extension's own two runtime-read snapshots (`app-template.json`, `client-api.json`) next to the bundles |
 | `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the four weekly `bump-*.yml` callers share |
 
 `dist/`, `dist-test/`, `node_modules/` and `*.vsix` are build output and are
@@ -379,7 +381,12 @@ Facts an agent cannot see from the code but will trip over:
 - **`esbuild.js` carries two load-bearing hacks** — do not "clean them up":
   the `import.meta.url` define + `scripts/import-meta-url-shim.mjs` inject
   (ESM linter modules bundled into CJS), and `copySnapshot()`, which copies
-  the linter's `data/properties.json` into `dist/` at build time. If
+  the linter's `data/properties.json` into `dist/` at build time (and
+  `copyOwnData()`, which puts the extension's own `src/data/app-template.json`
+  and `src/data/client-api.json` there too - and into `dist-test/` - because
+  neither is bundled any more: together with `tar`, which has its own
+  `dist/rendergate-tar.js`, they were 40% of a 1.1 MB activation bundle that
+  every window parsed for two commands and one hover). If
   `dist/properties.json` is missing, the property gate runs with **no
   metadata and finds nothing**, and completion and hover go quiet with it —
   `snapshot.ts` logs why, which is the only signal you get. The test build
@@ -538,7 +545,9 @@ Facts an agent cannot see from the code but will trip over:
   new knob the linter's config grows belongs in that merge — and never as a
   second implementation of the JSONC parsing or the directive syntax here.
 - **"New Project from Template" hands out abap2UI5/app-template's own files,
-  from a snapshot.** `src/data/app-template.json` carries that repository's
+  from a snapshot.** `src/data/app-template.json` (shipped as
+  `dist/app-template.json`, read on first use - `src/apptemplatefile.ts`)
+  carries that repository's
   `abaplint.jsonc`, `abap2ui5lint.jsonc`, `.claude/settings.json`,
   `.gitattributes`, `.gitignore`, `dependabot.yml`, `AGENTS.md`, its
   `package.json` and its `check.yml` - and, since 0.29.0, its named files

@@ -6,8 +6,9 @@
  * Why a snapshot and not a clone: `abap2ui5.newProject` is registered in the
  * WEB entry too (src/web/extension.ts), where there is no git, no child
  * process and no guarantee of network - vscode.dev has to be able to scaffold
- * a project as well as a desktop window does. So the content ships inside the
- * bundle. The price of that is drift, and drift is exactly what happened: the
+ * a project as well as a desktop window does. So the content ships with the
+ * extension - next to the bundle as `dist/app-template.json`, read through
+ * `workspace.fs` on first use. The price of that is drift, and drift is exactly what happened: the
  * scaffold carried its own hand-written copy of app-template's configs, and by
  * the time anyone looked it was emitting `@abap2ui5/linter@^0.1.1` (the
  * ecosystem was on 0.2.1), no framework pin at all (so a scaffolded project
@@ -43,8 +44,10 @@ import {
 } from "./lib/snapshot.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-// under src/ so tsc (rootDir: src, resolveJsonModule) can import it; esbuild
-// inlines it into both bundles, so the web build needs no fs for it either
+// under src/ so tsc (rootDir: src, resolveJsonModule) can type the suite's
+// import of it; esbuild COPIES it next to the bundle (dist/app-template.json)
+// rather than inlining it - 300 KB nobody needs at activation - and the two
+// commands read it through workspace.fs on both hosts (src/apptemplatefile.ts)
 const OUT = path.join(ROOT, "src", "data", "app-template.json");
 const REPO = "abap2UI5/app-template";
 const RAW = (file) => `https://raw.githubusercontent.com/${REPO}/main/${file}`;
