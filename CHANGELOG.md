@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.31.0
+
+The bundled linter moves to v0.8.5, and is now taken from its npm release
+rather than from a commit on its main branch.
 
 - **Add Agent Setup to Workspace.** A new command makes the project in the
   open folder ready for an AI agent - most abap2UI5 projects did not start
@@ -26,7 +29,7 @@
   alternative for Claude Code users, gives the `claude mcp add` line for the
   server alone, and says the server is listed in the official MCP Registry
   from 1.0 on; the README links the documentation's AI page. Hover and
-  completion describe `view_display` with the core's current wording.
+  completion describe the client API with the core's current wording.
 - **The agent app tools follow the abap2UI5 protocol's frontend rules.**
   The vendored agent client is now abap2UI5/mcp-server `a4d9f07`: a
   response of another protocol number is refused with both numbers named
@@ -279,12 +282,6 @@
   typescript-eslint, whose peer range ends below 6.1), eslint 10.12,
   esbuild 0.28.2, and `@types/node` back on the Node 22 line that
   `engines.node` names.
-
-## 0.30.2
-
-The bundled linter moves to v0.8.5, and is now taken from its npm release
-rather than from a commit on its main branch.
-
 - **The view check runs abap2UI5-linter 0.8.5** (from 0.8.3). What that
   brings to the editor: a builder attribute written as `a( v = … n = … )`
   is reconstructed like `a( n = … v = … )` - its value, often a binding,
