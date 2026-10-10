@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  GateMemo,
   RECHECK_STAGGER_MS,
   recheckSchedule,
   sweepEntryOf,
@@ -182,4 +183,48 @@ test("a sweep leaves no text in its cache - the ranges and a fingerprint instead
     sweepEntryOf("m1|", { findings: [finding], nothingChecked: "no view" }, text, () => []),
     { stamp: "m1|", findings: [], skip: true }
   );
+});
+
+test("one gate run per document version, whichever of findingsNow and checkDocument asks first", () => {
+  // the lens/code-action refetch (~250 ms after a change) reaches
+  // findingsNow before the live check (400 ms) reaches checkDocument - both
+  // go through the memo, so the second reads what the first ran
+  let gates = 0;
+  const runGate = () => ({ gate: { findings: [`run ${++gates}`] }, baselined: 0 });
+  const memos = new GateMemo<ReturnType<typeof runGate>>();
+  const key = "file:///zcl_app.clas.abap";
+
+  // findingsNow at version 7, then checkDocument at version 7
+  const first = memos.once(key, 7, 1, runGate);
+  const check = memos.get(key, 7, 1) ?? memos.once(key, 7, 1, runGate);
+  assert.equal(gates, 1, "the check reads the gate run the refetch did");
+  assert.equal(check, first);
+
+  // the other order: checkDocument seeds, findingsNow reads
+  const seeded = runGate();
+  memos.set(key, 8, 1, seeded);
+  assert.equal(memos.once(key, 8, 1, runGate), seeded);
+  assert.equal(gates, 2, "no second run for version 8");
+
+  // a new version, a new config generation, another document: each its own run
+  memos.once(key, 9, 1, runGate);
+  memos.once(key, 9, 2, runGate);
+  memos.once("file:///other.clas.abap", 9, 2, runGate);
+  assert.equal(gates, 5);
+  assert.equal(memos.get(key, 9, 1), undefined, "the slot per URI holds the latest only");
+  assert.ok(memos.get(key, 9, 2));
+
+  // clear (baseline file, class index) and delete (closed) forget
+  memos.delete("file:///other.clas.abap");
+  assert.equal(memos.size, 1);
+  memos.clear();
+  assert.equal(memos.get(key, 9, 2), undefined);
+
+  // a gate that throws stores nothing
+  assert.throws(() =>
+    memos.once(key, 10, 2, () => {
+      throw new Error("mid-edit");
+    })
+  );
+  assert.equal(memos.get(key, 10, 2), undefined);
 });

@@ -143,3 +143,54 @@ export function sweepEntryOf<P>(
     fingerprint: textFingerprint(text),
   };
 }
+
+/**
+ * One gate run per document version, whoever asks first.
+ *
+ * The live check gates a document 400 ms after the last keystroke; the
+ * lightbulb, the lens and the status bar ask `findingsNow` for the same
+ * version - and VS Code refetches code lenses and code actions ~250 ms
+ * after a change, so that ask came FIRST, ran the gate on a memo miss, and
+ * the live check then ran it a second time over the identical text. An
+ * entry is good for one document version under one config generation; the
+ * callers clear the memo when something else the verdict depends on moves
+ * (a baseline file, the class index).
+ */
+export class GateMemo<R> {
+  private readonly entries = new Map<string, { version: number; configGen: number; result: R }>();
+
+  get(key: string, version: number, configGen: number): R | undefined {
+    const entry = this.entries.get(key);
+    return entry && entry.version === version && entry.configGen === configGen
+      ? entry.result
+      : undefined;
+  }
+
+  set(key: string, version: number, configGen: number, result: R): void {
+    this.entries.set(key, { version, configGen, result });
+  }
+
+  /** The memo's result for this version, or `run()`'s - stored. A `run`
+   *  that throws stores nothing (the next ask runs it again). */
+  once(key: string, version: number, configGen: number, run: () => R): R {
+    const hit = this.get(key, version, configGen);
+    if (hit !== undefined) {
+      return hit;
+    }
+    const result = run();
+    this.set(key, version, configGen, result);
+    return result;
+  }
+
+  delete(key: string): void {
+    this.entries.delete(key);
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+}

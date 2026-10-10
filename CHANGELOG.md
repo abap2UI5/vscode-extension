@@ -10,7 +10,10 @@
   library the render-gate installer uses (86 KB) is loaded the first time
   that installer runs. The activation bundle went from 1.1 MB to 0.66 MB,
   the vscode.dev bundle from 0.75 MB to 0.39 MB; nothing you can do changed.
-- **Less work on every keystroke and save.** Whether a file is one the view
+- **Less work on every keystroke and save.** The property gate runs once
+  per edit: the lightbulb and the lenses asked for the findings of the new
+  text before the live check ran, and the check then ran the same gate over
+  the same text again. Whether a file is one the view
   check judges is decided once per edit instead of on every keystroke (for a
   class that is not an app, that decision read the repository config's
   timestamps each time); the lenses above a class no longer re-evaluate on

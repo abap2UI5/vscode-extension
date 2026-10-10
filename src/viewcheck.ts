@@ -60,7 +60,14 @@ import {
   workspaceClassIndex,
 } from "./classindexfeed";
 import { plural } from "./text";
-import { recheckSchedule, SweepEntry, sweepEntryOf, sweepInBatches, textFingerprint } from "./checkschedule";
+import {
+  GateMemo,
+  recheckSchedule,
+  SweepEntry,
+  sweepEntryOf,
+  sweepInBatches,
+  textFingerprint,
+} from "./checkschedule";
 import { baselineWriteRefusal, rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
@@ -460,18 +467,23 @@ async function runRenderGate(
 }
 
 /**
- * The findings of a document as it stands right now, memoised per document on
- * its version - one slot per URI, so two checkable editors side by side do
- * not evict each other, and `checkDocument` seeds it so the status bar and
- * the code lens read the check's own result instead of gating a second time.
+ * The gate result of a document as it stands right now, memoised per
+ * document on its version and the config generation - one slot per URI, so
+ * two checkable editors side by side do not evict each other. `findingsNow`
+ * and `checkDocument` both read and seed it (`GateMemo`), so whichever asks
+ * first for a version runs the gate and the other reads the result: the
+ * lens and code-action refetch ~250 ms after a change used to gate first,
+ * and the live check 400 ms after it gated the identical text again.
+ * `baselined` rides along so the check's log line is what it was.
  *
- * The quick-fix provider needs them, and it must not work off the findings
- * behind the diagnostics currently shown: a fix carries character offsets into
- * the source it was computed from, and between the last check and the moment
- * the lightbulb is opened the buffer may have moved. Recomputing is a few
- * milliseconds - applying a stale offset would corrupt the file.
+ * The quick-fix provider needs the findings, and it must not work off the
+ * findings behind the diagnostics currently shown: a fix carries character
+ * offsets into the source it was computed from, and between the last check
+ * and the moment the lightbulb is opened the buffer may have moved.
+ * Recomputing is a few milliseconds - applying a stale offset would corrupt
+ * the file.
  */
-const memos = new Map<string, { version: number; findings: PropertyFinding[] }>();
+const memos = new GateMemo<{ gate: GateResult; baselined: number }>();
 
 /** Set by registerViewCheck - lets the quick-fix module ask for a re-check
  *  after it changed something OUTSIDE the document (the baseline file), which
@@ -498,36 +510,50 @@ function dropCachesIfConfigChanged(): void {
   }
 }
 
+/** The in-process gate over the document's text, the baseline applied -
+ *  the one pipeline behind `findingsNow` and `checkDocument`. Throws what
+ *  the gate throws (an unparsable buffer mid-edit). */
+function gateDocument(
+  doc: vscode.TextDocument,
+  options: CheckOptions
+): { gate: GateResult; baselined: number } {
+  const text = doc.getText();
+  const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
+  const gate = runGate(
+    text,
+    doc.uri.fsPath || labelOf(doc.uri),
+    isXml,
+    gateOptionsFor(doc, options, isXml)
+  );
+  let baselined = 0;
+  if (options.baseline && doc.uri.scheme === "file") {
+    // the quick-fix provider must see what the diagnostics show - a fix
+    // offered for a finding the baseline already swallowed makes no sense
+    baselined = applyBaselineTo(gate.findings, options.baseline, doc.uri.fsPath);
+  }
+  return { gate, baselined };
+}
+
 export function findingsNow(doc: vscode.TextDocument): PropertyFinding[] {
   const key = doc.uri.toString();
   // a change some other check's option lookup noticed - cheap, unlike
   // resolving the options on every code-action request
   dropCachesIfConfigChanged();
-  const memo = memos.get(key);
-  if (memo && memo.version === doc.version) {
-    return memo.findings;
+  const memo = memos.get(key, doc.version, cachedUnderConfig);
+  if (memo) {
+    return memo.gate.findings;
   }
   if (!isCheckable(doc)) {
     // Code actions are requested for every ABAP file the cursor moves in;
     // reconstructing a view from one that builds none is pure cost.
     return [];
   }
-  const text = doc.getText();
-  const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
   const options = optionsFor(doc);
-  const gate = runGate(
-    text,
-    doc.uri.fsPath || doc.fileName,
-    isXml,
-    gateOptionsFor(doc, options, isXml)
-  );
-  if (options.baseline && doc.uri.scheme === "file") {
-    // the quick-fix provider must see what the diagnostics show - a fix
-    // offered for a finding the baseline already swallowed makes no sense
-    applyBaselineTo(gate.findings, options.baseline, doc.uri.fsPath);
-  }
-  memos.set(key, { version: doc.version, findings: gate.findings });
-  return gate.findings;
+  // the options may have noticed a changed config - under the generation
+  // the gate actually runs
+  dropCachesIfConfigChanged();
+  return memos.once(key, doc.version, cachedUnderConfig, () => gateDocument(doc, options)).gate
+    .findings;
 }
 
 // ---------------------------------------------------------------------------
@@ -627,38 +653,35 @@ async function checkDocument(
     );
   }
 
-  const text = doc.getText();
   // labelOf, not path.basename: an ADT document's last path segment is often
   // the generic "main" or "source", which names nothing in a message
   const name = labelOf(doc.uri);
-  const isXml = VIEW_XML_RE.test(doc.fileName) || /^\s*</.test(text);
-  // An unparsable buffer mid-edit throws out of the gate - on the live path
-  // that was one unhandled rejection per keystroke, and in a workspace sweep
-  // a single such file ended the whole run.
-  let gate: GateResult;
-  try {
-    gate = runGate(
-      text,
-      doc.uri.fsPath || name,
-      isXml,
-      gateOptionsFor(doc, options, isXml)
-    );
-  } catch (err) {
-    log(`view-check: ${name} [${doc.uri.scheme}] - could not be checked (${String(err)})`);
-    if (request.announce) {
-      vscode.window.showWarningMessage(
-        `abap2UI5: ${name} could not be checked - ${String(err)}`
-      );
+  // the options just resolved may have noticed a changed config: the memo
+  // is read under the generation the gate would run under
+  dropCachesIfConfigChanged();
+  // The same pipeline `findingsNow` runs, through the same memo: the lens
+  // and code-action refetch usually asked for this version before the live
+  // check's debounce ended, and the gate then ran twice over the identical
+  // text. Whichever asked first seeds it; the other reads it.
+  let gated = memos.get(key, startVersion, cachedUnderConfig);
+  if (!gated) {
+    // An unparsable buffer mid-edit throws out of the gate - on the live path
+    // that was one unhandled rejection per keystroke, and in a workspace sweep
+    // a single such file ended the whole run.
+    try {
+      gated = gateDocument(doc, options);
+    } catch (err) {
+      log(`view-check: ${name} [${doc.uri.scheme}] - could not be checked (${String(err)})`);
+      if (request.announce) {
+        vscode.window.showWarningMessage(
+          `abap2UI5: ${name} could not be checked - ${String(err)}`
+        );
+      }
+      return;
     }
-    return;
+    memos.set(key, startVersion, cachedUnderConfig, gated);
   }
-  let baselined = 0;
-  if (options.baseline && doc.uri.scheme === "file") {
-    baselined = applyBaselineTo(gate.findings, options.baseline, doc.uri.fsPath);
-  }
-  // the same pipeline `findingsNow` runs - seeding it here spares the status
-  // bar and the code lens a second gate run over the identical text
-  memos.set(key, { version: startVersion, findings: gate.findings });
+  const { gate, baselined } = gated;
 
   if (gate.nothingChecked) {
     diagnostics.delete(doc.uri);
