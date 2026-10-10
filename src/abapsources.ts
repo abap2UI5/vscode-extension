@@ -206,6 +206,13 @@ async function readFile(uri: vscode.Uri, now: number): Promise<string | undefine
   }
 }
 
+/** One file's text on disk, through the shared cache - what a consumer that
+ *  updates one entry on a watcher event reads with. Undefined when the file
+ *  is gone or unreadable. */
+export function readAbapSource(uri: vscode.Uri): Promise<string | undefined> {
+  return readFile(uri, Date.now());
+}
+
 /** What one sweep found - see {@link scanAbapSources}. */
 export interface AbapSourceScan {
   sources: AbapSource[];
