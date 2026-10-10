@@ -5,7 +5,8 @@ import { CONFIG_SECTION } from "./settings";
 import { isAppSource, onDidRefreshAppClasses } from "./appclasses";
 import { eventRaises, whenBranches } from "./context";
 import { fixableCount } from "./quickfix";
-import { testIncludeFor } from "./unitrunner";
+import { classOfFile, testIncludeFor } from "./unitrunner";
+import { DIAG_SOURCE } from "./diagnostics";
 
 /*
  * The things you do to an app class, offered where the class is declared.
@@ -99,15 +100,43 @@ function hasTestInclude(doc: vscode.TextDocument): boolean {
   if (doc.uri.scheme !== "file") {
     return false;
   }
+  const key = doc.uri.toString();
+  const known = testIncludes.get(key);
+  if (known !== undefined) {
+    return known;
+  }
   const include = testIncludeFor(doc.uri.fsPath);
-  if (!include) {
-    return false;
+  let exists = false;
+  if (include) {
+    try {
+      exists = fs.existsSync(include);
+    } catch {
+      exists = false;
+    }
   }
-  try {
-    return fs.existsSync(include);
-  } catch {
-    return false;
+  testIncludes.set(key, exists);
+  return exists;
+}
+
+/**
+ * The `existsSync` answers, per class uri. A lens pass runs on every change
+ * of the document and on every refresh the provider is asked for, and the
+ * answer only moves when a test include is created or deleted - which the
+ * watcher in `registerCodeLens` reports. The shared ABAP watcher cannot: its
+ * glob matches every `.clas.abap`, and a test include ends in
+ * `.testclasses.abap`.
+ */
+const testIncludes = new Map<string, boolean>();
+
+/** The class file a test include belongs to - the memo entry its change
+ *  invalidates (`zcl_app.clas.testclasses.abap` -> `zcl_app.clas.abap`). */
+function classUriOfInclude(include: vscode.Uri): vscode.Uri | undefined {
+  if (!classOfFile(include.path)) {
+    return undefined;
   }
+  return include.with({
+    path: include.path.replace(/\.clas\.testclasses\.abap$/i, ".clas.abap"),
+  });
 }
 
 /**
@@ -211,6 +240,18 @@ function whenLenses(doc: vscode.TextDocument, text: string): vscode.CodeLens[] {
 
 export function registerCodeLens(context: vscode.ExtensionContext): void {
   const provider = new AppCodeLens();
+  // Over the test includes alone - the shared ABAP watcher's glob does not
+  // reach them (see `testIncludes`).
+  const includeWatcher = vscode.workspace.createFileSystemWatcher(
+    "**/*.clas.testclasses.abap"
+  );
+  const includeChanged = (include: vscode.Uri): void => {
+    const cls = classUriOfInclude(include);
+    if (cls) {
+      testIncludes.delete(cls.toString());
+      provider.refresh();
+    }
+  };
   context.subscriptions.push(
     provider,
     vscode.languages.registerCodeLensProvider({ language: "abap" }, provider),
@@ -225,16 +266,55 @@ export function registerCodeLens(context: vscode.ExtensionContext): void {
     /* The autofix count follows the findings, and those change without the
      * document changing: a settings switch, an adopted baseline, the check
      * finishing after the keystroke that triggered it. Every one of them ends
-     * in published diagnostics, so that is what the lens listens to. */
+     * in published diagnostics, so that is what the lens listens to.
+     *
+     * Every extension in the window fires this - abaplint on every
+     * keystroke - so only a change that involves OUR findings on a visible
+     * ABAP editor re-evaluates the lenses: a uri that carries one now, or
+     * carried one the last time (then they were just removed), the same
+     * filter `inlineview.ts` applies. */
     vscode.languages.onDidChangeDiagnostics((e) => {
       const open = new Set(
         vscode.window.visibleTextEditors
           .filter((editor) => editor.document.languageId === "abap")
           .map((editor) => editor.document.uri.toString())
       );
-      if (e.uris.some((uri) => open.has(uri.toString()))) {
+      let ours = false;
+      for (const uri of e.uris) {
+        const key = uri.toString();
+        if (!open.has(key)) {
+          continue;
+        }
+        const now = vscode.languages
+          .getDiagnostics(uri)
+          .some((d) => d.source === DIAG_SOURCE);
+        if (now || withOurFindings.has(key)) {
+          ours = true;
+        }
+        if (now) {
+          withOurFindings.add(key);
+        } else {
+          withOurFindings.delete(key);
+        }
+      }
+      if (ours) {
         provider.refresh();
       }
+    }),
+    // the "Run unit tests" lens follows the test include beside the class
+    includeWatcher,
+    includeWatcher.onDidCreate(includeChanged),
+    includeWatcher.onDidDelete(includeChanged),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      testIncludes.clear();
+      provider.refresh();
+    }),
+    vscode.workspace.onDidCloseTextDocument((doc) => {
+      testIncludes.delete(doc.uri.toString());
     })
   );
 }
+
+/** The visible ABAP editors that carried one of our diagnostics at the last
+ *  change notice - see the `onDidChangeDiagnostics` listener. */
+const withOurFindings = new Set<string>();
