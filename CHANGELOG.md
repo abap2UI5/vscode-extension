@@ -260,6 +260,10 @@
     checkout only, and a server started through npx does not look beside your
     repos root - so the agent's tool reported the checkout missing while
     *Migrate Classic Report to abap2UI5* found it.
+- Internal: TypeScript 6.0 for the type check (7.x waits for
+  typescript-eslint, whose peer range ends below 6.1), eslint 10.12,
+  esbuild 0.28.2, and `@types/node` back on the Node 22 line that
+  `engines.node` names.
 
 ## 0.30.2
 
