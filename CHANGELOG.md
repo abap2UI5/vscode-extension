@@ -22,6 +22,11 @@
 - **"New Project from Template" is in step with app-template again:** its
   latest `AGENTS.md`, `abap-check` and `ui5-check` skills, `check-pin.mjs`
   and `doctor.mjs`.
+- **The MCP walkthrough step names the abap2UI5 Claude Code plugin** as the
+  alternative for Claude Code users, gives the `claude mcp add` line for the
+  server alone, and says the server is listed in the official MCP Registry
+  from 1.0 on; the README links the documentation's AI page. Hover and
+  completion describe `view_display` with the core's current wording.
 - **The agent app tools follow the abap2UI5 protocol's frontend rules.**
   The vendored agent client is now abap2UI5/mcp-server `a4d9f07`: a
   response of another protocol number is refused with both numbers named
