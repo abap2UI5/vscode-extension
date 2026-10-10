@@ -90,7 +90,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`, and the app tools below) |
-| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the client's `transport` through the auth proxy (endpoint, method, cookies - the CSRF handshake and the `sap-contextid` per session are the vendored client's, the transport only carries their headers) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client |
+| `src/agent-client.ts` | The entry of the `dist/agent-client.js` bundle (the vendored client, snapshot and viewxml alone) `agentapps.ts` loads on the first app_* call - ~50 KB that stays out of the activation bundle, the way `rendergate-tar.ts` keeps `tar` out; the test build puts the same file in `dist-test/` so the real loader runs in `npm test` |
+| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the vendored client loaded through `createRequire` from `dist/agent-client.js` on first use (`agentClient( )`), the client's `transport` through the auth proxy (endpoint, method, cookies - the CSRF handshake and the `sap-contextid` per session are the vendored client's, the transport only carries their headers) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client |
 | `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
 | `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
@@ -135,7 +136,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `scripts/lib/snapshot.mjs` | The one lifecycle the three snapshot generators share: upstream read (local checkout or GitHub raw), shape check, `--check` byte-compare, write |
 | `snippets/` | ABAP snippets contributed to the editor |
 | `media/` | Icons: `icon.svg` (panel), `icon-light/dark.svg` (preview tab), `icon.png` (gallery) |
-| `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js` (plus `src/rendergate-tar.ts` into `dist/rendergate-tar.js`), `src/web/extension.ts` into `dist/web/extension.js`, and `src/test/` into `dist-test/`; copies the linter's data files and the extension's own two runtime-read snapshots (`app-template.json`, `client-api.json`) next to the bundles |
+| `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js` (plus `src/rendergate-tar.ts` into `dist/rendergate-tar.js` and `src/agent-client.ts` into `dist/agent-client.js`, both loaded on first use), `src/web/extension.ts` into `dist/web/extension.js`, and `src/test/` into `dist-test/` (with its own `agent-client.js`); copies the linter's data files and the extension's own two runtime-read snapshots (`app-template.json`, `client-api.json`) next to the bundles |
 | `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the four weekly `bump-*.yml` callers share |
 
 `dist/`, `dist-test/`, `node_modules/` and `*.vsix` are build output and are
@@ -280,8 +281,9 @@ identity (see Conventions).
   (`appclasses.ts`), the class index (`classindexsync.ts`), the apps tree
   (built from the former) and the UI5 snapshot (`snapshot.ts`, read at the
   first gate or completion) all wait for the first ABAP document, the first
-  check or the first ask. What activation still does: loads the bundle (0.66
-  MB), creates the session's channels and status item, reads the 1.5 KB
+  check or the first ask. What activation still does: loads the bundle (0.62
+  MB - the render gate's `tar` and the vendored agent client are bundles of
+  their own, loaded on first use), creates the session's channels and status item, reads the 1.5 KB
   `dist/compat.json`, registers the commands, providers and the four
   FileSystemWatchers (ABAP sources, test includes, lint configs, baselines),
   re-checks the checkable documents already open (the visible ones at once,
@@ -404,7 +406,9 @@ Facts an agent cannot see from the code but will trip over:
   and `src/data/client-api.json` there too - and into `dist-test/` - because
   neither is bundled any more: together with `tar`, which has its own
   `dist/rendergate-tar.js`, they were 40% of a 1.1 MB activation bundle that
-  every window parsed for two commands and one hover). If
+  every window parsed for two commands and one hover; the vendored agent
+  client followed into `dist/agent-client.js`, 50 KB for four tools behind
+  a setting that is off by default). If
   `dist/properties.json` is missing, the property gate runs with **no
   metadata and finds nothing**, and completion and hover go quiet with it —
   `snapshot.ts` logs why, which is the only signal you get. The test build
@@ -666,7 +670,10 @@ Facts an agent cannot see from the code but will trip over:
   fails when the copies differ from the recorded commit. **Fix the snapshot
   in mcp-server and re-vendor** (`npm run agent-vendor -- <checkout> --ref
   <commit>`), never in the copy - and update the hand-written `.d.ts` beside
-  it when an export changes shape. What is the extension's own lives in
+  it when an export changes shape. The copies are bundled apart from the
+  extension (`src/agent-client.ts` -> `dist/agent-client.js`) and loaded by
+  `agentapps.ts` on the first app_* call; the web build, which has no
+  system MCP server, never pulls them in. What is the extension's own lives in
   `src/agentapps.ts`: the transport through the auth proxy and the system
   rules around the client. Every local-backend assumption of the client is
   an OPTION of mcp-server's `createAppClient` (its `docs/agent-snapshot.md`,

@@ -8,8 +8,10 @@
   to it and are read the first time "New Project from Template", "Add Agent
   Setup to Workspace" or a `client->` completion needs them. The archive
   library the render-gate installer uses (86 KB) is loaded the first time
-  that installer runs. The activation bundle went from 1.1 MB to 0.66 MB,
-  the vscode.dev bundle from 0.75 MB to 0.39 MB; nothing you can do changed.
+  that installer runs, and the client behind the agent app tools (50 KB)
+  the first time an agent calls one. The activation bundle went from 1.1 MB
+  to 0.62 MB, the vscode.dev bundle from 0.75 MB to 0.39 MB; nothing you
+  can do changed.
 - **Less work on every keystroke and save.** The property gate runs once
   per edit: the lightbulb and the lenses asked for the findings of the new
   text before the live check ran, and the check then ran the same gate over

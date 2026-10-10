@@ -219,6 +219,27 @@ async function buildTests() {
   );
   // clientapi.ts reads client-api.json next to the bundle it runs in
   copyOwnData("dist-test");
+  // agentapps.ts loads the vendored agent client from next to its own
+  // bundle (src/agent-client.ts) - the test bundles sit in dist-test/, so
+  // the real loader needs the file there too
+  await esbuild.build(agentClientConfig("dist-test/agent-client.js"));
+}
+
+/** The vendored agent client as its own file next to the bundle -
+ *  `agentapps.ts` loads it on the first app_* call (see
+ *  src/agent-client.ts). Same shape as the `tar` bundle below. */
+function agentClientConfig(outfile) {
+  return {
+    entryPoints: ["src/agent-client.ts"],
+    bundle: true,
+    format: "cjs",
+    minify: production,
+    sourcemap: !production,
+    sourcesContent: false,
+    platform: "node",
+    outfile,
+    logLevel: "info",
+  };
 }
 
 /**
@@ -349,18 +370,25 @@ async function main() {
     logLevel: "info",
   });
 
+  // the vendored agent client, for the system MCP server's app_* tools
+  // alone - agentapps.ts loads it on the first call (see src/agent-client.ts)
+  const agentCtx = await esbuild.context(agentClientConfig("dist/agent-client.js"));
+
   if (watch) {
     await ctx.watch();
     await webCtx.watch();
     await tarCtx.watch();
+    await agentCtx.watch();
     console.log("[watch] esbuild is watching for changes...");
   } else {
     await ctx.rebuild();
     await webCtx.rebuild();
     await tarCtx.rebuild();
+    await agentCtx.rebuild();
     await ctx.dispose();
     await webCtx.dispose();
     await tarCtx.dispose();
+    await agentCtx.dispose();
   }
 }
 
