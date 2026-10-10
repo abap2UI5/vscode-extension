@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.31.0
+
+The bundled linter moves to v0.8.5, and is now taken from its npm release
+rather than from a commit on its main branch.
 
 - **Add Agent Setup to Workspace.** A new command makes the project in the
   open folder ready for an AI agent - most abap2UI5 projects did not start
@@ -22,6 +25,11 @@
 - **"New Project from Template" is in step with app-template again:** its
   latest `AGENTS.md`, `abap-check` and `ui5-check` skills, `check-pin.mjs`
   and `doctor.mjs`.
+- **The MCP walkthrough step names the abap2UI5 Claude Code plugin** as the
+  alternative for Claude Code users, gives the `claude mcp add` line for the
+  server alone, and says the server is listed in the official MCP Registry
+  from 1.0 on; the README links the documentation's AI page. Hover and
+  completion describe the client API with the core's current wording.
 - **The agent app tools follow the abap2UI5 protocol's frontend rules.**
   The vendored agent client is now abap2UI5/mcp-server `a4d9f07`: a
   response of another protocol number is refused with both numbers named
@@ -34,6 +42,16 @@
   the extension's transport through the auth proxy only carries their
   headers and the system's cookies, so the token is fetched once and the
   body re-sent once, never twice.
+- **The agent app tools take mcp-server's later fixes.** The vendored agent
+  client is now abap2UI5/mcp-server `185baed`: a binding written as
+  `{path: '/A', model: 'other'}` is read as the named model's, so a value
+  is no longer written into the app's own model; an unsent edit no longer
+  survives into a view the system displayed anew, and a model push no
+  longer invents table rows for one; a model path through `__proto__`,
+  `constructor` or `prototype` is refused, and an element of that name no
+  longer breaks the screen; a number field takes a number or a decimal
+  string, not whatever `Number()` makes of a value; an action list that is
+  no list is refused with a sentence instead of "object is not iterable".
 - **Migrate Classic Report to abap2UI5.** A new command - in the Command
   Palette and in the context menu of a `*.prog.abap` - converts a classic
   ABAP report into an abap-cloud-gui report class with that addon's
@@ -260,12 +278,10 @@
     checkout only, and a server started through npx does not look beside your
     repos root - so the agent's tool reported the checkout missing while
     *Migrate Classic Report to abap2UI5* found it.
-
-## 0.30.2
-
-The bundled linter moves to v0.8.5, and is now taken from its npm release
-rather than from a commit on its main branch.
-
+- Internal: TypeScript 6.0 for the type check (7.x waits for
+  typescript-eslint, whose peer range ends below 6.1), eslint 10.12,
+  esbuild 0.28.2, and `@types/node` back on the Node 22 line that
+  `engines.node` names.
 - **The view check runs abap2UI5-linter 0.8.5** (from 0.8.3). What that
   brings to the editor: a builder attribute written as `a( v = … n = … )`
   is reconstructed like `a( n = … v = … )` - its value, often a binding,
