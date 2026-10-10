@@ -43,30 +43,34 @@ export async function activate(
       "activated (web build - language features and property gate)"
   );
 
-  try {
-    const raw = await vscode.workspace.fs.readFile(
-      vscode.Uri.joinPath(context.extensionUri, "dist", "properties.json")
-    );
-    setSnapshotText(new TextDecoder().decode(raw));
-    const broken = snapshotError();
-    if (broken) {
-      log(`web: the bundled UI5 metadata could not be parsed (${broken})`);
-    }
-  } catch (err) {
-    log(
-      "web: dist/properties.json could not be read - the property gate and " +
-        `completion have no metadata (${err instanceof Error ? err.message : String(err)})`
-    );
-  }
-
-  // the linter's icon data, before the first check can cache an empty registry
-  const unseeded = await seedLinterData(async (packaged) =>
+  // The two data reads go out together - each is a round trip to the
+  // browser host's file system, and neither depends on the other. The
+  // registrations wait for both: the first check must not cache an empty
+  // snapshot or an empty icon registry.
+  const readPackaged = async (...segments: string[]) =>
     new TextDecoder().decode(
       await vscode.workspace.fs.readFile(
-        vscode.Uri.joinPath(context.extensionUri, ...packaged)
+        vscode.Uri.joinPath(context.extensionUri, ...segments)
       )
-    )
-  );
+    );
+  const [snapshotFailure, unseeded] = await Promise.all([
+    readPackaged("dist", "properties.json").then(
+      (text) => {
+        setSnapshotText(text);
+        return snapshotError()
+          ? `web: the bundled UI5 metadata could not be parsed (${snapshotError()})`
+          : undefined;
+      },
+      (err: unknown) =>
+        "web: dist/properties.json could not be read - the property gate and " +
+        `completion have no metadata (${err instanceof Error ? err.message : String(err)})`
+    ),
+    // the linter's icon data, before the first check can cache an empty registry
+    seedLinterData((packaged) => readPackaged(...packaged)),
+  ]);
+  if (snapshotFailure) {
+    log(snapshotFailure);
+  }
   for (const failure of unseeded) {
     log(`web: the linter's data file could not be read - its rules report nothing (${failure})`);
   }
