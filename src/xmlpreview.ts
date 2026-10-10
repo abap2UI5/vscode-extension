@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { classNameOf, usesBuilder } from "./abap";
+import { preparedAbapOf } from "./language";
 import { formatDocument, lineForOffset } from "./xmlformat";
 
 /*
@@ -161,11 +161,16 @@ export function registerXmlPreview(
       }
       return lastContent;
     }
-    const prep = prepareAbap(source.getText());
+    // The language features' memoised reconstruction (one `prepareAbap` per
+    // document version, shared with completion, the annotations and the
+    // gate) - this used to reconstruct a second time on every refresh. An
+    // unparsable buffer answers undefined there, which is "no view" here.
+    const text = source.getText();
+    const nodes = preparedAbapOf(source)?.nodes ?? [];
     const className =
-      classNameOf(source.getText(), source.fileName).toUpperCase() ||
+      classNameOf(text, source.fileName).toUpperCase() ||
       "this class";
-    if (!prep.nodes.length) {
+    if (!nodes.length) {
       const empty =
         `<!-- ${className}: no view could be reconstructed - the class calls ` +
         `z2ui5_cl_ui5_view_builder=>factory( ) but nothing checkable came out of the ` +
@@ -178,7 +183,7 @@ export function registerXmlPreview(
       diagnostics.delete(PREVIEW_URI);
       return empty;
     }
-    const formatted = formatDocument(prep.nodes, className);
+    const formatted = formatDocument(nodes, className);
     lastContent = formatted.text;
     lastOffsets = formatted.lineOffsets;
     lastOffsetsFor = source.uri.toString();
