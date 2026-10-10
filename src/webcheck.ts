@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
+import { recheckSchedule } from "./checkschedule";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { GateOptions, runGate, VIEW_XML_RE } from "./gate";
 import { isAllClassesFile, isCheckableSource } from "./checkcore";
@@ -544,10 +545,15 @@ export function registerWebCheck(
    *  until it is edited, saved or closed - the editor/CI drift this module
    *  exists to prevent. The gate is in-process and costs milliseconds. */
   const recheckOpen = () => {
-    for (const doc of vscode.workspace.textDocuments) {
-      if (isCheckable(doc)) {
-        schedule(doc, 0);
-      }
+    const visible = new Set(
+      vscode.window.visibleTextEditors.map((editor) => editor.document.uri.toString())
+    );
+    const checkable = vscode.workspace.textDocuments.filter(isCheckable);
+    // the visible editors at once, the rest staggered - as on desktop
+    for (const { doc, delay } of recheckSchedule(checkable, (doc) =>
+      visible.has(doc.uri.toString())
+    )) {
+      schedule(doc, delay);
     }
   };
 

@@ -53,6 +53,7 @@ import {
   workspaceClassIndex,
 } from "./classindexfeed";
 import { plural } from "./text";
+import { recheckSchedule } from "./checkschedule";
 import { baselineWriteRefusal, rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
@@ -1522,12 +1523,18 @@ export function registerViewCheck(
    *  background tab kept the diagnostics it was given under the old config
    *  until it was edited, saved or closed - which is exactly the editor/CI
    *  drift this pipeline exists to prevent, and the gate is in-process and
-   *  costs milliseconds per file. */
+   *  costs milliseconds per file. The visible ones at once, the rest
+   *  staggered (`recheckSchedule`): at activation with many tabs open, every
+   *  one of them was gated back to back before the host got a turn. */
   const recheckOpen = () => {
-    for (const doc of vscode.workspace.textDocuments) {
-      if (isCheckable(doc)) {
-        check(doc, 0, { render: false, announce: false });
-      }
+    const visible = new Set(
+      vscode.window.visibleTextEditors.map((editor) => editor.document.uri.toString())
+    );
+    const checkable = vscode.workspace.textDocuments.filter(isCheckable);
+    for (const { doc, delay } of recheckSchedule(checkable, (doc) =>
+      visible.has(doc.uri.toString())
+    )) {
+      check(doc, delay, { render: false, announce: false });
     }
   };
   recheckAll = recheckOpen;

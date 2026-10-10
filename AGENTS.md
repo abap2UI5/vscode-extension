@@ -51,6 +51,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
 | `src/compat.ts` | `vscode`-free: the bundled linter's compatibility record (`@abap2ui5/linter/compat`, copied next to the bundle by `esbuild.js` like the snapshot; null when the pin ships none) and what it says about a workspace's framework pin - the one parser of `abaplint.jsonc`'s `dependencies[].branch` (`scaffold.ts` uses it too), `compareRelease`, `compatVerdict`, the activation line |
 | `src/compatcheck.ts` | The framework-pin check's plumbing: a warning on the `branch` line of an open `abaplint.jsonc` pinned below what the bundled linter assumes, on open and save |
+| `src/checkschedule.ts` | The view check's `vscode`-free SCHEDULING, shared by `viewcheck.ts` and `webcheck.ts`: the order a re-check of every open document runs in (`recheckSchedule` - the visible editors at once, the rest `RECHECK_STAGGER_MS` apart; activation, a config change and a class-index change all re-check what is open) |
 | `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability (`isCheckableSource` - what the linter's `checkAbapSource` judges, a viewless app class and `allClasses` included - and `isViewSource`, what the systemless preview and the mock generator need), the workspace fix's tally, the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written, what the view preview shows after a refresh that threw (`failedPreviewState`) |
 | `src/childproc.ts` | `vscode`-free: the ONE way a checker is started - shell quoting of program AND arguments, timeout, kill of the whole process tree, "nobody is waiting any more" |
 | `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
@@ -145,7 +146,7 @@ not committed.
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
-`abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `settings.ts`, `linterrelease.ts`, `text.ts`,
+`abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `checkschedule.ts`, `settings.ts`, `linterrelease.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
@@ -282,7 +283,8 @@ identity (see Conventions).
   MB), creates the session's channels and status item, reads the 1.5 KB
   `dist/compat.json`, registers the commands, providers and the four
   FileSystemWatchers (ABAP sources, test includes, lint configs, baselines),
-  re-checks the checkable documents already open, and probes
+  re-checks the checkable documents already open (the visible ones at once,
+  the rest 50 ms apart - `checkschedule.ts`), and probes
   `mcp.reposRoot` with a few `existsSync` when that setting is set. The web
   entry additionally reads its three data files (snapshot, client API, icon
   data) concurrently, because a browser host has no `fs` to read them lazily
