@@ -132,6 +132,26 @@ function distributionSetting(): string | null {
   return config().get<string>("viewCheck.distribution", "") || null;
 }
 
+/**
+ * The checkability verdicts, memoised per document version. `isCheckable`
+ * runs on EVERY keystroke, before the live check's debounce - and for a
+ * `*.clas.abap` the content test turns down it went on to `optionsFor`, i.e.
+ * a `statSync` per config file of the chain, per keystroke. The content half
+ * depends on the text alone; the `allClasses` half on the governing config,
+ * so an entry also records the config generation it was computed under and
+ * the two config watchers (`configChanged`, the settings listener) drop the
+ * memo outright. Entries of closed documents go with the other per-document
+ * caches.
+ */
+const checkableMemo = new Map<
+  string,
+  { version: number; verdict: boolean; configGen: number }
+>();
+
+function forgetCheckable(uri: vscode.Uri): void {
+  checkableMemo.delete(uri.toString());
+}
+
 /** See `isCheckableSource` - this is only the document unwrapping. */
 export function isCheckable(doc: vscode.TextDocument): boolean {
   // the revision side of a git diff is the same class again: checked, every
@@ -140,6 +160,21 @@ export function isCheckable(doc: vscode.TextDocument): boolean {
   if (isShadowScheme(doc.uri.scheme)) {
     return false;
   }
+  const key = doc.uri.toString();
+  const cached = checkableMemo.get(key);
+  if (
+    cached &&
+    cached.version === doc.version &&
+    cached.configGen === configGeneration()
+  ) {
+    return cached.verdict;
+  }
+  const verdict = decideCheckable(doc);
+  checkableMemo.set(key, { version: doc.version, verdict, configGen: configGeneration() });
+  return verdict;
+}
+
+function decideCheckable(doc: vscode.TextDocument): boolean {
   if (isCheckableSource(doc.fileName, doc.languageId, doc.getText())) {
     return true;
   }
@@ -1523,6 +1558,7 @@ export function registerViewCheck(
     }
     clearConfigCache();
     clearSweepCache();
+    checkableMemo.clear();
     lastVersionLine = "";
     // the memoised findings behind the lightbulb and the "fix all" lens were
     // computed under the old config - the version they are keyed on does not
@@ -1636,6 +1672,7 @@ export function registerViewCheck(
       // generation it was given cannot be handed out again.
       generations.delete(doc.uri.toString());
       memos.delete(doc.uri.toString());
+      forgetCheckable(doc.uri);
       /* The sweep's entry for an OPEN document is keyed on `v<version>`, and
        * versions restart at 1 when a document is reopened. Closing without
        * saving and typing back to the same version would otherwise hit a
@@ -1657,6 +1694,7 @@ export function registerViewCheck(
         // changed - without this the gate stayed off until the window reloaded
         clearRenderGateFailure();
         clearSweepCache();
+        checkableMemo.clear();
         // re-checks every open document too - a second recheckOpen() here
         // scheduled each of them twice
         recheckOpenDocuments();
