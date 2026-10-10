@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { RECHECK_STAGGER_MS, recheckSchedule, sweepInBatches } from "../checkschedule";
+import {
+  RECHECK_STAGGER_MS,
+  recheckSchedule,
+  sweepEntryOf,
+  sweepInBatches,
+  textFingerprint,
+} from "../checkschedule";
+import type { PropertyFinding } from "@abap2ui5/linter/properties";
 
 /*
  * The view check's scheduling decisions (checkschedule.ts) - what the
@@ -145,4 +152,34 @@ test("the yield really gives the host a turn between gated files", async () => {
   });
   await gate.promise;
   assert.deepEqual(order, ["a", "host", "b"]);
+});
+
+test("a sweep leaves no text in its cache - the ranges and a fingerprint instead", () => {
+  const finding = { type: "unknown-property", control: "sap.m.Button", member: "nosuch", line: 2, column: 3 } as PropertyFinding;
+  const text = "<mvc:View>\n  <Button nosuch=\"x\"/>\n</mvc:View>\n";
+  const placed: string[] = [];
+  const entry = sweepEntryOf("m1|", { findings: [finding] }, text, (t, findings) => {
+    placed.push(t);
+    return findings.map((f) => `${f.line}:${f.column}`);
+  });
+  assert.ok(!("text" in entry), "the text is not kept");
+  assert.deepEqual(entry.placed, ["2:3"], "the ranges were placed while the text was in hand");
+  assert.deepEqual(placed, [text]);
+  assert.equal(entry.fingerprint, textFingerprint(text));
+  assert.notEqual(textFingerprint(text), textFingerprint(text + " "), "an edit since the sweep is told");
+  assert.equal(textFingerprint(text), textFingerprint(String(text)), "stable");
+  assert.equal(entry.findings[0], finding, "the finding objects are the gate's own - a baseline applied to a copy keeps the rest placed");
+
+  // an open document: its version is the stamp, nothing is placed or fingerprinted
+  const open = sweepEntryOf("v3|", { findings: [finding] }, undefined, () => {
+    throw new Error("not for an open document");
+  });
+  assert.deepEqual(open, { stamp: "v3|", findings: [finding] });
+  // a clean file from disk: nothing to place either
+  assert.deepEqual(sweepEntryOf("m1|", { findings: [] }, text, () => []), { stamp: "m1|", findings: [] });
+  // nothing checked: remembered as a skip
+  assert.deepEqual(
+    sweepEntryOf("m1|", { findings: [finding], nothingChecked: "no view" }, text, () => []),
+    { stamp: "m1|", findings: [], skip: true }
+  );
 });

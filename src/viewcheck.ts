@@ -45,7 +45,14 @@ import {
   settleRenderErrors,
   workspaceFixSummary,
 } from "./checkcore";
-import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
+import {
+  PlacedFindings,
+  placeFindings,
+  showProblemsMessage,
+  textSource,
+  toDiagnostics,
+  toDiagnosticsPlaced,
+} from "./diagnostics";
 import {
   classIndexStamp,
   onDidChangeClassIndex,
@@ -53,7 +60,7 @@ import {
   workspaceClassIndex,
 } from "./classindexfeed";
 import { plural } from "./text";
-import { recheckSchedule, sweepInBatches } from "./checkschedule";
+import { recheckSchedule, SweepEntry, sweepEntryOf, sweepInBatches, textFingerprint } from "./checkschedule";
 import { baselineWriteRefusal, rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
@@ -805,9 +812,14 @@ export interface SweptFile {
    *  been typed in since - the sweep is `await`ed per file, so the window is
    *  real. Absent when the text came from disk. */
   version?: number;
-  /** The gated text, when it came from disk and produced findings - what
-   *  `checkWorkspace` computes the ranges from without opening the file. */
-  text?: string;
+  /** The findings' ranges, when the text came from disk and produced
+   *  findings - computed while the text was in hand, so `checkWorkspace`
+   *  places them without opening the file and without the sweep keeping
+   *  the text. */
+  placed?: PlacedFindings;
+  /** `textFingerprint` of that text - what `fixWorkspace` compares the
+   *  document against before it applies the offsets. */
+  fingerprint?: string;
   /** The config file governing it, or undefined when the settings do - what
    *  `updateBaseline` filters on, so a nested config's files do not land in
    *  the root baseline as entries the CLI would call stale. */
@@ -817,11 +829,9 @@ export interface SweptFile {
 /** Gate results per file, keyed on what the text was when it was gated - the
  *  open document's version, or the file's mtime. Pre-baseline, so one cache
  *  serves the check, the fix and the baseline rebuild alike; dropped whenever
- *  a config or a setting changes the answer. */
-const sweepCache = new Map<
-  string,
-  { stamp: string; findings: PropertyFinding[]; text?: string; skip?: boolean }
->();
+ *  a config or a setting changes the answer. Never the text: the ranges and
+ *  a fingerprint of it (`SweepEntry`). */
+const sweepCache = new Map<string, SweepEntry<PlacedFindings>>();
 
 function clearSweepCache(): void {
   sweepCache.clear();
@@ -1055,13 +1065,12 @@ async function sweepWorkspace(
         log(`view-check: ${labelOf(uri)} skipped - ${String(err)}`);
         return true;
       }
-      entry = gate.nothingChecked
-        ? { stamp: io.stamp, findings: [], skip: true }
-        : {
-            stamp: io.stamp,
-            findings: gate.findings,
-            text: !target.open && gate.findings.length ? text : undefined,
-          };
+      // the ranges now, while the text is here - the cache keeps those and
+      // a fingerprint, not the text (an open document needs neither: its
+      // version in the stamp says whether the findings still describe it)
+      entry = sweepEntryOf(io.stamp, gate, target.open ? undefined : text, (gated, findings) =>
+        placeFindings(textSource(gated), findings)
+      );
       sweepCache.set(key, entry);
     }
     if (entry.skip) {
@@ -1075,7 +1084,8 @@ async function sweepWorkspace(
       uri,
       findings,
       version: target.open?.version,
-      text: entry.text,
+      placed: entry.placed,
+      fingerprint: entry.fingerprint,
       configFile: opts.configFile,
     });
     return gated;
@@ -1128,7 +1138,7 @@ async function checkWorkspace(
            * buffer that was typed in while the sweep ran, whose lines the
            * findings no longer describe. Opening every clean file as a
            * document just to place nothing was the old cost here. */
-          let source;
+          let diags: vscode.Diagnostic[] = [];
           if (file.version !== undefined) {
             const doc = vscode.workspace.textDocuments.find(
               (d) => d.uri.toString() === file.uri.toString()
@@ -1138,11 +1148,10 @@ async function checkWorkspace(
               untouched.add(file.uri.toString());
               continue;
             }
-            source = doc;
-          } else if (file.findings.length) {
-            source = textSource(file.text ?? "");
+            diags = toDiagnostics(doc, file.findings, []);
+          } else if (file.findings.length && file.placed) {
+            diags = toDiagnosticsPlaced(file.findings, file.placed);
           }
-          const diags = source ? toDiagnostics(source, file.findings, []) : [];
           diagnostics.set(file.uri, diags);
           published.add(file.uri.toString());
           problems += diags.length;
@@ -1256,8 +1265,13 @@ async function fixWorkspace(log: (m: string) => void): Promise<void> {
             continue;
           }
           // Gated from DISK, but opened (and typed in) since: there is no
-          // version to compare, the text itself has to match.
-          if (file.version === undefined && file.text !== undefined && doc.getText() !== file.text) {
+          // version to compare, the text itself has to match - by the
+          // fingerprint the sweep kept of what it gated.
+          if (
+            file.version === undefined &&
+            file.fingerprint !== undefined &&
+            textFingerprint(doc.getText()) !== file.fingerprint
+          ) {
             moved++;
             continue;
           }

@@ -167,6 +167,47 @@ function diagnosticCode(
   return { value: type, target: vscode.Uri.parse(`${RULES_PAGE}#${type}`) };
 }
 
+/** The ranges of a file's findings, computed while its text was in hand -
+ *  what the workspace sweep keeps for a file read from disk instead of the
+ *  text itself (`placeFindings`), keyed on the finding object so a baseline
+ *  applied afterwards (which drops entries) keeps the rest placed. */
+export type PlacedFindings = ReadonlyMap<PropertyFinding, vscode.Range>;
+
+export function placeFindings(doc: FindingSource, findings: readonly PropertyFinding[]): PlacedFindings {
+  return new Map(findings.map((f) => [f, findingRange(doc, f)]));
+}
+
+/** `toDiagnostics` over ranges placed earlier - no text needed. A finding
+ *  the map does not know (there is none: the same gate result fills both)
+ *  lands on the first line rather than nowhere. */
+export function toDiagnosticsPlaced(
+  findings: readonly PropertyFinding[],
+  placed: PlacedFindings
+): vscode.Diagnostic[] {
+  return findings.map((f) =>
+    diagnosticOf(f, placed.get(f) ?? new vscode.Range(0, 0, 0, 0))
+  );
+}
+
+function diagnosticOf(f: PropertyFinding, range: vscode.Range): vscode.Diagnostic {
+  const d = new vscode.Diagnostic(
+    range,
+    f.message ?? describe(f),
+    // never `DIAGNOSTIC_SEVERITY[<unknown string>]`: a severity a
+    // `viewCheck.rules` entry misspells is undefined there, and VS Code
+    // renders undefined as Error - `diagnosticSeverityKey` clamps it
+    DIAGNOSTIC_SEVERITY[diagnosticSeverityKey(f)]
+  );
+  d.source = DIAG_SOURCE;
+  d.code = diagnosticCode(f.type);
+  if (DEPRECATION_RULES.has(f.type)) {
+    d.tags = [vscode.DiagnosticTag.Deprecated];
+  } else if (UNNECESSARY_RULES.has(f.type)) {
+    d.tags = [vscode.DiagnosticTag.Unnecessary];
+  }
+  return d;
+}
+
 /**
  * `renderSeverity` is what a render error counts as - Error unless the repo's
  * `rules['render-error']` re-weighs it (`settleRenderErrors` in checkcore.ts),
@@ -178,25 +219,7 @@ export function toDiagnostics(
   renderErrors: string[],
   renderSeverity: FindingSeverity = "error"
 ): vscode.Diagnostic[] {
-  const diagnostics: vscode.Diagnostic[] = [];
-  for (const f of findings) {
-    const d = new vscode.Diagnostic(
-      findingRange(doc, f),
-      f.message ?? describe(f),
-      // never `DIAGNOSTIC_SEVERITY[<unknown string>]`: a severity a
-      // `viewCheck.rules` entry misspells is undefined there, and VS Code
-      // renders undefined as Error - `diagnosticSeverityKey` clamps it
-      DIAGNOSTIC_SEVERITY[diagnosticSeverityKey(f)]
-    );
-    d.source = DIAG_SOURCE;
-    d.code = diagnosticCode(f.type);
-    if (DEPRECATION_RULES.has(f.type)) {
-      d.tags = [vscode.DiagnosticTag.Deprecated];
-    } else if (UNNECESSARY_RULES.has(f.type)) {
-      d.tags = [vscode.DiagnosticTag.Unnecessary];
-    }
-    diagnostics.push(d);
-  }
+  const diagnostics = findings.map((f) => diagnosticOf(f, findingRange(doc, f)));
   const text = renderErrors.length ? doc.getText() : "";
   for (const e of renderErrors) {
     // render errors are strings without positions - the token the message

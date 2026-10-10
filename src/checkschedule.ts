@@ -13,6 +13,9 @@
  *     (`sweepEntryOf`, `textFingerprint`).
  */
 
+import type { PropertyFinding } from "@abap2ui5/linter/properties";
+import { hashOf } from "./classindex";
+
 /** How far apart the re-check of the documents NOT visible is spread. */
 export const RECHECK_STAGGER_MS = 50;
 
@@ -87,4 +90,56 @@ export async function sweepInBatches<T, S>(
       }
     }
   }
+}
+
+/** What the sweep cache holds per file - and what it does not: the text.
+ *  Until a config change dropped the cache, it kept the whole text of every
+ *  file read from disk that had findings, for two uses that need less: the
+ *  ranges of those findings (`placed`, computed while the text was in hand)
+ *  and "is the file still what was gated" before a fix is applied to it
+ *  (`fingerprint`). Both are stored, the text is let go. */
+export interface SweepEntry<P> {
+  /** The open document's version or the file's mtime, plus the class index's stamp. */
+  stamp: string;
+  /** Pre-baseline - one cache serves the check, the fix and the rebuild. */
+  findings: PropertyFinding[];
+  /** Nothing to gate (not checkable, or the gate found nothing to judge). */
+  skip?: boolean;
+  /** The findings' ranges, for a file read from disk that has findings. */
+  placed?: P;
+  /** `textFingerprint` of that text, for the same files. */
+  fingerprint?: string;
+}
+
+/** A short identity of a text - length and two independent 32-bit hashes
+ *  (`hashOf`) - that the workspace fix compares the document against before
+ *  it applies offsets computed from the swept text. */
+export function textFingerprint(text: string): string {
+  return hashOf(text);
+}
+
+/**
+ * The entry a gate result becomes. `text` is the DISK text - undefined for
+ * an open document, whose version in the stamp already says whether the
+ * findings still describe it. `place` runs only when there is something to
+ * place: a file from disk with findings.
+ */
+export function sweepEntryOf<P>(
+  stamp: string,
+  gate: { findings: PropertyFinding[]; nothingChecked?: string },
+  text: string | undefined,
+  place: (text: string, findings: PropertyFinding[]) => P
+): SweepEntry<P> {
+  if (gate.nothingChecked) {
+    return { stamp, findings: [], skip: true };
+  }
+  if (text === undefined || !gate.findings.length) {
+    return { stamp, findings: gate.findings };
+  }
+  return {
+    stamp,
+    findings: gate.findings,
+    placed: place(text, gate.findings),
+    fingerprint: textFingerprint(text),
+  };
 }
