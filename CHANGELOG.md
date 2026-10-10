@@ -34,6 +34,16 @@
   the extension's transport through the auth proxy only carries their
   headers and the system's cookies, so the token is fetched once and the
   body re-sent once, never twice.
+- **The agent app tools take mcp-server's later fixes.** The vendored agent
+  client is now abap2UI5/mcp-server `185baed`: a binding written as
+  `{path: '/A', model: 'other'}` is read as the named model's, so a value
+  is no longer written into the app's own model; an unsent edit no longer
+  survives into a view the system displayed anew, and a model push no
+  longer invents table rows for one; a model path through `__proto__`,
+  `constructor` or `prototype` is refused, and an element of that name no
+  longer breaks the screen; a number field takes a number or a decimal
+  string, not whatever `Number()` makes of a value; an action list that is
+  no list is refused with a sentence instead of "object is not iterable".
 - **Migrate Classic Report to abap2UI5.** A new command - in the Command
   Palette and in the context menu of a `*.prog.abap` - converts a classic
   ABAP report into an abap-cloud-gui report class with that addon's
