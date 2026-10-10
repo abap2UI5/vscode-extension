@@ -53,7 +53,7 @@ import {
   workspaceClassIndex,
 } from "./classindexfeed";
 import { plural } from "./text";
-import { recheckSchedule } from "./checkschedule";
+import { recheckSchedule, sweepInBatches } from "./checkschedule";
 import { baselineWriteRefusal, rebuildBaseline } from "./baselinefile";
 import {
   applyBaselineTo,
@@ -901,7 +901,10 @@ async function sweepWorkspace(
    * of its wall time waiting on the disk one file at a time. A batch is
    * staged with `Promise.all` (bounded, so a 5000-file workspace does not
    * open 5000 reads at once) and then gated strictly IN ORDER - the finding
-   * set and the order the callers see are exactly the serial loop's.
+   * set and the order the callers see are exactly the serial loop's. The
+   * host gets a turn after every gated file (`sweepInBatches`): the gate is
+   * synchronous, and a batch of eight gated back to back, batch after batch,
+   * held the shared extension host for the whole sweep.
    *
    * Progress is reported every `PROGRESS_EVERY` files plus once at the end:
    * per file it was one host roundtrip per entry, which on a fast gate cost
@@ -975,113 +978,114 @@ async function sweepWorkspace(
   };
 
   const swept: SweptFile[] = [];
-  for (
-    let base = 0;
-    base < targets.length && !token.isCancellationRequested;
-    base += IO_BATCH
-  ) {
-    const batch = targets.slice(base, base + IO_BATCH);
-    const staged = await Promise.all(batch.map(stage));
-    for (const [offset, io] of staged.entries()) {
-      if (token.isCancellationRequested) {
-        break;
-      }
-      const index = base + offset;
-      if ((index + 1) % PROGRESS_EVERY === 0 || index === targets.length - 1) {
-        report(index);
-      }
-      if (!io) {
-        continue;
-      }
-      const target = batch[offset];
-      const uri = target.uri;
-      const key = uri.toString();
-      // a document with no path on disk has no directory to discover a config
-      // from - the workspace's own config governs it, as it does on the live path
-      const opts = resolveOptions(discoveryDirOf(uri), sweepSettings);
-      dropCachesIfConfigChanged();
-      /* Only what the CLI's walk would reach, judged from the directory it
-       * walks: the governing config's, or the workspace folder when the
-       * settings govern. A file under a dot-directory or one a config
-       * `ignore` pattern prunes is checked by nobody in CI - checking it here
-       * squiggles what CI never sees, and a baseline rebuilt from it carries
-       * an entry CI fails as stale. Open documents that the glob did not
-       * find (a class from a system) have no place in that walk and stay. */
-      if (known.has(key) && uri.scheme === "file") {
-        const root = opts.configFile
-          ? path.dirname(opts.configFile)
-          : vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
-        if (
-          root &&
-          !cliCollects(path.relative(root, uri.fsPath), { ignore: opts.ignore, root })
-        ) {
-          continue;
-        }
-      }
-      /* Gated once per text: the cache key is the open document's version or
-       * the file's mtime, so a re-run only pays for what changed since. The
-       * cached findings are PRE-baseline - the baseline is applied per run
-       * below, because the rebuild needs the unfiltered truth. */
-      const cached = sweepCache.get(key);
-      let entry = cached && cached.stamp === io.stamp ? cached : undefined;
-      if (!entry) {
-        let text = io.text;
-        if (text === undefined) {
-          // staged as a cache hit, but the entry was dropped between staging
-          // and gating (a config change clears the cache mid-sweep) - re-read
-          // rather than silently skip the file
-          try {
-            text = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-          } catch {
-            continue;
-          }
-        }
-        const isXml = VIEW_XML_RE.test(uri.path);
-        // the content half of the linter's collectFiles: a builder (or
-        // frozen-builder) class, an app class without a view, and under
-        // `allClasses` every class
-        if (!isXml && !isCheckableSource(uri.path, "abap", text, { allClasses: opts.allClasses })) {
-          sweepCache.set(key, { stamp: io.stamp, findings: [], skip: true });
-          continue;
-        }
-        let gate: GateResult;
-        try {
-          gate = runGate(
-            text,
-            uri.scheme === "file" ? uri.fsPath : uri.path,
-            isXml,
-            isXml ? opts : { ...opts, classIndex: workspaceClassIndex() }
-          );
-        } catch (err) {
-          // one file that cannot be parsed is not a reason to abandon the sweep
-          log(`view-check: ${labelOf(uri)} skipped - ${String(err)}`);
-          continue;
-        }
-        entry = gate.nothingChecked
-          ? { stamp: io.stamp, findings: [], skip: true }
-          : {
-              stamp: io.stamp,
-              findings: gate.findings,
-              text: !target.open && gate.findings.length ? text : undefined,
-            };
-        sweepCache.set(key, entry);
-      }
-      if (entry.skip) {
-        continue;
-      }
-      const findings = entry.findings.slice();
-      if (options.baseline && opts.baseline && uri.scheme === "file") {
-        applyBaselineTo(findings, opts.baseline, uri.fsPath);
-      }
-      swept.push({
-        uri,
-        findings,
-        version: target.open?.version,
-        text: entry.text,
-        configFile: opts.configFile,
-      });
+  /** One staged target, in the glob's order; true when the gate ran. */
+  const gateOne = async (
+    target: { uri: vscode.Uri; open?: vscode.TextDocument },
+    io: { stamp: string; text?: string } | undefined,
+    index: number
+  ): Promise<boolean> => {
+    if ((index + 1) % PROGRESS_EVERY === 0 || index === targets.length - 1) {
+      report(index);
     }
-  }
+    if (!io) {
+      return false;
+    }
+    const uri = target.uri;
+    const key = uri.toString();
+    // a document with no path on disk has no directory to discover a config
+    // from - the workspace's own config governs it, as it does on the live path
+    const opts = resolveOptions(discoveryDirOf(uri), sweepSettings);
+    dropCachesIfConfigChanged();
+    /* Only what the CLI's walk would reach, judged from the directory it
+     * walks: the governing config's, or the workspace folder when the
+     * settings govern. A file under a dot-directory or one a config
+     * `ignore` pattern prunes is checked by nobody in CI - checking it here
+     * squiggles what CI never sees, and a baseline rebuilt from it carries
+     * an entry CI fails as stale. Open documents that the glob did not
+     * find (a class from a system) have no place in that walk and stay. */
+    if (known.has(key) && uri.scheme === "file") {
+      const root = opts.configFile
+        ? path.dirname(opts.configFile)
+        : vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
+      if (
+        root &&
+        !cliCollects(path.relative(root, uri.fsPath), { ignore: opts.ignore, root })
+      ) {
+        return false;
+      }
+    }
+    /* Gated once per text: the cache key is the open document's version or
+     * the file's mtime, so a re-run only pays for what changed since. The
+     * cached findings are PRE-baseline - the baseline is applied per run
+     * below, because the rebuild needs the unfiltered truth. */
+    const cached = sweepCache.get(key);
+    let entry = cached && cached.stamp === io.stamp ? cached : undefined;
+    let gated = false;
+    if (!entry) {
+      let text = io.text;
+      if (text === undefined) {
+        // staged as a cache hit, but the entry was dropped between staging
+        // and gating (a config change clears the cache mid-sweep) - re-read
+        // rather than silently skip the file
+        try {
+          text = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+        } catch {
+          return false;
+        }
+      }
+      const isXml = VIEW_XML_RE.test(uri.path);
+      // the content half of the linter's collectFiles: a builder (or
+      // frozen-builder) class, an app class without a view, and under
+      // `allClasses` every class
+      if (!isXml && !isCheckableSource(uri.path, "abap", text, { allClasses: opts.allClasses })) {
+        sweepCache.set(key, { stamp: io.stamp, findings: [], skip: true });
+        return false;
+      }
+      let gate: GateResult;
+      gated = true;
+      try {
+        gate = runGate(
+          text,
+          uri.scheme === "file" ? uri.fsPath : uri.path,
+          isXml,
+          isXml ? opts : { ...opts, classIndex: workspaceClassIndex() }
+        );
+      } catch (err) {
+        // one file that cannot be parsed is not a reason to abandon the sweep
+        log(`view-check: ${labelOf(uri)} skipped - ${String(err)}`);
+        return true;
+      }
+      entry = gate.nothingChecked
+        ? { stamp: io.stamp, findings: [], skip: true }
+        : {
+            stamp: io.stamp,
+            findings: gate.findings,
+            text: !target.open && gate.findings.length ? text : undefined,
+          };
+      sweepCache.set(key, entry);
+    }
+    if (entry.skip) {
+      return gated;
+    }
+    const findings = entry.findings.slice();
+    if (options.baseline && opts.baseline && uri.scheme === "file") {
+      applyBaselineTo(findings, opts.baseline, uri.fsPath);
+    }
+    swept.push({
+      uri,
+      findings,
+      version: target.open?.version,
+      text: entry.text,
+      configFile: opts.configFile,
+    });
+    return gated;
+  };
+  await sweepInBatches(targets, {
+    batch: IO_BATCH,
+    stage,
+    handle: gateOne,
+    cancelled: () => token.isCancellationRequested,
+  });
   return { files: swept, cancelled: token.isCancellationRequested };
 }
 

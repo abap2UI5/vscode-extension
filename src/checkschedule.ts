@@ -40,3 +40,51 @@ export function recheckSchedule<T>(
   }
   return [...visible, ...hidden];
 }
+
+/** What a workspace sweep hands `sweepInBatches`. */
+export interface BatchSweep<T, S> {
+  /** How many targets are staged (their I/O started) at once. */
+  batch: number;
+  /** One target's I/O - runs concurrently within a batch. `undefined` is a
+   *  target that vanished (skipped, still handled so progress counts it). */
+  stage: (target: T) => Promise<S | undefined>;
+  /** One target, strictly in order. True when it did the CPU-bound work
+   *  (gated the file) - the host gets a turn after every such one. */
+  handle: (target: T, staged: S | undefined, index: number) => Promise<boolean> | boolean;
+  cancelled: () => boolean;
+  /** Replaced by the tests; a macrotask by default. */
+  yieldTurn?: () => Promise<void>;
+}
+
+/**
+ * A sweep's loop: the I/O of a batch ahead of the gate (`Promise.all` over
+ * `batch` targets, so a 5000-file workspace does not open 5000 reads at
+ * once), then each target handled in the glob's order - and a yield to the
+ * host after every file that was actually gated. The gate is synchronous
+ * and takes a few milliseconds per class; eight of them back to back per
+ * batch, batch after batch, held the shared extension host for the whole
+ * sweep, and the progress notification, the cursor and every other
+ * extension waited with it. A cache hit costs nothing and gets no yield.
+ *
+ * Cancellation is asked before every target, as the serial loop asked it:
+ * a cancelled sweep stops after the file it is on, and the caller reports
+ * what it got as partial.
+ */
+export async function sweepInBatches<T, S>(
+  targets: readonly T[],
+  sweep: BatchSweep<T, S>
+): Promise<void> {
+  const yieldTurn = sweep.yieldTurn ?? (() => new Promise<void>((r) => setTimeout(r, 0)));
+  for (let base = 0; base < targets.length && !sweep.cancelled(); base += sweep.batch) {
+    const batch = targets.slice(base, base + sweep.batch);
+    const staged = await Promise.all(batch.map(sweep.stage));
+    for (const [offset, io] of staged.entries()) {
+      if (sweep.cancelled()) {
+        return;
+      }
+      if (await sweep.handle(batch[offset], io, base + offset)) {
+        await yieldTurn();
+      }
+    }
+  }
+}
