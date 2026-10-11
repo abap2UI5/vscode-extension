@@ -1,13 +1,5 @@
 import * as vscode from "vscode";
-import { classNameOf, usesBuilder } from "./abap";
-import { isAppSource, onDidRefreshAppClasses } from "./appclasses";
-import {
-  abapSources,
-  invalidateAbapSource,
-  isAbapDocument,
-  onDidChangeAbapSources,
-  watchAbapSources,
-} from "./abapsources";
+import { appClassEntries, onDidRefreshAppClasses } from "./appclasses";
 
 /*
  * The apps of this workspace, as a tree with the actions on them.
@@ -21,6 +13,12 @@ import {
  *
  * A class counts as an app when it implements `z2ui5_if_app` - the same test
  * the navigation map uses, so the two cannot disagree about what an app is.
+ *
+ * The list is the app-class index's (`appclasses.ts`): the index already
+ * reads every class the window sees and updates one entry on a save, an
+ * open, a close or a change on disk. The tree used to run its own sweep of
+ * the workspace on every one of those events - re-reading every file once
+ * the source cache had expired - to answer what the index knew.
  */
 
 interface AppNode {
@@ -96,20 +94,14 @@ class AppTree implements vscode.TreeDataProvider<AppNode> {
 }
 
 async function scan(): Promise<AppNode[]> {
-  const out: AppNode[] = [];
   // Files AND open documents - working straight against the system through
   // ADT means there is no file to glob, and this tree was simply empty there.
-  for (const source of await abapSources()) {
-    if (!isAppSource(source.text)) {
-      continue;
-    }
-    out.push({
-      className: classNameOf(source.text, source.uri.path),
-      uri: source.uri,
-      buildsViews: usesBuilder(source.text),
-      fromEditor: source.fromEditor,
-    });
-  }
+  const out = (await appClassEntries()).map((entry) => ({
+    className: entry.name,
+    uri: vscode.Uri.parse(entry.key),
+    buildsViews: entry.usesBuilder,
+    fromEditor: entry.fromEditor,
+  }));
   return out.sort((a, b) => a.className.localeCompare(b.className));
 }
 
@@ -126,17 +118,11 @@ async function withOpenClass(node: AppNode | undefined, command: string): Promis
 }
 
 /** How long event-driven refreshes are coalesced. A branch switch touches
- *  hundreds of files at once, and every refresh means a rescan of the
- *  window's ABAP sources in getChildren. */
+ *  hundreds of files at once, and the index says so once per file. */
 const REFRESH_DEBOUNCE_MS = 300;
 
 export function registerAppView(context: vscode.ExtensionContext): void {
   const provider = new AppTree();
-  // The shared watcher and source cache: a rescan now re-reads the files that
-  // actually changed instead of the whole workspace - which matters most for
-  // the event this tree fires at itself, the openTextDocument that a click on
-  // one of its own items performs.
-  watchAbapSources(context);
   let pending: NodeJS.Timeout | undefined;
   const refresh = () => {
     if (pending) {
@@ -157,34 +143,12 @@ export function registerAppView(context: vscode.ExtensionContext): void {
       },
     },
     vscode.window.createTreeView("abap2ui5.apps", { treeDataProvider: provider }),
-    // create / change / delete on disk, and a workspace folder coming or
-    // going - all of it through the one shared watcher
-    onDidChangeAbapSources(refresh),
-    // the app-class index rebuilt in the background - a subclass of a base
-    // class it did not know before is an app now
+    // every change of the index: a rebuild in the background (a subclass of
+    // a base class it did not know before is an app now), a saved class
+    // that became an app or stopped being one, an ADT document opened or
+    // closed (the whole list, where the classes come from editors), a file
+    // created, changed or deleted on disk - the index hears of all of it
     onDidRefreshAppClasses(refresh),
-    // a saved class can BECOME an app (or stop being one) - the tree follows.
-    // The save may reach the cache before the watcher does, so the file's
-    // remembered text is dropped here as well.
-    vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (isAbapDocument(doc)) {
-        invalidateAbapSource(doc.uri);
-        refresh();
-      }
-    }),
-    // Opening and closing an ABAP document changes the list itself when the
-    // classes come from editors rather than from a folder - which is the
-    // whole picture in the ADT case.
-    vscode.workspace.onDidOpenTextDocument((doc) => {
-      if (isAbapDocument(doc)) {
-        refresh();
-      }
-    }),
-    vscode.workspace.onDidCloseTextDocument((doc) => {
-      if (isAbapDocument(doc)) {
-        refresh();
-      }
-    }),
     // the explicit command answers now, not after the debounce
     vscode.commands.registerCommand("abap2ui5.refreshApps", () => provider.refresh()),
     vscode.commands.registerCommand("abap2ui5.runApp", (node: AppNode) =>

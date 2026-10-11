@@ -10,6 +10,7 @@ import { abapNsMap } from "./context";
 import {
   Annotation,
   costAnnotations,
+  decorationSignature,
   deprecationAnnotations,
   NamespaceScope,
   sinceAnnotations,
@@ -79,6 +80,34 @@ export function registerInlineAnnotations(
   };
 
   const config = () => vscode.workspace.getConfiguration(CONFIG_SECTION);
+
+  /** What each editor was last given per style (`decorationSignature`), so
+   *  a paint that would set exactly that skips the call. The pass runs
+   *  twice per typing pause - 300 ms after the keystroke and again when the
+   *  live check's diagnostics land - and the second one re-sent the same
+   *  four lists almost every time. Keyed on the editor object: a closed and
+   *  reopened editor is a new one, with nothing remembered for it. */
+  const lastPainted = new WeakMap<
+    vscode.TextEditor,
+    Map<vscode.TextEditorDecorationType, string>
+  >();
+  const setDecorations = (
+    editor: vscode.TextEditor,
+    style: vscode.TextEditorDecorationType,
+    list: vscode.DecorationOptions[]
+  ) => {
+    let signatures = lastPainted.get(editor);
+    if (!signatures) {
+      signatures = new Map();
+      lastPainted.set(editor, signatures);
+    }
+    const signature = decorationSignature(list);
+    if (signatures.get(style) === signature) {
+      return;
+    }
+    signatures.set(style, signature);
+    editor.setDecorations(style, list);
+  };
 
   /** The finding messages, from the published diagnostics - the same text the
    *  Problems panel shows, so the two cannot disagree. */
@@ -204,7 +233,7 @@ export function registerInlineAnnotations(
     const doc = editor.document;
     const clear = () => {
       for (const style of Object.values(styles)) {
-        editor.setDecorations(style, []);
+        setDecorations(editor, style, []);
       }
     };
     if (doc.languageId !== "abap" && !VIEW_XML_RE.test(doc.fileName)) {
@@ -213,11 +242,12 @@ export function registerInlineAnnotations(
     }
     const mode = config().get<Mode>("inlineFindings", "problems");
     const findings = findingLines(doc, mode);
-    editor.setDecorations(
+    setDecorations(
+      editor,
       styles.error,
       findings.get(vscode.DiagnosticSeverity.Error) ?? []
     );
-    editor.setDecorations(styles.info, [
+    setDecorations(editor, styles.info, [
       ...(findings.get(vscode.DiagnosticSeverity.Information) ?? []),
       ...(findings.get(vscode.DiagnosticSeverity.Hint) ?? []),
     ]);
@@ -253,11 +283,11 @@ export function registerInlineAnnotations(
         renderOptions: { after: { contentText: trim(annotation.text) } },
       });
     }
-    editor.setDecorations(styles.warning, [
+    setDecorations(editor, styles.warning, [
       ...(findings.get(vscode.DiagnosticSeverity.Warning) ?? []),
       ...warn,
     ]);
-    editor.setDecorations(styles.meta, meta);
+    setDecorations(editor, styles.meta, meta);
   };
 
   /** Documents whose visible annotations came from our findings. */

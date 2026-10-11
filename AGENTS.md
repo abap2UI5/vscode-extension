@@ -34,11 +34,12 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/connectcheck.ts` | `vscode`-free: what the connection check's probes MEAN - launch-URL shape, DNS/TCP/TLS failure and HTTP-status classification, bootstrap-page detection - behind "Check System Connection" |
 | `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list, and what an edited model document may push into the running app (`applyModelMessage`) |
 | `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
-| `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): loads the snapshot via `workspace.fs`, registers the in-process features only - including the navigation map, the Control Properties view and the findings tree (fed by `webFindingsNow`, no baseline machinery) |
+| `src/web/startup.ts` | `vscode`-free: the web activation's ORDER - the registrations first, the data reads after, and the `DataGate` that holds the checks until the reads are in (a gate run before them would memoise an empty icon registry in the linter for the session; completion and hover need no holding) - `webstartup.test.ts`, since the in-host smoke test cannot run everywhere |
+| `src/web/extension.ts` | Web-host activation (vscode.dev/BAS): registers the in-process features first, then loads the snapshot via `workspace.fs` (`startWeb`), registers the in-process features only - including the navigation map, the Control Properties view and the findings tree (fed by `webFindingsNow`, no baseline machinery) |
 | `src/web/linterdata.ts` | `vscode`-free: the linter's own data files in the web build (`data/icons.json`) - read by the caller through `workspace.fs`, seeded into the `fs` shim under the path the linter reads |
-| `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, repo config through `workspace.fs` (no render gate) |
+| `src/webcheck.ts` | The web build's view check: the property gate scheduled live/on-save, repo config through `workspace.fs` (no render gate); every gate run waits on the entry's `DataGate`, and `webFindingsNow` answers nothing until it opens |
 | `src/gate.ts` | The in-process property gate itself, shared by `viewcheck.ts` (desktop) and `webcheck.ts` (web) |
-| `src/diagnostics.ts` | Findings -> VS Code diagnostics (ranges, severities, rule links), shared by both checks |
+| `src/diagnostics.ts` | Findings -> VS Code diagnostics (ranges, severities, rule links), shared by both checks; `placeFindings` / `toDiagnosticsPlaced` split the two halves for the sweep, which places a disk file's findings while it has the text and publishes them later without it |
 | `src/selector.ts` | The document selector all view providers share |
 | `src/template.ts` | The app-class skeleton both entries insert |
 | `src/ui5detect.ts` | Reads the system's `sap-ui-version.json` and offers to align the view-check settings |
@@ -51,6 +52,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
 | `src/compat.ts` | `vscode`-free: the bundled linter's compatibility record (`@abap2ui5/linter/compat`, copied next to the bundle by `esbuild.js` like the snapshot; null when the pin ships none) and what it says about a workspace's framework pin - the one parser of `abaplint.jsonc`'s `dependencies[].branch` (`scaffold.ts` uses it too), `compareRelease`, `compatVerdict`, the activation line |
 | `src/compatcheck.ts` | The framework-pin check's plumbing: a warning on the `branch` line of an open `abaplint.jsonc` pinned below what the bundled linter assumes, on open and save |
+| `src/checkschedule.ts` | The view check's `vscode`-free SCHEDULING, shared by `viewcheck.ts` and `webcheck.ts`: the per-document gate memo (`GateMemo` - one gate run per document version and config generation, seeded by whichever of `findingsNow` and `checkDocument` asks first; the lens/code-action refetch ~250 ms after a change used to gate, and the live check 400 ms after it gated the same text again), the order a re-check of every open document runs in (`recheckSchedule` - the visible editors at once, the rest `RECHECK_STAGGER_MS` apart; activation, a config change and a class-index change all re-check what is open) and the workspace sweep's loop (`sweepInBatches` - a batch's I/O staged together, the files gated in order, a turn for the host after every gated file), and what the sweep cache holds per file (`SweepEntry`, `sweepEntryOf`: the findings' ranges and a `textFingerprint`, never the text - it kept every red file's whole text until a config change) |
 | `src/checkcore.ts` | The view check's `vscode`-free decisions: checkability (`isCheckableSource` - what the linter's `checkAbapSource` judges, a viewless app class and `allClasses` included - and `isViewSource`, what the systemless preview and the mock generator need), the workspace fix's tally, the render-gate command ladder, scratch-file naming, the JSON report parsing, where a disable directive may be written, what the view preview shows after a refresh that threw (`failedPreviewState`) |
 | `src/childproc.ts` | `vscode`-free: the ONE way a checker is started - shell quoting of program AND arguments, timeout, kill of the whole process tree, "nobody is waiting any more" |
 | `src/configcore.ts` | `vscode`/`fs`/`path`-free: what an `abap2ui5lint.jsonc` MEANS for a check (precedence, nearest-config discovery, baseline application) - shared by the desktop and web readers |
@@ -60,7 +62,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE. The CASE region itself (`eventCaseRegion`, `ownLevel`) lives in `context.ts`, which restricts the event rename, highlights, lens and Go-to-Definition to the WHENs at its own level |
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
 | `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
-| `src/clientapi.ts` | The bundled `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion |
+| `src/clientapi.ts` | The `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion - `vscode`-free; read from `dist/client-api.json` beside the bundle on first use (the web entry hands the text in, like `snapshot.ts`) |
 | `src/chainformat.ts` | Format Document for builder chains: hands on the linter's own `chain-house-layout` fixes (never a second layout algorithm) |
 | `src/renderloc.ts` | Places a render-gate error message on the source line quoting its token |
 | `scripts/generate-client-api.mjs` | Regenerates `src/data/client-api.json` from `z2ui5_if_client.intf.abap` (local checkout or GitHub raw) |
@@ -76,9 +78,9 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/catalogue.ts` | `vscode`-free: parses the sample repositories' committed `catalogue.json` (three sibling shapes, pinned in `src/test/fixtures/catalogue-*.json`) and matches a control against the entries |
 | `src/exampleview.ts` | "Show Examples for this Control": catalogue discovery, the remote-catalogue fallback (fetch + day cache in memory and `globalState`), QuickPick, opens the hit (editor or GitHub) |
 | `src/annotations.ts` | `vscode`-free: what a line deserves to be told about it - `@since` and deprecation per control/member (of a builder chain, and of a raw XML view through the linter's `parseXml`, each element in its own namespace scope - `xmlNamespaceScopes`), roundtrip cost per PUBLIC attribute |
-| `src/inlineview.ts` | The one decoration pass that renders all three inline annotations (findings, `@since`/deprecation, cost) - for builder classes and raw XML views |
+| `src/inlineview.ts` | The one decoration pass that renders all three inline annotations (findings, `@since`/deprecation, cost) - for builder classes and raw XML views; per editor and style it remembers what it last set (`decorationSignature`, `annotations.ts`) and skips `setDecorations` for an identical list - the pass runs twice per typing pause, and the second one repeated the first |
 | `src/abbreviation.ts` | `vscode`-free: Emmet-style abbreviations -> element tree -> chain (emitted by `xmltoabap.ts`) |
-| `src/appview.ts` | The "abap2UI5 Apps" tree: every z2ui5_if_app class with run/preview/check |
+| `src/appview.ts` | The "abap2UI5 Apps" tree: every z2ui5_if_app class with run/preview/check - listed from the app-class index (`appClassEntries`), never from a sweep of its own, so a save moves one node - and the index announces a save or an open only when the entry changed (`sameAppClassEntry`), so most do not re-render the tree |
 | `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix / Run unit tests (when a `*.clas.testclasses.abap` sits beside the class) above the class definition |
@@ -89,11 +91,12 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`, and the app tools below) |
-| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the client's `transport` through the auth proxy (endpoint, method, cookies - the CSRF handshake and the `sap-contextid` per session are the vendored client's, the transport only carries their headers) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client |
+| `src/agent-client.ts` | The entry of the `dist/agent-client.js` bundle (the vendored client, snapshot and viewxml alone) `agentapps.ts` loads on the first app_* call - ~50 KB that stays out of the activation bundle, the way `rendergate-tar.ts` keeps `tar` out; the test build puts the same file in `dist-test/` so the real loader runs in `npm test` |
+| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the vendored client loaded through `createRequire` from `dist/agent-client.js` on first use (`agentClient( )`), the client's `transport` through the auth proxy (endpoint, method, cookies - the CSRF handshake and the `sap-contextid` per session are the vendored client's, the transport only carries their headers) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client |
 | `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
 | `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
-| `src/rendergate.ts` | "Install / Update Render Gate": downloads the linter release's checker bundle and Chromium into global storage, verifies it, and resolves the installed CLI (see Toolchain) |
+| `src/rendergate.ts` | "Install / Update Render Gate": downloads the linter release's checker bundle and Chromium into global storage, verifies it, and resolves the installed CLI (see Toolchain). `tar` is loaded on first use from `dist/rendergate-tar.js`, the bundle `esbuild.js` builds from `src/rendergate-tar.ts` - 86 KB that stays out of the activation bundle |
 | `src/report.ts` | `vscode`-free: the shape and the redaction of "Copy Diagnostics for a Bug Report" - the report this extension writes about itself (per open document: scheme, checkability, governing config) |
 | `src/diagnosticsreport.ts` | The command's plumbing: collects what `report.ts` formats from the window (extensions, settings, documents, log lines, systems) |
 | `src/screenshot.ts` | "Take App Screenshot": finds the render gate's Chromium and renders the proxied URL headless |
@@ -101,27 +104,30 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/xmltoabap.ts` | "Convert XML View to Builder Chain": XML parser + corpus-style chain emitter |
 | `src/convert.ts` | The convert command's plumbing (source pick, result document) |
 | `src/wizard.ts` | "New App from Template" (gallery pick, class name input) and "New Project from Template" (class name input, writing app-template's project - the gallery stays with the former, because the template's test include asserts on the template's own starter class) |
-| `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's shared files copied from `src/data/app-template.json`, its named files (starter class, sidecar, test include, abapGit descriptors) substituted from the same snapshot the way `template.json`'s `substitutions` describe, and the three composed files written here |
+| `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's shared files copied from the `src/data/app-template.json` snapshot, its named files (starter class, sidecar, test include, abapGit descriptors) substituted from the same snapshot the way `template.json`'s `substitutions` describe, and the three composed files written here. The snapshot is NOT bundled: it is handed in through `setAppTemplate` / `loadAppTemplate` (the suite passes the file, `apptemplate.test.ts` pins the registry) and `templateFiles( )` / `templateSpec( )` throw until it is |
+| `src/apptemplatefile.ts` | Where that snapshot comes from at runtime, for both entries: `dist/app-template.json` next to the bundle (copied by `esbuild.js`), read through `workspace.fs` the first time "New Project from Template" or "Add Agent Setup to Workspace" runs - never at activation |
 | `src/agentsetup.ts` | `vscode`/`fs`/`path`-free: what "Add Agent Setup to Workspace" writes into an EXISTING project - app-template's `agentSetup` key executed over the snapshot, ported function by function from that repository's `create/agent-setup.mjs` (never overwrite, `package.json`/`.gitignore` only gain entries, the gates pointed at `.abapgit.xml`'s `STARTING_FOLDER`, nothing planned into the source folder), decided as a plan over a `WorkspaceProbe` before anything is written |
 | `src/agentsetupview.ts` | The command's plumbing, shared by both entries: the workspace folder, the modal confirmation listing what is written and skipped, a re-plan right before writing (a folder that changed under the dialog is refused), the writes through `workspace.fs`, the "abap2UI5 Agent Setup" output with the next steps |
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` (the template's `files.shared` and `files.named`, BOM stripped, plus its `template.json`) from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
+| `src/rendergate-tar.ts` | The entry of the `dist/rendergate-tar.js` bundle (`tar` alone) `rendergate.ts` loads on first use |
 | `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot, and the `*_HOME` variable each checkout is handed to mcp-server as (`checkoutHomes`) |
 | `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/mcp-server's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
 | `scripts/generate-settings.mjs` | Regenerates the settings table in `README.md` from `contributes.configuration`; `--check` fails when it is stale (`src/test/settings.test.ts`) |
 | `scripts/generate-commands.mjs` | Regenerates the command table in `README.md` from `contributes.commands`, with the keys off `contributes.keybindings`; `--check` fails when it is stale (`src/test/commands.test.ts`). abap2UI5/docs sends the reader here for it — *"the full settings and command tables are in the repository README"* — and before it there was no command table: 43 commands, one of them named in the file |
 | `src/propedit.ts` | Property-editor edits: set/add/remove one `a( )` attribute as a span edit |
-| `src/propview.ts` | The "Control Properties" webview view: cursor -> `controlCallAt` -> form -> WorkspaceEdit |
+| `src/propview.ts` | The "Control Properties" webview view: cursor -> `controlCallAt` -> form -> WorkspaceEdit; a message identical to the last one posted is not posted again (`sameMessage` in `propedit.ts`), forgotten when the view is re-resolved or shown again |
 | `src/navmap.ts` | App navigation graph: nav_app_call extraction, column layout, SVG rendering |
 | `src/navview.ts` | "Show App Navigation Map": workspace scan + the webview panel around the SVG |
 | `src/snapshot.ts` | Loads the bundled UI5 metadata once, for the gate and the language features |
 | `src/abapscan.ts` | The ONE ABAP lexer: where the literals, comments and string templates are, and the blanked source every regex-reading feature runs over - plus `lineStartAt`, the line start that is right at offset 0 too (never `lastIndexOf("\n", offset - 1)`, which reads -1 as 0) |
-| `src/classindex.ts` | `vscode`-free: the cross-file class index the linter's class-level rules read (superclass chain, `cs_event`, `outsideReads`) - built from the linter's own `classIndexOf`, assembled incrementally per file so a save recomputes one file, pinned to a full build in `classindex.test.ts`; disabled while the pinned linter exports no `classIndexOf` |
+| `src/classindex.ts` | `vscode`-free: the cross-file class index the linter's class-level rules read (superclass chain, `cs_event`, `outsideReads`) - built from the linter's own `classIndexOf`, assembled incrementally per file so a save recomputes one file, pinned to a full build in `classindex.test.ts`; disabled while the pinned linter exports no `classIndexOf`. Holds a file's text (and word set) only when the file reads through a reference (`->`, the one case `readsOf` re-reads it), a content hash (`hashOf`) for every other |
 | `src/classindexsync.ts` | `vscode`-free: WHEN that index is read and when the checks hear of it - LAZY (nothing is read until a check first asks; the extension activates on any `*.clas.abap`, and indexing samples-controls' 644 classes costs ~0.7 s of the shared host), no partial index ever handed out (undefined until the first scan is in, then one change notice), saved state only (disk files, plus open documents without one), debounced change notices, everything stopped on dispose - `classindexsync.test.ts` |
 | `src/classindexfeed.ts` | The plumbing around `classindexsync.ts` for both entries: the shared ABAP watcher, saves, opened/closed ADT documents, `workspace.fs` |
-| `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk |
+| `src/abapsources.ts` | "Which ABAP does this window know about?" — the workspace's files PLUS the open documents, so the features that used to glob work when a class comes from ADT rather than from disk. The shared text cache behind it (`sourcecache.ts`): reads twelve at a time (`mapInPool`), entries validated by a `stat` once past the TTL rather than re-read, the whole cache dropped five minutes after the last sweep - the comment block there says why each |
+| `src/sourcecache.ts` | `vscode`-free: that cache itself (`SourceTextCache`) over an injected `stat`/`read` - a cold read stats the file in the same step (`Promise.all`), so the stamp is known from the first read on and the first validation past the TTL is a stat and not a second read of every file; the idle eviction, the invalidation guard, the working-set cap - `sourcecache.test.ts` runs both sweeps against a fake file system |
 | `src/sharedscan.ts` | `vscode`-free: one scan in flight, joined by every caller that asks for the same thing while it runs and nothing changed since it started - what lets the app index, the class index and the apps tree share the cold scan at activation (`abapsources.ts`) |
-| `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81) |
-| `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, and what a RENAME has to drop (never object identity against a memo) |
+| `src/appclasses.ts` | "Is this class an app?" answered across INHERITANCE: indexes the window's classes so `isAppSource` can follow `INHERITING FROM` to a base class that carries `z2ui5_if_app` (issue #81). LAZY - nothing is read until the window shows an ABAP document, a class with a superclass is asked about or the apps tree asks (the extension activates on any XML file); a watcher event re-reads that one file, a burst or a folder change rebuilds whole |
+| `src/appindex.ts` | `vscode`-free: the app-class index's bookkeeping - per-document contributions, what a RENAME has to drop (never object identity against a memo), the entries the apps tree shows (`AppClassEntry`), the rebuild in slices of `BUILD_SLICE` with a yield between them that a newer rebuild supersedes (`buildAppIndex`), the chain walk over entries (`isAppEntry`) |
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
 | `src/linterrelease.ts` | `LINTER_RELEASE` — the linter version and release commit `esbuild.js` stamped (`LINTER_PIN`, `LINTER_COMMIT`), read there and nowhere else (`linterpin.test.ts` pins that) |
 | `src/text.ts` | `plural(count, noun)` — the one pluralizer behind every counted string users read (dependency-free) |
@@ -131,7 +137,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `scripts/lib/snapshot.mjs` | The one lifecycle the three snapshot generators share: upstream read (local checkout or GitHub raw), shape check, `--check` byte-compare, write |
 | `snippets/` | ABAP snippets contributed to the editor |
 | `media/` | Icons: `icon.svg` (panel), `icon-light/dark.svg` (preview tab), `icon.png` (gallery) |
-| `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js`, and `src/test/` into `dist-test/` |
+| `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js` (plus `src/rendergate-tar.ts` into `dist/rendergate-tar.js` and `src/agent-client.ts` into `dist/agent-client.js`, both loaded on first use), `src/web/extension.ts` into `dist/web/extension.js`, and `src/test/` into `dist-test/` (with its own `agent-client.js`); copies the linter's data files and the extension's own two runtime-read snapshots (`app-template.json`, `client-api.json`) next to the bundles |
 | `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the four weekly `bump-*.yml` callers share |
 
 `dist/`, `dist-test/`, `node_modules/` and `*.vsix` are build output and are
@@ -143,11 +149,11 @@ not committed.
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
 `catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
-`abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `settings.ts`, `linterrelease.ts`, `text.ts`,
+`abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `sourcecache.ts`, `checkschedule.ts`, `settings.ts`, `linterrelease.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`,
+`unitrunner.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
@@ -268,8 +274,26 @@ identity (see Conventions).
   base class holding the interface is a common house pattern and used to make
   the whole extension go quiet on every app built that way. The lookup is
   synchronous by necessity (a CodeLens provider cannot await a scan), so the
-  index is rebuilt in the background; an unknown base class means "not an
-  app", never a guess.
+  index is built in the background - lazily, in slices, and the first ask
+  starts it; an unknown base class means "not an app", never a guess.
+- **Activation stays cheap for a window without ABAP.** `onLanguage:xml`
+  activates the whole extension for any XML file, and there is no narrower
+  event. So nothing sweeps the workspace at activation: the app-class index
+  (`appclasses.ts`), the class index (`classindexsync.ts`), the apps tree
+  (built from the former) and the UI5 snapshot (`snapshot.ts`, read at the
+  first gate or completion) all wait for the first ABAP document, the first
+  check or the first ask. What activation still does: loads the bundle (0.62
+  MB - the render gate's `tar` and the vendored agent client are bundles of
+  their own, loaded on first use), creates the session's channels and status item, reads the 1.5 KB
+  `dist/compat.json`, registers the commands, providers and the four
+  FileSystemWatchers (ABAP sources, test includes, lint configs, baselines),
+  re-checks the checkable documents already open (the visible ones at once,
+  the rest 50 ms apart - `checkschedule.ts`), and probes
+  `mcp.reposRoot` with a few `existsSync` when that setting is set. The web
+  entry additionally reads its three data files (snapshot, client API, icon
+  data) concurrently, because a browser host has no `fs` to read them lazily
+  with - after its registrations, not before them (`web/startup.ts`); only
+  the checks wait for the reads.
 - **The preview reloads on activation, not on save.** A saved ABAP class is
   still inactive on the server, so reloading would show the old version. Keys
   that other ABAP extensions own (F9, Ctrl+F3) are taken over only with a
@@ -379,7 +403,14 @@ Facts an agent cannot see from the code but will trip over:
 - **`esbuild.js` carries two load-bearing hacks** — do not "clean them up":
   the `import.meta.url` define + `scripts/import-meta-url-shim.mjs` inject
   (ESM linter modules bundled into CJS), and `copySnapshot()`, which copies
-  the linter's `data/properties.json` into `dist/` at build time. If
+  the linter's `data/properties.json` into `dist/` at build time (and
+  `copyOwnData()`, which puts the extension's own `src/data/app-template.json`
+  and `src/data/client-api.json` there too - and into `dist-test/` - because
+  neither is bundled any more: together with `tar`, which has its own
+  `dist/rendergate-tar.js`, they were 40% of a 1.1 MB activation bundle that
+  every window parsed for two commands and one hover; the vendored agent
+  client followed into `dist/agent-client.js`, 50 KB for four tools behind
+  a setting that is off by default). If
   `dist/properties.json` is missing, the property gate runs with **no
   metadata and finds nothing**, and completion and hover go quiet with it —
   `snapshot.ts` logs why, which is the only signal you get. The test build
@@ -538,7 +569,9 @@ Facts an agent cannot see from the code but will trip over:
   new knob the linter's config grows belongs in that merge — and never as a
   second implementation of the JSONC parsing or the directive syntax here.
 - **"New Project from Template" hands out abap2UI5/app-template's own files,
-  from a snapshot.** `src/data/app-template.json` carries that repository's
+  from a snapshot.** `src/data/app-template.json` (shipped as
+  `dist/app-template.json`, read on first use - `src/apptemplatefile.ts`)
+  carries that repository's
   `abaplint.jsonc`, `abap2ui5lint.jsonc`, `.claude/settings.json`,
   `.gitattributes`, `.gitignore`, `dependabot.yml`, `AGENTS.md`, its
   `package.json` and its `check.yml` - and, since 0.29.0, its named files
@@ -639,7 +672,10 @@ Facts an agent cannot see from the code but will trip over:
   fails when the copies differ from the recorded commit. **Fix the snapshot
   in mcp-server and re-vendor** (`npm run agent-vendor -- <checkout> --ref
   <commit>`), never in the copy - and update the hand-written `.d.ts` beside
-  it when an export changes shape. What is the extension's own lives in
+  it when an export changes shape. The copies are bundled apart from the
+  extension (`src/agent-client.ts` -> `dist/agent-client.js`) and loaded by
+  `agentapps.ts` on the first app_* call; the web build, which has no
+  system MCP server, never pulls them in. What is the extension's own lives in
   `src/agentapps.ts`: the transport through the auth proxy and the system
   rules around the client. Every local-backend assumption of the client is
   an OPTION of mcp-server's `createAppClient` (its `docs/agent-snapshot.md`,

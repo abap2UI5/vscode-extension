@@ -37,14 +37,31 @@
 import * as http from "http";
 import * as https from "https";
 import { URL } from "url";
-import {
-  AgentError,
-  createAppClient,
-  type AppClient,
-  type AppLocation,
-  type AppTransport,
-} from "./vendor/agent/appclient";
+import { createRequire } from "module";
+import * as path from "path";
+import type { AppClient, AppLocation, AppTransport } from "./vendor/agent/appclient";
 import type { AgentSnapshot } from "./vendor/agent/snapshot";
+
+/**
+ * The vendored client is NOT in this bundle: `esbuild.js` builds
+ * `src/agent-client.ts` into `dist/agent-client.js` next to it, and it is
+ * loaded here on the first app_* call - ~50 KB that every activation parsed
+ * for four tools behind a setting that is off by default. Through
+ * `createRequire`, not `require`: the bundler would inline a literal
+ * `require("./agent-client")`, and it must leave this one for node to
+ * resolve at runtime (the test build puts the same file in `dist-test/`,
+ * next to the test bundles, so the real loader runs there too).
+ */
+type AgentClientModule = typeof import("./agent-client");
+let agentClientModule: AgentClientModule | undefined;
+function agentClient(): AgentClientModule {
+  if (!agentClientModule) {
+    agentClientModule = createRequire(__filename)(
+      path.join(__dirname, "agent-client.js")
+    ) as AgentClientModule;
+  }
+  return agentClientModule;
+}
 import { textResult, type McpTool, type McpToolResult } from "./mcprpc";
 import { TOKEN_COOKIE } from "./proxy";
 import { originOf, proxiedUrl, sapClientOf } from "./urls";
@@ -394,7 +411,7 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
   const endpointOf = (system: AgentSystem): string => {
     const where = agentEndpoint(system.launchUrlFor(PROBE_CLASS));
     if ("problem" in where) {
-      throw new AgentError(where.problem);
+      throw new (agentClient().AgentError)(where.problem);
     }
     return where.endpoint;
   };
@@ -409,11 +426,11 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
       const endpoint = (): string => {
         const active = deps.activeSystem();
         if (!active || active.name !== name) {
-          throw new AgentError(`system '${name}' is no longer the active system`);
+          throw new (agentClient().AgentError)(`system '${name}' is no longer the active system`);
         }
         return endpointOf(active);
       };
-      client = createAppClient({
+      client = agentClient().createAppClient({
         transport: createSystemTransport({
           endpoint,
           proxyBase: (origin) => deps.proxyBase(origin),
@@ -440,7 +457,7 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
     if (active && clients.has(active.name)) {
       return clients.get(active.name)!;
     }
-    nobody ??= createAppClient({
+    nobody ??= agentClient().createAppClient({
       transport: async () => {
         throw new Error("no system");
       },
@@ -472,7 +489,7 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
       }
       return textResult(JSON.stringify(snapshot));
     } catch (err) {
-      if (err instanceof AgentError) {
+      if (err instanceof agentClient().AgentError) {
         return textResult(err.message, true);
       }
       throw err;

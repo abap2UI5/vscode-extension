@@ -7,13 +7,15 @@
  * methods every app calls) had nothing, so the one thing the linter could
  * only report AFTER the fact (popover_display takes xml, not val) is now
  * offered BEFORE it: signature and ABAP Doc, parsed from the interface
- * source by scripts/generate-client-api.mjs and bundled as JSON.
+ * source by scripts/generate-client-api.mjs and shipped as JSON next to the
+ * bundle.
  *
  * `vscode`-free: pure lookups over the bundled data, so the test suite can
  * drive the cursor logic without an editor.
  */
 
-import api from "./data/client-api.json";
+import * as fs from "fs";
+import * as path from "path";
 
 export interface ClientMethod {
   name: string;
@@ -24,15 +26,70 @@ export interface ClientMethod {
   obsolete?: boolean;
 }
 
-const METHODS: ClientMethod[] = (api as { methods: ClientMethod[] }).methods;
-const BY_NAME = new Map(METHODS.map((m) => [m.name.toLowerCase(), m]));
+/*
+ * The reference ships NEXT to the bundle (`dist/client-api.json`, copied
+ * there by `esbuild.js` like `properties.json`) and is read on the first
+ * `client->` completion or hover, not at activation - as an imported JSON
+ * module it was 59 KB of the bundle parsed by every window. Same pattern as
+ * `snapshot.ts`: the desktop reads the file beside `__dirname`, the web
+ * entry hands the text in through `setClientApiText` (there is no `fs` in a
+ * browser host), and a file that cannot be read is an empty reference, with
+ * the reason in `clientApiError`.
+ */
+const FILE = path.join(__dirname, "client-api.json");
+
+let methods: ClientMethod[] | undefined;
+let byName: Map<string, ClientMethod> | undefined;
+let failure: string | undefined;
+
+function adopt(raw: string): void {
+  const parsed = JSON.parse(raw) as { methods?: unknown };
+  if (!Array.isArray(parsed.methods)) {
+    throw new Error("client-api.json carries no methods array");
+  }
+  methods = parsed.methods as ClientMethod[];
+  byName = new Map(methods.map((m) => [m.name.toLowerCase(), m]));
+  failure = undefined;
+}
+
+/** Web build only: the reference arrives as text, read through
+ *  `vscode.workspace.fs`. */
+export function setClientApiText(raw: string): void {
+  try {
+    adopt(raw);
+  } catch (err) {
+    failure = err instanceof Error ? err.message : String(err);
+    methods = [];
+    byName = new Map();
+  }
+}
+
+function loaded(): ClientMethod[] {
+  if (methods === undefined) {
+    try {
+      adopt(fs.readFileSync(FILE, "utf8"));
+    } catch (err) {
+      failure = err instanceof Error ? err.message : String(err);
+      methods = [];
+      byName = new Map();
+    }
+  }
+  return methods as ClientMethod[];
+}
+
+/** Why the reference is empty, or undefined when it loaded. */
+export function clientApiError(): string | undefined {
+  loaded();
+  return failure;
+}
 
 export function clientMethods(): ClientMethod[] {
-  return METHODS;
+  return loaded();
 }
 
 export function clientMethod(name: string): ClientMethod | undefined {
-  return BY_NAME.get(name.toLowerCase());
+  loaded();
+  return byName?.get(name.toLowerCase());
 }
 
 /*

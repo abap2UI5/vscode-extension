@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- **The extension activates with a third less to load.** The project
+  template (300 KB) and the `client->` method reference (59 KB) are no
+  longer part of the code every window parses on activation: they ship next
+  to it and are read the first time "New Project from Template", "Add Agent
+  Setup to Workspace" or a `client->` completion needs them. The archive
+  library the render-gate installer uses (86 KB) is loaded the first time
+  that installer runs, and the client behind the agent app tools (50 KB)
+  the first time an agent calls one. The activation bundle went from 1.1 MB
+  to 0.62 MB, the vscode.dev bundle from 0.75 MB to 0.39 MB; nothing you
+  can do changed.
+- **Less work on every keystroke and save.** The property gate runs once
+  per edit: the lightbulb and the lenses asked for the findings of the new
+  text before the live check ran, and the check then ran the same gate over
+  the same text again. Whether a file is one the view
+  check judges is decided once per edit instead of on every keystroke (for a
+  class that is not an app, that decision read the repository config's
+  timestamps each time); the lenses above a class no longer re-evaluate on
+  every diagnostic another extension publishes, only when one of abap2UI5's
+  own findings moved, and the "Run unit tests" lens no longer looks for the
+  test include on every pass; the reconstructed XML preview reuses the
+  reconstruction the editor already has instead of parsing the class a
+  second time. The first scan of a workspace reads its classes twelve at a
+  time instead of one after the other, and the web build (vscode.dev, the
+  browser-based Business Application Studio) registers its features first
+  and reads its 600 KB of data after, concurrently - a command or a view
+  used to wait for the slowest read; a check asked for before the data is
+  in waits for it.
+- **A window without ABAP in it no longer scans the workspace on
+  activation.** The extension activates for any XML file; the index of app
+  classes (what lets F9, the lenses and the Apps tree recognise a class
+  that inherits `z2ui5_if_app`) is now built when the first ABAP document
+  shows up, in slices that leave the editor responsive, and a change on
+  disk re-reads that one file instead of everything. The Apps tree is a
+  view of that index, so a save moves one node rather than re-reading the
+  workspace - and a save or an open that changes nothing the tree shows
+  (the usual one) does not re-render it at all - and the text the
+  extension keeps of your classes is validated cheaply when it is old (a
+  stat per file, never a second read of the whole workspace) and let go
+  when it has not been used for a while.
+
 - **Add Agent Setup to Workspace.** A new command makes the project in the
   open folder ready for an AI agent - most abap2UI5 projects did not start
   from app-template and have no briefing for one. It adds what

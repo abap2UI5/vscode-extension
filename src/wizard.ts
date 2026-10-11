@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { APP_TEMPLATES, templateSource } from "./template";
 import { projectClassNameError, projectNameFrom, scaffoldFiles, scaffoldText } from "./scaffold";
+import { ensureAppTemplate } from "./apptemplatefile";
 
 /*
  * "New App from Template" - the template gallery behind abap2ui5.newApp.
@@ -124,7 +125,18 @@ export function registerNewApp(context: vscode.ExtensionContext): void {
  * `npm run check` - and the gallery stays with "New App from Template",
  * which adds a class to a repository once it exists.
  */
-export async function newProjectWizard(): Promise<void> {
+export async function newProjectWizard(context: vscode.ExtensionContext): Promise<void> {
+  // the template's files, read from next to the bundle on first use
+  try {
+    await ensureAppTemplate(context);
+  } catch (err) {
+    void vscode.window.showErrorMessage(
+      `abap2UI5: the bundled app template could not be read - ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+    return;
+  }
   const folders = await vscode.window.showOpenDialog({
     canSelectFiles: false,
     canSelectFolders: true,
@@ -256,6 +268,6 @@ export async function newProjectWizard(): Promise<void> {
 
 export function registerNewProject(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
-    vscode.commands.registerCommand("abap2ui5.newProject", () => newProjectWizard())
+    vscode.commands.registerCommand("abap2ui5.newProject", () => newProjectWizard(context))
   );
 }

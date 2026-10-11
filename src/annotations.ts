@@ -336,3 +336,45 @@ export function costAnnotations(
     };
   });
 }
+
+/** The slice of a `vscode.DecorationOptions` the signature reads - the
+ *  range, the text after the line and the hover; `hoverMessage` is a string
+ *  or a `MarkdownString` (`{ value }`). */
+export interface PaintedDecoration {
+  range: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+  hoverMessage?: string | { value: string } | ReadonlyArray<string | { value: string }>;
+  renderOptions?: { after?: { contentText?: string } };
+}
+
+/**
+ * One string that identifies what a decoration list would paint, so a paint
+ * whose result is what the editor already shows can skip `setDecorations`
+ * (a host roundtrip per style, four per editor). The inline pass runs twice
+ * per typing pause: 300 ms after the keystroke, and again when the live
+ * check's diagnostics land ~400 ms after it - and the second paint almost
+ * always re-sent the identical four lists.
+ */
+export function decorationSignature(list: readonly PaintedDecoration[]): string {
+  const hover = (h: PaintedDecoration["hoverMessage"]): string => {
+    if (h === undefined) {
+      return "";
+    }
+    if (typeof h === "string") {
+      return h;
+    }
+    if (Array.isArray(h)) {
+      return (h as ReadonlyArray<string | { value: string }>).map(hover).join("\u0001");
+    }
+    return (h as { value: string }).value;
+  };
+  return list
+    .map(
+      (d) =>
+        `${d.range.start.line}:${d.range.start.character}-${d.range.end.line}:${d.range.end.character}` +
+        `\u0002${d.renderOptions?.after?.contentText ?? ""}\u0002${hover(d.hoverMessage)}`
+    )
+    .join("\u0003");
+}

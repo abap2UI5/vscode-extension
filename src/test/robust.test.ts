@@ -11,7 +11,11 @@ import { navCallsOf, navGraph, navTargetsOf } from "../navmap";
 import { chainFormatEdits } from "../chainformat";
 import { abapNsMap, viewOutline } from "../context";
 import { APP_TEMPLATES, templateSource } from "../template";
-import { TEMPLATE_FILES } from "../scaffold";
+import appTemplate from "../data/app-template.json";
+import { setAppTemplate, templateFiles } from "../scaffold";
+
+setAppTemplate(appTemplate);
+const TEMPLATE_FILES = templateFiles();
 
 /*
  * The readers run on every pause in typing, so a half-written class is not an
