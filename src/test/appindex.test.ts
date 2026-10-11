@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AppClassIndex, BUILD_SLICE, buildAppIndex, isAppEntry, sameAppClassEntry } from "../appindex";
+import {
+  AppClassEntry,
+  AppClassIndex,
+  BUILD_SLICE,
+  buildAppIndex,
+  contributionsOf,
+  isAppEntry,
+  sameAppClassEntry,
+} from "../appindex";
 import { AppClassInfo, appClassInfoOf } from "../abap";
 
 /*
@@ -215,4 +223,36 @@ test("a save that changes nothing the tree shows is no change of the index", () 
       `${JSON.stringify(change)} is what the tree or the walk reads`
     );
   }
+});
+
+test("a file deleted on disk leaves the index after a rebuild that read it", async () => {
+  // the rebuild recorded contributions for the open documents only, so a
+  // class whose file nobody had open could not be removed by its delete
+  // event: it stayed in the Apps tree until the next full rebuild
+  const built = await buildAppIndex([
+    src("file:///zcl_app", APP),
+    src("file:///zcl_sub", sub("zcl_sub", "zcl_app")),
+  ]);
+  assert.ok(built);
+  const index = new AppClassIndex<AppClassEntry>();
+  index.replace(built, contributionsOf(built));
+  assert.equal(index.remove("file:///zcl_sub", (entry) => entry.key), "ZCL_SUB");
+  assert.equal(index.get("ZCL_SUB"), undefined, "the deleted class is gone");
+  assert.ok(index.get("ZCL_APP"), "the other class stays");
+});
+
+test("a file that lost its name to another source does not remove the winner", async () => {
+  // two files define ZCL_DUP; the later one wins the name - deleting the
+  // earlier one must leave the winner's entry alone
+  const built = await buildAppIndex([
+    src("file:///a/zcl_dup", APP.replace("zcl_app", "zcl_dup")),
+    src("file:///b/zcl_dup", APP.replace("zcl_app", "zcl_dup")),
+  ]);
+  assert.ok(built);
+  const contributed = contributionsOf(built);
+  assert.deepEqual([...contributed], [["file:///b/zcl_dup", "ZCL_DUP"]]);
+  const index = new AppClassIndex<AppClassEntry>();
+  index.replace(built, contributed);
+  assert.equal(index.remove("file:///a/zcl_dup", (entry) => entry.key), undefined);
+  assert.equal(index.get("ZCL_DUP")?.key, "file:///b/zcl_dup");
 });

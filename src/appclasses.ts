@@ -5,6 +5,7 @@ import {
   AppClassIndex,
   appClassEntryOf,
   buildAppIndex,
+  contributionsOf,
   isAppEntry,
   sameAppClassEntry,
 } from "./appindex";
@@ -196,7 +197,12 @@ async function rebuildOnce(): Promise<boolean> {
   for (const doc of vscode.workspace.textDocuments) {
     docNames.delete(doc);
   }
-  const contributed = openDocuments(next);
+  // every file read owns the name it won (a deleted file drops it through
+  // that record); an open document's own record overrides its file's
+  const contributed = contributionsOf(next);
+  for (const [key, name] of openDocuments(next)) {
+    contributed.set(key, name);
+  }
   index.replace(next, contributed);
   ready = true;
   refreshed.fire();
@@ -453,7 +459,13 @@ export function registerAppClasses(context: vscode.ExtensionContext): void {
         }
         const key = doc.uri.toString();
         if (onDisk.has(key)) {
-          index.forget(key);
+          // the file is the class again: re-read it (a buffer closed
+          // without saving may have named another class), keeping the
+          // file's contribution so a later delete on disk still drops it
+          if (started) {
+            pendingFiles.set(key, doc.uri);
+            schedule(false);
+          }
         } else {
           index.remove(key, (entry) => entry.key);
         }

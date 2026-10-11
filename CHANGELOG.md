@@ -43,7 +43,9 @@ rather than from a commit on its main branch.
   (the usual one) does not re-render it at all - and the text the
   extension keeps of your classes is validated cheaply when it is old (a
   stat per file, never a second read of the whole workspace) and let go
-  when it has not been used for a while.
+  when it has not been used for a while. A class whose file is deleted,
+  or a file closed after an unsaved rename, leaves the Apps tree at once
+  rather than at the next full rescan.
 
 - **Add Agent Setup to Workspace.** A new command makes the project in the
   open folder ready for an AI agent - most abap2UI5 projects did not start
