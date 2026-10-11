@@ -140,8 +140,10 @@ rather than from a commit on its main branch.
     This Rule to the Baseline* and *Rebuild the View-Check Baseline*
     refuse - with a message saying why - a `baseline` in
     `abap2ui5lint.jsonc` that points outside the workspace folder holding
-    the config, a symbolic link out of it included. They used to overwrite
-    whatever JSON file the config named.
+    the config, a symbolic link out of it included - and a link to a file
+    that does not exist yet, which writing through would have created
+    wherever it points. They used to overwrite whatever JSON file the
+    config named.
   - *Add Agent Setup to Workspace* writes nothing through a symbolic link:
     a project whose `.claude` (or `package.json`, or any other file of the
     setup) is a link has that file skipped and named in the confirmation. A

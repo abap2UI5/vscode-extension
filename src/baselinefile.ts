@@ -86,6 +86,22 @@ export function baselineWriteRefusal(
       "folder names it as this file's baseline"
     );
   }
+  /* A DANGLING link has no real path to compare: realPath( ) fell back to its
+   * own folder, which is inside - and the write then created the link's
+   * target, wherever it points. */
+  let dangling = false;
+  try {
+    dangling = fs.lstatSync(baselineFile).isSymbolicLink() && !fs.existsSync(baselineFile);
+  } catch {
+    // not there at all - an ordinary new file
+  }
+  if (dangling) {
+    return (
+      `refusing to write ${baselineFile} - it is a symbolic link to a file that ` +
+      "does not exist, and writing through it would create that file wherever " +
+      "it points. Remove the link."
+    );
+  }
   const rel = path.relative(realPath(root), realPath(baselineFile));
   if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
     return (
