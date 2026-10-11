@@ -42,6 +42,11 @@ updates:
       # engine floor and moves only WITH engines.vscode - by hand, as one
       # commit. The lockfile may still resolve a newer .d.ts inside the range.
       - dependency-name: "@types/vscode"
+      # @types/node follows engines.node (>=22), not the newest Node: typings
+      # of a later major let the sources call APIs the supported runtime does
+      # not have. Move it with the engine, by hand.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       toolchain:
         patterns: ["*"]
