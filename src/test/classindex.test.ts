@@ -8,6 +8,7 @@ import {
   ClassIndexOf,
   ClassIndexStore,
   LINTER_CLASS_INDEX_OF,
+  hashOf,
 } from "../classindex";
 import { runGate } from "../gate";
 
@@ -430,4 +431,48 @@ test("the gate takes a class index - and with a linter that ignores it, nothing 
     ),
     `${rule} is the true positive on a class with no cs_event of its own`
   );
+});
+
+/*
+ * What the store retains per file - the text only where `readsOf` needs it.
+ */
+
+test("the store keeps the text of the files that read through a reference, and only those", () => {
+  const store = new ClassIndexStore(referenceIndexOf);
+  const base = "CLASS zcl_base DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    CONSTANTS cs_event TYPE string VALUE 'X'.\nENDCLASS.\n";
+  const reader =
+    "CLASS zcl_reader DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    DATA mo_popup TYPE REF TO zcl_popup.\n    METHODS run.\nENDCLASS.\n" +
+    "CLASS zcl_reader IMPLEMENTATION.\n  METHOD run.\n    DATA(lv) = mo_popup->ms_result.\n  ENDMETHOD.\nENDCLASS.\n";
+  const popup = "CLASS zcl_popup DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    DATA ms_result TYPE string.\nENDCLASS.\n";
+  store.set("base", base);
+  assert.equal(store.retainedTextLength, 0, "a file without -> keeps no text");
+  store.set("popup", popup);
+  store.set("reader", reader);
+  assert.equal(store.retainedTextLength, reader.length, "the reading file's text, nothing else");
+  // and the index is still the full build
+  assert.deepEqual(
+    [...store.index()!.get("zcl_popup")!.outsideReads].sort(),
+    [...referenceIndexOf([base, popup, reader]).get("zcl_popup")!.outsideReads].sort()
+  );
+  assert.equal(store.index()!.get("zcl_base")?.csEvent, true);
+});
+
+test("an edit of a file held by hash is still an edit, an identical text still a no-op", () => {
+  let calls = 0;
+  const counting: ClassIndexOf = (sources) => (calls++, referenceIndexOf(sources));
+  const store = new ClassIndexStore(counting);
+  const v1 = "CLASS zcl_a DEFINITION PUBLIC.\nENDCLASS.\n";
+  const v2 = "CLASS zcl_a DEFINITION PUBLIC INHERITING FROM zcl_base.\nENDCLASS.\n";
+  store.set("a", v1);
+  assert.equal(calls, 1);
+  store.set("a", v1);
+  assert.equal(calls, 1, "the same text again computes nothing");
+  const before = store.generation;
+  store.set("a", v2);
+  assert.equal(calls, 2);
+  assert.equal(store.index()!.get("zcl_a")?.superclass, "zcl_base");
+  assert.notEqual(store.generation, before);
+  // the hash tells texts apart that a length alone would not
+  assert.notEqual(hashOf("CLASS zcl_a DEFINITION."), hashOf("CLASS zcl_b DEFINITION."));
+  assert.equal(hashOf("x"), hashOf("x"));
 });

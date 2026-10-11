@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import { isAbapSourceDocument } from "./abap";
 import { sourceLabel } from "./checkcore";
-import { SharedScan } from "./sharedscan";
+import { SharedScan, mapInPool } from "./sharedscan";
+import { SourceTextCache } from "./sourcecache";
 
 /*
  * "Which ABAP does this window know about?" - the one answer four features
@@ -79,37 +80,63 @@ export function isAbapDocument(doc: vscode.TextDocument): boolean {
  *     uris; the per-file `readFile` + decode was the cost worth removing, and
  *     re-globbing keeps a file the watcher never told us about from being
  *     invisible forever.
- *   - an entry expires anyway after `CACHE_TTL_MS`. A FileSystemWatcher can
- *     miss a change (`files.watcherExclude`, a network share), and an
- *     extension that then shows a stale class until the window is reloaded
- *     would be worse than the sweep it replaced. The bursts this exists for -
- *     a debounced refresh, a picker being typed into - all happen inside that
- *     window.
+ *   - an entry is not trusted beyond `CACHE_TTL_MS` on the watcher's word
+ *     alone. A FileSystemWatcher can miss a change (`files.watcherExclude`,
+ *     a network share), and an extension that then shows a stale class
+ *     until the window is reloaded would be worse than the sweep it
+ *     replaced. The bursts this exists for - a debounced refresh, a picker
+ *     being typed into - all happen inside that window. Past it the entry is
+ *     VALIDATED rather than re-read: a `stat`, and the text is kept when the
+ *     file's mtime and size are what they were (it used to be re-read and
+ *     decoded whole - every file of the workspace, on the first sweep after
+ *     half a minute of quiet, which the apps tree ran per save). The stamp
+ *     is taken with the cold read, in the same step - a cold read that
+ *     recorded none made the FIRST validation stat and re-read every file
+ *     anyway, and the idle eviction below usually came before a second.
+ *   - and the cache is a working set, not a session-long copy of the
+ *     workspace: `CACHE_IDLE_MS` after the last sweep it is dropped whole
+ *     (`scheduleIdleEviction`). The consumers that read through it - the
+ *     app-class index's rebuild, the class index's first scan, the
+ *     navigation map, the symbol search - all run rarely once a window is
+ *     up; what they left behind was every class's text, retained for as
+ *     long as the window lived.
  */
 
-/** How long a cached text is trusted without the watcher saying anything. */
+/** How long a cached text is trusted on the watcher's word alone - past it
+ *  the next read validates the entry with a stat. */
 const CACHE_TTL_MS = 30000;
+
+/** How long after the last sweep the cache is dropped whole. */
+const CACHE_IDLE_MS = 5 * 60 * 1000;
+
+/** How many file reads the cold scan keeps in flight at once. */
+const READ_POOL_WIDTH = 12;
 
 /** Above this many remembered files the cache is dropped whole rather than
  *  grown - it is a working set, not an index. */
 const CACHE_MAX_FILES = 4000;
 
-const fileCache = new Map<string, { at: number; text: string }>();
-/** Bumped by every invalidation. A read that was in flight while one landed
- *  may hold the text from BEFORE the change - stored, it was trusted for the
- *  whole TTL, and the rescan the same change scheduled read it back. */
-let invalidations = 0;
+/** The cache itself lives `vscode`-free in sourcecache.ts (its clocks are
+ *  tested against a fake file system there); this is its file system. A
+ *  cold read stats the file in the same step (`Promise.all`), so the stamp
+ *  is known from the first read on and the first validation past the TTL is
+ *  a stat, not a second read of every file. */
+const fileCache = new SourceTextCache<vscode.Uri>(
+  {
+    stat: async (uri) => vscode.workspace.fs.stat(uri),
+    read: async (uri) => DECODER.decode(await vscode.workspace.fs.readFile(uri)),
+  },
+  { ttlMs: CACHE_TTL_MS, idleMs: CACHE_IDLE_MS, maxFiles: CACHE_MAX_FILES }
+);
 
 /** Called by the shared watcher: this file's text is no longer what we read. */
 function forgetFile(uri: vscode.Uri): void {
-  invalidations++;
-  fileCache.delete(uri.toString());
+  fileCache.forget(uri.toString());
 }
 
 /** Everything is suspect - a folder came or went. */
 function forgetAllFiles(): void {
-  invalidations++;
-  fileCache.clear();
+  fileCache.forgetAll();
 }
 
 let watching = false;
@@ -140,6 +167,7 @@ export function watchAbapSources(context: vscode.ExtensionContext): void {
       watching = false;
       listeners.clear();
       forgetAllFiles();
+      fileCache.dispose();
     }),
     watcher.onDidCreate(changed),
     // content changes from outside the editor too - a git pull can turn an
@@ -177,30 +205,17 @@ export function invalidateAbapSource(uri: vscode.Uri): void {
   forgetFile(uri);
 }
 
-/** One file's text, from the cache when it is still fresh. */
-async function readFile(uri: vscode.Uri, now: number): Promise<string | undefined> {
-  const key = uri.toString();
-  const cached = fileCache.get(key);
-  if (cached && now - cached.at < CACHE_TTL_MS) {
-    return cached.text;
-  }
-  const before = invalidations;
-  try {
-    const text = DECODER.decode(await vscode.workspace.fs.readFile(uri));
-    if (before !== invalidations) {
-      return text; // possibly older than the change - answer, do not keep
-    }
-    if (fileCache.size >= CACHE_MAX_FILES) {
-      fileCache.clear();
-    }
-    fileCache.set(key, { at: now, text });
-    return text;
-  } catch {
-    // deleted between the glob and the read, or unreadable - not our
-    // business to report, the next sweep will not find it either
-    fileCache.delete(key);
-    return undefined;
-  }
+/** One file's text, from the cache when it is still fresh - validated by a
+ *  stat past the TTL, read when cold (`sourcecache.ts`). */
+function readFile(uri: vscode.Uri, now: number): Promise<string | undefined> {
+  return fileCache.read(uri.toString(), uri, now);
+}
+
+/** One file's text on disk, through the shared cache - what a consumer that
+ *  updates one entry on a watcher event reads with. Undefined when the file
+ *  is gone or unreadable. */
+export function readAbapSource(uri: vscode.Uri): Promise<string | undefined> {
+  return readFile(uri, Date.now());
 }
 
 /** What one sweep found - see {@link scanAbapSources}. */
@@ -233,22 +248,47 @@ async function scanOnce(
   const seen = new Set<string>();
   const out: AbapSource[] = [];
   const now = Date.now();
+  fileCache.sweepStarted();
+  try {
+    return await sweep(seen, out, now, limit, token);
+  } finally {
+    fileCache.sweepEnded();
+  }
+}
 
+async function sweep(
+  seen: Set<string>,
+  out: AbapSource[],
+  now: number,
+  limit: number,
+  token: vscode.CancellationToken | undefined
+): Promise<AbapSourceScan> {
   const files = await vscode.workspace.findFiles(ABAP_SOURCE_GLOB, EXCLUDE, limit);
-  for (const uri of files) {
-    if (token?.isCancellationRequested) {
-      break;
-    }
-    const key = uri.toString();
+  // The reads go out `READ_POOL_WIDTH` at a time: each is a round trip to
+  // the file service, and one after the other left 644 classes as 644
+  // serial round trips. The answer keeps the glob's order regardless of
+  // which read lands first (the index and the tree are built from it).
+  const read = await mapInPool(
+    files,
+    READ_POOL_WIDTH,
+    async (uri) => {
+      const text = await readFile(uri, now);
+      return text === undefined ? undefined : { uri, text, fromEditor: false };
+    },
+    () => token?.isCancellationRequested === true
+  );
+  for (const source of read) {
+    const key = source.uri.toString();
     if (seen.has(key)) {
       continue;
     }
-    const text = await readFile(uri, now);
-    if (text === undefined) {
-      continue;
-    }
     seen.add(key);
-    out.push({ uri, text, fromEditor: false });
+    out.push(source);
+  }
+  // a file the glob no longer finds (deleted, now excluded) has no business
+  // in the cache - an uncapped sweep saw the whole workspace
+  if (!token && files.length < limit) {
+    fileCache.pruneTo(seen);
   }
 
   for (const doc of vscode.workspace.textDocuments) {
@@ -294,7 +334,7 @@ export function scanAbapSources(
     return scanOnce(limit, token);
   }
   return shared
-    .run(String(limit), invalidations, () => scanOnce(limit, undefined))
+    .run(String(limit), fileCache.invalidations, () => scanOnce(limit, undefined))
     .then((scan) => ({ ...scan, sources: [...scan.sources] }));
 }
 

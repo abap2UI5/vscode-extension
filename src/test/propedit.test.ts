@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { controlCallAt } from "../context";
-import { removeAttributeEdit, setAttributeEdit } from "../propedit";
+import { removeAttributeEdit, sameMessage, setAttributeEdit } from "../propedit";
 import { APP_TEMPLATES } from "../template";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import type { ViewNode } from "@abap2ui5/linter/reconstruct";
@@ -384,4 +384,27 @@ test("removing a middle attribute keeps the blank line that follows it", () => {
       "        )->a( n = `title` v = `x` ).",
     ].join("\n")
   );
+});
+
+test("the Control Properties view skips a post that says what the webview already shows", () => {
+  // every cursor pause used to post `{ type: "none" }` again
+  const none = { type: "none", reason: "Place the cursor on an ele( ) call" };
+  assert.ok(sameMessage(none, { ...none }), "an identical message is not sent again");
+  assert.ok(!sameMessage(none, { ...none, reason: "Open an ABAP class" }));
+  assert.ok(!sameMessage(undefined, none), "nothing posted yet: the first message goes out");
+  const form = { type: "control", tokenStart: 120, rows: [{ name: "text", value: "a" }], addable: [] };
+  assert.ok(sameMessage(form, JSON.parse(JSON.stringify(form))));
+  assert.ok(!sameMessage(form, { ...form, tokenStart: 121 }), "another control is another form");
+  assert.ok(
+    !sameMessage(form, { ...form, rows: [{ name: "text", value: "b" }] }),
+    "a changed value re-renders the form"
+  );
+  // a value JSON cannot express is never "the same" - a skipped post is the
+  // one failure mode this must not have
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  const otherCyclic: Record<string, unknown> = {};
+  otherCyclic.self = otherCyclic;
+  assert.ok(!sameMessage(cyclic, otherCyclic));
+  assert.ok(!sameMessage({ a: 1 }, { a: () => 1 }));
 });

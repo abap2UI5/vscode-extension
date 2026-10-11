@@ -12,7 +12,11 @@ import {
   readCompat,
   releaseParts,
 } from "../compat";
-import { TEMPLATE_FILES, frameworkPin } from "../scaffold";
+import appTemplate from "../data/app-template.json";
+import { frameworkPin, setAppTemplate, templateFiles } from "../scaffold";
+
+setAppTemplate(appTemplate);
+const TEMPLATE_FILES = templateFiles();
 
 /*
  * The record is a FIXTURE here, deliberately: the bundled linter release may

@@ -68,16 +68,49 @@ function wordsOf(text: string): Set<string> {
   return out;
 }
 
+/*
+ * What is kept per file. The TEXT is needed again only by `readsOf`, and
+ * only for a file that reads something through a reference (`->`): every
+ * other file's contribution is its facts, computed once. So the text and
+ * the word set stay only for the `->` files - the others keep a content hash
+ * (`hashOf`), which is all `set` needs to tell an unchanged file from an
+ * edited one. Over samples-controls that is ~16 MB of source the store no
+ * longer holds for the session.
+ */
 interface Entry {
-  text: string;
+  /** The source, for a file that reads through a reference; undefined for
+   *  one that does not (nothing re-reads it). */
+  text: string | undefined;
+  /** `hashOf(text)` - how `set` recognises an unchanged file. */
+  hash: string;
   /** The class the file defines (lower case), or null. */
   name: string | null;
   facts: { superclass: string | null; csEvent: boolean } | null;
-  words: Set<string>;
+  /** The words a class name can be - only for a file with `text`. */
+  words: Set<string> | undefined;
   /** Class -> attribute names this file reads of it; null when stale. */
   reads: Map<string, Set<string>> | null;
   /** The known classes `reads` was computed against (sorted, joined). */
   readsAgainst: string;
+}
+
+/** Whether a file reads anything through a reference - the one case
+ *  `readsOf` needs its text again. */
+function readsThroughReference(text: string): boolean {
+  return text.includes("->");
+}
+
+/** Two FNV-1a 32-bit hashes (different offset bases) plus the length - 64
+ *  bits of content identity, cheap over megabytes. */
+export function hashOf(text: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x050c5d1f;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c, 0x01000193) >>> 0;
+  }
+  return `${text.length}:${a.toString(16)}:${b.toString(16)}`;
 }
 
 export class ClassIndexStore {
@@ -123,17 +156,20 @@ export class ClassIndexStore {
       return;
     }
     const previous = this.entries.get(key);
-    if (previous && previous.text === text) {
+    const hash = hashOf(text);
+    if (previous && (previous.text !== undefined ? previous.text === text : previous.hash === hash)) {
       return;
     }
     const own = this.indexOf([text]);
     const first = own.entries().next();
     const [name, facts] = first.done ? [null, null] : first.value;
+    const keepText = readsThroughReference(text);
     this.entries.set(key, {
-      text,
+      text: keepText ? text : undefined,
+      hash,
       name,
       facts: facts ? { superclass: facts.superclass ?? null, csEvent: Boolean(facts.csEvent) } : null,
-      words: wordsOf(text),
+      words: keepText ? wordsOf(text) : undefined,
       reads: null,
       readsAgainst: "",
     });
@@ -182,7 +218,7 @@ export class ClassIndexStore {
       merged.set(name, { superclass: f.superclass, csEvent: f.csEvent, outsideReads: new Set() });
     }
     for (const entry of this.entries.values()) {
-      if (!entry.text.includes("->")) {
+      if (entry.text === undefined || entry.words === undefined) {
         continue; // reads nothing through a reference
       }
       if (entry.reads === null || !sameKnown) {
@@ -242,6 +278,15 @@ export class ClassIndexStore {
   /** The class a held file defines (lower case), if any. */
   nameOf(key: string): string | null {
     return this.entries.get(key)?.name ?? null;
+  }
+
+  /** How much source text the store holds - the `->` files' only. */
+  get retainedTextLength(): number {
+    let n = 0;
+    for (const entry of this.entries.values()) {
+      n += entry.text?.length ?? 0;
+    }
+    return n;
   }
 
   private readsOf(text: string, against: string[]): Map<string, Set<string>> {

@@ -41,7 +41,7 @@
  * execute a workspace's code, and the web host could not.
  */
 
-import { TEMPLATE_FILES, TEMPLATE_SPEC, withinNpmNameRules } from "./scaffold";
+import { templateFiles, templateSpec, withinNpmNameRules } from "./scaffold";
 
 /** The `agentSetup` key of app-template's template.json. */
 export interface AgentSetupSpec {
@@ -55,10 +55,11 @@ export interface AgentSetupSpec {
   existingVariants?: { files: Record<string, string[]> };
 }
 
-/** The snapshot's agentSetup, or undefined when the snapshot predates it. */
-export const AGENT_SETUP: AgentSetupSpec | undefined = (
-  TEMPLATE_SPEC as { agentSetup?: AgentSetupSpec }
-).agentSetup;
+/** The snapshot's agentSetup, or undefined when the snapshot predates it
+ *  (the snapshot has to be loaded - see `setAppTemplate`). */
+export function agentSetupSpec(): AgentSetupSpec | undefined {
+  return (templateSpec() as { agentSetup?: AgentSetupSpec }).agentSetup;
+}
 
 /** What the plan needs from the workspace folder. Paths are relative,
  *  `/`-separated. `readText` is only called for a path `exists` said yes to. */
@@ -551,12 +552,13 @@ export function planFromSnapshot(
   probe: WorkspaceProbe,
   folderName: string
 ): Promise<AgentSetupPlan> {
-  if (!AGENT_SETUP?.files) {
+  const spec = agentSetupSpec();
+  if (!spec?.files) {
     return Promise.reject(
       new Error("the extension's app-template snapshot has no agentSetup - it predates the agent setup")
     );
   }
-  return planAgentSetup(AGENT_SETUP, TEMPLATE_FILES, probe, folderName);
+  return planAgentSetup(spec, templateFiles(), probe, folderName);
 }
 
 /** The actions that write something. */
