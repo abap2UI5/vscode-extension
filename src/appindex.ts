@@ -87,6 +87,24 @@ export function appClassEntryOf(source: AppSource): AppClassEntry {
   };
 }
 
+/**
+ * Which document contributed each entry of a rebuilt name map, by key - the
+ * record `AppClassIndex.replace` takes. Every file the rebuild read owns the
+ * name it won, not only the open documents: a file deleted on disk is
+ * dropped from the index through that record (`remove`), and without it the
+ * class of a file nobody had open stayed in the Apps tree, and kept
+ * answering `isAppSource`, until the next full rebuild.
+ */
+export function contributionsOf(
+  byName: ReadonlyMap<string, AppClassEntry>
+): Map<string, string> {
+  const contributed = new Map<string, string>();
+  for (const entry of byName.values()) {
+    contributed.set(entry.key, entry.name);
+  }
+  return contributed;
+}
+
 /** Classes parsed per slice of a rebuild before the host gets a turn - the
  *  extension host is shared, and 644 classes parsed in one synchronous loop
  *  (at activation, and after every watcher burst) held it for a while. */
