@@ -206,5 +206,15 @@ test("a symbolic link inside the folder does not carry the write outside", (t) =
     addToBaseline(link, path.join(repo, "zcl_app.clas.abap"), FINDING, repo)
   );
   assert.equal(fs.readFileSync(victim, "utf8"), "{}");
+
+  // a link to a file that does not exist yet: writing through it creates it
+  const away = path.join(outer, "created-outside.json");
+  const dangling = path.join(repo, "dangling-baseline.json");
+  fs.symlinkSync(away, dangling);
+  assert.match(baselineWriteRefusal(dangling, repo) ?? "", /symbolic link to a file that does not exist/);
+  assert.throws(() =>
+    addToBaseline(dangling, path.join(repo, "zcl_app.clas.abap"), FINDING, repo)
+  );
+  assert.ok(!fs.existsSync(away), "the dangling link was written through");
   fs.rmSync(outer, { recursive: true, force: true });
 });
