@@ -1,10 +1,13 @@
 # Monthly dependency updates, opened as pull requests so `npm test`, the
 # typecheck and the web smoke decide whether they are safe.
 #
-# @abap2ui5/linter is deliberately NOT here. It is a git dependency pinned to
-# a commit, and bump-linter.yml already owns it: once a week that workflow
-# re-resolves the pin against the linter's main, runs the full gate, and opens
-# a pull request only if it passed. Letting Dependabot bump it too would mean
+# @abap2ui5/linter is deliberately NOT here. It is an EXACT npm pin (no
+# caret - the bundle ships that release, see AGENTS.md), and bump-linter.yml
+# already owns it: once a week that workflow installs the latest published
+# version, records the commit it was published from in `linterRelease`, runs
+# the full gate, and opens a pull request only if it passed. Dependabot would
+# move the version and not the record, and the render gate would then have
+# nothing to download but the rolling tag. Letting it bump the pin too would mean
 # two pull requests for one decision, and the one without the gate run would
 # be the one that looks simpler to merge.
 version: 2
@@ -34,13 +37,16 @@ updates:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@abap2ui5/linter"
-      # The @types/vscode RANGE is coupled to engines.vscode: `vsce package`
-      # compares the two strings and refuses a types range newer than the
+      # @types/vscode is pinned EXACTLY to engines.vscode's floor: `vsce
+      # package` compares the two strings and refuses typings newer than the
       # engine floor, so a bump here does not produce a red test, it produces
       # an unpackageable extension (bit us on 2026-09-01: ^1.134.0 against
-      # engines ^1.101.0 broke `npm run vsix` on main). The range stays at the
-      # engine floor and moves only WITH engines.vscode - by hand, as one
-      # commit. The lockfile may still resolve a newer .d.ts inside the range.
+      # engines ^1.101.0 broke `npm run vsix` on main). A caret range was no
+      # better the other way round: the lock resolved a newer .d.ts inside it
+      # (1.134.0 against the 1.101 floor), which lets the sources call API
+      # the oldest supported VS Code does not have and only a user on that
+      # version would find out. The pin moves only WITH engines.vscode - by
+      # hand, as one commit; src/test/vscodetypes.test.ts holds the two together.
       - dependency-name: "@types/vscode"
       # @types/node follows engines.node (>=22), not the newest Node: typings
       # of a later major let the sources call APIs the supported runtime does

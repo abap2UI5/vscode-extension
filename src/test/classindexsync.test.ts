@@ -242,6 +242,27 @@ test("a folder change rescans, and a rescan asked for during a scan runs once af
   assert.deepEqual(names(h.sync.index()), ["zcl_z"], "what the rescan did not find is gone");
 });
 
+test("a file created during the first scan is in the index once the scan is through", async () => {
+  // the scan ends with retain( ) over what it globbed BEFORE the file landed;
+  // a readOne racing it had its entry dropped there - and the key left in
+  // onDisk, so opened( )/closed( ) ignored the class until its next change
+  const h = harness({ "file:///a": cls("zcl_a") });
+  const held = h.hold();
+  h.sync.index(); // starts the first scan, held
+  h.disk.set("file:///b", cls("zcl_b"));
+  const during = h.sync.fileChanged("file:///b");
+  held.resolve();
+  await during;
+  await settle();
+  await settle();
+  assert.equal(h.scans(), 1, "a single file is not a rescan");
+  assert.deepEqual(names(h.sync.index()), ["zcl_a", "zcl_b"]);
+  // and it IS the disk's: an editor opening it contributes nothing extra
+  h.sync.opened("file:///b", cls("zcl_b", "INHERITING FROM zcl_a"));
+  await settle();
+  assert.equal(h.sync.index()?.get("zcl_b")?.superclass, null, "the disk's text stays");
+});
+
 test("a workspace that cannot be read still ends the wait - with what it had", async () => {
   const h = harness({ "file:///a": cls("zcl_a") });
   h.failNextScan();

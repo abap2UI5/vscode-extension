@@ -88,6 +88,15 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The callers run with `contents: write` and `pull-requests: write`
+          # because create-pull-request needs both - but the gate between here
+          # and there is `npm ci`, the tests and a VS Code download, hundreds
+          # of packages and their install scripts that need neither. Left to
+          # its default, checkout persists that token into .git/config for all
+          # of them to find. Keep it out; the one step that pushes gets its
+          # token through its `token:` input below and configures git itself.
+          persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:

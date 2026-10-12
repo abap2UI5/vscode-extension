@@ -278,6 +278,62 @@ export function postToShownApp(session: Session, message: unknown): void {
   session.previewProvider?.post(message);
 }
 
+/** Re-sends the theme / language lists to the shown preview, so its pickers
+ *  follow a change of `previewThemes` / `previewLanguages` without a reload. */
+export function refreshPickers(session: Session): void {
+  postToShownApp(session, {
+    type: "pickers",
+    themes: mergedThemes(),
+    languages: mergedLanguages(),
+    theme: session.theme(),
+    language: session.language(),
+  });
+}
+
+/** What the preview answered to an `applyModel` message. */
+export interface ModelAppliedReply {
+  ok: boolean;
+  /** Why not, when `ok` is false - always set then. */
+  reason?: string;
+}
+
+const MODEL_APPLY_TIMEOUT_MS = 5000;
+
+/** The one apply waiting for its `modelApplied` reply - a second apply before
+ *  the first was answered supersedes it. */
+let modelAppliedWaiter: ((reply: ModelAppliedReply) => void) | undefined;
+
+/**
+ * Posts an `applyModel` message and resolves with the preview's verdict.
+ *
+ * The command used to report "applied" the moment the message was posted;
+ * the webview may refuse it (no app loaded, nothing of the model in the
+ * document), and a preview that is not listening answers nothing - so a
+ * timeout stands in for the missing reply.
+ */
+export function applyModelAwaited(
+  session: Session,
+  message: unknown,
+  timeoutMs = MODEL_APPLY_TIMEOUT_MS
+): Promise<ModelAppliedReply> {
+  return new Promise((resolve) => {
+    modelAppliedWaiter?.({ ok: false, reason: "a later apply superseded it" });
+    const settle = (reply: ModelAppliedReply) => {
+      clearTimeout(timer);
+      if (modelAppliedWaiter === settle) {
+        modelAppliedWaiter = undefined;
+      }
+      resolve(reply);
+    };
+    const timer = setTimeout(
+      () => settle({ ok: false, reason: "the preview did not answer" }),
+      timeoutMs
+    );
+    modelAppliedWaiter = settle;
+    postToShownApp(session, message);
+  });
+}
+
 /** What one reload does BESIDES loading the page - the part every caller used
  *  to carry (or forget) on its own. */
 export interface ReloadOptions {
@@ -411,6 +467,8 @@ export function handleWebviewMessage(
         error?: string;
         chain?: unknown;
         device?: string;
+        ok?: boolean;
+        reason?: string;
       }
     | undefined;
   // Inspect mode: a control was clicked in the running app.
@@ -419,6 +477,17 @@ export function handleWebviewMessage(
       session,
       Array.isArray(message.chain) ? (message.chain as RuntimeControl[]) : []
     );
+    return;
+  }
+  // The preview's verdict on an applyModel message - see `applyModelAwaited`.
+  if (message?.type === "modelApplied") {
+    modelAppliedWaiter?.({
+      ok: message.ok === true,
+      reason:
+        typeof message.reason === "string" && message.reason
+          ? message.reason
+          : "the preview gave no reason",
+    });
     return;
   }
   // The app answered the model-dump command.
@@ -701,11 +770,19 @@ export async function movePreview(
    * next F9 opened in the old surface again, and the empty state went back to
    * explaining the other mode. Whichever scope defines it today is the one
    * that has to change.
+   *
+   * Scoped to a resource: without one, inspect( ) never reports a folder
+   * value and VS Code refuses a WorkspaceFolder write, so a folder-level
+   * `openMode` used to be invisible here and the Global value changed under
+   * it. The active editor's document, else the first workspace folder.
    */
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const resource =
+    vscode.window.activeTextEditor?.document.uri ??
+    vscode.workspace.workspaceFolders?.[0]?.uri;
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION, resource);
   const set = cfg.inspect<string>(OPEN_MODE_KEY);
   const scope =
-    set?.workspaceFolderValue !== undefined
+    set?.workspaceFolderValue !== undefined && resource
       ? vscode.ConfigurationTarget.WorkspaceFolder
       : set?.workspaceValue !== undefined
         ? vscode.ConfigurationTarget.Workspace

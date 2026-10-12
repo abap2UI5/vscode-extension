@@ -326,8 +326,19 @@ const shared = new SharedScan<AbapSourceScan>();
  * Only a token-less caller joins or is joined - a cancellation must not end
  * somebody else's scan - and each caller gets its own copy of the list.
  */
+/** The default cap on the glob - for the pickers and the navigation map,
+ *  which show a list a person reads. The INDEXES pass {@link UNCAPPED}:
+ *  a class index built from the first 2000 files of a larger workspace is
+ *  a partial one, and `classindexsync.ts` promises never to hand one out -
+ *  the gate would judge a subclass against a superclass it never saw, and
+ *  F9 and the lenses would go quiet on it, with nothing in the log. */
+export const DEFAULT_FILE_CAP = 2000;
+/** No cap: every file the glob finds. `findFiles` takes a maximum, not an
+ *  "unlimited", so this is the largest one it accepts. */
+export const UNCAPPED = Number.MAX_SAFE_INTEGER;
+
 export function scanAbapSources(
-  limit = 2000,
+  limit = DEFAULT_FILE_CAP,
   token?: vscode.CancellationToken
 ): Promise<AbapSourceScan> {
   if (token) {
@@ -340,7 +351,7 @@ export function scanAbapSources(
 
 /** The sources alone - what every caller but the navigation map needs. */
 export async function abapSources(
-  limit = 2000,
+  limit = DEFAULT_FILE_CAP,
   token?: vscode.CancellationToken
 ): Promise<AbapSource[]> {
   return (await scanAbapSources(limit, token)).sources;

@@ -13,6 +13,7 @@ import {
   directiveLine,
   isCheckableSource,
   isViewSource,
+  mayBeCheckable,
   settleRenderErrors,
   suppressionEdits,
   SuppressionEdit,
@@ -56,6 +57,17 @@ const BUILDER_CLASS =
 // ---------------------------------------------------------------------------
 // isCheckableSource
 // ---------------------------------------------------------------------------
+
+test("mayBeCheckable is the name-and-language half, asked before the text is joined", () => {
+  // the live checks ask this on every change of every document
+  assert.equal(mayBeCheckable("main.view.xml", "xml"), true);
+  assert.equal(mayBeCheckable("zcl_app.clas.abap", "plaintext"), true);
+  assert.equal(mayBeCheckable("untitled-1", "abap"), true);
+  assert.equal(mayBeCheckable("notes.md", "markdown"), false);
+  assert.equal(mayBeCheckable("big.json", "json"), false);
+  // never stricter than isCheckableSource: whatever it admits passes here
+  assert.equal(mayBeCheckable("zcl_app.abap", "plaintext"), true);
+});
 
 test("view and fragment XML are always checkable", () => {
   assert.equal(isCheckableSource("main.view.xml", "xml", "<View/>"), true);

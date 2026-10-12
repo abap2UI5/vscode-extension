@@ -59,6 +59,8 @@ export class ClassIndexSync {
   private readonly onDisk = new Set<string>();
   private scanning: Promise<void> | undefined;
   private rescan = false;
+  /** File events that arrived during a scan - replayed after it. */
+  private readonly afterScan = new Set<string>();
   private started = false;
   private ready = false;
   private disposed = false;
@@ -129,7 +131,19 @@ export class ClassIndexSync {
     if (!this.started || this.disposed) {
       return Promise.resolve(); // the first scan reads it when it is asked for
     }
-    return key === undefined ? this.fullScan() : this.readOne(key);
+    if (key === undefined) {
+      return this.fullScan();
+    }
+    /* While a scan runs, a single file is not read beside it: the scan ends
+     * with `retain(seen)` over the files it globbed BEFORE this one landed,
+     * which dropped the entry readOne had just set - and left its key in
+     * `onDisk`, so opened( ) and closed( ) ignored it until the next change.
+     * Queued instead, and replayed once the scan is through. */
+    if (this.scanning) {
+      this.afterScan.add(key);
+      return this.scanning;
+    }
+    return this.readOne(key);
   }
 
   /** A document was saved: its text is the file's now. */
@@ -188,9 +202,20 @@ export class ClassIndexSync {
     }
     const run = this.scanOnce().finally(() => {
       this.scanning = undefined;
-      if (this.rescan && !this.disposed) {
+      if (this.disposed) {
+        this.afterScan.clear();
+        return;
+      }
+      if (this.rescan) {
         this.rescan = false;
+        this.afterScan.clear(); // the rescan reads them with everything else
         void this.fullScan();
+        return;
+      }
+      const replay = [...this.afterScan];
+      this.afterScan.clear();
+      for (const key of replay) {
+        void this.readOne(key);
       }
     });
     this.scanning = run;
@@ -280,7 +305,14 @@ export class ClassIndexSync {
       if (this.disposed || !this.ready) {
         return;
       }
-      const now = this.store.generation;
+      let now: number;
+      try {
+        // assembles the index (`readsOf` runs the linter over the readers),
+        // and a throw here would be an unhandled exception out of a timer
+        now = this.store.generation;
+      } catch {
+        return;
+      }
       if (now !== this.lastGeneration) {
         this.lastGeneration = now;
         this.deps.onChange();

@@ -6,6 +6,7 @@ import {
   isAbapDocument,
   onDidChangeAbapSources,
   watchAbapSources,
+  UNCAPPED,
 } from "./abapsources";
 
 /*
@@ -26,7 +27,9 @@ const DECODER = new TextDecoder();
 
 const sync = new ClassIndexSync(new ClassIndexStore(), {
   scan: async () =>
-    (await abapSources()).map((source) => ({
+    // every class: the gate's verdicts are only as good as the index, and a
+    // capped one is partial (see UNCAPPED)
+    (await abapSources(UNCAPPED)).map((source) => ({
       key: source.uri.toString(),
       text: source.text,
       fromEditor: source.fromEditor,

@@ -29,17 +29,18 @@ import { labelOf, noWorkspaceFolders } from "./abapsources";
 import {
   augmentedPath,
   CheckerCommand,
+  checkerCwd,
   cliCollects,
+  editorFixPlan,
   FindingSeverity,
   isAllClassesFile,
   isCheckableSource,
   isViewSource,
+  mayBeCheckable,
   parseRenderReport,
-  checkerCwd,
-  RenderGateOutcome,
   renderGateNote,
+  RenderGateOutcome,
   RenderResult,
-  editorFixPlan,
   resolveCheckerCommand,
   scratchFileName,
   settleRenderErrors,
@@ -190,12 +191,39 @@ export function isCheckable(doc: vscode.TextDocument): boolean {
 }
 
 function decideCheckable(doc: vscode.TextDocument): boolean {
-  if (isCheckableSource(doc.fileName, doc.languageId, doc.getText())) {
+  // the name and language first, before the buffer is joined: this runs on
+  // every change of EVERY document, and a multi-megabyte log or JSON file
+  // edited beside the ABAP work paid a full getText( ) per keystroke for a
+  // verdict its name alone decides
+  if (!mayBeCheckable(doc.fileName, doc.languageId)) {
+    return false;
+  }
+  const checkable =
+    isCheckableSource(doc.fileName, doc.languageId, doc.getText()) ||
+    // `allClasses` is the repository config's word - asked only for a class
+    // the content test turned down (the options are cached per config mtime)
+    (isAllClassesFile(doc.fileName) && optionsFor(doc).allClasses === true);
+  if (!checkable) {
+    return false;
+  }
+  /* Only what the CLI's walk would reach - the same rule the workspace sweep
+   * applies (`gateOne`). The live check squiggled a class under a
+   * dot-directory or one the config's `ignore` prunes, the sweep then
+   * deleted those findings as stale, and the next keystroke brought them
+   * back; the Problems count never matched CI for such a file. A document
+   * outside every workspace folder (a class from a system) has no place in
+   * that walk and stays checkable, as in the sweep. */
+  if (doc.uri.scheme !== "file") {
     return true;
   }
-  // `allClasses` is the repository config's word - asked only for a class
-  // the content test turned down (the options are cached per config mtime)
-  return isAllClassesFile(doc.fileName) && optionsFor(doc).allClasses === true;
+  const opts = optionsFor(doc);
+  const root = opts.configFile
+    ? path.dirname(opts.configFile)
+    : vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath;
+  if (!root) {
+    return true;
+  }
+  return cliCollects(path.relative(root, doc.uri.fsPath), { ignore: opts.ignore, root });
 }
 
 /** Does the document build a view of its own - what the systemless preview
@@ -962,16 +990,22 @@ async function sweepWorkspace(
     uri: vscode.Uri;
     open?: vscode.TextDocument;
   }): Promise<
-    | { stamp: string; text?: string }
+    | { stamp: string; text?: string; version?: number }
     | undefined
   > => {
     if (target.open) {
       // always with the text - it is already in memory, and carrying it even
       // on a cache hit means a cache cleared mid-sweep (a config change) can
-      // still be gated instead of skipped
+      // still be gated instead of skipped. The version travels WITH the
+      // text: `checkWorkspace` and `fixWorkspace` compare it against the
+      // document's to decide whether the ranges still describe the buffer,
+      // and a version read later, at gate time, after the batch's I/O and
+      // the yield to the host, was the version of whatever the user had
+      // typed by then - the guard then let old offsets into a new buffer.
       return {
         stamp: `v${target.open.version}|${classIndexStamp(target.uri.toString())}`,
         text: target.open.getText(),
+        version: target.open.version,
       };
     }
     let stamp: string;
@@ -1014,7 +1048,7 @@ async function sweepWorkspace(
   /** One staged target, in the glob's order; true when the gate ran. */
   const gateOne = async (
     target: { uri: vscode.Uri; open?: vscode.TextDocument },
-    io: { stamp: string; text?: string } | undefined,
+    io: { stamp: string; text?: string; version?: number } | undefined,
     index: number
   ): Promise<boolean> => {
     if ((index + 1) % PROGRESS_EVERY === 0 || index === targets.length - 1) {
@@ -1106,7 +1140,7 @@ async function sweepWorkspace(
     swept.push({
       uri,
       findings,
-      version: target.open?.version,
+      version: io.version,
       placed: entry.placed,
       fingerprint: entry.fingerprint,
       configFile: opts.configFile,

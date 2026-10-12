@@ -311,6 +311,8 @@ export function registerCodeLens(context: vscode.ExtensionContext): void {
     }),
     vscode.workspace.onDidCloseTextDocument((doc) => {
       testIncludes.delete(doc.uri.toString());
+      // a document closed with findings still on it stayed in the set
+      withOurFindings.delete(doc.uri.toString());
     })
   );
 }

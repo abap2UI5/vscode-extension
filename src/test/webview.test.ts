@@ -141,6 +141,41 @@ test("the stale badge offers the activation, and the give-up toast is forced", (
   assert.ok(html.includes("msg.force"));
 });
 
+test("the activate badge does not promise Ctrl+F3 outside ADT documents", () => {
+  const html = previewHtml({
+    frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
+    externalUrl: "https://host:44300/sap/bc/z2ui5?app_start=ZCL_X",
+    className: "ZCL_X",
+    theme: "",
+    language: "",
+    modelRoots: [],
+    nonce: "n0nce",
+  });
+  // the keybinding exists for `resourceScheme == adt` only
+  assert.ok(html.includes("Ctrl+F3 in an ADT document"));
+  assert.ok(!html.includes("reload (Ctrl+F3)"));
+});
+
+test("applyModel is answered in every branch, and the pickers can be rebuilt", () => {
+  const html = previewHtml({
+    frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
+    externalUrl: "https://host:44300/sap/bc/z2ui5?app_start=ZCL_X",
+    className: "ZCL_X",
+    theme: "",
+    language: "",
+    modelRoots: ["MT_ITEMS"],
+    nonce: "n0nce",
+  });
+  // the host shows "applied" only on the ok reply - one answer per outcome
+  const replies = html.match(/type: 'modelApplied', ok: (true|false)/g) ?? [];
+  assert.equal(replies.filter((r) => r.endsWith("false")).length, 2);
+  assert.equal(replies.filter((r) => r.endsWith("true")).length, 1);
+  // a changed previewThemes / previewLanguages setting reaches the <select>s
+  assert.ok(html.includes("msg.type === 'pickers'"));
+  assert.ok(html.includes("fillSelect(themeEl, msg.themes, msg.theme)"));
+  assert.ok(html.includes("fillSelect(languageEl, msg.languages, msg.language)"));
+});
+
 test("the screenshot message names the device the preview shows", () => {
   const html = previewHtml({
     frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
@@ -479,7 +514,9 @@ test("an applied model document goes into the app through the restore path", () 
   assert.ok(at > 0, "the applyModel message is not handled");
   assert.ok(html.lastIndexOf("if (fromApp) { return; }", at) > 0);
   // filtered to the class's roots once more, then the hook's restore command
-  const branch = html.slice(at, at + 700);
+  const branch = html.slice(at, at + 1400);
   assert.ok(branch.includes("filteredRestore("));
   assert.ok(branch.includes("__abap2ui5Cmd: 'restore'"));
+  // and the host hears whether it went in
+  assert.ok(branch.includes("type: 'modelApplied', ok: true"));
 });

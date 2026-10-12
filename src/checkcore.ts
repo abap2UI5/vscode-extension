@@ -60,6 +60,14 @@ export function isCheckableSource(
   return declaresApp(text) || Boolean(opts.allClasses && isAllClassesFile(fileName));
 }
 
+/** Could this document be checkable at all, by name and language alone -
+ *  what {@link isCheckableSource} decides before it reads the text. The
+ *  live checks ask this first, so a document that can never be one (a log,
+ *  a JSON file) costs no `getText( )` per keystroke. */
+export function mayBeCheckable(fileName: string, languageId: string | undefined): boolean {
+  return VIEW_XML_RE.test(fileName) || isAbapSource(fileName, languageId);
+}
+
 /** A file `allClasses` makes CI collect: a `*.clas.abap` that is not a
  *  `*.testclasses.abap` (the linter's walk skips those first). */
 export function isAllClassesFile(fileName: string): boolean {
@@ -827,14 +835,17 @@ const shortDigest = (hex: string): string => hex.slice(0, 12);
  * every machine that installs the gate. Pinning the URL to a per-commit tag
  * pins WHICH asset, not WHAT IS IN IT.
  *
- * Two checks, strongest first:
+ * Two checks:
  *
- * 1. A `<bundle>.sha256` sibling asset, when the linter publishes one:
- *    authoritative, and a mismatch is refused outright. (It does not publish
- *    one today; this closes the gap the moment it does, with no release here.)
- * 2. Otherwise trust-on-first-use, per url. A per-commit tag is supposed to be
+ * 1. Trust-on-first-use, per url. A per-commit tag is supposed to be
  *    IMMUTABLE, so the same url answering with different bytes than last time
- *    is precisely the signal worth stopping on - it cannot happen by accident.
+ *    is precisely the signal worth stopping on - it cannot happen by accident,
+ *    and nothing published beside the bundle overrides it (the checksum asset
+ *    sits in the same release, replaceable by the same hands).
+ * 2. A `<bundle>.sha256` sibling asset, when the linter publishes one: a
+ *    mismatch is refused outright, and for the rolling tag, whose bytes move
+ *    by design, it is the only check there is. (It does not publish one
+ *    today; this closes the gap the moment it does, with no release here.)
  *
  * Neither protects a first install against a bundle that was already
  * tampered with; say so rather than implying otherwise.
@@ -846,6 +857,28 @@ const shortDigest = (hex: string): string => hex.slice(0, 12);
  */
 export function bundleTrust(input: BundleTrustInput): BundleTrustDecision {
   const { actual, published, remembered, rolling } = input;
+  /* The immutable url's remembered digest is checked FIRST. The `.sha256`
+   * sibling is fetched from the same release as the bundle, so whoever can
+   * replace the one asset can replace the other, and a published checksum
+   * that agreed with moved bytes used to override what this machine had
+   * verified and installed from the very same url - the one case trust on
+   * first use exists to catch. For a per-commit url the bytes may not move,
+   * published checksum or not. The rolling tag moves by design; there the
+   * published checksum is the stronger word (below). */
+  if (!rolling && remembered && remembered !== actual) {
+    return {
+      accept: false,
+      reason: "immutable-moved",
+      message:
+        "bundle changed since it was last installed from the same URL. That URL " +
+        "names one immutable linter commit, so its content should never move" +
+        (published === actual
+          ? " - and a published checksum that agrees with the new bytes does not make it move legitimately"
+          : "") +
+        `. Expected ${shortDigest(remembered)}…, got ${shortDigest(actual)}…. ` +
+        "Nothing was installed.",
+    };
+  }
   if (published) {
     if (published !== actual) {
       return {

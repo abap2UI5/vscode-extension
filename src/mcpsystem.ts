@@ -14,13 +14,14 @@ import { searchClassRefs, searchClasses } from "./appsearch";
 import {
   createAgentAppTools,
   ENABLE_APP_TOOLS_KEY,
+  PROBE_CLASS,
   type AgentSystem,
 } from "./agentapps";
 import { snapshot } from "./snapshot";
 import { isLoopbackHost, type SapProxy } from "./proxy";
 import { runGate, VIEW_XML_RE } from "./gate";
 import { workspaceClassIndex } from "./classindexfeed";
-import { withParams } from "./urls";
+import { originOf, sapClientOf, withParams } from "./urls";
 import { CONFIG_SECTION } from "./settings";
 
 /*
@@ -107,7 +108,24 @@ function shareConnect(
 
 function buildTools(deps: SystemMcpDeps): McpTool[] {
   // every tool that may prompt goes through the shared flow, not deps.connect
-  const connect = shareConnect(() => deps.connect());
+  const connectFlow = shareConnect(() => deps.connect());
+  /* The connect flow restarts the proxy's credentials, and that resets its
+   * breaker after a rejected logon - so an agent that retries `search_apps`
+   * or `run_app_on_system` on a wrong password re-sent it to the system once
+   * per call, up to the lockout. The app_* tools skip the flow while the
+   * proxy already forwards to the active system (`served` in agentapps.ts);
+   * these two now do the same, and the breaker holds until the user acts. */
+  const connect = async (): Promise<{ sapClient?: string } | undefined> => {
+    const active = deps.activeSystem?.();
+    if (active && deps.proxy.isRunning) {
+      const launchUrl = active.launchUrlFor(PROBE_CLASS);
+      const origin = originOf(launchUrl);
+      if (origin && deps.proxy.systemOrigin === origin) {
+        return { sapClient: sapClientOf(launchUrl) };
+      }
+    }
+    return connectFlow();
+  };
   const tools: McpTool[] = [
     {
       name: "list_systems",
@@ -457,12 +475,30 @@ export function createSystemMcpServer(
     }
     let body = "";
     req.setEncoding("utf8");
-    for await (const chunk of req) {
-      body += chunk;
-      if (body.length > BODY_CAP) {
-        res.writeHead(413).end();
-        return;
-      }
+    /* Not `for await` with a `return` inside: leaving the loop early calls
+     * the iterator's return( ), which destroys the half-read request and the
+     * socket with it - the 413 just written may never reach the client.
+     * Collected on events instead, the rest of the body drained, and the
+     * answer flushed before anything is torn down. */
+    const tooLarge = await new Promise<boolean>((resolve, reject) => {
+      let capped = false;
+      req.on("data", (chunk: string) => {
+        if (capped) {
+          return;
+        }
+        body += chunk;
+        if (body.length > BODY_CAP) {
+          capped = true;
+          body = "";
+          req.resume();
+        }
+      });
+      req.on("end", () => resolve(capped));
+      req.on("error", reject);
+    });
+    if (tooLarge) {
+      res.writeHead(413).end();
+      return;
     }
     let parsed: unknown;
     try {

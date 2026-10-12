@@ -293,6 +293,14 @@ export async function activateAndReload(session: Session): Promise<void> {
  *  that was merely warming up. */
 const CHECK_TIMEOUT_MS = 30_000;
 
+/** The proxy could not start - told apart from a probe failure, which is
+ *  the system's. */
+class ProxyStartError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
 /**
  * "abap2UI5: Check System Connection" - probes the active system's launch URL
  * and reports step by step where a launch would end, with the fix next to the
@@ -363,8 +371,16 @@ export async function checkConnection(session: Session): Promise<void> {
               aborter.abort(new Error("connection check cancelled"));
             });
             // The same start( ) a launch goes through: it clears a previous
-            // rejection and holds the credentials the fetch injects.
-            await session.proxy.start(origin, creds.user, creds.pass);
+            // rejection and holds the credentials the fetch injects. Its
+            // failure is the proxy's (a loopback port in use, a refused
+            // listen), not the system's - reported as such rather than
+            // falling into the probe's catch, which would call the host
+            // unreachable.
+            try {
+              await session.proxy.start(origin, creds.user, creds.pass);
+            } catch (err) {
+              throw new ProxyStartError(err);
+            }
             // `background`: the check owns its own messaging. Everything it
             // needs - status, WWW-Authenticate, body - comes back in the
             // answer, so letting this probe run through `onResponse` bought
@@ -434,16 +450,28 @@ export async function checkConnection(session: Session): Promise<void> {
           session.log(`connection check: cancelled (${system.name})`);
           return;
         }
-        const failure = err as { code?: unknown; message?: unknown };
-        steps.push(
-          describeConnectFailure({
-            code: typeof failure?.code === "string" ? failure.code : undefined,
-            message:
-              typeof failure?.message === "string"
-                ? failure.message
-                : String(err),
-          })
-        );
+        if (err instanceof ProxyStartError) {
+          steps.push({
+            label: "Local auth proxy",
+            ok: false,
+            detail: `could not start the proxy - ${err.message}`,
+            fix:
+              "The proxy listens on a loopback port VS Code's Node picks; " +
+              "another process may hold it, or a policy refuses the listen. " +
+              'Retry, or set abap2ui5.openMode to "external" to run without it.',
+          });
+        } else {
+          const failure = err as { code?: unknown; message?: unknown };
+          steps.push(
+            describeConnectFailure({
+              code: typeof failure?.code === "string" ? failure.code : undefined,
+              message:
+                typeof failure?.message === "string"
+                  ? failure.message
+                  : String(err),
+            })
+          );
+        }
       }
     }
   }
@@ -505,6 +533,15 @@ export function watchProxyStatus(session: Session): void {
     }
     if (reason) {
       session.log(`proxy: it says "${reason}"`);
+    }
+    /* A 403 is not a rejected logon: the credentials were accepted and the
+     * user lacks an authorization for the service - or a CSRF layer answers
+     * the agent client's first POST with 403 + "X-CSRF-Token: Required", the
+     * normal handshake. The connection check and the activation watch read
+     * it that way; this path offered "Re-enter Credentials" for it, and that
+     * button deletes a password that works. Logged, and no offer. */
+    if (status === 403) {
+      return;
     }
     const now = Date.now();
     if (now - session.lastAuthPrompt < 30_000) {

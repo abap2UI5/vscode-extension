@@ -43,8 +43,63 @@ export function registerNavMap(
   log: (m: string) => void
 ): void {
   let panel: vscode.WebviewPanel | undefined;
+  // The render in flight, so a second "Show App Navigation Map" while the
+  // scan runs joins it instead of starting a second scan.
+  let inFlight: Promise<void> | undefined;
 
-  const render = async () => {
+  const ensurePanel = (): vscode.WebviewPanel => {
+    if (panel) {
+      panel.reveal();
+      return panel;
+    }
+    panel = vscode.window.createWebviewPanel(
+      "abap2ui5.navmap",
+      "abap2UI5 App Navigation",
+      { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
+      { enableScripts: true }
+    );
+    panel.iconPath = {
+      light: vscode.Uri.joinPath(context.extensionUri, "media", "icon-light.svg"),
+      dark: vscode.Uri.joinPath(context.extensionUri, "media", "icon-dark.svg"),
+    };
+    panel.onDidDispose(() => {
+      panel = undefined;
+    });
+    panel.webview.onDidReceiveMessage(
+      async (msg: { type?: string; file?: string; offset?: number }) => {
+        // the map's own refresh button - a rescan without the palette
+        if (msg?.type === "refresh") {
+          void render();
+          return;
+        }
+        if (msg?.type !== "open" || !msg.file) {
+          return;
+        }
+        try {
+          const doc = await vscode.workspace.openTextDocument(
+            vscode.Uri.parse(msg.file)
+          );
+          // an edge carries the nav_app_call's offset; a node opens plain
+          const at =
+            typeof msg.offset === "number" && msg.offset >= 0
+              ? doc.positionAt(Math.min(msg.offset, doc.getText().length))
+              : undefined;
+          await vscode.window.showTextDocument(doc, {
+            preview: false,
+            selection: at ? new vscode.Range(at, at) : undefined,
+          });
+        } catch (err) {
+          log(`nav-map: could not open ${msg.file} - ${String(err)}`);
+        }
+      }
+    );
+    return panel;
+  };
+
+  const renderOnce = async () => {
+    // The panel exists BEFORE the scan is awaited: two invocations during
+    // the scan used to each find `panel` undefined and create two panels.
+    ensurePanel();
     const { sources, cappedFiles } = await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Window,
@@ -67,51 +122,9 @@ export function registerNavMap(
           truncated ? " - cap reached, apps beyond it are missing" : ""
         })`
     );
-
+    // closed while the scan ran - nothing to draw into
     if (!panel) {
-      panel = vscode.window.createWebviewPanel(
-        "abap2ui5.navmap",
-        "abap2UI5 App Navigation",
-        { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
-        { enableScripts: true }
-      );
-      panel.iconPath = {
-        light: vscode.Uri.joinPath(context.extensionUri, "media", "icon-light.svg"),
-        dark: vscode.Uri.joinPath(context.extensionUri, "media", "icon-dark.svg"),
-      };
-      panel.onDidDispose(() => {
-        panel = undefined;
-      });
-      panel.webview.onDidReceiveMessage(
-        async (msg: { type?: string; file?: string; offset?: number }) => {
-          // the map's own refresh button - a rescan without the palette
-          if (msg?.type === "refresh") {
-            void render();
-            return;
-          }
-          if (msg?.type !== "open" || !msg.file) {
-            return;
-          }
-          try {
-            const doc = await vscode.workspace.openTextDocument(
-              vscode.Uri.parse(msg.file)
-            );
-            // an edge carries the nav_app_call's offset; a node opens plain
-            const at =
-              typeof msg.offset === "number" && msg.offset >= 0
-                ? doc.positionAt(Math.min(msg.offset, doc.getText().length))
-                : undefined;
-            await vscode.window.showTextDocument(doc, {
-              preview: false,
-              selection: at ? new vscode.Range(at, at) : undefined,
-            });
-          } catch (err) {
-            log(`nav-map: could not open ${msg.file} - ${String(err)}`);
-          }
-        }
-      );
-    } else {
-      panel.reveal();
+      return;
     }
     panel.webview.html = navMapHtml({
       nonce: createNonce(),
@@ -122,7 +135,19 @@ export function registerNavMap(
     });
   };
 
+  const render = (): Promise<void> => {
+    if (!inFlight) {
+      inFlight = renderOnce().finally(() => {
+        inFlight = undefined;
+      });
+    }
+    return inFlight;
+  };
+
   context.subscriptions.push(
+    // closed with the extension - a panel left behind at teardown would be a
+    // webview whose message handler is gone
+    new vscode.Disposable(() => panel?.dispose()),
     vscode.commands.registerCommand("abap2ui5.showNavMap", () => render())
   );
 }
