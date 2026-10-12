@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { run } from "./childproc";
 import { offerInstall, renderGateBrowsers } from "./rendergate";
@@ -156,8 +157,13 @@ export async function takeScreenshot(
     screenshotFileName(options.className, new Date(), shotSequence)
   );
 
+  // A profile of its own, gone after the shot: the cookie the proxy's first
+  // authorized answer plants is a session credential, and without this flag
+  // headless Chromium wrote it into the user's persistent default profile.
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "abap2ui5-shot-"));
   const args = [
     "--headless=new",
+    `--user-data-dir=${profile}`,
     "--disable-gpu",
     "--hide-scrollbars",
     `--window-size=${options.width ?? 1280},${options.height ?? 900}`,
@@ -209,6 +215,13 @@ export async function takeScreenshot(
         (err instanceof Error ? err.message : String(err))
     );
     return undefined;
+  } finally {
+    try {
+      fs.rmSync(profile, { recursive: true, force: true });
+    } catch {
+      // a profile Chromium still holds a handle on - the temp dir is cleaned
+      // by the OS, and the next shot gets a fresh one anyway
+    }
   }
   if (!fs.existsSync(file)) {
     // a clean exit without a PNG says why only on stderr, which the

@@ -195,6 +195,13 @@ async function buildTests() {
     .readdirSync(dir)
     .filter((f) => f.endsWith(".test.ts"))
     .map((f) => path.join(dir, f));
+  // Start from nothing: `npm test` runs `dist-test/*.test.cjs`, so the bundle
+  // of a test that was renamed or deleted would keep running (and keep
+  // passing, or failing on a module that no longer exists) until somebody
+  // removed the directory by hand. Everything below recreates what the tests
+  // read next to themselves (properties.json, compat.json, the own data
+  // files, the agent client).
+  fs.rmSync("dist-test", { recursive: true, force: true });
   await esbuild.build({
     entryPoints,
     bundle: true,

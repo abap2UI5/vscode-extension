@@ -31,7 +31,7 @@ import { registerAppView } from "./appview";
 import { registerDiagnosticsReport } from "./diagnosticsreport";
 import { classNameOf } from "./abap";
 import { isAppSource, registerAppClasses } from "./appclasses";
-import { proxiedUrl, shortUrl } from "./urls";
+import { originOf, proxiedUrl, shortUrl } from "./urls";
 import { registerAppSearch } from "./appsearch";
 import { registerNewApp, registerNewProject } from "./wizard";
 import { registerAgentSetup } from "./agentsetupview";
@@ -54,10 +54,12 @@ import {
   TEMPLATE_KEY,
 } from "./session";
 import {
+  applyModelAwaited,
   modelRootsOf,
   movePreview,
   postToShownApp,
   PreviewViewProvider,
+  refreshPickers,
   reloadShownApp,
 } from "./preview";
 import {
@@ -273,6 +275,14 @@ export function activate(context: vscode.ExtensionContext): void {
       ) {
         provider.refreshWelcome();
       }
+      // The pickers in a running preview were built from the lists at load
+      // time - a theme added to the setting did not show up until the next F9.
+      if (
+        e.affectsConfiguration(`${CONFIG_SECTION}.previewThemes`) ||
+        e.affectsConfiguration(`${CONFIG_SECTION}.previewLanguages`)
+      ) {
+        refreshPickers(session);
+      }
       if (
         e.affectsConfiguration(`${CONFIG_SECTION}.${ALLOW_UNAUTHORIZED_KEY}`)
       ) {
@@ -345,6 +355,22 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
+      /* The proxy may have been restarted for another system since the app
+       * was shown (the connection check, an agent's connect) - then the
+       * target's frameUrl still carries the old port and token, which
+       * `singleUseUrl` hands back unchanged, and Chromium shot a
+       * connection-refused page with a dead token in its argument vector.
+       * The screenshot is of the app on the system the proxy forwards to,
+       * or it is not taken. */
+      const externalUrl = session.currentTarget.externalUrl;
+      const url = proxiedUrl(externalUrl, session.proxy.origin);
+      if (!url || session.proxy.systemOrigin !== originOf(externalUrl)) {
+        vscode.window.showInformationMessage(
+          "abap2UI5: the auth proxy now forwards to another system - run the app " +
+            "again (F9) before taking a screenshot."
+        );
+        return;
+      }
       // the same numbers the preview stage frames the app with
       const widths: Record<string, number | undefined> = DEVICE_WIDTHS;
       const width = typeof device === "string" ? widths[device] : undefined;
@@ -352,8 +378,10 @@ export function activate(context: vscode.ExtensionContext): void {
         context,
         {
           // A one-shot url: Chromium takes the page only as a command line
-          // argument, which every process of this user can read.
-          url: session.proxy.singleUseUrl(session.currentTarget.frameUrl),
+          // argument, which every process of this user can read. Minted from
+          // the external url and the proxy as it runs NOW, not from the
+          // frameUrl the app was shown with.
+          url: session.proxy.singleUseUrl(url),
           className: session.currentTarget.className,
           width,
         },
@@ -415,11 +443,11 @@ export function activate(context: vscode.ExtensionContext): void {
         },
         mode === "panel"
           ? {
-              label: "$(window) Move Preview to an Editor Tab",
+              label: "$(window) Show the Preview in an Editor Tab",
               run: () => vscode.commands.executeCommand("abap2ui5.previewInTab"),
             }
           : {
-              label: "$(layout-panel) Move Preview to the Panel",
+              label: "$(layout-panel) Show the Preview in the Panel",
               run: () => vscode.commands.executeCommand("abap2ui5.previewInPanel"),
             },
         {
@@ -499,8 +527,17 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.showWarningMessage(`abap2UI5: cannot apply the model - ${result.error}`);
         return;
       }
-      postToShownApp(session, result.message);
       const applied = Object.keys(result.message.data);
+      // "applied" only once the preview says so - it may refuse (no app
+      // loaded, nothing of the model in the document) or not be listening.
+      const reply = await applyModelAwaited(session, result.message);
+      if (!reply.ok) {
+        log(`model-apply: ${target.className} - not applied: ${reply.reason}`);
+        vscode.window.showWarningMessage(
+          `abap2UI5: the model was not applied - ${reply.reason}.`
+        );
+        return;
+      }
       log(
         `model-apply: ${target.className} <- ${applied.join(", ")}` +
           (result.dropped.length ? ` (dropped: ${result.dropped.join(", ")})` : "")

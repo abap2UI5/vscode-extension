@@ -28,8 +28,10 @@ name: Release
 #   Open VSX
 #     1. Sign in on open-vsx.org with GitHub and create an access token.
 #     2. Claim the namespace ONCE - publishing into a namespace that does
-#        not exist fails:
-#           npx ovsx create-namespace abap2ui5 -p <token>
+#        not exist fails. With the ovsx version this workflow pins
+#        (OVSX_VERSION below), not whatever the registry serves today; ovsx
+#        reads the token from OVSX_PAT:
+#           OVSX_PAT=<token> npx --yes ovsx@<OVSX_VERSION> create-namespace abap2ui5
 #     3. Store the token as the repository secret OVSX_PAT.
 #
 # Each publish is skipped while its secret is unset, so a release without
@@ -37,6 +39,20 @@ name: Release
 # attached - and a release that reached only ONE marketplace is finished by
 # re-running this workflow, which publishes the missing half and treats the
 # other's "already exists" as done.
+#
+# ---------------------------------------------------------------------------
+# Four jobs, because of what the token can do in each. The build runs
+# `npm ci`, the tests and two VS Code downloads - hundreds of packages and
+# their install scripts - and none of that needs to write to the repository.
+# It used to run with a `contents: write` GITHUB_TOKEN that actions/checkout
+# had persisted into .git/config, so every dependency in the tree could have
+# pushed a tag or cut a release. Now `build` and `desktop` get a read token
+# and keep it out of the checkout, `release` is the only job with
+# `contents: write` and runs no npm at all - it downloads the .vsix the build
+# uploaded, tags, and creates the release - and `publish` installs the tree
+# again, read-only, for the pinned vsce (ovsx comes through npx at a pinned
+# version) and the two marketplace tokens. Every step that writes names the
+# token it uses; nothing gets one by being in the same job.
 # ---------------------------------------------------------------------------
 on:
   push:
@@ -44,22 +60,63 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      tagged: ${{ steps.meta.outputs.tagged }}
+      vsix: ${{ steps.meta.outputs.vsix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job pushes, so no token in .git/config for
+          # `npm ci` and the tests to find.
+          persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
 
+      # The same two caches ci.yml keeps: playwright's Chromium (fetched by
+      # npm ci through @vscode/test-web's tree) and the VS Code web build
+      # that `npm run test:web` downloads. Browser-sized downloads both.
+      - name: Cache the playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ms-playwright-${{ runner.os }}-
+
+      - name: Work out the test-host version to key the cache on
+        id: hosts
+        run: |
+          node -e '
+            const l = require("./package-lock.json");
+            const fs = require("fs");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              `web=${l.packages["node_modules/@vscode/test-web"]?.version ?? "none"}\n`);
+          '
+
+      - name: Cache the VS Code web build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .vscode-test-web
+          key: vscode-test-web-${{ runner.os }}-${{ steps.hosts.outputs.web }}
+
       - name: Work out which tag to release
         id: meta
+        env:
+          # The checkout kept no credentials, so the tag lookup below gets
+          # the (read) token by hand - the repository is public and the lookup
+          # would work anonymously, but it should not depend on that staying so.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           version=$(node -p "require('./package.json').version")
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
@@ -72,13 +129,14 @@ jobs:
           else
             # Started by hand: the manifest decides the tag.
             tag="v$version"
+            origin="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             # The peeled ref (^{}) is the COMMIT an annotated tag points at;
             # the plain ref would be the tag object, and a retry after an
             # annotated `git tag -a` compared that against the commit and
             # refused. A lightweight tag has no peeled ref: fall back.
-            remote=$(git ls-remote --tags origin "refs/tags/$tag^{}" | cut -f1)
+            remote=$(git ls-remote --tags "$origin" "refs/tags/$tag^{}" | cut -f1)
             if [ -z "$remote" ]; then
-              remote=$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)
+              remote=$(git ls-remote --tags "$origin" "refs/tags/$tag" | cut -f1)
             fi
             # An existing tag on THIS commit is a retry of a run that got as
             # far as tagging - re-running after a marketplace token failed is
@@ -92,7 +150,7 @@ jobs:
               echo "missing half from the .vsix that was actually released, so both marketplaces"
               echo "carry identical bytes for $tag -"
               echo "    gh release download $tag --pattern '*.vsix'"
-              echo "    npx ovsx publish abap2ui5-$version.vsix -p <token>   # or: npx vsce publish --packagePath ..."
+              echo "    OVSX_PAT=<token> npx --yes ovsx@1.2.0 publish abap2ui5-$version.vsix   # or: npx vsce publish --packagePath ..."
               echo "Otherwise this is a new release: bump the version in package.json and add a"
               echo "CHANGELOG.md section for it."
               echo "::error::$tag is already released from commit ${remote:0:12} - releasing it again from here would publish different content under a version that is already out"
@@ -137,25 +195,102 @@ jobs:
       # was before.
       - run: npm run test:web
 
+      # The .vsix the release job attaches, so the bytes that were tested are
+      # the bytes that ship - the release job builds nothing.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.meta.outputs.vsix }}
           path: ${{ steps.meta.outputs.vsix }}
           if-no-files-found: error
 
+  # The desktop half of the same question the web smoke test answers, and the
+  # one ci.yml gate a release still skipped: `src/extension.ts`, the Session
+  # wiring and `dist/properties.json` resolved next to the packaged bundle
+  # only prove themselves in a real VS Code. Same job as ci.yml's `desktop`,
+  # step for step, so the two cannot drift apart.
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache the playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ms-playwright-${{ runner.os }}-
+
+      - name: Work out the test-host version to key the cache on
+        id: hosts
+        run: |
+          node -e '
+            const l = require("./package-lock.json");
+            const fs = require("fs");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              `electron=${l.packages["node_modules/@vscode/test-electron"]?.version ?? "none"}\n`);
+          '
+
+      # @vscode/test-electron downloads a full VS Code into ./.vscode-test.
+      - name: Cache the VS Code desktop build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .vscode-test
+          key: vscode-test-electron-${{ runner.os }}-${{ steps.hosts.outputs.electron }}
+
+      - run: npm ci
+
+      # xvfb because Electron needs a display; ABAP2UI5_DESKTOP_TEST_REQUIRED
+      # because the runner is allowed to skip itself in a restricted
+      # environment and that must never quietly become true here.
+      - name: Run the desktop smoke test
+        env:
+          ABAP2UI5_DESKTOP_TEST_REQUIRED: "1"
+        run: xvfb-run -a npm run test:desktop
+
+  # The only job that writes. No npm here: it needs the manifest's changelog
+  # and the commit to tag, both of which the checkout has, and the .vsix,
+  # which the build uploaded.
+  release:
+    needs: [build, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The one push below names its token itself (`Tag the commit`).
+          persist-credentials: false
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ${{ needs.build.outputs.vsix }}
+
       # Only for a manual run - a tag-triggered run already has its tag.
       # Pushing with GITHUB_TOKEN does not start another workflow run, so
       # this cannot loop back into the tag trigger above.
       - name: Tag the commit
-        if: github.event_name == 'workflow_dispatch' && steps.meta.outputs.tagged == ''
+        if: github.event_name == 'workflow_dispatch' && needs.build.outputs.tagged == ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
         run: |
-          git tag "${{ steps.meta.outputs.tag }}"
-          git push origin "${{ steps.meta.outputs.tag }}"
+          git tag "$TAG"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TAG"
 
       # Release notes come from the matching CHANGELOG.md section.
       - name: Collect the release notes
         run: |
-          version="${{ steps.meta.outputs.version }}"
+          version="${{ needs.build.outputs.version }}"
           awk -v header="## $version" '
             $0 == header { inside = 1; next }
             inside && /^## / { exit }
@@ -169,13 +304,13 @@ jobs:
             echo "## Installation"
             echo ""
             echo '```bash'
-            echo "code --install-extension ${{ steps.meta.outputs.vsix }}"
+            echo "code --install-extension ${{ needs.build.outputs.vsix }}"
             echo '```'
             echo ""
             echo "Or: Extensions panel → \`…\` menu → **Install from VSIX…**"
           } >> release-notes.md
 
-      # Idempotent on purpose. The marketplace publishes come after this step,
+      # Idempotent on purpose. The marketplace publishes come after this job,
       # so a missing or expired token fails the run with the release already
       # created - and the fix for that is to re-run this workflow, which must
       # not then die on "release already exists". Re-running replaces the
@@ -183,17 +318,46 @@ jobs:
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.meta.outputs.tag }}
-          VSIX: ${{ steps.meta.outputs.vsix }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VSIX: ${{ needs.build.outputs.vsix }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "::notice::$TAG is already released - replacing the .vsix asset"
             gh release upload "$TAG" "$VSIX" --clobber
           else
             gh release create "$TAG" "$VSIX" \
-              --title "abap2UI5 ${{ steps.meta.outputs.version }}" \
+              --title "abap2UI5 ${{ needs.build.outputs.version }}" \
               --notes-file release-notes.md
           fi
+
+  # The marketplaces get the same bytes the GitHub release carries. This job
+  # needs node_modules again - for the pinned vsce, nothing else; ovsx is
+  # fetched at its pinned version by npx - and gets the read token like the
+  # build does; the only credentials it holds are the two marketplace tokens,
+  # and only in the step that uses them.
+  publish:
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      # Neither publisher needs a browser; this is the sandbox install from
+      # AGENTS.md, for the same reason - nothing here runs a test.
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ${{ needs.build.outputs.vsix }}
 
       # The secrets context is not reliably available in step-level `if`,
       # so turn "is the token configured" into step outputs first. A publish
@@ -225,11 +389,14 @@ jobs:
       - name: Publish the same .vsix to both marketplaces
         if: steps.tokens.outputs.vsce == 'true' || steps.tokens.outputs.ovsx == 'true'
         env:
+          # Both CLIs read their token from the environment - vsce VSCE_PAT,
+          # ovsx OVSX_PAT - so neither appears on a command line.
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-          VSIX: ${{ steps.meta.outputs.vsix }}
+          VSIX: ${{ needs.build.outputs.vsix }}
           VSCE: ${{ steps.tokens.outputs.vsce }}
           OVSX: ${{ steps.tokens.outputs.ovsx }}
+          OVSX_VERSION: "1.2.0"
         run: |
           # Runs one publish command, and reports whether the version is now
           # up there - by publishing it, or by having been there already.
@@ -263,9 +430,15 @@ jobs:
           # Studio. OVSX_PAT is a token from open-vsx.org; the `abap2ui5`
           # namespace has to exist first (`ovsx create-namespace`) and the
           # Eclipse publisher agreement has to be signed.
+          # ovsx is pinned to an exact version HERE, not as a devDependency:
+          # a publisher that resolved "whatever is latest" on release day was
+          # the one unpinned piece of the toolchain - but in the tree it drags
+          # a second @vscode/vsce (3.x) with an open advisory into every
+          # contributor's `npm audit`, for a tool only this step runs. Bump
+          # OVSX_VERSION by hand with a release of ovsx.
           # https://github.com/eclipse/openvsx/wiki/Publishing-Extensions
           if [ "$OVSX" = "true" ]; then
-            publish "Open VSX" npx --yes ovsx publish "$VSIX" -p "$OVSX_PAT" || failed="$failed open-vsx"
+            publish "Open VSX" npx --yes "ovsx@$OVSX_VERSION" publish "$VSIX" || failed="$failed open-vsx"
           fi
 
           # Both are attempted before the job gives up, so one broken token

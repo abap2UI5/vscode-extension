@@ -4,7 +4,7 @@ import { recheckSchedule } from "./checkschedule";
 import { DataGate } from "./web/startup";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 import { GateOptions, runGate, VIEW_XML_RE } from "./gate";
-import { isAllClassesFile, isCheckableSource } from "./checkcore";
+import { cliCollects, isAllClassesFile, isCheckableSource, mayBeCheckable } from "./checkcore";
 import { preparedAbapOf } from "./language";
 import { onDidChangeClassIndex, registerClassIndex, workspaceClassIndex } from "./classindexfeed";
 import { showProblemsMessage, textSource, toDiagnostics } from "./diagnostics";
@@ -273,17 +273,25 @@ async function sweepWorkspaceWeb(
       }> = [];
       let checked = 0;
       let problems = 0;
+      /* Reported every PROGRESS_EVERY files plus the last, as on desktop: per
+       * file it is a host roundtrip per entry, and the browser host is the
+       * slower of the two. */
+      const PROGRESS_EVERY = 25;
+      let reported = 0;
       for (const [index, target] of targets.entries()) {
         if (token.isCancellationRequested) {
           break;
         }
         const uri = target.uri;
-        progress.report({
-          // the file's name too, like the desktop sweep - a bare counter says
-          // nothing about where a slow scan is stuck
-          message: `${index + 1}/${targets.length} - ${uri.path.split("/").pop() || uri.path}`,
-          increment: 100 / targets.length,
-        });
+        if ((index + 1) % PROGRESS_EVERY === 0 || index === targets.length - 1) {
+          progress.report({
+            // the file's name too, like the desktop sweep - a bare counter
+            // says nothing about where a slow scan is stuck
+            message: `${index + 1}/${targets.length} - ${uri.path.split("/").pop() || uri.path}`,
+            increment: ((index + 1 - reported) * 100) / targets.length,
+          });
+          reported = index + 1;
+        }
         let text: string;
         // captured WITH the text: what is gated below describes this version
         // of the buffer and no later one
@@ -303,6 +311,11 @@ async function sweepWorkspaceWeb(
         const opts = optionsForPath(uri.path);
         // what the linter's collectFiles judges - see checkcore.isCheckableSource
         if (!isXml && !isCheckableSource(uri.path, "abap", text, { allClasses: opts.allClasses })) {
+          continue;
+        }
+        // and only what its walk reaches (dot-directories, the config's
+        // `ignore`) - the desktop sweep skipped those, this one checked them
+        if (!target.open && !walkReaches(uri, opts)) {
           continue;
         }
         let gate;
@@ -403,12 +416,39 @@ function isCheckable(doc: vscode.TextDocument): boolean {
   if (isShadowScheme(doc.uri.scheme)) {
     return false;
   }
-  if (isCheckableSource(doc.fileName, doc.languageId, doc.getText())) {
+  // the name first, before the buffer is joined - see the desktop decideCheckable
+  if (!mayBeCheckable(doc.fileName, doc.languageId)) {
+    return false;
+  }
+  const checkable =
+    isCheckableSource(doc.fileName, doc.languageId, doc.getText()) ||
+    // the repository config's `allClasses`, asked only for a class the content
+    // test turned down - the same decision as the desktop isCheckable
+    (isAllClassesFile(doc.fileName) && options(doc).allClasses === true);
+  if (!checkable) {
+    return false;
+  }
+  // and only what CI's walk reaches - the desktop live check and both
+  // sweeps apply the same rule
+  return walkReaches(doc.uri, options(doc));
+}
+
+/** Would the CLI's directory walk reach this file? The desktop sweep's rule
+ *  (`cliCollects` from the governing config's directory, else the workspace
+ *  folder), over posix uri paths - this build has no `path`. A document in
+ *  no workspace folder has no place in that walk and stays. */
+function walkReaches(uri: vscode.Uri, opts: CheckOptions): boolean {
+  const root = opts.configFile
+    ? opts.configFile.slice(0, opts.configFile.lastIndexOf("/"))
+    : vscode.workspace.getWorkspaceFolder(uri)?.uri.path;
+  if (!root) {
     return true;
   }
-  // the repository config's `allClasses`, asked only for a class the content
-  // test turned down - the same decision as the desktop isCheckable
-  return isAllClassesFile(doc.fileName) && options(doc).allClasses === true;
+  const prefix = root.endsWith("/") ? root : root + "/";
+  if (!uri.path.startsWith(prefix)) {
+    return true;
+  }
+  return cliCollects(uri.path.slice(prefix.length), { ignore: opts.ignore, root });
 }
 
 /** Findings per document, memoised on its version - the same contract
@@ -662,23 +702,48 @@ export function registerWebCheck(
       }
     } catch (err) {
       log(`web: could not read the abap2ui5lint configs - ${String(err)}`);
-      return;
+      // the open documents are still checked - under the settings alone, as
+      // with no config at all; this used to be the one activation-time
+      // re-check, and a provider hiccup left them unchecked until edited
     }
     memos.clear();
     recheckOpen();
+  };
+  /* Debounced: a pull that touches a config and its baselines fires one
+   * event per file, and each ran the whole findFiles + every readFile again
+   * (the generation guard discards the stale RESULTS, not the I/O) and
+   * re-gated every open document. */
+  const RELOAD_DEBOUNCE_MS = 300;
+  let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleReload = () => {
+    if (reloadTimer !== undefined) {
+      clearTimeout(reloadTimer);
+    }
+    reloadTimer = setTimeout(() => {
+      reloadTimer = undefined;
+      void reload();
+    }, RELOAD_DEBOUNCE_MS);
   };
   // the watcher glob cannot exclude, and a dependency's baseline-named file
   // must not re-read every config in the workspace
   const changed = (uri: vscode.Uri) => {
     if (!uri.path.includes("/node_modules/")) {
-      void reload();
+      scheduleReload();
     }
   };
   context.subscriptions.push(
     watcher,
     watcher.onDidChange(changed),
     watcher.onDidCreate(changed),
-    watcher.onDidDelete(changed)
+    watcher.onDidDelete(changed),
+    {
+      dispose: () => {
+        if (reloadTimer !== undefined) {
+          clearTimeout(reloadTimer);
+          reloadTimer = undefined;
+        }
+      },
+    }
   );
 
   log("web: property gate registered (repo config through workspace.fs)");

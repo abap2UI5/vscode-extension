@@ -6,11 +6,13 @@ Check out the contribution guidelines [here.](https://abap2ui5.github.io/docs/re
 
 ```bash
 npm ci                 # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 in a sandbox
-npm run lint           # tsc --noEmit && eslint .
-npm test               # the vscode-free cores, driven headless
-npm run package        # the desktop and web bundles
-npm run vsix           # what the marketplace would get
+npm run check          # lint, test, vsix - what CI will say about this tree
 ```
+
+`npm run check` is `npm run lint` (tsc --noEmit && eslint .), `npm test` (the
+vscode-free cores, driven headless) and `npm run vsix` (what the marketplace
+would get - vsce runs the production build itself, so there is no separate
+`npm run package` step).
 
 Everything the user sees inside VS Code is in English, including command
 titles and setting descriptions. [AGENTS.md](AGENTS.md) is the full contract:

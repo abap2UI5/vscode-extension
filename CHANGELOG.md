@@ -388,6 +388,55 @@ rather than from a commit on its main branch.
     the unit tests run in `cmd.exe`, the shell their command line is quoted
     for. *Convert XML View* keeps a warning about an unreadable tag from
     spilling into the generated ABAP.
+  - *Preview, model and navigation map.* *Apply the Model Document to the
+    Running App* confirms only what the preview accepted; it used to say
+    "applied" even when no app was loaded or nothing of the model was in the
+    document, and now says why instead. The theme and language pickers in a
+    running preview follow a change to `abap2ui5.previewThemes` /
+    `abap2ui5.previewLanguages` without an F9. *Show the Preview in an Editor
+    Tab* / *… in the Panel* reads the same in the preview menu as in the
+    Command Palette, and honours an `openMode` set per workspace folder. The
+    *activate* badge and the welcome screen say that Ctrl+F3 is bound in ADT
+    documents only - elsewhere the button or the command *Activate and Reload
+    Preview* does the same. *Show App Navigation Map* run again while its
+    scan is still going no longer opens a second map. The settings UI showed `abap2ui5.reloadOnSave`
+    as `true` by default; it has no default (the effective behaviour is
+    `reloadOn: activation`). A screenshot's Chromium runs in a throwaway
+    profile that is deleted afterwards, instead of leaving the proxy's
+    session cookie in the user's default profile. *Take App Screenshot* after
+    the proxy moved to another system (a connection check, an agent's
+    connect) says so instead of photographing a connection-refused page.
+  - *System and credentials.* An agent that retries `search_apps` or
+    `run_app_on_system` on a rejected logon no longer re-sends the password
+    to the system on every call - the proxy's stop after a 401 now holds for
+    those two tools as it does for the app tools, so a wrong password costs
+    one failed logon, not a locked user. A 403 from the system (a missing
+    authorization, or the CSRF handshake an agent's first POST gets) is
+    logged and no longer offers *Re-enter Credentials*, which deleted a
+    password that worked. *Check System Connection* reports a proxy that
+    could not listen as the proxy's failure, not as an unreachable host.
+  - *View check.* *Fix Workspace* and *Check Workspace* no longer apply a
+    file's fixes to a buffer edited while the sweep was reading it - the
+    guard compared the right version against the wrong one. The live check
+    leaves a class under a dot-directory or one the config's `ignore` prunes
+    alone, as CI does; it used to squiggle it, the sweep then removed the
+    findings as stale, and the next keystroke brought them back. On
+    vscode.dev the workspace sweep skips those files too, reports progress
+    every 25 files rather than per file, and a `git pull` touching a config
+    and its baselines re-reads them once rather than once per file. A
+    document that can never be checked (a log, a JSON file) no longer costs
+    its whole text per keystroke to find that out.
+  - *Classes the extension knows about.* The class index and the app-class
+    index read every class of the workspace; both stopped at 2000 files and
+    judged a larger workspace against a partial index without saying so. A
+    workspace folder added while a class file was changing is indexed (the
+    file's event used to cancel the folder's rebuild), and a class created
+    on disk during the first scan is in the index when the scan is through.
+  - *Render gate.* For the per-commit bundle URL a changed download is
+    refused even when a published checksum agrees with the new bytes - that
+    checksum sits in the same release, and the digest this machine verified
+    is the anchor. The rolling bundle, which moves by design, still trusts
+    the published checksum.
 - Internal: `@abap2ui5/linter` is an exact npm devDependency, like in
   every other repository of the ecosystem, instead of a `github:` commit
   pin; the weekly bump follows the latest published version, and a test

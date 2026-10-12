@@ -58,19 +58,24 @@ test("a published checksum that does not match is refused", () => {
   assert.match(decision.message, /bbbbbbbbbbbb/);
 });
 
-test("the published checksum wins over the remembered one, in both directions", () => {
-  // it is the stronger check: a remembered digest is only what this machine
-  // downloaded once, the published one is what the publisher says it is
-  const good = bundleTrust({
+test("a published checksum does not let an immutable url's bytes move", () => {
+  // the `.sha256` sits in the same release as the bundle: whoever replaces
+  // the one replaces the other, so for a per-commit url the digest this
+  // machine verified and installed is the anchor, and a published checksum
+  // that agrees with the NEW bytes is exactly what a tampered release looks like
+  const moved = bundleTrust({
     url: PINNED,
     actual: A,
     published: A,
     remembered: B,
     rolling: false,
   });
-  assert.ok(good.accept);
-  assert.equal(good.reason, "published-match");
+  assert.ok(!moved.accept);
+  assert.equal(moved.reason, "immutable-moved");
+  assert.match(moved.message, /published checksum that agrees/);
 
+  // and a published checksum that disagrees with unchanged bytes is still a
+  // refusal - the publisher's own word against the download
   const bad = bundleTrust({
     url: PINNED,
     actual: A,
@@ -80,6 +85,20 @@ test("the published checksum wins over the remembered one, in both directions", 
   });
   assert.ok(!bad.accept);
   assert.equal(bad.reason, "published-mismatch");
+});
+
+test("for the rolling tag the published checksum wins over the remembered one", () => {
+  // rolling bytes move by design, so there the remembered digest says
+  // nothing and the publisher's checksum is the stronger check
+  const good = bundleTrust({
+    url: ROLLING,
+    actual: A,
+    published: A,
+    remembered: B,
+    rolling: true,
+  });
+  assert.ok(good.accept);
+  assert.equal(good.reason, "published-match");
 });
 
 // ---------------------------------------------------------------------------

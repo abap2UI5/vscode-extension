@@ -20,6 +20,9 @@ export const MODEL_SCHEME = "abap2ui5-model";
 const SCHEME = MODEL_SCHEME;
 
 const contents = new Map<string, string>();
+/** Dumps kept, most recent last - a session dumping many classes used to
+ *  hold every dump it ever made. */
+const MAX_DUMPS = 20;
 
 export interface ModelView {
   /** Renders one dump (or the reason there is none) for the given class. */
@@ -47,8 +50,9 @@ export function registerModelView(
      * closes a virtual document it has kept hidden for a few minutes and asks
      * the provider again when the tab is returned to - so forgetting here
      * showed the "no model dump yet" placeholder in a tab that was still
-     * open and had a dump a moment ago. The map is bounded by the number of
-     * classes a session dumps, and one dump per class at that.
+     * open and had a dump a moment ago. The map holds one dump per class and
+     * the `MAX_DUMPS` most recent classes - older ones go on insert, so a
+     * tab of a class dumped twenty classes ago shows the placeholder again.
      */
   );
 
@@ -75,7 +79,15 @@ export function registerModelView(
         scheme: SCHEME,
         path: `/${safeFileStem(className)}.model.json`,
       });
+      // delete first, so a re-dumped class moves to the recent end
+      contents.delete(uri.toString());
       contents.set(uri.toString(), body);
+      for (const key of contents.keys()) {
+        if (contents.size <= MAX_DUMPS) {
+          break;
+        }
+        contents.delete(key);
+      }
       emitter.fire(uri);
       const doc = await vscode.workspace.openTextDocument(uri);
       // jsonc, because the header (and an error) is a comment line

@@ -16,6 +16,7 @@ import {
   onDidChangeAbapSources,
   readAbapSource,
   watchAbapSources,
+  UNCAPPED,
 } from "./abapsources";
 
 /*
@@ -168,7 +169,8 @@ export function refreshAppClasses(): Promise<void> {
 async function rebuildOnce(): Promise<boolean> {
   let sources: Awaited<ReturnType<typeof abapSources>> = [];
   try {
-    sources = await abapSources();
+    // every class: a subclass beyond a cap would be "not an app" (see UNCAPPED)
+    sources = await abapSources(UNCAPPED);
   } catch {
     // a workspace that cannot be globbed still has its open documents
   }
@@ -384,11 +386,17 @@ export async function appClassEntries(): Promise<AppClassEntry[]> {
  */
 export function registerAppClasses(context: vscode.ExtensionContext): void {
   watchAbapSources(context);
+  /* Whether a FULL rebuild is owed: kept outside the timer's closure, because
+   * a per-file event inside the debounce re-arms the timer with `full =
+   * false` and one pending file - and the folder that was just added (whose
+   * classes only a full rebuild reads) never made it into the index. */
+  let fullPending = false;
   const schedule = (full: boolean) => {
     if (!started) {
       return; // nothing to keep current - the first build reads it all
     }
     if (full) {
+      fullPending = true;
       pendingFiles.clear();
     }
     if (scheduled) {
@@ -396,7 +404,8 @@ export function registerAppClasses(context: vscode.ExtensionContext): void {
     }
     scheduled = setTimeout(() => {
       scheduled = undefined;
-      if (full || pendingFiles.size === 0) {
+      if (fullPending || pendingFiles.size === 0) {
+        fullPending = false;
         void refreshAppClasses();
       } else {
         void flushPendingFiles();

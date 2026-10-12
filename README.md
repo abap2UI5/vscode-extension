@@ -269,7 +269,7 @@ when the two drift apart.
 | `abap2ui5.codeLens` | `true` | Show *Run*, *Activate & reload*, *Check views* and *Autofix n findings* above the class definition of an abap2UI5 app. The autofix lens appears only while the view check has findings it can correct mechanically. |
 | `abap2ui5.openMode` | `"tab"` | How F9 opens the app. |
 | `abap2ui5.reloadOn` | `"activation"` | When the preview of the shown app class reloads by itself. |
-| `abap2ui5.reloadOnSave` | `true` | Reload the preview when the shown app class is saved. *(deprecated)* |
+| `abap2ui5.reloadOnSave` |  | Reload the preview when the shown app class is saved. *(deprecated)* |
 | `abap2ui5.viewCheck.onSave` | `true` | Run the static view check every time a checkable file is saved: an ABAP class building views with `z2ui5_cl_ui5_view_builder`, or a raw `*.view.xml` / `*.fragment.xml`. Findings appear in the Problems panel. The command *"abap2UI5: Check Views (Static)"* runs the same check on demand. |
 | `abap2ui5.viewCheck.live` | `true` | Also check while typing, shortly after each pause. Only the bundled property gate runs on a keystroke - it works in-process and needs no I/O; the render gate stays on save and on demand. |
 | `abap2ui5.viewCheck.command` | `""` | Command that runs the [abap2UI5-linter](https://github.com/abap2UI5/linter) CLI **for the render gate** - the property gate is bundled with the extension and needs no command. Leave empty for the default: a local checkout under `abap2ui5.mcp.reposRoot` when present (runs with VS Code's own Node.js), otherwise `npx --yes github:abap2UI5/linter` at the release commit of the linter this extension bundles. |

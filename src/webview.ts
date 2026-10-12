@@ -438,7 +438,7 @@ ${BASE_CSS}
     <span class="dot" id="dot"></span>
     <span class="name" id="name">${className}</span>
     <button class="badge" id="stale" title="The source was saved but not activated - the preview still shows the active version. Click to reload it anyway.">not activated</button>
-    <button class="badge" id="act" title="Activate the class through your ABAP tooling and reload (Ctrl+F3)">activate</button>
+    <button class="badge" id="act" title="Activate the class through your ABAP tooling and reload - the command 'Activate and Reload Preview', Ctrl+F3 in an ADT document">activate</button>
     <button class="errors" id="errors" title="Runtime errors the app reported since the last load. Click to jump to the likely source line and open the abap2UI5 output log."></button>
     <button class="rt" id="rt" title="Last backend roundtrip (POST through the auth proxy). Click to open the traffic log."></button>
     <span class="url" id="url" title="${externalUrl}">${urlLabel}</span>
@@ -711,6 +711,29 @@ ${BASE_CSS}
   languageEl.addEventListener('change', () => {
     vscodeApi.postMessage({ type: 'param', name: 'language', value: languageEl.value });
   });
+  // Rebuilds a picker from [value, label] pairs; the current value keeps an
+  // entry even when the new list does not know it (as the first render does).
+  function fillSelect(el, entries, current) {
+    if (!Array.isArray(entries)) { return; }
+    const value = typeof current === 'string' ? current : el.value;
+    el.textContent = '';
+    let known = false;
+    for (const entry of entries) {
+      if (!Array.isArray(entry)) { continue; }
+      const opt = document.createElement('option');
+      opt.value = String(entry[0]);
+      opt.textContent = String(entry[1]);
+      known = known || opt.value === value;
+      el.appendChild(opt);
+    }
+    if (!known && value) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = value;
+      el.appendChild(opt);
+    }
+    el.value = value;
+  }
 
   // Start the app only now: the load listener above is already attached.
   load(frameUrl, 'Starting ' + nameEl.textContent + '\\u2026');
@@ -834,10 +857,28 @@ ${BASE_CSS}
       // pin's restore path, on demand. The host has already reduced it to
       // the class's own roots; it is filtered here once more, so the page
       // only ever receives what a restore may carry, whoever composed it.
-      if (body.dataset.state !== 'ready') { showToast('No app is loaded yet'); return; }
+      // Either way the host hears the outcome: it used to report "applied"
+      // the moment it had posted, whatever happened here.
+      if (body.dataset.state !== 'ready') {
+        showToast('No app is loaded yet');
+        vscodeApi.postMessage({ type: 'modelApplied', ok: false, reason: 'no app is loaded yet' });
+        return;
+      }
       const data = filteredRestore(JSON.stringify(msg.data || null));
-      if (!data) { showToast('Nothing of the app\'s model in that document'); return; }
+      if (!data) {
+        showToast('Nothing of the app\'s model in that document');
+        vscodeApi.postMessage({ type: 'modelApplied', ok: false, reason: 'nothing of the app\'s model is in that document' });
+        return;
+      }
       postToApp({ __abap2ui5Cmd: 'restore', data: data });
+      vscodeApi.postMessage({ type: 'modelApplied', ok: true });
+      return;
+    }
+    if (msg.type === 'pickers') {
+      // The theme / language settings changed while the app is up: the
+      // <select>s were rendered from the lists as they were at load time.
+      fillSelect(themeEl, msg.themes, msg.theme);
+      fillSelect(languageEl, msg.languages, msg.language);
       return;
     }
     if (msg.type !== 'load') { return; }
@@ -1333,7 +1374,7 @@ export function welcomeHtml(options: WelcomeOptions): string {
             }, the cursor stays in the code.`
           : "Open an app class and press <kbd>F9</kbd>."
       }</span></li>
-      <li><span class="num">3</span><span>Activate the class with <kbd>Ctrl+F3</kbd> &mdash; the preview reloads on its own. A save alone leaves the server on the active version, so it does not reload.</span></li>
+      <li><span class="num">3</span><span>Activate the class &mdash; <kbd>Ctrl+F3</kbd> in an ADT document, or the <em>activate</em> button in the preview toolbar / the command <em>Activate and Reload Preview</em> &mdash; and the preview reloads on its own. A save alone leaves the server on the active version, so it does not reload.</span></li>
     </ol>`;
 
   // An app is running, just not in this view: say where it is, not how to start.

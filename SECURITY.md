@@ -33,12 +33,28 @@ real system, so it is worth being precise about what it does with both:
   That rewrite is what makes the preview work; it is also the part of this
   extension a report is most likely to be about, and such a report is very
   welcome.
-- **It has zero runtime dependencies.** Nothing is installed alongside it, so
-  the supply chain is the VSIX and the toolchain that built it.
+- **It has no npm `dependencies`.** Nothing is installed alongside it, so the
+  supply chain is the VSIX and the toolchain that built it. What the VSIX
+  carries beyond the extension's own code is bundled in at build time from
+  `devDependencies`: the linter, into the extension bundle; `tar`, the
+  render-gate installer's archive library, into its own file next to it. The
+  agent client vendored from abap2UI5/mcp-server (`src/vendor/agent/`) is
+  bundled into its own file the same way. Both of those are loaded the first
+  time they are needed, not on activation (`esbuild.js`).
 - **The linter it bundles reads source; it never executes it.** The property
   gate parses ABAP and XML statically. The render gate, which does load a view
-  in a browser, is not part of the extension — it lives in
-  `@abap2ui5/linter-render` and is fetched separately.
+  in a browser, is the exception, and it is downloaded by this extension at
+  runtime: *"Install Render Gate"* / *"Update Render Gate"* (`src/rendergate.ts`)
+  fetch the linter's checker bundle from its immutable per-commit GitHub
+  release tag `render-gate-bundle-<sha12>` — the release commit of exactly the
+  linter version this build bundles — verify its SHA-256 against the published
+  `.sha256` asset and against the digest remembered from the last install,
+  refuse a per-commit bundle whose bytes changed, unpack it into the
+  extension's global storage and run it locally with a Chromium that
+  playwright downloads. Only `abap2ui5.viewCheck.rollingBundle` (off by
+  default) switches to the rolling tag that follows the linter's main. That
+  download-and-execute path is the second part of this extension a report is
+  likely to be about, and such reports are in scope here.
 
 ## Out of scope
 
