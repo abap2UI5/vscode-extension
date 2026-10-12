@@ -437,6 +437,12 @@ rather than from a commit on its main branch.
     checksum sits in the same release, and the digest this machine verified
     is the anchor. The rolling bundle, which moves by design, still trusts
     the published checksum.
+- The Workspace Trust text no longer claims that every restricted setting is
+  read from the user settings only. `abap2ui5.systems`,
+  `abap2ui5.launchUrlTemplate` and `abap2ui5.viewCheck.render` are ignored
+  from the workspace in Restricted Mode, and a trusted workspace can set
+  them - a team shares its systems that way. The text now says so; the
+  settings themselves are unchanged.
 - Internal: `@abap2ui5/linter` is an exact npm devDependency, like in
   every other repository of the ecosystem, instead of a `github:` commit
   pin; the weekly bump follows the latest published version, and a test
