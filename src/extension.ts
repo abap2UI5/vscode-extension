@@ -33,6 +33,7 @@ import { classNameOf } from "./abap";
 import { isAppSource, registerAppClasses } from "./appclasses";
 import { originOf, proxiedUrl, shortUrl } from "./urls";
 import { registerAppSearch } from "./appsearch";
+import { registerOpenLink } from "./openlinkview";
 import { registerNewApp, registerNewProject } from "./wizard";
 import { registerAgentSetup } from "./agentsetupview";
 import { registerConvert } from "./convert";
@@ -585,6 +586,13 @@ export function activate(context: vscode.ExtensionContext): void {
     run: (className) => runApp(session, provider, className),
     recent: () => session.recentApps(),
     log,
+  });
+
+  // vscode://abap2ui5.abap2ui5/open?code=…|src=…: a class handed over by
+  // another tool (the layout editor's "Open in VS Code") opens unsaved here.
+  registerOpenLink(context, {
+    log,
+    run: (className) => runApp(session, provider, className),
   });
 
   // The system MCP server: the extension's systems, credentials and proxy,
