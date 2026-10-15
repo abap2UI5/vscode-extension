@@ -44,6 +44,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/template.ts` | The app-class skeleton both entries insert |
 | `src/ui5detect.ts` | Reads the system's `sap-ui-version.json` and offers to align the view-check settings |
 | `src/appsearch.ts` | "Run an App from the System": QuickPick over the ADT quick search |
+| `src/openlink.ts` | `vscode`-free: what a `vscode://abap2ui5.abap2ui5/open` link means - `code=` (deflate-raw, base64url) or `src=` (https on GitHub's raw hosts only), the class file name, the size cap; links are untrusted input, any web page can open one |
+| `src/openlinkview.ts` | The URI handler itself: fetches or unpacks the class, opens it as an untitled `.clas.abap`, offers F9 |
 | `src/inspect.ts` | Inspect mode's matcher: runtime control chain -> outline node (the builder call to jump to) |
 | `src/modelview.ts` | The live-model document the preview's `{ }` button fills; "Apply the Model Document to the Running App" (registered in `extension.ts`) copies it for editing and pushes the edited JSON back through the pin's restore path |
 | `src/webview.ts` | HTML for the preview and the welcome screen (theme variables, CSP nonce, theme/language pickers, the open-mode-aware empty state) |
@@ -151,7 +153,7 @@ not committed.
 `catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
 `abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `sourcecache.ts`, `checkschedule.ts`, `settings.ts`, `linterrelease.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
-does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`,
+does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
 `unitrunner.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,

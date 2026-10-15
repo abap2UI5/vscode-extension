@@ -85,6 +85,8 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
 - **Navigate an app**: the view hierarchy in the Outline pane, Go to Definition
   between an event and its `WHEN`, F2 renaming every literal an app is wired
   together with, and a navigation map of the workspace's apps.
+- **Open a class from a link**: `vscode://abap2ui5.abap2ui5/open?code=…`
+  or `?src=<raw GitHub URL>` opens the class unsaved, ready for F9.
 - **Templates**: *New App from Template* is a gallery of linter-clean
   skeletons; *New Project from Template* writes a whole
   [app-template](https://github.com/abap2UI5/app-template) project.
