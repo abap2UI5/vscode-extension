@@ -42,7 +42,8 @@
     "onLanguage:xml",
     "workspaceContains:**/*.clas.abap",
     "workspaceContains:**/*.view.xml",
-    "workspaceContains:**/*.fragment.xml"
+    "workspaceContains:**/*.fragment.xml",
+    "onUri"
   ],
   "capabilities": {
     "untrustedWorkspaces": {

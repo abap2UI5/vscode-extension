@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Open a class from a link.** A `vscode://abap2ui5.abap2ui5/open` link
+  opens the class it carries as an unsaved `.clas.abap` document and offers
+  to run it with F9 - the abap2UI5 layout editor's "Open in VS Code" writes
+  one. The link carries the class itself (`code=`, compressed) or a URL to
+  fetch it from (`src=`, GitHub's raw hosts over https only); nothing runs
+  until you choose to.
+
 ## 0.31.0
 
 The bundled linter moves to v0.8.5, and is now taken from its npm release
