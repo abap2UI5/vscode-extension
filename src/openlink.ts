@@ -137,3 +137,41 @@ export async function inflateCode(code: string, limit = MAX_SOURCE): Promise<str
   }
   return new TextDecoder("utf-8", { fatal: false }).decode(Buffer.concat(parts));
 }
+
+/**
+ * The body, read to at most `limit` bytes. `res.text( )` kept the whole
+ * answer in memory before the size was compared, so the cap limited what was
+ * KEPT, not what was downloaded; a declared length over the cap is refused
+ * before the first byte, and a stream is cancelled the moment it passes it -
+ * the shape `inflateCode` already gives the inline form.
+ */
+export async function readCapped(
+  res: { headers: { get(name: string): string | null }; body: ReadableStream<Uint8Array> | null },
+  limit: number,
+  url: string
+): Promise<string> {
+  const tooLarge = () => new Error(`${url} is larger than a class link carries`);
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) {
+    throw tooLarge();
+  }
+  if (!res.body) {
+    return "";
+  }
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    size += value.length;
+    if (size > limit) {
+      await reader.cancel();
+      throw tooLarge();
+    }
+    parts.push(value);
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(Buffer.concat(parts));
+}

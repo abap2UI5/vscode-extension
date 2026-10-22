@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { deflateRawSync } from "node:zlib";
-import { inflateCode, MAX_SOURCE, parseOpenUri, sourceUrl } from "../openlink";
+import { inflateCode, MAX_SOURCE, parseOpenUri, readCapped, sourceUrl } from "../openlink";
 
 const HELLO =
   "CLASS zcl_hello DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    INTERFACES z2ui5_if_app.\nENDCLASS.\n";
@@ -74,4 +74,41 @@ test("a link that unpacks to too much, or to nothing readable, says so", async (
   const bomb = base64url(deflateRawSync(Buffer.alloc(MAX_SOURCE + 1, 0x20)));
   await assert.rejects(inflateCode(bomb), /more code than a class link carries/);
   await assert.rejects(inflateCode("bm90LWRlZmxhdGU"), /could not be unpacked/);
+});
+
+/* The `src=` download used to be read whole (`res.text( )`) and compared
+ * against MAX_SOURCE afterwards - the cap limited what was kept, not what
+ * was downloaded. Now a declared length over the cap is refused before the
+ * body is touched, and a stream is cancelled the moment it passes it. */
+test("readCapped refuses an oversized download before and while reading it", async () => {
+  const response = (chunks: Uint8Array[], length?: number) => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const next = chunks.shift();
+        if (next) {
+          controller.enqueue(next);
+        } else {
+          controller.close();
+        }
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const headers = { get: (name: string) => (name === "content-length" && length !== undefined ? String(length) : null) };
+    return { res: { headers, body }, wasCancelled: () => cancelled };
+  };
+  const bytes = (n: number) => new Uint8Array(n).fill(0x61);
+  // within the cap, chunk by chunk
+  assert.equal(await readCapped(response([bytes(3), bytes(2)]).res, 5, "u"), "aaaaa");
+  // the declared length alone refuses it - nothing is read
+  const declared = response([bytes(1)], 6);
+  await assert.rejects(readCapped(declared.res, 5, "u"), /larger than a class link carries/);
+  // undeclared and over the cap: cancelled on the chunk that passes it
+  const streamed = response([bytes(4), bytes(4), bytes(4)]);
+  await assert.rejects(readCapped(streamed.res, 5, "u"), /larger than a class link carries/);
+  assert.equal(streamed.wasCancelled(), true);
+  // a body-less answer is an empty class, not a crash
+  assert.equal(await readCapped({ headers: { get: () => null }, body: null }, 5, "u"), "");
 });
