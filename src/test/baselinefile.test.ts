@@ -10,6 +10,7 @@ import {
   readBaseline,
   rebuildBaseline,
 } from "../baselinefile";
+import { findingKey, loadBaseline, migrateKey } from "@abap2ui5/linter/baseline";
 
 const FINDING = {
   type: "control-too-new",
@@ -217,4 +218,43 @@ test("a symbolic link inside the folder does not carry the write outside", (t) =
   );
   assert.ok(!fs.existsSync(away), "the dangling link was written through");
   fs.rmSync(outer, { recursive: true, force: true });
+});
+
+/* Linter 0.9.0 dropped the source position ten rules carried in a key field
+ * (`migrateKey`). An "Add to Baseline" from an older extension wrote the old
+ * spelling next to the new one for the same finding, and the CLI then read
+ * one key counted twice and reported it stale. The append now rewrites the
+ * stored keys in the bundled linter's form, and what it writes is what the
+ * bundled linter reads back unchanged. */
+test("an append migrates the stored keys to the bundled linter's form", () => {
+  const dir = tmp();
+  const file = path.join(dir, "abap2ui5lint-baseline.json");
+  const source = path.join(dir, "src", "zcl_a.clas.abap");
+  // a 0.8.5 baseline: the line number in `member` (source-line-too-long),
+  // the offset in `value` (empty-catch-block), one key of another rule
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      findings: {
+        "src/zcl_a.clas.abap|source-line-too-long||12|": 1,
+        "src/zcl_a.clas.abap|source-line-too-long||40|": 1,
+        "src/zcl_a.clas.abap|empty-catch-block|||310": 1,
+        "src/zcl_a.clas.abap|control-too-new|sap.m.Avatar||": 1,
+      },
+    })
+  );
+  const finding = { type: "source-line-too-long", control: "", member: "", value: "" } as never;
+  const key = addToBaseline(file, source, finding, dir);
+  assert.equal(key, "src/zcl_a.clas.abap|source-line-too-long|||");
+  assert.deepEqual(readBaseline(file).findings, {
+    "src/zcl_a.clas.abap|control-too-new|sap.m.Avatar||": 1,
+    "src/zcl_a.clas.abap|empty-catch-block|||": 1,
+    "src/zcl_a.clas.abap|source-line-too-long|||": 3,
+  });
+  // round trip: every key the extension wrote is the key the linter computes
+  for (const stored of Object.keys(readBaseline(file).findings ?? {})) {
+    assert.equal(migrateKey(stored), stored);
+  }
+  assert.equal(findingKey("src/zcl_a.clas.abap", finding), key);
+  assert.deepEqual([...loadBaseline(file)], Object.entries(readBaseline(file).findings ?? {}));
 });

@@ -38,9 +38,16 @@ import {
   attachSuggestionFixes,
   isOptInEnabled,
 } from "@abap2ui5/linter/findings";
-import * as linterFix from "@abap2ui5/linter/fix";
+import { matchLineEndings } from "@abap2ui5/linter/fix";
+import {
+  declaresApp,
+  frozenBuilderOf as linterFrozenBuilderOf,
+  sizeLimitRaised,
+  standDownUnusedNamespaces,
+  VIEWLESS_APP_RULE,
+} from "@abap2ui5/linter/check";
+import * as portable from "@abap2ui5/linter/portable";
 import { snapshot } from "./snapshot";
-import { blankComments, blankNonCode } from "./abapscan";
 import type { CheckOptions } from "./lintconfig";
 
 /**
@@ -57,64 +64,14 @@ export function linterExport<T>(ns: object, name: string): T | undefined {
   return typeof value === "function" ? (value as T) : undefined;
 }
 
-type FixFinding = { type: string; fixes?: Array<{ start: number; end: number; text: string }> };
-
-/** The linter's own pass when it has one (its `settle` step, from the release
- *  after 0.8.5 on), else {@link matchLineEndingsPort}. */
-export const LINTER_MATCH_EOL = linterExport<(findings: FixFinding[], source: string) => FixFinding[]>(
-  linterFix,
-  "matchLineEndings"
-);
-
-/**
- * Makes every fix write the line ending the file will have - a port of the
- * linter's `matchLineEndings` (lib/fix.mjs), used while the pinned release
- * does not export it. The rules write replacement text with `\n`; in a file
- * whose line breaks are mostly CRLF every `\n` of a fix text becomes `\r\n`
- * (a `\n` at the very start of a text inserted right behind a `\r` completes
- * that line break and stays). While a `crlf-line-ending` finding is among
- * them it is the other way round: its fix turns the file into LF, so every
- * other text writes LF too. Mutates and returns `findings`.
- *
- * VS Code would normalise an inserted text to the document's line ending
- * anyway, so the lightbulb never wrote a mixed file; what this changes is the
- * findings themselves - what the MCP system server hands an agent, and what
- * `gate.parity.test.ts` compares against the CLI's `--fix`.
- */
-export function matchLineEndingsPort<F extends FixFinding>(findings: F[], source: string): F[] {
-  const text = String(source ?? "");
-  const toLf = findings.some((f) => f.type === "crlf-line-ending");
-  if (!toLf) {
-    const crlf = text.split("\r\n").length - 1;
-    if (!crlf || crlf * 2 <= text.split("\n").length - 1) {
-      return findings;
-    }
-  }
-  for (const f of findings) {
-    if (f.type === "crlf-line-ending") {
-      continue;
-    }
-    for (const e of f.fixes ?? []) {
-      if (typeof e.text !== "string" || !e.text.includes("\n")) {
-        continue;
-      }
-      e.text = toLf
-        ? e.text.replace(/\r\n/g, "\n")
-        : e.text.replace(/\r?\n/g, (nl, at: number) =>
-            at === 0 && nl === "\n" && text[e.start - 1] === "\r" ? nl : "\r\n"
-          );
-    }
-  }
-  return findings;
-}
-
-/** The line-ending pass the gate's `settle` ends with - the linter's when the
- *  pinned release exports it. */
-export function matchLineEndings<F extends FixFinding>(findings: F[], source: string): F[] {
-  return LINTER_MATCH_EOL
-    ? (LINTER_MATCH_EOL(findings, source) as F[])
-    : matchLineEndingsPort(findings, source);
-}
+/* The linter's own `declaresApp`, `VIEWLESS_APP_RULE`, `sizeLimitRaised`,
+ * `standDownUnusedNamespaces` and `matchLineEndings` are called here as of
+ * the 0.9.0 pin (`./check`, `./fix`). The gate used to carry ports of each
+ * while the pinned release exported them from its main entry only - the one
+ * the web host cannot bundle - and `gate.parity.test.ts` pinned the copies
+ * to the linter's source. Re-exported, so the callers that read them through
+ * this module (`checkcore.ts`, the parity tests) keep one import. */
+export { declaresApp, matchLineEndings, sizeLimitRaised, standDownUnusedNamespaces, VIEWLESS_APP_RULE };
 
 /** The linter's "another class reads this class's public attributes" test
  *  (from the release after 0.8.5 on): with it, `checkAbapSource` stands the
@@ -134,44 +91,12 @@ export const LINTER_COLLECT_CONTAINER_PAGES = linterExport<
   (root: unknown) => Record<string, string[]>
 >(linterProperties, "collectContainerPages");
 
-/**
- * The part of the linter's `./portable` export the gate calls (the opt-in
- * `portable-app` rule, from the release after 0.8.5 on).
- *
- * BUMP: the pinned typings declare no `./portable` subpath, so this shape and
- * the `require` below stand in for `import * as portable from
- * "@abap2ui5/linter/portable"` until the pin is bumped - then replace both
- * with that import (`gate.parity.test.ts` fails until somebody does, see
- * "the stand-ins for linter exports").
- */
-interface PortableModule {
-  checkPortable(opts: {
-    nodes?: unknown[];
-    source?: string;
-    abap?: boolean;
-    data?: unknown;
-    profile: unknown;
-  }): PropertyFinding[];
-  PORTABLE_RULE: string;
-  PORTABLE_PROFILE_URL: URL;
-}
-
-/** The linter's `./portable` module, or undefined on a release without one.
- *  A `require`, because an `import` of a subpath the pinned package does not
- *  export would not bundle; `esbuild.js` resolves a missing one to an empty
- *  module (`absentLinterExports`), so this never reaches for a linter outside
- *  the bundle at runtime. */
-function loadPortable(): PortableModule | undefined {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const ns = require("@abap2ui5/linter/portable") as object;
-    return linterExport(ns, "checkPortable") ? (ns as PortableModule) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export const LINTER_PORTABLE = loadPortable();
+/** The linter's `./portable` module - the opt-in `portable-app` rule. The
+ *  0.8.5 pin exported no such subpath, and the gate reached for it through
+ *  a `require` inside a try; from 0.9.0 on it is a plain import. Exported
+ *  under the name the parity tests know. */
+export const LINTER_PORTABLE = portable;
+type PortableModule = typeof portable;
 
 /** The vendored portable profile, read on first use - a port of
  *  `portableProfileOf` in the linter's `lib/index.mjs`, with the same path
@@ -200,152 +125,22 @@ function portableFindings(
   args: { nodes: unknown[]; source: string; abap?: boolean; data?: unknown }
 ): PropertyFinding[] {
   const mod = LINTER_PORTABLE;
-  if (!mod || !isOptInEnabled(rules ?? null, mod.PORTABLE_RULE)) {
+  if (!isOptInEnabled(rules ?? null, mod.PORTABLE_RULE)) {
     return [];
   }
   const profile = portableProfileOf(mod);
-  return profile === undefined ? [] : mod.checkPortable({ ...args, profile });
-}
-
-/**
- * An app class, as the linter's `declaresApp` (`lib/index.mjs`) reads one:
- * an `INTERFACES` statement naming `z2ui5_if_app` at a line start, with
- * comments and literal contents blanked. PORT: the linter exports it only
- * from its main entry, which pulls in the renderer (`http`, `os`) and cannot
- * be bundled for the web host; `gate.parity.test.ts` pins the regex to the
- * installed linter's source and fails when a leaf module starts exporting it.
- * Deliberately not `isAppClass` (`abap.ts`), which also accepts the statement
- * mid-line - a different question (is this an app for F9) with a different
- * answer for `PUBLIC SECTION. INTERFACES z2ui5_if_app.` on one line.
- */
-export const DECLARES_APP_RE = /^[^\S\r\n]*INTERFACES\b[^.]*\bz2ui5_if_app\b/im;
-
-export function declaresApp(source: string): boolean {
-  return DECLARES_APP_RE.test(blankNonCode(String(source)));
-}
-
-/**
- * The rule ids an app class WITHOUT a view is judged by on top of
- * `checkSourceRules` - PORT of `VIEWLESS_APP_RULE` in the linter's
- * `lib/index.mjs`, which exports it from nowhere. Pinned to the installed
- * linter's source by `gate.parity.test.ts`.
- */
-export const VIEWLESS_APP_RULE =
-  /^(?:binding-to-\w+|obsolete-[\w-]+|event-[\w-]+|handler-without-event|private-app-attribute|loop-work-area-bound|missing-view-display-on-navigated|missing-on-navigated-branch|separate-lifecycle-ifs|manual-init-flag|redundant-init-display|lifecycle-is-initial|unconditional-popup-display|display-after-nav-app-call|double-display-in-branch|duplicate-for-iterator)$/;
-
-/**
- * Whether the class raises a model's size limit anywhere: the constant
- * outside a literal and a comment, or the action name as a literal - PORT of
- * the `sizeLimitRaised` expression in the linter's `checkAbapSource`, which
- * hands it to `checkNodes` (`rows-hidden-by-visible` judges only a class that
- * never raises the limit). A release that does not read the input ignores it.
- */
-export function sizeLimitRaised(source: string): boolean {
-  return (
-    /\bcs_event\s*-\s*set_size_limit\b/i.test(blankNonCode(source)) ||
-    /[`']SET_SIZE_LIMIT[`']/i.test(source)
-  );
-}
-
-/** What `prepareAbap` returns from the release after 0.8.5 on beyond the
- *  pinned typings: the start-path model a document the FIRST display shows is
- *  judged against. Absent at the pin - every document then takes `model`. */
-interface StartPath {
-  nodeOnInit?: boolean[];
-  initModel?: Record<string, unknown> | null;
-  initModelShape?: Record<string, unknown> | null;
-  initialFields?: Set<string>;
-}
-
-/**
- * The linter's stand-down of `unused-namespace-declaration` - a port of the
- * block in `checkAbapSource` (lib/index.mjs), which exports no function for
- * it. The rule is a claim about the WHOLE view, only as good as the
- * reconstruction behind it: a class whose reconstruction is incomplete
- * (`unplacedTokens`), or that writes the prefix in more builder literals
- * (`ns = \`form\``, `\`form:SimpleForm\``) than its reconstructed documents
- * carry, may use it exactly where nobody looked - and the finding came with a
- * deleting fix that broke the view. Without the port the editor reported it,
- * and the lightbulb offered that fix, on classes CI is silent about.
- *
- * Returns the surviving findings and the rules that stood down (for
- * `applyDirectives`: a waiver of a rule that did not judge the class is not
- * "unused"). The literal count reads the source with its comments blanked
- * (`blankComments`, the linter reads it through its own `scrub`).
- */
-export function standDownUnusedNamespaces<F extends { type: string; member?: unknown }>(
-  findings: F[],
-  source: string,
-  prep: Pick<PreparedAbap, "unplacedTokens" | "nodes">
-): { findings: F[]; stoodDown: string[] } {
-  const RULE = "unused-namespace-declaration";
-  const incomplete = prep.unplacedTokens > 0;
-  const stoodDown = incomplete ? [RULE] : [];
-  if (!findings.some((f) => f.type === RULE)) {
-    return { findings, stoodDown };
-  }
-  const code = blankComments(source);
-  const inSource = (prefix: string): number => {
-    const p = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return (
-      (code.match(new RegExp(`\\bns\\s*=\\s*[\`']${p}[\`']`, "gi")) ?? []).length +
-      (code.match(new RegExp(`[(=]\\s*[\`']${p}:[A-Za-z]`, "gi")) ?? []).length
-    );
-  };
-  const inDocs = new Map<string, number>();
-  const count = (p: string) => inDocs.set(p, (inDocs.get(p) ?? 0) + 1);
-  const walk = (node: PreparedAbap["nodes"][number]): void => {
-    if (node.name) {
-      if (node.ns) {
-        count(node.ns);
-      } else if (String(node.name).includes(":")) {
-        count(String(node.name).split(":")[0]);
-      }
-      for (const [n] of node.attrs ?? []) {
-        const at = String(n).indexOf(":");
-        if (at > 0 && !String(n).startsWith("xmlns")) {
-          count(String(n).slice(0, at));
-        }
-      }
-    }
-    for (const child of node.children ?? []) {
-      walk(child);
-    }
-  };
-  for (const root of prep.nodes ?? []) {
-    walk(root);
-  }
-  const kept = findings.filter(
-    (f) =>
-      f.type !== RULE ||
-      (!incomplete &&
-        inSource(String(f.member ?? "")) <= (inDocs.get(String(f.member ?? "")) ?? 0))
-  );
-  if (kept.length < findings.length && !stoodDown.length) {
-    stoodDown.push(RULE);
-  }
-  return { findings: kept, stoodDown };
+  return profile === undefined
+    ? []
+    : mod.checkPortable({ ...args, profile } as Parameters<typeof mod.checkPortable>[0]);
 }
 
 export const VIEW_XML_RE = /\.(view|fragment)\.xml$/i;
 
-/** The frozen builders the linter reports `frozen-view-builder` for. Like
- *  `checkIcons` before it, `frozenBuilderOf` has no subpath in the linter's
- *  `exports` map, so the two names are mirrored here - `gate.parity.test.ts`
- *  pins this list to `checkAbapSource`'s answer. */
-const FROZEN_BUILDERS = ["z2ui5_cl_xml_view", "z2ui5_cl_xml_view_cc"];
-
-/** Compiled once: `frozenBuilderOf` runs inside `isCheckableSource`, i.e. on
- *  every keystroke, code-action request and sweep file - not the place to
- *  build regexes. No `g` flag, so `test` and `search` stay stateless. */
-const FROZEN_FACTORY_RES = FROZEN_BUILDERS.map((name) => ({
-  name,
-  re: new RegExp(`\\b${name}\\s*=>\\s*factory`, "i"),
-}));
-
-/** The frozen builder a source builds its view with, or undefined. */
+/** The frozen builder a source builds its view with, or undefined - the
+ *  linter's `frozenBuilderOf` (`./check`, null for none), in the shape the
+ *  callers here compare against. */
 export function frozenBuilderOf(text: string): string | undefined {
-  return FROZEN_FACTORY_RES.find((f) => f.re.test(text))?.name;
+  return linterFrozenBuilderOf(text) ?? undefined;
 }
 
 /**
@@ -543,12 +338,13 @@ export function runGate(
        * still reads such a class is `obsolete-custom-control`: the old
        * builder's `_z2ui5( )->timer( )` & co. are method names, and a Timer
        * stays obsolete on the frozen builder too. */
-      const frozen = FROZEN_FACTORY_RES.find((f) => f.re.test(text));
+      const frozen = frozenBuilderOf(text);
       if (frozen) {
-        const at = text.search(frozen.re);
+        // the offset `checkAbapSource` reports: the factory call itself
+        const at = text.search(new RegExp(`\\b${frozen}\\s*=>\\s*factory`, "i"));
         return {
           findings: settled([
-            { type: "frozen-view-builder", value: frozen.name, offset: at < 0 ? 0 : at },
+            { type: "frozen-view-builder", value: frozen, offset: at < 0 ? 0 : at },
             ...obsoleteCcHelperFindings(text),
           ]),
           renderable: false,
@@ -633,7 +429,7 @@ export function runGate(
       const bound = elementBoundSlots(text);
       // whether the class ever raises a model's size limit (rows-hidden-by-visible)
       const raised = sizeLimitRaised(text);
-      const start = prep as PreparedAbap & StartPath;
+      const start = prep;
       for (const [index, node] of prep.nodes.entries()) {
         /* A document the FIRST display shows is judged against the start-path
          * model (the linter's `initModel`): what an event handler assigns has
@@ -661,8 +457,7 @@ export function runGate(
             shape: onInit ? start.initModelShape : prep.modelShape,
             // the fields the start path leaves initial, for a document the
             // first display shows (enum-bound-to-initial-field) - and whether
-            // the class raises the size limit; a release that reads neither
-            // ignores both, and the pinned typings name neither yet
+            // the class raises the size limit
             initialFields: onInit ? start.initialFields : null,
             sizeLimitRaised: raised,
             rootFields: prep.rootFields,

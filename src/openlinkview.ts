@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { classNameOf } from "./abap";
-import { inflateCode, MAX_SOURCE, OpenRequest, parseOpenUri } from "./openlink";
+import { inflateCode, MAX_SOURCE, OpenRequest, parseOpenUri, readCapped } from "./openlink";
 
 /*
  * The URI handler: vscode://abap2ui5.abap2ui5/open?code=…&name=… or ?src=…
@@ -80,9 +80,5 @@ async function sourceOf(request: Exclude<OpenRequest, { kind: "error" }>): Promi
   if (!res.ok) {
     throw new Error(`${request.url} answered ${res.status}`);
   }
-  const text = await res.text();
-  if (text.length > MAX_SOURCE) {
-    throw new Error(`${request.url} is larger than a class link carries`);
-  }
-  return text;
+  return readCapped(res, MAX_SOURCE, request.url);
 }
