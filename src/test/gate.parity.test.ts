@@ -5,22 +5,19 @@ import * as path from "path";
 import { checkAbapSource, checkXmlSource } from "@abap2ui5/linter";
 import { prepareAbap } from "@abap2ui5/linter/reconstruct";
 import { RULES } from "@abap2ui5/linter/findings";
-import * as abapRulesNs from "@abap2ui5/linter/abap-rules";
-import * as reconstructNs from "@abap2ui5/linter/reconstruct";
-import * as propertiesNs from "@abap2ui5/linter/properties";
-import * as findingsNs from "@abap2ui5/linter/findings";
 import * as fixNs from "@abap2ui5/linter/fix";
-import * as linterMain from "@abap2ui5/linter";
+import * as linterCheck from "@abap2ui5/linter/check";
+import * as linterPortable from "@abap2ui5/linter/portable";
 import {
-  DECLARES_APP_RE,
   declaresApp,
+  frozenBuilderOf,
   LINTER_COLLECT_CONTAINER_PAGES,
-  LINTER_MATCH_EOL,
   LINTER_PORTABLE,
   LINTER_PUBLIC_READ_FROM_OUTSIDE,
   matchLineEndings,
-  matchLineEndingsPort,
   runGate,
+  sizeLimitRaised,
+  standDownUnusedNamespaces,
   VIEWLESS_APP_RULE,
 } from "../gate";
 import { LINTER_CLASS_INDEX_OF } from "../classindex";
@@ -245,9 +242,9 @@ ABAP_FIXTURES["a relative path under an element-bound slot"] = ELEMENT_BOUND;
 
 /** A class on the FROZEN builder. `checkAbapSource` answers with the one
  *  `frozen-view-builder` finding and nothing else; the gate used to answer
- *  "nothing to check" - an editor/CI divergence. `frozenBuilderOf` has no
- *  subpath in the linter's `exports` map, so `gate.ts` mirrors the two class
- *  names, and this fixture is what pins the mirror to the linter's answer. */
+ *  "nothing to check" - an editor/CI divergence. `frozenBuilderOf` is the
+ *  linter's own (`./check`) since the 0.9.0 pin; this fixture pins the gate's
+ *  answer to the linter's. */
 const FROZEN_CLASS = `CLASS zcl_parity DEFINITION PUBLIC.
   PUBLIC SECTION.
     INTERFACES z2ui5_if_app.
@@ -621,39 +618,6 @@ test("a CRLF file's fixes write CRLF, and LF while crlf-line-ending converts it"
   for (const f of lf.findings) {
     for (const e of f.fixes ?? []) {
       assert.ok(!e.text.includes("\r"), `${f.type} writes a CR into an LF file`);
-    }
-  }
-});
-
-test("the line-ending port behaves as the linter's matchLineEndings", () => {
-  const fx = (type: string, start: number, text: string) => ({ type, fixes: [{ start, end: start, text }] });
-  // mostly CRLF: every LF of a fix text becomes CRLF
-  const crlfSource = "a\r\nb\r\nc\r\n";
-  assert.equal(matchLineEndingsPort([fx("r", 3, "x\ny\n")], crlfSource)[0].fixes[0].text, "x\r\ny\r\n");
-  // a text starting with LF right behind a CR completes that line break
-  assert.equal(matchLineEndingsPort([fx("r", 2, "\nz")], crlfSource)[0].fixes[0].text, "\nz");
-  // already CRLF stays CRLF
-  assert.equal(matchLineEndingsPort([fx("r", 3, "x\r\ny")], crlfSource)[0].fixes[0].text, "x\r\ny");
-  // mostly LF (one CRLF among four breaks): untouched
-  assert.equal(matchLineEndingsPort([fx("r", 0, "x\ny")], "a\nb\nc\r\nd\n")[0].fixes[0].text, "x\ny");
-  // half and half is not "mostly CRLF"
-  assert.equal(matchLineEndingsPort([fx("r", 0, "x\ny")], "a\r\nb\n")[0].fixes[0].text, "x\ny");
-  // with crlf-line-ending among them every text is LF, its own fix untouched
-  const conv = matchLineEndingsPort(
-    [fx("r", 0, "x\r\ny"), { type: "crlf-line-ending", fixes: [{ start: 1, end: 2, text: "" }] }],
-    "a\nb"
-  );
-  assert.equal(conv[0].fixes[0].text, "x\ny");
-  assert.equal(conv[1].fixes[0].text, "");
-  // when the pinned linter exports its own, the two agree on all of the above
-  if (LINTER_MATCH_EOL) {
-    for (const [findings, source] of [
-      [[fx("r", 3, "x\ny\n")], crlfSource],
-      [[fx("r", 2, "\nz")], crlfSource],
-      [[fx("r", 0, "x\ny")], "a\nb\nc\r\nd\n"],
-    ] as const) {
-      const copy = () => JSON.parse(JSON.stringify(findings));
-      assert.deepEqual(LINTER_MATCH_EOL(copy(), source), matchLineEndingsPort(copy(), source));
     }
   }
 });
@@ -1134,62 +1098,24 @@ test("the rules the round-seven inputs feed are reachable through the gate", () 
  * the linter keeps the original out of reach, and to its removal once it
  * does not. */
 
-/** The linter's main entry, as text - the ports below are copies of what
- *  `lib/index.mjs` holds unexported. */
-const LINTER_INDEX = fs.readFileSync(
-  path.join(__dirname, "..", "node_modules", "@abap2ui5", "linter", "lib", "index.mjs"),
-  "utf8"
-);
-
-test("the stand-ins for linter exports: the ports say what lib/index.mjs says", () => {
-  // VIEWLESS_APP_RULE, character for character
-  const viewless = /const VIEWLESS_APP_RULE = \/(.+)\/;\n/.exec(LINTER_INDEX)?.[1];
-  assert.ok(viewless, "lib/index.mjs no longer defines VIEWLESS_APP_RULE - see gate.ts");
-  assert.equal(VIEWLESS_APP_RULE.source, viewless, "the linter changed VIEWLESS_APP_RULE - copy it into gate.ts");
-  // declaresApp, by behaviour (the pin and the branch spell the anchor
-  // differently and mean the same) - over every fixture and the edge cases
-  const samples = [
-    ...Object.values(ABAP_FIXTURES),
-    NON_APP_CLASS,
-    "CLASS a DEFINITION. PUBLIC SECTION. INTERFACES z2ui5_if_app. ENDCLASS.",
-    "CLASS a DEFINITION.\n  PUBLIC SECTION.\n    INTERFACES: if_serializable_object, z2ui5_if_app.\nENDCLASS.",
-    "CLASS a DEFINITION.\n  PUBLIC SECTION.\n    \" INTERFACES z2ui5_if_app.\nENDCLASS.",
-    "CLASS a DEFINITION.\n  PUBLIC SECTION.\n    DATA x TYPE string VALUE `INTERFACES z2ui5_if_app`.\nENDCLASS.",
-    /* Not compared: a literal left UNCLOSED at a line end (a half-typed
-     * buffer). The linter's blankLiterals ends it at the line end,
-     * abapscan's lexer carries it on to the next delimiter - so the two can
-     * disagree about an INTERFACES line below it until the literal is
-     * closed. No valid class is read differently. */
-    "*  INTERFACES z2ui5_if_app.\n",
-    "\r\n   INTERFACES z2ui5_if_app.\r\n",
-  ];
-  for (const sample of samples) {
-    assert.equal(declaresApp(sample), linterMain.declaresApp(sample), JSON.stringify(sample.slice(0, 80)));
-  }
-  assert.ok(DECLARES_APP_RE.flags.includes("m"));
-});
-
-test("the stand-ins for linter exports: a port goes once a leaf module exports the original", () => {
-  /* The gate reaches the linter through its leaf subpaths only (the main
-   * entry pulls in the renderer, which the web host cannot load). The day one
-   * of them exports what gate.ts ports, the port is a second copy of the
-   * linter's semantics - this fails so it is deleted, not kept. */
-  const leaves: Record<string, object> = {
-    "./abap-rules": abapRulesNs,
-    "./reconstruct": reconstructNs,
-    "./properties": propertiesNs,
-    "./findings": findingsNs,
-    "./fix": fixNs,
-  };
-  const ported = ["declaresApp", "VIEWLESS_APP_RULE", "sizeLimitRaised", "standDownUnusedNamespaces", "frozenBuilderOf"];
-  for (const [subpath, ns] of Object.entries(leaves)) {
-    for (const name of ported) {
-      assert.ok(
-        !(name in ns),
-        `@abap2ui5/linter/${subpath.slice(2)} exports ${name} now - call it from gate.ts and delete the port`
-      );
-    }
-  }
+test("the stand-ins for linter exports: the gate calls the linter's own", () => {
+  /* Until the 0.9.0 pin the gate carried PORTS of `declaresApp`,
+   * `VIEWLESS_APP_RULE`, `sizeLimitRaised`, `standDownUnusedNamespaces` and
+   * `frozenBuilderOf` - the linter exported them from its main entry only,
+   * which the web host cannot bundle - and this test pinned each copy to
+   * the linter's source. `./check` exports the originals now, and what the
+   * gate hands on IS the original: a copy creeping back in fails here. */
+  assert.equal(declaresApp, linterCheck.declaresApp);
+  assert.equal(VIEWLESS_APP_RULE, linterCheck.VIEWLESS_APP_RULE);
+  assert.equal(sizeLimitRaised, linterCheck.sizeLimitRaised);
+  assert.equal(standDownUnusedNamespaces, linterCheck.standDownUnusedNamespaces);
+  assert.equal(matchLineEndings, fixNs.matchLineEndings);
+  assert.equal(LINTER_PORTABLE, linterPortable);
+  // the one adapter left: the linter answers null for "no frozen builder",
+  // the gate's callers compare against undefined
+  assert.equal(frozenBuilderOf("z2ui5_cl_xml_view=>factory( )"), "z2ui5_cl_xml_view");
+  assert.equal(frozenBuilderOf("z2ui5_cl_ui5_view_builder=>factory( )"), undefined);
+  assert.equal(linterCheck.frozenBuilderOf("z2ui5_cl_ui5_view_builder=>factory( )"), null);
 });
 
 test("the stand-ins for linter exports: gone with the bump", () => {

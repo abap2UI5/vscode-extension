@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+The bundled linter moves to v0.9.0.
+
+- **Baselines keep working after the linter's key change.** Linter 0.9.0
+  no longer writes a source position into the baseline keys of ten rules
+  (`source-line-too-long`, `trailing-whitespace`, `empty-catch-block`, ...),
+  so a line inserted above a waived finding no longer turns it stale. The
+  extension reads and writes the new keys: *Add to Baseline* rewrites the
+  entries an older release wrote in the new form instead of adding a second
+  key for the same finding - which the CLI counted twice and reported stale.
+  Refresh the repository's baseline once with `abap2ui5lint
+  --update-baseline` and move the Action pin with it.
+- **A class link's `src=` download stops at the size limit.** The source was
+  downloaded whole and compared against the limit afterwards; a declared
+  length over it is now refused before the first byte, and a stream is cut
+  off the moment it passes it.
+
 - **Open a class from a link.** A `vscode://abap2ui5.abap2ui5/open` link
   opens the class it carries as an unsaved `.clas.abap` document and offers
   to run it with F9 - the abap2UI5 layout editor's "Open in VS Code" writes

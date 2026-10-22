@@ -107,7 +107,9 @@ function copyCompat(data, outDir) {
  *  here, so the bundle never asks node for it at runtime - an unresolved
  *  `require` would otherwise stay in the bundle and could pick up some other
  *  copy of the linter from a parent `node_modules` of the extension. */
-const LATER_LINTER_SUBPATHS = ["@abap2ui5/linter/portable"];
+// Empty at the 0.9.0 pin: `./portable` is exported now and imported
+// outright. The plugin stays for the next subpath a release adds.
+const LATER_LINTER_SUBPATHS = [];
 const absentLinterExports = {
   name: "absent-linter-exports",
   setup(build) {

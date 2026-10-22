@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { PropertyFinding } from "@abap2ui5/linter/properties";
-import { baselineBase, findingKey } from "@abap2ui5/linter/baseline";
+import { baselineBase, findingKey, migrateKey } from "@abap2ui5/linter/baseline";
 
 /*
  * Reading and appending to the repo's abap2ui5lint baseline file.
@@ -143,6 +143,26 @@ function writeBaseline(
   };
 }
 
+/**
+ * The stored entries with every key in the bundled linter's form. Linter
+ * 0.9.0 moved the source position ten rules used to write into a key field
+ * out of the key (`migrateKey`); its readers map an old key to today's, but
+ * an append that kept the old spelling next to the new one the linter would
+ * write for the same finding left two keys for one finding - which the CLI
+ * reads as one key counted twice and reports as stale. So an append rewrites
+ * the file in the form the linter reads AND writes; a rebuild replaces every
+ * entry anyway. Counts of keys that become one add up, as the linter's own
+ * reader adds them.
+ */
+function migratedKeys(stored: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, count] of Object.entries(stored)) {
+    const migrated = migrateKey(key);
+    out[migrated] = (out[migrated] ?? 0) + count;
+  }
+  return out;
+}
+
 /** The keys one file's findings contribute, with their counts - what both the
  *  single-finding append and the whole-file rebuild are made of. */
 export function baselineKeys(
@@ -215,7 +235,7 @@ export function addAllToBaseline(
 ): string[] {
   assertWritable(baselineFile, root);
   const raw = readBaseline(baselineFile);
-  const findings: Record<string, number> = raw.findings ?? {};
+  const findings = migratedKeys(raw.findings ?? {});
   const added: string[] = [];
   for (const { file, findings: fileFindings } of files) {
     for (const key of baselineKeys(baselineFile, file, fileFindings)) {
