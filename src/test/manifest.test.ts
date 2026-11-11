@@ -327,6 +327,115 @@ test("no contribution offers a desktop-only command in the web host", () => {
 });
 
 /*
+ * The Command Palette can pass a command nothing. A command whose handler
+ * NEEDS its argument - a tree node, a rule id, a finding - does nothing there
+ * (or fails), so it is hidden with `"when": "false"` under
+ * `menus.commandPalette` and stays reachable from the menu, lens or code
+ * action that supplies the argument.
+ *
+ * "Needs" is read off the handler's signature, which makes it a convention:
+ * a first parameter declared without `?` or a default says the command cannot
+ * work without it. A handler that falls back to the active editor declares
+ * the parameter optional (`node?: …`) and stays in the palette.
+ */
+
+/** The first parameter of every inline `registerCommand` handler: "required",
+ *  "optional" (`?`, a default, a rest parameter) or "none". */
+function handlerArguments(): Map<string, Array<"required" | "optional" | "none">> {
+  const found = new Map<string, Array<"required" | "optional" | "none">>();
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "test") {
+          walk(full);
+        }
+        continue;
+      }
+      if (!entry.name.endsWith(".ts")) {
+        continue;
+      }
+      for (const m of fs
+        .readFileSync(full, "utf8")
+        .matchAll(
+          /registerCommand\(\s*["'`]([^"'`]+)["'`]\s*,\s*(?:async\s*)?\(([^)]*)\)/g
+        )) {
+        // the first parameter alone, object types blanked so that their
+        // commas, colons and `?` are not read as the parameter's own
+        const first = m[2].replace(/\{[^}]*\}/g, "{}").split(",")[0].trim();
+        const name = first.split(/[:=]/)[0].trim();
+        const kind =
+          first === ""
+            ? "none"
+            : name.endsWith("?") || name.startsWith("...") || /=(?!>)/.test(first)
+              ? "optional"
+              : "required";
+        found.set(m[1], [...(found.get(m[1]) ?? []), kind]);
+      }
+    }
+  };
+  walk(path.join(ROOT, "src"));
+  return found;
+}
+
+const handlerArgs = handlerArguments();
+
+/** The commands `menus.commandPalette` hides everywhere. */
+const paletteHidden = new Set(
+  (
+    (manifest.contributes.menus?.commandPalette ?? []) as Array<{
+      command?: string;
+      when?: string;
+    }>
+  )
+    .filter((entry) => (entry.when ?? "").trim() === "false")
+    .map((entry) => entry.command)
+);
+
+test("the signature scan reads every registration", () => {
+  // a handler passed by reference (`registerCommand("x", handler)`) would
+  // escape the scan, and the two tests below would pass it unjudged
+  for (const [command, files] of registered) {
+    assert.equal(
+      handlerArgs.get(command)?.length,
+      files.length,
+      `${command} - register it with an inline arrow function, so its ` +
+        "argument can be read off the registration"
+    );
+  }
+  assert.deepEqual(handlerArgs.get("abap2ui5.copyAppName"), ["required"]);
+  assert.deepEqual(handlerArgs.get("abap2ui5.generateMock"), ["optional"]);
+  assert.deepEqual(handlerArgs.get("abap2ui5.reload"), ["none"]);
+});
+
+test("a command taking a required argument is hidden from the palette", () => {
+  const offenders = contributed.filter(
+    (command) =>
+      handlerArgs.get(command)?.includes("required") &&
+      !paletteHidden.has(command)
+  );
+  assert.deepEqual(
+    offenders,
+    [],
+    "the palette passes no argument - hide these with " +
+      '{ "command": …, "when": "false" } under menus.commandPalette, or ' +
+      "declare the parameter optional if the handler works without it"
+  );
+});
+
+test("a command hidden from the palette is one that takes an argument", () => {
+  // the reverse: `"when": "false"` on a command that needs nothing takes it
+  // away from the keyboard for no reason
+  for (const command of paletteHidden) {
+    assert.ok(
+      command !== undefined && handlerArgs.get(command)?.includes("required"),
+      `${command} is hidden from the palette but its handler requires no argument`
+    );
+  }
+  assert.ok(paletteHidden.size > 0, "the palette hides something at all");
+});
+
+/*
  * Two more things the manifest can only promise: a `viewItem == …` clause
  * names a contextValue some tree item actually sets (a typo here hides the
  * menu entry with no error anywhere), and every file the manifest points at
