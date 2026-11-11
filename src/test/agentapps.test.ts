@@ -17,6 +17,7 @@ import {
   SYSTEM_HINT,
   systemLocation,
   type AgentAppsDeps,
+  type AgentSystem,
   type ConfirmAnswer,
   type ConfirmRequest,
   type SystemRequest,
@@ -59,7 +60,7 @@ const LOCATION = {
   PATHNAME: "/sap/bc/z2ui5",
 };
 
-const system = (name: string, template = TEMPLATE) => ({
+const system = (name: string, template = TEMPLATE): AgentSystem => ({
   name,
   launchUrlFor: (cls: string) =>
     template.replace("{class}", encodeURIComponent(cls.toUpperCase())),
@@ -660,6 +661,87 @@ test("`system` must name the active system - the tools never switch", async () =
   assert.equal(other.isError, true);
   assert.match(textOf(other), /system 'QAS' is not the active system \('DEV'\) - the app tools act on the active system only/);
   assert.equal(h.calls.connect, 0, "refused before any prompt");
+});
+
+test("a production system refuses app_start - no prompt, no question, nothing sent", async () => {
+  let requested = 0;
+  const h = harness({
+    request: async () => {
+      requested++;
+      throw new Error("no request expected");
+    },
+  });
+  h.setActive({ ...system("DEV"), role: "production" });
+  // also when the proxy is down: the connect flow (and its credential
+  // prompt) must not even start
+  for (const up of [true, false]) {
+    h.setProxy(up);
+    const r = await h.call("app_start", { app: "zcl_app" });
+    assert.equal(r.isError, true);
+    assert.match(
+      textOf(r),
+      /system 'DEV' is marked as production \("role": "production" in its abap2ui5\.systems profile\) - app_start is refused/
+    );
+    assert.match(textOf(r), /nothing was sent/);
+  }
+  assert.equal(h.calls.connect, 0, "refused before the connect flow");
+  assert.equal(h.asked.length, 0, "refused before the confirmation");
+  assert.equal(requested, 0, "the system was not contacted");
+  // the role is the tools' only reason: back on a development profile it starts
+  const sys = scriptedSystem("table-011");
+  const dev = harness({ request: sys.request });
+  dev.setActive({ ...system("DEV"), role: "development" });
+  snapOf(await dev.call("app_start", { app: "z2ui5_cl_smp_app_011" }));
+});
+
+test("a system that turns out to be production after the connect flow is refused too", async () => {
+  // nothing active until the user picks a system in the connect flow
+  const picked = { ...system("DEV"), role: "production" };
+  let active: typeof picked | undefined;
+  const h = harness({
+    activeSystem: () => active,
+    connect: async () => {
+      active = picked;
+      return { sapClient: "100" };
+    },
+  });
+  const r = await h.call("app_start", { app: "zcl_app" });
+  assert.equal(r.isError, true);
+  assert.match(textOf(r), /marked as production/);
+  assert.equal(h.asked.length, 0);
+});
+
+test("app_act is refused once the session's system is production - with or without an event", async () => {
+  const sys = scriptedSystem("table-011");
+  const h = harness({ request: sys.request });
+  const start = snapOf(await h.call("app_start", { app: "z2ui5_cl_smp_app_011" }));
+  const asked = h.asked.length;
+  // the profile gains the role while the session runs
+  h.setActive({ ...system("DEV"), role: "production" });
+  h.setProxy(false);
+  for (const args of [
+    { session: start.session, event: "BUTTON_EDIT" },
+    { session: start.session, values: {} },
+    { session: "unknown-session", event: "X" },
+  ]) {
+    const r = await h.call("app_act", args);
+    assert.equal(r.isError, true);
+    assert.match(textOf(r), /system 'DEV' is marked as production .* app_act is refused/);
+  }
+  assert.equal(sys.sent.length, 1, "only the start went out");
+  assert.equal(h.asked.length, asked, "no question for a refused step");
+  assert.equal(h.calls.connect, 0, "no connect flow either");
+  // reading stays possible: the list is a name search, describe is memory
+  h.setProxy(true);
+  assert.ok(!(await h.call("app_list", {})).isError);
+  assert.equal(snapOf(await h.call("app_describe", { session: start.session })).session, start.session);
+});
+
+test("the acting tools say in their description that production refuses them", () => {
+  const { tools } = harness();
+  for (const name of ["app_start", "app_act"]) {
+    assert.match(tools.find((t) => t.name === name)!.description, /"role": "production"/, name);
+  }
 });
 
 test("the user backing out of the picker is an error result, not a hang", async () => {

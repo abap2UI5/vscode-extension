@@ -11,6 +11,7 @@ import {
 import { OpenMode } from "./webview";
 import { expandTemplate, sapClientOf, withParams } from "./urls";
 import { allSystems, SystemProfile } from "./systems";
+import { roleLine, statusText } from "./systemprofile";
 import { ModelView } from "./modelview";
 
 import { CONFIG_SECTION } from "./settings";
@@ -278,9 +279,18 @@ export class Session implements vscode.Disposable {
       this.statusItem.hide();
       return;
     }
-    this.statusItem.text = `$(play-circle) ${this.currentTarget.className}`;
+    // the role of the system the app runs on, when its profile names one -
+    // looked up by name: the target only records which system it came from
+    const shownOn = this.currentTarget.system;
+    const role = allSystems().find((system) => system.name === shownOn)?.role;
+    this.statusItem.text = statusText(this.currentTarget.className, role);
+    this.statusItem.backgroundColor =
+      role === "production"
+        ? new vscode.ThemeColor("statusBarItem.warningBackground")
+        : undefined;
     this.statusItem.tooltip = new vscode.MarkdownString(
       `**abap2UI5 preview** — ${this.currentTarget.system}\n\n` +
+        (role ? `${roleLine(role)}\n\n` : "") +
         `${redactQueryCredentials(this.currentTarget.externalUrl)}\n\nClick for preview actions.`
     );
     this.statusItem.show();

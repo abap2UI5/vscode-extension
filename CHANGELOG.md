@@ -77,6 +77,24 @@ The bundled linter moves to v0.9.0.
   `abap2ui5.allowUnauthorizedCerts` to `true` yourself, nothing changes** -
   every certificate is still accepted without a question; if you relied on
   the old default, you are asked once per system.
+- **A system profile says more than name and URL.** An entry of
+  `abap2ui5.systems` may now carry `minUi5` and `distribution` - what that
+  system serves - and a `role`. While a system is active, its `minUi5` and
+  `distribution` replace `abap2ui5.viewCheck.minUi5` and
+  `abap2ui5.viewCheck.distribution`: switching the system changes which
+  "too new for this release" findings and `@since` annotations you see. A
+  repository's `abap2ui5lint.jsonc` still wins over both, so the editor
+  keeps agreeing with CI; the *abap2UI5* output says where the target came
+  from. After the first launch against a system from the list, the detected
+  UI5 version is offered to that system's profile instead of the global
+  settings. `"role": "production"` makes the agent app tools refuse
+  `app_start` and `app_act` there - before any question and before anything
+  is sent - and the status bar, the system picker and `list_systems` show
+  the role; a system you marked as production in your User settings stays
+  production when a workspace lists the same host without the mark. `auth`
+  is reserved for further logon mechanisms: only `"basic"` is accepted.
+  Existing entries load unchanged, and a field the extension does not
+  understand is ignored and named in the output.
 
 - **Open a class from a link.** A `vscode://abap2ui5.abap2ui5/open` link
   opens the class it carries as an unsaved `.clas.abap` document and offers

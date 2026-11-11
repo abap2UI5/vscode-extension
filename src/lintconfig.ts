@@ -22,7 +22,7 @@ import {
   loadBaseline,
 } from "@abap2ui5/linter/baseline";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
-import { optionsFromConfig } from "./configcore";
+import { optionsFromConfig, optionsFromSettings } from "./configcore";
 
 /** The knobs both the config file and the VS Code settings can set. */
 export interface CheckOptions {
@@ -53,6 +53,9 @@ export interface CheckOptions {
   baseline?: string;
   /** The config file the values came from, for the output channel. */
   configFile?: string;
+  /** The active system whose profile supplied `minUi5` and/or
+   *  `distribution` - set only while a value of it is in effect. */
+  systemProfile?: string;
   /** Set when a config file was found but could not be read. */
   error?: string;
 }
@@ -66,6 +69,10 @@ export interface SettingsOptions {
   /** Per-rule severity overrides / switch-offs from the VS Code settings,
    *  in the shape `abap2ui5lint.jsonc` uses for the same thing. */
   rules?: Record<string, unknown>;
+  /** Set by `settingsForSystem` (configcore.ts): the active system, and
+   *  which of the two values above are its profile's rather than the
+   *  settings' own. */
+  system?: { name: string; minUi5: boolean; distribution: boolean };
 }
 
 interface CacheEntry {
@@ -218,7 +225,8 @@ export function findConfigFile(dir: string | undefined): string | undefined {
 
 /**
  * The options one document is checked with: the repo config where it speaks,
- * the VS Code settings everywhere else. `allow` is the exception — the two
+ * the VS Code settings everywhere else (with the active system's profile
+ * already laid over them - `settingsForSystem` in configcore.ts). `allow` is the exception — the two
  * lists merge, because a repo-wide allowance and a personal one are both
  * meant. That is how the CLI treats it too.
  */
@@ -228,11 +236,11 @@ export function resolveOptions(
 ): CheckOptions {
   const file = findConfigFile(dir);
   if (!file) {
-    return { ...settings };
+    return optionsFromSettings(settings);
   }
   const { loaded, error } = readConfig(file);
   if (error) {
-    return { ...settings, configFile: file, error };
+    return { ...optionsFromSettings(settings), configFile: file, error };
   }
   /* The mapping itself lives in `configcore.ts`, shared with the web build:
    * two builds disagreeing about precedence is the same defect as an editor
@@ -334,10 +342,16 @@ export function describeOptions(options: CheckOptions): string {
       : options.distribution === "sapui5"
         ? "SAPUI5"
         : options.distribution || "UI5 (distribution not set)";
+  const profile = options.systemProfile
+    ? `the profile of system '${options.systemProfile}'`
+    : "";
   const from = options.configFile
     ? options.error
-      ? `${options.configFile} (unreadable: ${options.error}) - using the VS Code settings`
-      : options.configFile
-    : "VS Code settings";
+      ? `${options.configFile} (unreadable: ${options.error}) - using ` +
+        (profile ? `${profile} and the VS Code settings` : "the VS Code settings")
+      : options.configFile + (profile ? ` and ${profile}` : "")
+    : profile
+      ? `${profile} and the VS Code settings`
+      : "VS Code settings";
   return `target ${dist} ${options.minUi5}, from ${from}`;
 }

@@ -53,6 +53,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/webview.ts` | HTML for the preview and the welcome screen (theme variables, CSP nonce, theme/language pickers, the open-mode-aware empty state) |
 | `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401; authorized by the token in its own url |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
+| `src/systemprofile.ts` | `vscode`-free: what a `systems` entry may say beyond name and url - `role`, `minUi5`, `distribution`, the reserved `auth` - parsed tolerantly (`profileFieldsOf`; what was ignored is `profileNotes`, logged once per change of the setting), `production` kept from the settings scopes a workspace's list shadows (`tightenRoles`), the status bar's role text, and the detected UI5 version written back into an entry (`withDetectedUi5`) |
+| `src/checktarget.ts` | The settings half of a desktop check's options: the four `viewCheck` settings with the active system's profile laid over them (`checkSettings`, the precedence itself is `settingsForSystem` in `configcore.ts`), and the change notice / generation the view check and the inline annotations re-check on |
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
 | `src/compat.ts` | `vscode`-free: the bundled linter's compatibility record (`@abap2ui5/linter/compat`, copied next to the bundle by `esbuild.js` like the snapshot; null when the pin ships none) and what it says about a workspace's framework pin - the one parser of `abaplint.jsonc`'s `dependencies[].branch` (`scaffold.ts` uses it too), `compareRelease`, `compatVerdict`, the activation line |
 | `src/compatcheck.ts` | The framework-pin check's plumbing: a warning on the `branch` line of an open `abaplint.jsonc` pinned below what the bundled linter assumes, on open and save |
@@ -163,7 +165,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`, `web/startup.ts`,
+`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
@@ -391,6 +393,19 @@ identity (see Conventions).
   refusal that names the first two. Do not add a path that accepts an
   unverified certificate without a pin, and do not add a workspace-settable
   switch that weakens verification.
+- **A system profile field may only tighten.** `abap2ui5.systems` can be set
+  by a (trusted) workspace, so nothing in a profile may switch a security
+  check off: `role: "production"` refuses things, `minUi5` / `distribution`
+  only choose what the view check compares against, `auth` is reserved
+  (`"basic"` alone is accepted, anything else ignored with a log line).
+  Certificate trust is deliberately NOT a profile field. And because a
+  workspace's list replaces the user's whole array, `tightenRoles`
+  (`systemprofile.ts`) keeps `production` for every system on the origin of
+  a production profile in a shadowed scope. The precedence of `minUi5` and
+  `distribution` is decided in `configcore.ts` and nowhere else: repository
+  `abap2ui5lint.jsonc` > active system's profile (`settingsForSystem`) >
+  VS Code setting; the web build has no systems and never applies the
+  middle step.
 - **A file the repository's config names is confined before it is written.**
   The `baseline` of an `abap2ui5lint.jsonc` is replaced with JSON by "Add to
   Baseline" / "Update Baseline"; `baselinefile.ts` refuses every write whose

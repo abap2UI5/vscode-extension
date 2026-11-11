@@ -115,6 +115,59 @@ export function parseLintConfig(text: string, file: string): ParsedLintConfig {
   return parseConfig(file, text) as ParsedLintConfig;
 }
 
+/** What the active system's profile says about the UI5 it serves. */
+export interface SystemTarget {
+  name: string;
+  minUi5?: string;
+  distribution?: string;
+}
+
+/*
+ * THE PRECEDENCE of `minUi5` and `distribution`, decided here and nowhere
+ * else:
+ *
+ *   repository `abap2ui5lint.jsonc`  >  active system's profile  >  VS Code setting
+ *
+ * `settingsForSystem` is the second step (profile over setting),
+ * `optionsFromConfig` the first (repo config over the result). The repo
+ * config stays on top because CI checks against it and knows no system; the
+ * profile beats the setting because it is the more specific word - the
+ * setting is one value for every system. The web build has no systems and
+ * never calls `settingsForSystem`: there the settings apply as they are.
+ */
+
+/**
+ * The settings with the active system's profile laid over them: where the
+ * profile names a `minUi5` or a `distribution`, that value replaces the
+ * setting's. `allow` and `rules` are not per-system. No system, or a profile
+ * that names neither: the settings unchanged (the same object).
+ */
+export function settingsForSystem(
+  settings: SettingsOptions,
+  system: SystemTarget | undefined
+): SettingsOptions {
+  if (!system || (!system.minUi5 && !system.distribution)) {
+    return settings;
+  }
+  return {
+    ...settings,
+    minUi5: system.minUi5 || settings.minUi5,
+    distribution: system.distribution || settings.distribution,
+    system: {
+      name: system.name,
+      minUi5: !!system.minUi5,
+      distribution: !!system.distribution,
+    },
+  };
+}
+
+/** The check options the settings alone produce - no repo config governs
+ *  the file. */
+export function optionsFromSettings(settings: SettingsOptions): CheckOptions {
+  const { system, ...rest } = settings;
+  return system ? { ...rest, systemProfile: system.name } : { ...rest };
+}
+
 /**
  * The check options a parsed config produces, over the VS Code settings.
  *
@@ -160,6 +213,14 @@ export function optionsFromConfig(
     // what CI reports, so both reach the gate
     properties: raw.properties,
     allClasses: raw.allClasses,
+    // named only while a value of the profile is actually in effect - the
+    // log line answers "where did this floor come from"
+    ...(settings.system &&
+    ((settings.system.minUi5 && raw.minUi5 === undefined) ||
+      (settings.system.distribution &&
+        (raw.distribution === undefined || raw.distribution === null)))
+      ? { systemProfile: settings.system.name }
+      : {}),
   };
 }
 

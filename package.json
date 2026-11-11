@@ -803,11 +803,39 @@
               "url": {
                 "type": "string",
                 "description": "Launch URL template with the {class} placeholder."
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "development",
+                  "production"
+                ],
+                "description": "What the system is used for. On a production system the agent app tools refuse app_start and app_act, and the status bar shows the role. Optional."
+              },
+              "minUi5": {
+                "type": "string",
+                "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+                "description": "The UI5 version this system serves, e.g. 1.120. While the system is active it replaces abap2ui5.viewCheck.minUi5; a repository's abap2ui5lint.jsonc still wins. Optional."
+              },
+              "distribution": {
+                "type": "string",
+                "enum": [
+                  "sapui5",
+                  "openui5"
+                ],
+                "description": "The UI5 distribution this system serves. While the system is active it replaces abap2ui5.viewCheck.distribution; a repository's abap2ui5lint.jsonc still wins. Optional."
+              },
+              "auth": {
+                "type": "string",
+                "enum": [
+                  "basic"
+                ],
+                "description": "Reserved for further logon mechanisms. \"basic\" is the only value accepted and is what happens anyway; any other value is ignored."
               }
             },
             "additionalProperties": false
           },
-          "markdownDescription": "The systems F9 can launch against. The active one is picked with the command **\"abap2UI5: Select System\"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again.\n\n```json\n[\n  { \"name\": \"DEV\", \"url\": \"https://dev:44300/sap/bc/z2ui5?app_start={class}&sap-client=100\" },\n  { \"name\": \"Sandbox\", \"url\": \"https://box:44300/sap/bc/z2ui5?app_start={class}\" }\n]\n```"
+          "markdownDescription": "The systems F9 can launch against. The active one is picked with the command **\"abap2UI5: Select System\"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again. An entry may also name the UI5 version and distribution its system serves (`minUi5`, `distribution` - used by the view check while that system is active) and its `role` (`\"production\"`: the agent app tools refuse to act there).\n\n```json\n[\n  { \"name\": \"DEV\", \"url\": \"https://dev:44300/sap/bc/z2ui5?app_start={class}&sap-client=100\", \"minUi5\": \"1.120\", \"distribution\": \"sapui5\" },\n  { \"name\": \"Sandbox\", \"url\": \"https://box:44300/sap/bc/z2ui5?app_start={class}\" },\n  { \"name\": \"PRD\", \"url\": \"https://prd:44300/sap/bc/z2ui5?app_start={class}\", \"role\": \"production\" }\n]\n```\n\nOptional per system: `minUi5` and `distribution` - what that system serves; while it is the active system they replace `#abap2ui5.viewCheck.minUi5#` and `#abap2ui5.viewCheck.distribution#` (a repository's `abap2ui5lint.jsonc` wins over both). `role`: `\"development\"` or `\"production\"` - on a production system the agent app tools refuse to start or operate apps, and the status bar shows the role; a system you marked as production in your user settings stays production when a workspace lists the same host without the mark. `auth` is reserved: only `\"basic\"` is accepted. A field with a value the extension does not understand is ignored and named in the *abap2UI5* output."
         },
         "abap2ui5.allowUnauthorizedCerts": {
           "type": "boolean",

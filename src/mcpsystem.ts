@@ -28,6 +28,8 @@ import { runGate, VIEW_XML_RE } from "./gate";
 import { workspaceClassIndex } from "./classindexfeed";
 import { originOf, sapClientOf, withParams } from "./urls";
 import { CONFIG_SECTION } from "./settings";
+import { checkSettings } from "./checktarget";
+import { optionsFromSettings } from "./configcore";
 
 /*
  * The abap2UI5 SYSTEM MCP server - real-system tools for AI agents.
@@ -48,7 +50,10 @@ import { CONFIG_SECTION } from "./settings";
 
 export interface SystemMcpDeps {
   /** The configured launch systems, no prompting. */
-  listSystems(): { active?: string; systems: Array<{ name: string; host: string }> };
+  listSystems(): {
+    active?: string;
+    systems: Array<{ name: string; host: string; role?: string }>;
+  };
   /**
    * The connect flow F9 uses: pick/keep the system, ensure credentials,
    * start the proxy. May prompt the user; undefined when they back out.
@@ -187,9 +192,14 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
           systems
             .map(
               (s) =>
-                `${s.name === active ? "* " : "  "}${s.name}  (${s.host})`
+                `${s.name === active ? "* " : "  "}${s.name}  (${s.host})` +
+                (s.role ? `  [${s.role}]` : "")
             )
-            .join("\n") + "\n\n* = active system"
+            .join("\n") +
+            "\n\n* = active system" +
+            (systems.some((s) => s.role === "production")
+              ? "\n[production] = app_start and app_act are refused there"
+              : "")
         );
       },
     },
@@ -362,16 +372,10 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
         }
         const filename = String(args.filename ?? "").trim() || "source.clas.abap";
         const isXml = VIEW_XML_RE.test(filename) || /^\s*</.test(source);
-        const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-        const rules = cfg.get<Record<string, unknown>>("viewCheck.rules");
+        // the settings with the active system's profile over them, as the
+        // editor's check reads them (checktarget.ts)
         const gate = runGate(source, filename, isXml, {
-          minUi5: cfg.get<string>("viewCheck.minUi5", "1.71"),
-          // "" is the setting's default and means "not decided" - the
-          // linter's own answer, never "sapui5" (which silences
-          // sapui5-only-control: see gate.ts and viewcheck.ts)
-          distribution: cfg.get<string>("viewCheck.distribution", "") || null,
-          allow: cfg.get<string[]>("viewCheck.allow", []),
-          rules: rules && Object.keys(rules).length > 0 ? rules : undefined,
+          ...optionsFromSettings(checkSettings()),
           // judged against the window's other classes, as the editor is
           classIndex: isXml ? undefined : workspaceClassIndex(),
         });

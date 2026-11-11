@@ -83,6 +83,8 @@ import {
   storeTemplate,
   activateTemplate,
 } from "./systems";
+import { profileNotes } from "./systemprofile";
+import { checkTargetChanged, setCheckTargetSource } from "./checktarget";
 
 /** Where the screenshot Save As dialog last saved to, per window. */
 const SHOT_DIR_STATE = "abap2ui5.screenshotSaveDir";
@@ -133,6 +135,17 @@ export function activate(context: vscode.ExtensionContext): void {
   // answer to "why does the check flag a call my release does not have".
   const compat = readCompat();
   log(`compat: ${compatLine(compat)}`);
+
+  // The active system's profile may name the UI5 version and distribution
+  // the view check compares against (checktarget.ts), and what a `systems`
+  // entry says that nobody understands is named in the log rather than
+  // silently dropped.
+  setCheckTargetSource(() => activeSystem(context));
+  const logProfileNotes = () =>
+    profileNotes(
+      vscode.workspace.getConfiguration(CONFIG_SECTION).get<unknown>("systems", [])
+    ).forEach((note) => log(`systems: ${note}`));
+  logProfileNotes();
 
   // Every request the embedded app makes goes through the proxy - log it
   // with its full roundtrip time, and feed the toolbar's badge with the
@@ -242,7 +255,11 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       provider.refreshWelcome();
-      log(`system: now launching against ${system.name}`);
+      log(
+        `system: now launching against ${system.name}` +
+          (system.role ? ` (${system.role})` : "")
+      );
+      checkTargetChanged();
       if (session.currentTarget) {
         // Same app, other system - relaunch instead of reloading a URL that
         // no longer points where the user is looking.
@@ -279,6 +296,17 @@ export function activate(context: vscode.ExtensionContext): void {
         e.affectsConfiguration(`${CONFIG_SECTION}.${OPEN_MODE_KEY}`)
       ) {
         provider.refreshWelcome();
+      }
+      if (
+        e.affectsConfiguration(`${CONFIG_SECTION}.${TEMPLATE_KEY}`) ||
+        e.affectsConfiguration(`${CONFIG_SECTION}.systems`)
+      ) {
+        // a profile's role, minUi5 or distribution may have changed
+        if (e.affectsConfiguration(`${CONFIG_SECTION}.systems`)) {
+          logProfileNotes();
+        }
+        session.updateStatusItem();
+        checkTargetChanged();
       }
       // The pickers in a running preview were built from the lists at load
       // time - a theme added to the setting did not show up until the next F9.
@@ -612,6 +640,7 @@ export function activate(context: vscode.ExtensionContext): void {
         systems: allSystems().map((s) => ({
           name: s.name,
           host: shortUrl(s.template),
+          role: s.role,
         })),
       }),
       // no certificate question from an agent's call: an untrusted
@@ -649,6 +678,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return system
           ? {
               name: system.name,
+              role: system.role,
               launchUrlFor: (className: string) =>
                 session.urlFor(system, className),
             }

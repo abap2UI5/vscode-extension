@@ -6,8 +6,10 @@ import {
   joinPath,
   nearestConfig,
   optionsFromConfig,
+  optionsFromSettings,
   parseBaseline,
   parseLintConfig,
+  settingsForSystem,
 } from "../configcore";
 import { findingKey } from "@abap2ui5/linter/baseline";
 import type { LintConfig } from "@abap2ui5/linter/config";
@@ -283,5 +285,61 @@ test("no distribution anywhere is null - the linter's own default, not sapui5", 
     optionsFromConfig({ distribution: "openui5" }, "/repo/abap2ui5lint.jsonc", undecided)
       .distribution,
     "openui5"
+  );
+});
+
+// ------------------------------------------------- the active system ----
+
+test("precedence of minUi5 and distribution: repo config > active system's profile > setting", () => {
+  const FILE = "/repo/abap2ui5lint.jsonc";
+  const settings = { minUi5: "1.71", distribution: null as string | null, allow: ["sap.m.X.y"] };
+  const system = { name: "DEV", minUi5: "1.120", distribution: "openui5" };
+
+  // 3. the setting alone
+  assert.equal(settingsForSystem(settings, undefined), settings, "no system: the settings themselves");
+  assert.equal(optionsFromSettings(settings).minUi5, "1.71");
+  assert.equal(optionsFromSettings(settings).systemProfile, undefined);
+
+  // 2. the profile over the setting
+  const withSystem = settingsForSystem(settings, system);
+  assert.equal(withSystem.minUi5, "1.120");
+  assert.equal(withSystem.distribution, "openui5");
+  assert.deepEqual(withSystem.allow, ["sap.m.X.y"], "allow is not per-system");
+  const noConfig = optionsFromSettings(withSystem);
+  assert.equal(noConfig.minUi5, "1.120");
+  assert.equal(noConfig.distribution, "openui5");
+  assert.equal(noConfig.systemProfile, "DEV");
+  assert.equal("system" in noConfig, false, "the bookkeeping does not reach the gate");
+
+  // 1. the repo config over both - each value on its own
+  const both = optionsFromConfig({ minUi5: "1.96", distribution: "sapui5" }, FILE, withSystem);
+  assert.equal(both.minUi5, "1.96");
+  assert.equal(both.distribution, "sapui5");
+  assert.equal(both.systemProfile, undefined, "nothing of the profile is in effect");
+  const floorOnly = optionsFromConfig({ minUi5: "1.96" }, FILE, withSystem);
+  assert.equal(floorOnly.minUi5, "1.96");
+  assert.equal(floorOnly.distribution, "openui5", "the config is silent: the profile's word");
+  assert.equal(floorOnly.systemProfile, "DEV");
+  const silent = optionsFromConfig({}, FILE, withSystem);
+  assert.equal(silent.minUi5, "1.120");
+  assert.equal(silent.distribution, "openui5");
+  assert.equal(silent.systemProfile, "DEV");
+});
+
+test("a profile that names one value leaves the other to the setting", () => {
+  const settings = { minUi5: "1.71", distribution: "sapui5", allow: [] };
+  const floor = settingsForSystem(settings, { name: "DEV", minUi5: "1.108" });
+  assert.equal(floor.minUi5, "1.108");
+  assert.equal(floor.distribution, "sapui5");
+  const dist = settingsForSystem(settings, { name: "DEV", distribution: "openui5" });
+  assert.equal(dist.minUi5, "1.71");
+  assert.equal(dist.distribution, "openui5");
+  // a profile of name and url changes nothing, and is not named as a source
+  const plain = settingsForSystem(settings, { name: "DEV" });
+  assert.equal(plain, settings);
+  // a config that decides the one value the profile names: the profile is not in effect
+  assert.equal(
+    optionsFromConfig({ minUi5: "1.96" }, "/repo/abap2ui5lint.jsonc", floor).systemProfile,
+    undefined
   );
 });

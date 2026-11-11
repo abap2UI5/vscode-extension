@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
 import { isUsableTemplate, originOf, shortUrl } from "./urls";
+import { ProfileFields, profileFieldsOf, tightenRoles } from "./systemprofile";
 
 /*
  * The systems the extension can launch against.
@@ -27,11 +28,12 @@ const ACTIVE_KEY = "abap2ui5.activeSystem";
 const LEGACY_USER = "abap2ui5.user";
 const LEGACY_PASS = "abap2ui5.pass";
 
-export interface SystemProfile {
+export interface SystemProfile extends ProfileFields {
   /** What the picker and the status bar show. */
   name: string;
   /** URL template with the `{class}` placeholder. */
   template: string;
+  // role, minUi5, distribution, auth: see `ProfileFields` (systemprofile.ts)
 }
 
 function config() {
@@ -68,7 +70,13 @@ export function profilesFrom(raw: unknown): SystemProfile[] {
     if (!isUsableTemplate(template)) {
       continue;
     }
-    list.push({ name: textOf(entry.name) || shortUrl(template), template });
+    list.push({
+      name: textOf(entry.name) || shortUrl(template),
+      template,
+      // the optional fields, each only when it holds a usable value - an
+      // entry of name and url loads exactly as it always did
+      ...profileFieldsOf(entry),
+    });
   }
   return list;
 }
@@ -93,7 +101,20 @@ export function allSystems(): SystemProfile[] {
     single && !list.some((s) => s.template === single.template)
       ? [single, ...list]
       : list;
-  return withUniqueNames(all);
+  return withUniqueNames(tightenRoles(all, shadowedSystems()));
+}
+
+/** The profiles of the settings scopes the effective `systems` value
+ *  shadows - a workspace's list replaces the user's, and must not take a
+ *  `"role": "production"` away with it (`tightenRoles`). */
+function shadowedSystems(): SystemProfile[] {
+  const scopes = config().inspect<unknown>(SYSTEMS_KEY);
+  if (!scopes) {
+    return [];
+  }
+  const values = [scopes.workspaceFolderValue, scopes.workspaceValue, scopes.globalValue];
+  const effective = values.findIndex((value) => value !== undefined);
+  return effective < 0 ? [] : values.slice(effective + 1).flatMap(profilesFrom);
 }
 
 /**
@@ -268,7 +289,8 @@ export async function pickSystem(
   const items: Array<vscode.QuickPickItem & { system?: SystemProfile; add?: boolean }> =
     all.map((system) => ({
       label: system.name === active?.name ? `$(check) ${system.name}` : system.name,
-      description: shortUrl(system.template),
+      description:
+        shortUrl(system.template) + (system.role ? ` · ${system.role}` : ""),
       system,
     }));
   items.push({
