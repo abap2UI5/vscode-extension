@@ -6,6 +6,10 @@ import {
   agentEndpoint,
   boundedInt,
   classNameOf,
+  CONFIRM_ACTIONS_KEY,
+  CONFIRM_TIMEOUT_MS,
+  confirmDetail,
+  confirmSummary,
   createAgentAppTools,
   createSystemTransport,
   DISABLED_MESSAGE,
@@ -13,6 +17,8 @@ import {
   SYSTEM_HINT,
   systemLocation,
   type AgentAppsDeps,
+  type ConfirmAnswer,
+  type ConfirmRequest,
   type SystemRequest,
   type SystemResponse,
 } from "../agentapps";
@@ -99,10 +105,18 @@ function scriptedSystem(name: string) {
 
 function harness(over: Partial<AgentAppsDeps> = {}) {
   const calls = { connect: 0, search: [] as string[] };
+  /** every question put to the user, and what they answer next (default: Allow) */
+  const asked: ConfirmRequest[] = [];
+  const answers: ConfirmAnswer[] = [];
   let active: ReturnType<typeof system> | undefined = system("DEV");
   let proxyUp = true;
   const deps: AgentAppsDeps = {
     enabled: () => true,
+    confirmActions: () => true,
+    confirm: async (request) => {
+      asked.push(request);
+      return answers.shift() ?? "allow";
+    },
     activeSystem: () => active,
     systemNames: () => ["DEV", "QAS"],
     connect: async () => {
@@ -132,6 +146,8 @@ function harness(over: Partial<AgentAppsDeps> = {}) {
     tools,
     call,
     calls,
+    asked,
+    answers,
     setActive: (s: ReturnType<typeof system> | undefined) => (active = s),
     setProxy: (up: boolean) => (proxyUp = up),
   };
@@ -191,6 +207,339 @@ test("every tool that acts says that it acts for real", () => {
   for (const name of ["app_list", "app_start", "app_act"]) {
     const description = h.tools.find((t) => t.name === name)!.description;
     assert.match(description, /FOR REAL on the active SAP system as the configured user/, name);
+  }
+});
+
+// ------------------------------------------------- the confirmation ----
+
+/** The question without its signal, for comparing. */
+const plain = ({ signal: _signal, ...rest }: ConfirmRequest) => rest;
+
+/** A system that starts any class with one button, and answers every event. */
+function buttonSystem() {
+  const sent: Array<{ app?: string; event?: unknown }> = [];
+  const view =
+    '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Page title="T"><Button text="Go" press=".eB([\'GO\'])"/></Page></mvc:View>';
+  const request: SystemRequest = async (_url, init) => {
+    const front = JSON.parse(init.body ?? "{}").value.S_FRONT;
+    const app = front.SEARCH
+      ? String(new URLSearchParams(front.SEARCH).get("app_start")).toUpperCase()
+      : undefined;
+    sent.push({ app, event: front.EVENT });
+    return json(200, {
+      S_FRONT: {
+        ID: `D${sent.length}`,
+        APP: app ?? "ZCL_A",
+        PROTOCOL: 2,
+        ...(app ? { S_ACTION: { T_SYSTEM: [["VIEW_SLOTS", "display", "MAIN", view]] } } : {}),
+      },
+    });
+  };
+  return { request, sent };
+}
+
+test("the confirmation setting is on by default, user/machine scope, and restricted in untrusted workspaces", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  assert.equal(CONFIRM_ACTIONS_KEY, "agent.confirmActions");
+  const key = `abap2ui5.${CONFIRM_ACTIONS_KEY}`;
+  const setting = pkg.contributes.configuration.properties[key];
+  assert.ok(setting, key);
+  assert.equal(setting.type, "boolean");
+  assert.equal(setting.default, true, "asking is the default");
+  assert.equal(setting.scope, "machine", "a cloned repository must not be able to switch it off");
+  assert.ok(
+    pkg.capabilities.untrustedWorkspaces.restrictedConfigurations.includes(key)
+  );
+});
+
+test("with defaults, a start and every event wait for the user's Allow - with what is sent in the question", async () => {
+  const sys = scriptedSystem("form-381");
+  const h = harness({ request: sys.request });
+  const steps = fixture("form-381").steps;
+  let snap = snapOf(await h.call("app_start", { app: steps[0].arg }));
+  assert.deepEqual(h.asked.map(plain), [
+    { kind: "start", system: "DEV", className: "Z2UI5_CL_SMP_APP_381", values: {} },
+  ]);
+  assert.equal(h.asked[0].signal.aborted, false);
+  // values without an event: nothing is sent, so nothing is asked
+  snap = snapOf(await h.call("app_act", { session: snap.session, values: { f1: "hello agent" } }));
+  assert.equal(h.asked.length, 1);
+  assert.equal(sys.sent.length, 1);
+  assert.equal(snap.pending?.length, 1);
+  // the event: the pending edit and this call's values are both in the question
+  snap = snapOf(
+    await h.call("app_act", {
+      session: snap.session,
+      values: { f6: true, f4: "left top" },
+      event: "SHOW",
+    })
+  );
+  assert.equal(h.asked.length, 2);
+  const question = plain(h.asked[1]);
+  assert.equal(question.kind, "event");
+  assert.equal(question.system, "DEV");
+  assert.equal(question.className, "Z2UI5_CL_SMP_APP_381");
+  assert.equal(question.event, "SHOW");
+  assert.equal(question.action?.event, "SHOW");
+  assert.deepEqual(Object.values(question.values), ["hello agent", true, "left top"]);
+  assert.deepEqual(Object.keys(question.values).slice(1), ["f6", "f4"]);
+  // a plain Allow is for that one step: the next event is asked about again
+  snapOf(await h.call("app_act", { session: snap.session, ...(steps[2].arg as object) }));
+  assert.equal(h.asked.length, 3);
+  assert.equal(h.asked[2].event, "TOAST_CLOSED");
+  assert.equal(sys.sent.length, sys.exchanges.length, "the recorded session, request for request");
+});
+
+test("the question is asked BEFORE anything is sent", async () => {
+  const sys = buttonSystem();
+  const sentWhenAsked: number[] = [];
+  const h = harness({
+    request: sys.request,
+    confirm: async () => {
+      sentWhenAsked.push(sys.sent.length);
+      return "allow";
+    },
+  });
+  const snap = snapOf(await h.call("app_start", { app: "zcl_a" }));
+  await h.call("app_act", { session: snap.session, event: "GO" });
+  assert.deepEqual(sentWhenAsked, [0, 1]);
+  assert.equal(h.calls.connect, 0);
+});
+
+test("Deny is a refusal that says the user declined - no error, nothing sent, the session kept", async () => {
+  const sys = buttonSystem();
+  const h = harness({ request: sys.request });
+  h.answers.push("deny");
+  const start = await h.call("app_start", { app: "zcl_a" });
+  assert.equal(start.isError, undefined, "the tool worked - the user said no");
+  assert.equal(
+    textOf(start),
+    "The user declined the request to start ZCL_A on system 'DEV'. Nothing was sent to the system. " +
+      "Do not retry it unless the user asks for it."
+  );
+  assert.equal(sys.sent.length, 0);
+  // a denied start was not "the first start": the next one is asked about again
+  const snap = snapOf(await h.call("app_start", { app: "zcl_a" }));
+  assert.equal(h.asked.length, 2);
+  h.answers.push("deny");
+  const act = await h.call("app_act", { session: snap.session, event: "GO" });
+  assert.equal(act.isError, undefined);
+  assert.equal(
+    textOf(act),
+    "The user declined the request to fire event GO in ZCL_A on system 'DEV'. Nothing was sent to " +
+      "the system. Do not retry it unless the user asks for it."
+  );
+  assert.equal(sys.sent.length, 1, "only the allowed start went out");
+  // the session is as it was, and an allowed event still goes through
+  assert.equal(snapOf(await h.call("app_describe", { session: snap.session })).session, snap.session);
+  snapOf(await h.call("app_act", { session: snap.session, event: "GO" }));
+  assert.deepEqual(sys.sent.map((s) => s.event), [undefined, "GO"]);
+});
+
+test("a closed dialog, an unknown answer and a failing question all count as Deny", async () => {
+  const sys = buttonSystem();
+  const logged: string[] = [];
+  let n = 0;
+  const h = harness({
+    request: sys.request,
+    log: (m) => logged.push(m),
+    confirm: async () => {
+      n++;
+      if (n === 1) {
+        return undefined;
+      }
+      if (n === 2) {
+        return "yes" as unknown as ConfirmAnswer;
+      }
+      throw new Error("no window");
+    },
+  });
+  for (let i = 0; i < 3; i++) {
+    const r = await h.call("app_start", { app: "zcl_a" });
+    assert.equal(r.isError, undefined);
+    assert.match(textOf(r), /^The user declined the request to start ZCL_A/);
+  }
+  assert.equal(sys.sent.length, 0);
+  assert.ok(logged.some((m) => /the confirmation failed - Error: no window/.test(m)));
+});
+
+test("no answer within the timeout is a refusal too - and a late Allow sends nothing", async () => {
+  const sys = buttonSystem();
+  let answerLate: ((a: ConfirmAnswer) => void) | undefined;
+  const signals: AbortSignal[] = [];
+  const h = harness({
+    request: sys.request,
+    confirmTimeoutMs: 20,
+    confirm: (request) => {
+      signals.push(request.signal);
+      return new Promise<ConfirmAnswer>((resolve) => (answerLate = resolve));
+    },
+  });
+  const r = await h.call("app_start", { app: "zcl_a" });
+  assert.equal(r.isError, undefined);
+  assert.equal(
+    textOf(r),
+    "The user did not answer the confirmation within 0.02 s, which counts as declined: the request " +
+      "to start ZCL_A on system 'DEV' was not carried out. Nothing was sent to the system. " +
+      "Do not retry it unless the user asks for it."
+  );
+  assert.equal(signals[0].aborted, true, "the plumbing can tell that the answer no longer counts");
+  answerLate!("allow-session");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(sys.sent.length, 0, "nothing sent after the fact");
+  // and the late 'for this session' was not remembered: the next start asks again
+  const again = h.call("app_start", { app: "zcl_a" });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(signals.length, 2);
+  answerLate!("allow");
+  snapOf(await again);
+  assert.equal(sys.sent.length, 1);
+  assert.equal(CONFIRM_TIMEOUT_MS, 120_000);
+});
+
+test("Allow for This Session stops the questions for that class on that system only", async () => {
+  const sys = buttonSystem();
+  const h = harness({ request: sys.request });
+  h.answers.push("allow-session");
+  let a = snapOf(await h.call("app_start", { app: "zcl_a" }));
+  assert.equal(h.asked.length, 1);
+  a = snapOf(await h.call("app_act", { session: a.session, event: "GO" }));
+  snapOf(await h.call("app_act", { session: a.session, event: "GO" }));
+  snapOf(await h.call("app_start", { app: "ZCL_A" }));
+  assert.equal(h.asked.length, 1, "ZCL_A: starts and events, no more questions");
+  // another class is asked about as before
+  const b = snapOf(await h.call("app_start", { app: "zcl_b" }));
+  assert.equal(h.asked.length, 2);
+  assert.equal(h.asked[1].className, "ZCL_B");
+  snapOf(await h.call("app_act", { session: b.session, event: "GO" }));
+  assert.equal(h.asked.length, 3);
+  assert.equal(h.asked[2].className, "ZCL_B");
+  assert.equal(h.asked[2].kind, "event");
+  // and so is the same class on another system
+  h.setActive(system("QAS", TEMPLATE));
+  snapOf(await h.call("app_start", { app: "zcl_a" }));
+  assert.equal(h.asked.length, 4);
+  assert.deepEqual([h.asked[3].system, h.asked[3].className], ["QAS", "ZCL_A"]);
+  // a new server (a new window) remembers nothing
+  const fresh = harness({ request: sys.request });
+  snapOf(await fresh.call("app_start", { app: "zcl_a" }));
+  assert.equal(fresh.asked.length, 1);
+});
+
+test("only the FIRST start of a class is asked about - its events still are", async () => {
+  const sys = buttonSystem();
+  const h = harness({ request: sys.request });
+  snapOf(await h.call("app_start", { app: "zcl_a" }));
+  const second = snapOf(await h.call("app_start", { app: "zcl_a" }));
+  assert.equal(h.asked.length, 1, "the second start of ZCL_A is not asked about");
+  await h.call("app_act", { session: second.session, event: "GO" });
+  assert.equal(h.asked.length, 2);
+  assert.equal(h.asked[1].kind, "event");
+  snapOf(await h.call("app_start", { app: "zcl_b" }));
+  assert.equal(h.asked.length, 3, "another class's first start is");
+});
+
+test("one question at a time, and an Allow for This Session answers the calls waiting behind it", async () => {
+  const sys = buttonSystem();
+  let open = 0;
+  let most = 0;
+  let asked = 0;
+  const h = harness({
+    request: sys.request,
+    confirm: async () => {
+      asked++;
+      most = Math.max(most, ++open);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      open--;
+      return asked === 3 ? "allow-session" : "allow";
+    },
+  });
+  // two classes at once: two questions, one after the other
+  const [a] = await Promise.all([
+    h.call("app_start", { app: "zcl_a" }),
+    h.call("app_start", { app: "zcl_b" }),
+  ]);
+  assert.equal(asked, 2);
+  assert.equal(most, 1);
+  // two events of one class at once: the first answer covers the second
+  const session = snapOf(a).session;
+  await Promise.all([
+    h.call("app_act", { session, event: "GO" }),
+    h.call("app_act", { session, event: "GO" }),
+  ]);
+  assert.equal(asked, 3);
+});
+
+test("confirmActions off: nothing is asked", async () => {
+  const sys = buttonSystem();
+  const h = harness({ request: sys.request, confirmActions: () => false });
+  const snap = snapOf(await h.call("app_start", { app: "zcl_a" }));
+  snapOf(await h.call("app_act", { session: snap.session, event: "GO" }));
+  assert.equal(h.asked.length, 0);
+  assert.equal(sys.sent.length, 2);
+});
+
+test("what is refused anyway is not asked about: switched off, a wrong system, an unknown session", async () => {
+  const sys = buttonSystem();
+  const off = harness({ request: sys.request, enabled: () => false });
+  await off.call("app_start", { app: "zcl_a" });
+  assert.equal(off.asked.length, 0);
+  const h = harness({ request: sys.request });
+  await h.call("app_start", { app: "zcl_a", system: "QAS" });
+  await h.call("app_start", { app: "../x" }).catch(() => undefined);
+  const unknown = await h.call("app_act", { session: "nope", event: "GO" });
+  assert.equal(unknown.isError, true);
+  assert.match(textOf(unknown), /unknown session 'nope'/);
+  assert.equal(h.asked.length, 0);
+  assert.equal(sys.sent.length, 0);
+});
+
+test("the question's wording: one headline, the action, arguments, row and values underneath", () => {
+  const start = { kind: "start" as const, system: "DEV", className: "ZCL_A", values: { NAME: "x" } };
+  assert.equal(confirmSummary(start), "start ZCL_A on system 'DEV'");
+  assert.equal(
+    confirmDetail(start),
+    'Starting an app runs its code on the system, as you.\nValues filled in after the start:\n  NAME = "x"'
+  );
+  const event = {
+    kind: "event" as const,
+    system: "DEV",
+    className: "ZCL_A",
+    event: "a3",
+    action: { id: "a3", event: "SAVE", label: "Save" },
+    args: ["X", 1],
+    row: 2,
+    values: { "/NAME": "y".repeat(200), "/T_TAB/2/SELKZ": true },
+  };
+  assert.equal(confirmSummary(event), "fire event SAVE (a3) in ZCL_A on system 'DEV'");
+  assert.equal(
+    confirmDetail(event),
+    [
+      "The event runs for real, as you - it may save, post or delete data.",
+      "Action: Save",
+      'Arguments: ["X",1]',
+      "Row: 2",
+      "Values sent with it:",
+      `  /NAME = "${"y".repeat(119)}...`,
+      "  /T_TAB/2/SELKZ = true",
+    ].join("\n")
+  );
+  const many = Object.fromEntries(Array.from({ length: 15 }, (_, i) => [`F${i}`, i]));
+  const cut = confirmDetail({ kind: "event", system: "DEV", className: "ZCL_A", event: "GO", values: many });
+  assert.match(cut, / {2}F11 = 11\n {2}\.\.\. and 3 more$/);
+  assert.doesNotMatch(cut, /F12/);
+  assert.match(
+    confirmDetail({ kind: "event", system: "DEV", className: "ZCL_A", event: "GO", values: {} }),
+    /No values are sent with it\.$/
+  );
+});
+
+test("the acting tools tell the agent that the user is asked, and what a refusal means", () => {
+  const h = harness();
+  for (const name of ["app_start", "app_act"]) {
+    const description = h.tools.find((t) => t.name === name)!.description;
+    assert.match(description, /The user is asked to confirm it first/, name);
+    assert.match(description, /abap2ui5\.agent\.confirmActions/, name);
   }
 });
 
@@ -587,6 +936,8 @@ test("end to end: the real auth proxy and node http carry a recorded session to 
     await proxy.start(origin, "agent-user", "s3cret");
     const tools = createAgentAppTools({
       enabled: () => true,
+      confirmActions: () => false,
+      confirm: async () => "deny",
       activeSystem: () => ({
         name: "LOCAL",
         launchUrlFor: (cls) => `${origin}/sap/bc/z2ui5?app_start=${cls}&sap-client=001`,
