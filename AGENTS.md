@@ -65,8 +65,14 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
 | `src/baselinefile.ts` | `vscode`-free: reading and writing the repository's baseline file - the linter's own keys, a baseline that does not parse never silently replaced, and every write confined to the workspace folder holding the config (`baselineWriteRefusal`, see Conventions) |
 | `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, "add to baseline", and the one correction composed here - the WHEN branch for `event-without-handler` |
-| `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE. The CASE region itself (`eventCaseRegion`, `ownLevel`) lives in `context.ts`, which restricts the event rename, highlights, lens and Go-to-Definition to the WHENs at its own level |
+| `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE. The CASE region itself (`eventCaseRegion`, `ownLevel`) lives in `contextevents.ts` (re-exported by `context.ts`), which restricts the event rename, highlights, lens and Go-to-Definition to the WHENs at its own level |
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
+| `src/context.ts` | `vscode`-free: "what is being written here?" - the position analysis behind completion, hover, the outline, the property editor and the event wires. The module everybody imports from; it only re-exports the five below (`contextsplit.test.ts` pins that its exports are unchanged and that none of the five imports it back) |
+| `src/contextnames.ts` | `vscode`-free leaf: what both halves share - `WriteContext`, `DEFAULT_LIBRARY`, `splitName`, the library of a prefix |
+| `src/contextscan.ts` | `vscode`-free, internal to the `context*` modules: the ABAP call scan (which call and which literal the cursor is in, memoised) and the argument readers (named, positional, doubled quotes, commented-out lines blanked) |
+| `src/contextchain.ts` | `vscode`-free: the builder chain - `ContainerStack` (which control an `a( )` belongs to, handles included), `abapNsMap`, `abapContextAt`, `abapBindingContextAt`, `viewOutline`, `controlCallAt` |
+| `src/contextevents.ts` | `vscode`-free: events and bindings in an ABAP source - the `_event( )` calls, the `CASE client->get_event( )` regions and their WHEN branches, the event spans a rename replaces, the `_bind( )` argument and the bindable attributes |
+| `src/contextxml.ts` | `vscode`-free: raw view/fragment XML - the element tags with the namespaces in scope at each (`xmlScopedTags`, `xmlNsMapAt`, `xmlNsMap`) and `xmlContextAt` |
 | `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
 | `src/clientapi.ts` | The `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion - `vscode`-free; read from `dist/client-api.json` beside the bundle on first use (the web entry hands the text in, like `snapshot.ts`) |
 | `src/chainformat.ts` | Format Document for builder chains: hands on the linter's own `chain-house-layout` fixes (never a second layout algorithm) |
@@ -145,7 +151,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
 | `src/linterrelease.ts` | `LINTER_RELEASE` — the linter version and release commit `esbuild.js` stamped (`LINTER_PIN`, `LINTER_COMMIT`), read there and nowhere else (`linterpin.test.ts` pins that) |
 | `src/text.ts` | `plural(count, noun)` — the one pluralizer behind every counted string users read (dependency-free) |
-| `src/abap.ts`, `src/urls.ts`, `src/context.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
+| `src/abap.ts`, `src/urls.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
 | `src/test/` | `node --test` suite over exactly those modules |
 | `src/test/desktop/` | The `@vscode/test-electron` smoke test: `suite.ts` runs inside a real VS Code, `runner.mjs` writes the throwaway workspace and launches it |
 | `scripts/lib/snapshot.mjs` | The one lifecycle the three snapshot generators share: upstream read (local checkout or GitHub raw), shape check, `--check` byte-compare, write |
@@ -158,7 +164,8 @@ find a German string anywhere, it is a leftover — translate it.
 not committed.
 
 **The `vscode`-free boundary is load-bearing.** `abap.ts`, `urls.ts`,
-`context.ts`, `metadata.ts`, `lintconfig.ts`, `snapshot.ts`,
+`context.ts` (and the `contextnames.ts`, `contextscan.ts`, `contextchain.ts`,
+`contextevents.ts`, `contextxml.ts` it re-exports), `metadata.ts`, `lintconfig.ts`, `snapshot.ts`,
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
 `colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `chattools.ts`, `examples.ts`,
