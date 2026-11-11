@@ -18,6 +18,23 @@ The bundled linter moves to v0.9.0.
   length over it is now refused before the first byte, and a stream is cut
   off the moment it passes it.
 
+- **Show Roundtrip: what an event changed.** The traffic log says that a
+  roundtrip happened and how long it took; *abap2UI5: Show Roundtrip* says
+  what it did. Pick one of the last 20 roundtrips of the running app (time,
+  event, class, duration, size) and the model before and after it opens in
+  the diff editor, under a header naming the event, its arguments and every
+  model path the backend changed, added or removed. What you typed before
+  pressing the button counts as "before", so it is not blamed on the
+  backend. The request and response bodies behind this are kept in memory
+  only - never in a file, an output channel or *Copy Diagnostics for a Bug
+  Report* - a body over 512 KB is not kept at all, and everything is dropped
+  when the proxy stops or the system changes. Desktop only.
+- **Replay Roundtrip: send an event again.** *abap2UI5: Replay Roundtrip*
+  sends a stored request through the auth proxy once more and shows the new
+  answer beside the recorded one. A replay runs the event for real - whatever
+  its handler saves or posts happens a second time - so it asks every time,
+  naming system, class and event, and is not available in Restricted Mode.
+  Desktop only.
 - **Find All References for events, control ids and bound attributes.**
   Shift+F12 on an event name lists the `WHEN` branch that handles it and
   every `_event( )` that raises it; on a control id, the control that

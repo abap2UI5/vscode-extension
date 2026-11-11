@@ -231,6 +231,8 @@ reference is generated from `package.json` with `npm run commands`, and
 | Add Agent Setup to Workspace | `abap2ui5.addAgentSetup` |  |
 | Take App Screenshot | `abap2ui5.screenshot` |  |
 | Show Traffic Log | `abap2ui5.showTraffic` |  |
+| Show Roundtrip | `abap2ui5.showRoundtrip` |  |
+| Replay Roundtrip | `abap2ui5.replayRoundtrip` |  |
 | Convert XML View to Builder Chain | `abap2ui5.convertXml` |  |
 | Show App Navigation Map | `abap2ui5.showNavMap` |  |
 | Open Project on GitHub | `abap2ui5.openHomepage` |  |
