@@ -137,7 +137,8 @@ export async function runApp(
     session.proxy,
     origin,
     (m) => session.log(m),
-    sapClientOf(externalUrl)
+    sapClientOf(externalUrl),
+    system
   );
 
   // Remember the cursor position; open the window in which focus stolen by

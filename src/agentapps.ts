@@ -462,6 +462,21 @@ export interface AgentSystem {
   name: string;
   /** The external launch URL of a class (theme/language params included). */
   launchUrlFor(className: string): string;
+  /** The `role` of the system's profile (`abap2ui5.systems`). On a
+   *  `production` system app_start and app_act are refused - before the
+   *  connect flow, the confirmation and anything sent. */
+  role?: string;
+}
+
+/** The refusal on a system whose profile says production. Names the field,
+ *  so the user knows what to change - and that it is theirs to change. */
+export function productionRefusal(systemName: string, tool: string): string {
+  return (
+    `system '${systemName}' is marked as production ("role": "production" in its ` +
+    `abap2ui5.systems profile) - ${tool} is refused on a production system, and nothing ` +
+    "was sent to it. The app tools start and operate apps on development systems only; " +
+    "do not retry, and do not ask the user to change the profile for you."
+  );
 }
 
 export interface AgentAppsDeps {
@@ -507,6 +522,10 @@ const REAL =
   "Runs FOR REAL on the active SAP system as the configured user, through " +
   "the extension's auth proxy - an event may save, post or delete data. " +
   "Answers only while the user allows it (setting abap2ui5.agent.enableAppTools).";
+
+const PRODUCTION =
+  'Refused on a system whose profile says "role": "production" (list_systems shows it) - ' +
+  "nothing is sent there. ";
 
 const ASKS =
   " The user is asked to confirm it first (unless they allowed the class for the session or " +
@@ -633,10 +652,14 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
    * The system a start-shaped call acts on: the active one, connected (the
    * proxy started with its credentials - which may prompt) unless the proxy
    * already forwards there, and the one `system` names when it names one.
-   * Never switches systems.
+   * Never switches systems. `acting` names the tool that would act there
+   * (app_start): a production system refuses it - before the connect flow,
+   * so not even the credential prompt is shown, and again for the system
+   * that flow ends on.
    */
   const systemFor = async (
-    wanted: unknown
+    wanted: unknown,
+    acting?: string
   ): Promise<{ system: AgentSystem; sapClient?: string } | McpToolResult> => {
     const want = typeof wanted === "string" ? wanted.trim() : "";
     if (want && !deps.systemNames().includes(want)) {
@@ -652,6 +675,10 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
           'active system only; the user switches with "abap2UI5: Select System"',
         true
       );
+    }
+    if (acting && before && before.role === "production") {
+      deps.log(`agent: ${acting} refused - '${before.name}' is a production system`);
+      return textResult(productionRefusal(before.name, acting), true);
     }
     if (before && served(before)) {
       return {
@@ -676,6 +703,10 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
           'active system only; the user switches with "abap2UI5: Select System"',
         true
       );
+    }
+    if (acting && system.role === "production") {
+      deps.log(`agent: ${acting} refused - '${system.name}' is a production system`);
+      return textResult(productionRefusal(system.name, acting), true);
     }
     return { system, sapClient: connection.sapClient };
   };
@@ -900,6 +931,7 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
         "right after the start. Same tools, snapshot and refusals as the abap2UI5 server's " +
         "sandbox app_start; run_app_on_system shows a screenshot instead. May ask the user for " +
         "credentials on first contact. " +
+        PRODUCTION +
         REAL +
         ASKS,
       inputSchema: {
@@ -934,7 +966,9 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
           min: 0,
           max: 200,
         });
-        const chosen = await systemFor(args.system);
+        // a production system refuses here: before the question, before
+        // the connect flow, before anything is sent
+        const chosen = await systemFor(args.system, "app_start");
         if ("content" in chosen) {
           return chosen;
         }
@@ -1012,6 +1046,7 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
         "error names what is allowed - and nothing is sent. \"@CLOSE_POPUP\" / \"@CLOSE_POPOVER\" " +
         "actions close the dialog locally, as the browser does without a roundtrip. The session " +
         "must still run on the active system. " +
+        PRODUCTION +
         REAL +
         ASKS,
       inputSchema: {
@@ -1060,6 +1095,14 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
         // as the client decides it: without an event the values stay pending
         const fires = args.event !== undefined && args.event !== null && args.event !== "";
         const systemName = registry.get(session);
+        // whatever the session is: nothing is operated on a production
+        // system - refused before the question and before anything is sent
+        // (a session can only be there when the role was set after its start)
+        const current = deps.activeSystem();
+        if (current?.role === "production") {
+          deps.log(`agent: app_act refused - '${current.name}' is a production system`);
+          return textResult(productionRefusal(current.name, "app_act"), true);
+        }
         if (systemName) {
           const active = deps.activeSystem();
           if (!active || active.name !== systemName) {

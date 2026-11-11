@@ -10,6 +10,7 @@ import {
   describeOptions,
   resolveOptions,
 } from "../lintconfig";
+import { settingsForSystem } from "../configcore";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 
 const SETTINGS = { minUi5: "1.71", distribution: "sapui5", allow: ["sap.m.X.y"] };
@@ -183,4 +184,27 @@ test("an unset distribution is described as undecided, not as a distribution", (
     describeOptions({ minUi5: "1.71", distribution: null, allow: [] }),
     /target UI5 \(distribution not set\) 1\.71/
   );
+});
+
+test("the active system's profile fills in under a config and is named as a source", () => {
+  const system = { name: "DEV", minUi5: "1.120", distribution: "openui5" };
+  const settings = settingsForSystem(SETTINGS, system);
+  // no config: profile over settings
+  const none = resolveOptions(workspace(), settings);
+  assert.equal(none.minUi5, "1.120");
+  assert.equal(none.distribution, "openui5");
+  assert.match(describeOptions(none), /target OpenUI5 1\.120, from the profile of system 'DEV' and the VS Code settings/);
+  // a config that pins the floor: it wins, the profile keeps the distribution
+  const pinned = resolveOptions(workspace('{ "minUi5": "1.96" }'), settings);
+  assert.equal(pinned.minUi5, "1.96");
+  assert.equal(pinned.distribution, "openui5");
+  assert.match(describeOptions(pinned), /abap2ui5lint\.jsonc and the profile of system 'DEV'/);
+  // a config that pins both: the profile is not mentioned
+  const both = resolveOptions(workspace('{ "minUi5": "1.96", "distribution": "sapui5" }'), settings);
+  assert.equal(both.distribution, "sapui5");
+  assert.doesNotMatch(describeOptions(both), /profile/);
+  // an unreadable config falls back to profile + settings, and says so
+  const broken = resolveOptions(workspace("{ nope"), settings);
+  assert.equal(broken.minUi5, "1.120");
+  assert.match(describeOptions(broken), /unreadable.*using the profile of system 'DEV' and the VS Code settings/);
 });

@@ -166,3 +166,33 @@ test("a systems entry of the wrong type is skipped, not thrown over", () => {
   assert.deepEqual(profilesFrom(undefined), []);
   assert.equal(replaceTemplateIn([{ url: 42 }, { url }] as never, url, "https://n/x?app_start={class}")?.[1]?.url, "https://n/x?app_start={class}");
 });
+
+test("a profile's optional fields load beside name and url - and a bad one costs only itself", () => {
+  const url = "https://h/sap/bc/z2ui5?app_start={class}";
+  assert.deepEqual(
+    profilesFrom([
+      // what every release before the fields wrote: loads as it always did
+      { name: "DEV", url },
+      { name: "PRD", url, role: "production", minUi5: "1.120", distribution: "sapui5", auth: "basic" },
+      // wrong types and unknown words: the fields go, the entry stays
+      { name: "ODD", url, role: 1, minUi5: 1.12, distribution: "ui5", auth: "sso" },
+    ]),
+    [
+      { name: "DEV", template: url },
+      {
+        name: "PRD",
+        template: url,
+        role: "production",
+        minUi5: "1.120",
+        distribution: "sapui5",
+        auth: "basic",
+      },
+      { name: "ODD", template: url },
+    ]
+  );
+  // the fields travel through the name dedup
+  assert.equal(
+    withUniqueNames(profilesFrom([{ name: "A", url }, { name: "A", url, role: "production" }]))[1].role,
+    "production"
+  );
+});

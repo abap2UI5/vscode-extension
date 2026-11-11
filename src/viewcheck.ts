@@ -1,5 +1,10 @@
 import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
+import {
+  checkSettings,
+  checkTargetGeneration,
+  onDidChangeCheckTarget,
+} from "./checktarget";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -126,27 +131,9 @@ function config() {
   return vscode.workspace.getConfiguration(CONFIG_SECTION);
 }
 
-/**
- * The `viewCheck.rules` setting, in the shape `abap2ui5lint.jsonc` uses for
- * the same thing: rule id -> `false`, a severity, or `{ severity, exclude }`.
- *
- * Read fresh each time rather than cached - the check already runs per
- * keystroke, an object of a handful of entries costs nothing to fetch, and a
- * cache would be one more thing to invalidate when the setting changes.
- */
-function ruleSettings(): Record<string, unknown> | undefined {
-  const rules = config().get<Record<string, unknown>>("viewCheck.rules");
-  return rules && Object.keys(rules).length > 0 ? rules : undefined;
-}
-
-/** The `viewCheck.distribution` setting. Its default, "", means "not
- *  decided" and travels as null: that is the linter's own default and its
- *  own answer - a SAPUI5-only control is then a hint rather than an error
- *  (openui5) or nothing (sapui5). Defaulting to "sapui5" here used to
- *  silence in the editor what a configless CLI run reports. */
-function distributionSetting(): string | null {
-  return config().get<string>("viewCheck.distribution", "") || null;
-}
+/* The settings half of a check's options - the four `viewCheck` settings
+ * with the active system's profile laid over them - is `checkSettings( )`
+ * in checktarget.ts. */
 
 /**
  * The checkability verdicts, memoised per document version. `isCheckable`
@@ -289,13 +276,7 @@ export function baselineRootFor(sourceFile: string): string | undefined {
 }
 
 function optionsFor(doc: vscode.TextDocument): CheckOptions {
-  const cfg = config();
-  return resolveOptions(discoveryDir(doc), {
-    minUi5: cfg.get<string>("viewCheck.minUi5", "1.71"),
-    distribution: distributionSetting(),
-    allow: cfg.get<string[]>("viewCheck.allow", []),
-    rules: ruleSettings(),
-  });
+  return resolveOptions(discoveryDir(doc), checkSettings());
 }
 
 /** The options plus the language features' memoised reconstruction of this
@@ -527,12 +508,18 @@ export function recheckOpenDocuments(): void {
  *  see `configGeneration`. */
 let cachedUnderConfig = configGeneration();
 
+/** The same for the active system: what its profile contributes to the
+ *  options (`checkTargetGeneration`). */
+let cachedUnderTarget = checkTargetGeneration();
+
 /** Drops both result caches when a config changed under them - called right
  *  after options were resolved, which is when a changed chain is noticed. */
 function dropCachesIfConfigChanged(): void {
   const now = configGeneration();
-  if (now !== cachedUnderConfig) {
+  const target = checkTargetGeneration();
+  if (now !== cachedUnderConfig || target !== cachedUnderTarget) {
     cachedUnderConfig = now;
+    cachedUnderTarget = target;
     memos.clear();
     sweepCache.clear();
   }
@@ -949,12 +936,7 @@ async function sweepWorkspace(
    * the same four values for every file, and only the config DISCOVERED per
    * directory differs. Rebuilding it per file re-read four settings and
    * allocated an object per file for no answer that could change. */
-  const sweepSettings = {
-    minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
-    distribution: distributionSetting(),
-    allow: config().get<string[]>("viewCheck.allow", []),
-    rules: ruleSettings(),
-  };
+  const sweepSettings = checkSettings();
 
   /* The I/O half runs AHEAD of the CPU-bound gate, in small concurrent
    * batches: the old loop awaited one stat, then one read, then gated, file
@@ -1421,12 +1403,7 @@ async function updateBaseline(log: (m: string) => void): Promise<void> {
   if (!folder) {
     return;
   }
-  const rootOptions = resolveOptions(folder.uri.fsPath, {
-    minUi5: config().get<string>("viewCheck.minUi5", "1.71"),
-    distribution: distributionSetting(),
-    allow: config().get<string[]>("viewCheck.allow", []),
-    rules: ruleSettings(),
-  });
+  const rootOptions = resolveOptions(folder.uri.fsPath, checkSettings());
   const baselineFile = rootOptions.baseline;
   if (!baselineFile) {
     // the config path is known here, so the message can open the file the
@@ -1781,6 +1758,17 @@ export function registerViewCheck(
         // scheduled each of them twice
         recheckOpenDocuments();
       }
+    })
+  );
+
+  // The active system is part of the answer too: its profile may name the
+  // UI5 version and distribution the check compares against. A switch (or an
+  // edit of the `systems` setting) re-checks what is open.
+  context.subscriptions.push(
+    onDidChangeCheckTarget(() => {
+      lastVersionLine = "";
+      clearSweepCache();
+      recheckOpenDocuments();
     })
   );
 
