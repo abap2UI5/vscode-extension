@@ -166,6 +166,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/text.ts` | `plural(count, noun)` — the one pluralizer behind every counted string users read (dependency-free) |
 | `src/abap.ts`, `src/urls.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
 | `src/test/` | `node --test` suite over exactly those modules |
+| `src/test/apifloor.test.ts` | Every `contributes` key classified with the VS Code release it is stable in: none above `engines.vscode`, and the newest ones behind a named runtime guard (ROADMAP T15) |
 | `src/test/desktop/` | The `@vscode/test-electron` smoke test: `suite.ts` runs inside a real VS Code, `runner.mjs` writes the throwaway workspace and launches it |
 | `scripts/lib/snapshot.mjs` | The one lifecycle the three snapshot generators share: upstream read (local checkout or GitHub raw), shape check, `--check` byte-compare, write |
 | `snippets/` | ABAP snippets contributed to the editor |
