@@ -50,7 +50,11 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/openlinkview.ts` | The URI handler itself: fetches or unpacks the class, opens it as an untitled `.clas.abap`, offers F9 |
 | `src/inspect.ts` | Inspect mode's matcher: runtime control chain -> outline node (the builder call to jump to) |
 | `src/modelview.ts` | The live-model document the preview's `{ }` button fills; "Apply the Model Document to the Running App" (registered in `extension.ts`) copies it for editing and pushes the edited JSON back through the pin's restore path |
-| `src/webview.ts` | HTML for the preview and the welcome screen (theme variables, CSP nonce, theme/language pickers, the open-mode-aware empty state) |
+| `src/webview.ts` | The module every webview page is imported from: re-exports the four `webview*.ts` files below and holds no markup of its own |
+| `src/webviewshared.ts` | What the pages share: CSP nonce, HTML/script escaping, the theme / language / device-size lists, the inline icons, the base stylesheet (theme variables only) |
+| `src/webviewpreview.ts` | HTML for the running app's preview: toolbar, theme/language pickers, device sizes, loading overlay, the page script |
+| `src/webviewpanels.ts` | HTML for the pages that need no running app: the "Control Properties" form, the static view preview, the navigation map |
+| `src/webviewwelcome.ts` | HTML for the welcome screen (the open-mode-aware empty state) |
 | `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401; authorized by the token in its own url |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
 | `src/systemprofile.ts` | `vscode`-free: what a `systems` entry may say beyond name and url - `role`, `minUi5`, `distribution`, the reserved `auth` - parsed tolerantly (`profileFieldsOf`; what was ignored is `profileNotes`, logged once per change of the setting), `production` kept from the settings scopes a workspace's list shadows (`tightenRoles`), the status bar's role text, and the detected UI5 version written back into an entry (`withDetectedUi5`) |
@@ -169,7 +173,8 @@ does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `o
 `abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
 `unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `report2cloud.ts`, `report.ts`, `roundtrips.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
-`checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
+`checkcore.ts`, `compat.ts` and `webview.ts` with its parts `webviewshared.ts`, `webviewpreview.ts`,
+`webviewpanels.ts` and `webviewwelcome.ts` (HTML strings only — the state they render is
 passed in) must not import `vscode`: the test suite bundles them for plain
 Node, and an accidental import turns a unit test into a module-not-found
 error. Put the interesting logic
@@ -337,7 +342,9 @@ identity (see Conventions).
 - **Bump `version` and add a `CHANGELOG.md` entry** with every user-visible
   change. The changelog is written for users of the extension, not for
   reviewers of the diff.
-- **Webview markup lives in `src/webview.ts`,** styled only with `--vscode-*`
+- **Webview markup lives in the `src/webview*.ts` files** (`webviewshared.ts`,
+  `webviewpreview.ts`, `webviewpanels.ts`, `webviewwelcome.ts`; everything
+  else imports it through `src/webview.ts`, which only re-exports), styled only with `--vscode-*`
   theme variables so it works in light, dark and high-contrast themes. Inline
   `<style>`/`<script>` carry the CSP nonce - no `unsafe-inline`, and therefore
   no `style="..."` attributes in the markup either.
@@ -601,8 +608,8 @@ Facts an agent cannot see from the code but will trip over:
   A module that newly pulls `child_process`/`os`/`crypto` into the web graph
   breaks the web build, which is why the desktop-only plumbing stays behind
   `extension.ts` and the shared pieces live in `gate.ts`/`diagnostics.ts`/
-  `selector.ts`. `webview.ts` is web-safe in fact, not merely `vscode`-free:
-  its nonce comes from Web Crypto (`globalThis.crypto.getRandomValues`), not
+  `selector.ts`. `webview.ts` and its `webview*.ts` parts are web-safe in fact, not merely `vscode`-free:
+  the nonce (`webviewshared.ts`) comes from Web Crypto (`globalThis.crypto.getRandomValues`), not
   node's `crypto` module - that one import used to be what kept every webview
   out of the web host. Desktop-only commands are hidden from the web palette
   with `"when": "!isWeb"` entries under `menus.commandPalette`.
