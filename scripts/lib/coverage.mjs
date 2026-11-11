@@ -161,6 +161,25 @@ export function summarize(lines) {
   );
 }
 
+/** The lines of one module that have code and did not run, as ranges:
+ *  `"3-5, 9"`. Empty when every line ran. */
+export function uncoveredLines(perLine) {
+  const missed = [...perLine]
+    .filter(([, ran]) => !ran)
+    .map(([line]) => line)
+    .sort((a, b) => a - b);
+  const ranges = [];
+  for (const line of missed) {
+    const last = ranges[ranges.length - 1];
+    if (last && last[1] === line - 1) {
+      last[1] = line;
+    } else {
+      ranges.push([line, line]);
+    }
+  }
+  return ranges.map(([from, to]) => (from === to ? `${from}` : `${from}-${to}`)).join(", ");
+}
+
 export function percentOf(covered, total) {
   return total === 0 ? 100 : (covered / total) * 100;
 }

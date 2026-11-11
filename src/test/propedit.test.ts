@@ -408,3 +408,82 @@ test("the Control Properties view skips a post that says what the webview alread
   assert.ok(!sameMessage(cyclic, otherCyclic));
   assert.ok(!sameMessage({ a: 1 }, { a: () => 1 }));
 });
+
+// ---------------------------------------------------------------------------
+// Refusals: what the form must not touch
+// ---------------------------------------------------------------------------
+
+const ONE_LINE = "    view->tag( `Input` )->a( n = `value` v = `x` )->a( n = `type` v = `Email` ).";
+
+test("a chain written on one line takes no appended attribute and gives none up", () => {
+  const call = controlCallAt(ONE_LINE, ONE_LINE.indexOf("Input`"))!;
+  assert.equal(call.label, "Input");
+  assert.equal(call.appendAt, -1, "no line-per-segment layout to slide a line into");
+  assert.equal(setAttributeEdit(ONE_LINE, call, "placeholder", "Mail"), undefined);
+  // the a-call does not open its line: cutting lines would take the control
+  assert.equal(removeAttributeEdit(ONE_LINE, call, "type"), undefined);
+  // rewriting a literal in place needs no layout at all
+  const edit = setAttributeEdit(ONE_LINE, call, "type", "Tel")!;
+  assert.equal(apply(ONE_LINE, edit), ONE_LINE.replace("`Email`", "`Tel`"));
+});
+
+test("removing an attribute the control does not carry is no edit", () => {
+  const call = controlCallAt(SOURCE, SOURCE.indexOf("`Press me`"))!;
+  assert.equal(removeAttributeEdit(SOURCE, call, "icon"), undefined);
+  // the lookup is case-insensitive, as ABAP names are
+  assert.ok(removeAttributeEdit(SOURCE, call, "TEXT"));
+});
+
+test("a later a-call on a shared line whose arguments wrap goes with its lines", () => {
+  const wrapped = (close: string) =>
+    [
+      "    view->tag( `Input`",
+      "        )->a( n = `value` v = `x` )->a( n = `type`",
+      `            v = \`Email\`${close}`,
+    ].join("\n");
+  // its `)` opens the next line: the call and its continuation line go,
+  // and that `)` takes over closing `value`
+  const opening = wrapped("\n        )->tag( `Button` ).");
+  const call = controlCallAt(opening, opening.indexOf("Input`"))!;
+  assert.deepEqual(
+    call.attrs.map((a) => a.name),
+    ["value", "type"]
+  );
+  assert.equal(
+    apply(opening, removeAttributeEdit(opening, call, "type")!),
+    "    view->tag( `Input`\n        )->a( n = `value` v = `x`\n        )->tag( `Button` )."
+  );
+  // its `)` sits behind the value instead: no cut keeps the chain intact
+  const trailing = wrapped(" )->tag( `Button` ).");
+  const other = controlCallAt(trailing, trailing.indexOf("Input`"))!;
+  assert.equal(other.attrs.length, 2);
+  assert.equal(removeAttributeEdit(trailing, other, "type"), undefined);
+});
+
+test("the paren does not move up onto a blank line or a whole-line comment", () => {
+  for (const above of ["", "* the type comes last"]) {
+    const source = [
+      "    view->tag( `Input`",
+      "        )->a( n = `value` v = `x`",
+      above,
+      "        )->a( n = `type` v = `Email` ).",
+    ].join("\n");
+    const call = controlCallAt(source, source.indexOf("Input`"))!;
+    const next = apply(source, removeAttributeEdit(source, call, "type")!);
+    // the plain cut: the `)` stays on its own line, the line above untouched
+    assert.equal(
+      next,
+      ["    view->tag( `Input`", "        )->a( n = `value` v = `x`", above, "        )."].join(
+        "\n"
+      ),
+      JSON.stringify(above)
+    );
+  }
+});
+
+test("a message is the same as itself, and nothing is the same as nothing", () => {
+  const form = { type: "control", rows: [] };
+  assert.ok(sameMessage(form, form));
+  assert.ok(sameMessage(undefined, undefined));
+  assert.ok(!sameMessage(form, undefined));
+});

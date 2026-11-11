@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 import {
   controlsIn,
   deprecationText,
+  describeControl,
   describeMember,
+  enumValues,
   librariesIn,
   memberInfo,
   membersOf,
   valuesFor,
 } from "../metadata";
+import type { Snapshot } from "../metadata";
 import { snapshot, snapshotError } from "../snapshot";
 
 /*
@@ -93,4 +96,80 @@ test("the hover text names the member, its type and where it comes from", () => 
   assert.match(text, /sap\.m\.ButtonType/);
   assert.match(text, /ui5\.sap\.com/);
   assert.equal(describeMember(data, "sap.m.Button", "nonsense"), "");
+});
+
+/*
+ * A hand-built snapshot for the wording: the real one changes with every
+ * regeneration, and the lines below are about the text each field becomes.
+ */
+const TINY = {
+  "x.Base": {
+    properties: {
+      text: { type: "string", since: "1.20", deprecated: "use label" },
+      width: { type: "sap.ui.core.CSSSize" },
+    },
+  },
+  "x.Card": {
+    parent: "x.Base",
+    since: "1.64",
+    defaultAggregation: "content",
+    deprecated: { since: "1.120", text: "use <code>x.Tile</code>" },
+    members: { text: "1.70" },
+    // redeclared here: this one wins over the base's
+    properties: { text: { type: "string" } },
+    aggregations: { content: { type: "sap.ui.core.Control", multiple: true } },
+  },
+  "x.Plain": {},
+} as unknown as Snapshot;
+
+test("a member redeclared down the chain is the one described", () => {
+  const text = memberInfo(TINY, "x.Card", "text")!;
+  assert.equal(text.declaredOn, "x.Card");
+  // its @since comes from the flattened index, the base's deprecation stays behind
+  assert.equal(text.since, "1.70");
+  assert.equal(text.deprecated, undefined);
+  assert.deepEqual(
+    membersOf(TINY, "x.Card").map((m) => `${m.name}@${m.declaredOn}`),
+    ["content@x.Card", "text@x.Card", "width@x.Base"]
+  );
+});
+
+test("the control hover names its since, parent, default aggregation and deprecation", () => {
+  assert.equal(
+    describeControl(TINY, "x.Card"),
+    [
+      "**x.Card**",
+      "since UI5 1.64 · extends `x.Base` · default aggregation `content`",
+      "⚠️ Deprecated since 1.120 — use `x.Tile`",
+      "[UI5 API reference](https://ui5.sap.com/#/api/x.Card)",
+    ].join("\n\n")
+  );
+  // a control with nothing to say gets the name and the link only
+  assert.equal(
+    describeControl(TINY, "x.Plain"),
+    "**x.Plain**\n\n[UI5 API reference](https://ui5.sap.com/#/api/x.Plain)"
+  );
+  assert.equal(describeControl(TINY, "x.Nothing"), "");
+});
+
+test("the member hover carries its since and a deprecation written as text", () => {
+  assert.equal(
+    describeMember(TINY, "x.Base", "text"),
+    [
+      "**text** — property of `x.Base`",
+      "type `string` · since UI5 1.20",
+      "⚠️ use label",
+      "[UI5 API reference](https://ui5.sap.com/#/api/x.Base)",
+    ].join("\n\n")
+  );
+  assert.match(
+    describeMember(TINY, "x.Card", "content"),
+    /aggregation of `x\.Card`\n\ntype `sap\.ui\.core\.Control` · 0\.\.n · default aggregation/
+  );
+});
+
+test("an enum lookup without a type answers nothing", () => {
+  assert.equal(enumValues(data, undefined), undefined);
+  assert.equal(enumValues(data, ""), undefined);
+  assert.equal(deprecationText("a plain sentence"), "a plain sentence");
 });
