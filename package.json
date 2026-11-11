@@ -170,6 +170,18 @@
         "icon": "$(pulse)"
       },
       {
+        "command": "abap2ui5.showRoundtrip",
+        "category": "abap2UI5",
+        "title": "Show Roundtrip",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "abap2ui5.replayRoundtrip",
+        "category": "abap2UI5",
+        "title": "Replay Roundtrip",
+        "icon": "$(debug-rerun)"
+      },
+      {
         "command": "abap2ui5.convertXml",
         "category": "abap2UI5",
         "title": "Convert XML View to Builder Chain",
@@ -526,6 +538,14 @@
         },
         {
           "command": "abap2ui5.showTraffic",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.showRoundtrip",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.replayRoundtrip",
           "when": "!isWeb"
         },
         {

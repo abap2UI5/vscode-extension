@@ -42,6 +42,7 @@ import { registerNavMap } from "./navview";
 import { registerPropertyEditor } from "./propview";
 import { takeScreenshot } from "./screenshot";
 import { formatTrafficLine, isRoundtrip } from "./traffic";
+import { registerRoundtripCommands } from "./roundtripview";
 import { MODEL_SCHEME, registerModelView } from "./modelview";
 import { registerMockFile } from "./mockfile";
 import { registerUnitTests } from "./unittests";
@@ -167,6 +168,9 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   watchProxyStatus(session);
+  // "Show Roundtrip" / "Replay Roundtrip": the last roundtrips' bodies, kept
+  // by the proxy in memory only.
+  registerRoundtripCommands(context, session);
   session.modelView = registerModelView(context, log);
   session.updateStatusItem();
 

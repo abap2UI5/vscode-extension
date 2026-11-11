@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "fs";
+import * as path from "path";
+import { inspect } from "util";
 import { buildReport, redact, ReportInput } from "../report";
+import { RoundtripBuffer } from "../roundtrips";
 
 /*
  * A report is pasted into a public issue. Everything below is a thing that
@@ -171,4 +175,110 @@ test("the report counts the pinned certificates and names none of their hosts", 
   assert.match(one, /proxy running, 1 certificate trusted per system/);
   const none = buildReport({ ...INPUT, systems: { ...INPUT.systems, pinnedCertificates: 0 } });
   assert.match(none, /0 certificates trusted per system/);
+});
+
+// ---------------------------------------------------------------------------
+// Roundtrip bodies never reach the report
+// ---------------------------------------------------------------------------
+
+/*
+ * "Show Roundtrip" keeps the last request and response bodies of the running
+ * app in memory - the app's DATA. The report is pasted into a public issue.
+ * No redaction rule could tell a customer name from a class name, so the
+ * guarantee is structural, in three layers.
+ */
+
+/** Every field a report is built from. A field added to `ReportInput` fails
+ *  the compile here, and whoever adds it reads the tests below first. */
+const REPORT_FIELDS: Record<keyof ReportInput, "fixed" | "free-form"> = {
+  extensionVersion: "fixed",
+  vscodeVersion: "fixed",
+  platform: "fixed",
+  host: "fixed",
+  workspaceFolders: "fixed",
+  documents: "fixed",
+  renderGate: "fixed",
+  systems: "fixed",
+  relatedExtensions: "fixed",
+  // the two a value of any shape could arrive through
+  settings: "free-form",
+  recentLog: "free-form",
+};
+
+function ringWithSecrets(): RoundtripBuffer {
+  const ring = new RoundtripBuffer();
+  ring.add({
+    at: 0,
+    path: "/sap/bc/z2ui5?sap-client=100",
+    status: 200,
+    durationMs: 5,
+    requestHeaders: { cookie: "SESSION-COOKIE-VALUE", "content-type": "application/json" },
+    requestBody: Buffer.from(
+      JSON.stringify({
+        value: {
+          S_FRONT: { ID: "D1", EVENT: "SAVE", T_EVENT_ARG: ["ARGUMENT-VALUE"] },
+          MODEL: { MV_CUSTOMER: "REQUEST-BODY-VALUE" },
+        },
+      })
+    ),
+    requestBytes: 100,
+    responseBody: Buffer.from(
+      JSON.stringify({ S_FRONT: { ID: "D2", APP: "Z_APP" }, MODEL: { MV_CUSTOMER: "RESPONSE-BODY-VALUE" } })
+    ),
+    responseBytes: 100,
+    responseEncoding: "",
+  });
+  return ring;
+}
+
+test("the report's input has no field a roundtrip body is collected into", () => {
+  // layer 1: the collector and the formatter do not know the ring exists
+  const src = path.join(__dirname, "..", "src");
+  for (const file of ["report.ts", "diagnosticsreport.ts"]) {
+    const text = fs.readFileSync(path.join(src, file), "utf8");
+    assert.doesNotMatch(text, /roundtrips?\b|requestText|responseText/i, file);
+  }
+  assert.deepEqual(
+    Object.entries(REPORT_FIELDS)
+      .filter(([, kind]) => kind === "free-form")
+      .map(([name]) => name),
+    ["settings", "recentLog"]
+  );
+});
+
+test("the roundtrip modules write no body into a log, a channel or a file", () => {
+  // layer 2: `recentLog` is the session log - and nothing of a body goes in
+  const src = path.join(__dirname, "..", "src");
+  for (const file of ["roundtrips.ts", "roundtripview.ts"]) {
+    const text = fs.readFileSync(path.join(src, file), "utf8");
+    assert.doesNotMatch(text, /appendLine|createOutputChannel|from "fs"|workspace\.fs|writeFile|globalState|workspaceState\.update/, file);
+    const logged = [...text.matchAll(/session\.log\(([\s\S]*?)\);/g)].map((m) => m[1]);
+    for (const call of logged) {
+      assert.doesNotMatch(call, /Text\(|\.body|args|summary|models|header|detail/i, `${file}: ${call}`);
+    }
+    if (file === "roundtripview.ts") {
+      assert.ok(logged.length > 0, "the scan found the log calls it judges");
+    }
+  }
+});
+
+test("a roundtrip that strays into the report's free-form fields carries no body", () => {
+  // layer 3: even handed over whole, a roundtrip prints its number and sizes
+  const ring = ringWithSecrets();
+  const [entry] = ring.list();
+  const report = buildReport({
+    ...INPUT,
+    settings: { stray: entry, ring, list: ring.list() },
+    recentLog: [
+      String(entry),
+      `${entry}`,
+      JSON.stringify(entry),
+      JSON.stringify(ring),
+      inspect(entry, { depth: 10, showHidden: true }),
+      inspect(ring, { depth: 10, showHidden: true }),
+    ],
+  });
+  assert.doesNotMatch(report, /-VALUE/);
+  assert.doesNotMatch(report, /MV_CUSTOMER|T_EVENT_ARG|S_FRONT/);
+  assert.match(entry.requestText() ?? "", /REQUEST-BODY-VALUE/, "the fixture really holds one");
 });

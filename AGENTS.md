@@ -107,6 +107,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
 | `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
+| `src/roundtrips.ts` | `vscode`-free: the last 20 roundtrips' request and response bodies (`RoundtripBuffer`, owned by the proxy; a body over 512 KB decoded is not kept and the entry says so; IN MEMORY ONLY, in `#private` fields that neither serialize nor print - never a file, an output channel or the bug report - and emptied when the proxy stops or the system changes), what counts as the model before and after a roundtrip (the previous answer's `MODEL` plus the request's own delta -> this answer's `MODEL`, unknown rather than guessed when the chain is not stored), the changed/added/removed paths (`diffModels`), the event and its arguments out of the abap2UI5 request body, and the replay (`replayRoundtrip`: refused in Restricted Mode and on a production system before anything is asked, a confirmation every time, sent to the proxy's own loopback origin) |
+| `src/roundtripview.ts` | "Show Roundtrip" / "Replay Roundtrip": the picker, the virtual documents both sides of the diff editor are served from (a map in memory, emptied with the ring), the modal confirmation |
 | `src/rendergate.ts` | "Install / Update Render Gate": downloads the linter release's checker bundle and Chromium into global storage, verifies it, and resolves the installed CLI (see Toolchain). `tar` is loaded on first use from `dist/rendergate-tar.js`, the bundle `esbuild.js` builds from `src/rendergate-tar.ts` - 86 KB that stays out of the activation bundle |
 | `src/report.ts` | `vscode`-free: the shape and the redaction of "Copy Diagnostics for a Bug Report" - the report this extension writes about itself (per open document: scheme, checkability, governing config) |
 | `src/diagnosticsreport.ts` | The command's plumbing: collects what `report.ts` formats from the window (extensions, settings, documents, log lines, systems) |
@@ -165,7 +167,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
+`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `report2cloud.ts`, `report.ts`, `roundtrips.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain

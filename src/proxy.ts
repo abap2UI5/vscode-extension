@@ -15,6 +15,7 @@ import {
 } from "./certtrust";
 import { redact } from "./report";
 import { rebasedLocation } from "./urls";
+import { BodyTap, RoundtripBuffer } from "./roundtrips";
 
 /** Non-2xx answer from the ADT class lookup, with the status to decide on. */
 export class AdtStatusError extends Error {
@@ -856,6 +857,19 @@ export class SapProxy {
   onTraffic?: (entry: TrafficEntry) => void;
 
   /**
+   * The last roundtrips' request and response bodies - what "Show Roundtrip"
+   * and "Replay Roundtrip" read. In memory only (see `roundtrips.ts`), and
+   * emptied in `stopNow( )`: a stop and a switch to another system both go
+   * through it, so no body outlives the proxy session it was seen in.
+   */
+  readonly roundtrips = new RoundtripBuffer();
+
+  /** Names the system profile a roundtrip belongs to. Two profiles may share
+   *  an origin - then the proxy does not restart between them, and the ring
+   *  empties on the first roundtrip under the other name instead. */
+  roundtripScope?: () => string;
+
+  /**
    * Serialises start/stop. Both await the network, and two overlapping calls
    * (F9 racing "Run an App from the System", or the 401 re-logon) used to
    * close the same old server and then each assign `this.server` - leaving
@@ -1358,6 +1372,13 @@ export class SapProxy {
       });
     };
 
+    // A POST is a candidate for the roundtrip ring: its body is collected
+    // (up to the cap) while it streams to the system.
+    const requestTap = req.method === "POST" ? new BodyTap() : undefined;
+    if (requestTap) {
+      req.on("data", (chunk: Buffer) => requestTap.push(chunk));
+    }
+
     // Host, credentials, token cookie, Origin/Referer - see
     // `prepareForwardHeaders`, which the upgrade path shares.
     const headers = this.prepareForwardHeaders(req.headers, target, proxyOrigin, {
@@ -1449,6 +1470,32 @@ export class SapProxy {
       proxyRes.on("end", () =>
         logTraffic(proxyRes.statusCode ?? 0, receivedBytes)
       );
+      // The roundtrip ring: a POST the system answered 2xx, kept once its
+      // last byte is in - and only while the proxy session that saw the
+      // request is still the running one (a stop or a system switch in
+      // between has emptied the ring, and this answer belongs to the past).
+      if (requestTap && status >= 200 && status < 300) {
+        const responseTap = new BodyTap();
+        proxyRes.on("data", (chunk: Buffer) => responseTap.push(chunk));
+        proxyRes.on("end", () => {
+          if (this.token !== token) {
+            return;
+          }
+          this.roundtrips.add({
+            at: startedAt,
+            path: reportedPath,
+            status,
+            durationMs: Date.now() - startedAt,
+            requestHeaders: req.headers,
+            requestBody: requestTap.take(),
+            requestBytes: requestTap.bytes,
+            responseBody: responseTap.take(),
+            responseBytes: responseTap.bytes,
+            responseEncoding: String(proxyRes.headers["content-encoding"] ?? ""),
+            scope: this.roundtripScope?.(),
+          });
+        });
+      }
       proxyRes.on("close", () =>
         logTraffic(proxyRes.statusCode ?? 0, receivedBytes)
       );
@@ -1810,6 +1857,8 @@ export class SapProxy {
     this.authHeader = undefined;
     this.token = undefined;
     this.singleUseTokens.clear();
+    // the bodies of the session that ends here go with it
+    this.roundtrips.clear();
     for (const tunnel of this.tunnels) {
       tunnel.destroy();
     }
