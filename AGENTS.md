@@ -88,10 +88,13 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix / Run unit tests (when a `*.clas.testclasses.abap` sits beside the class) above the class definition |
-| `src/unitrunner.ts` | `vscode`-free: what "Run Unit Tests (No System)" decides - the runner (mcp-server's `scripts/ci-unit.mjs` from a checkout under `mcp.reposRoot`, else `npx -p @abap2ui5/mcp-server abap2ui5-unit`), its arguments (`src` or the class's folder, `--class`, `--home`), the shell-quoted terminal line, the banner |
+| `src/unitrunner.ts` | `vscode`-free: what "Run Unit Tests (No System)" decides - the runner (mcp-server's `scripts/ci-unit.mjs` from a checkout under `mcp.reposRoot`, else `npx -p @abap2ui5/mcp-server abap2ui5-unit`), its arguments (`src` or the class's folder, `--class` per class, `--home`, `--json` for the Testing view), the shell-quoted terminal line, the banner |
+| `src/unitdiscovery.ts` | `vscode`-free: the test classes (`CLASS … FOR TESTING`) and test methods (`METHODS … FOR TESTING`) of a `*.clas.testclasses.abap` with the range each is declared at, plus the fixtures (`setup`, `class_setup`, …) - read off the blanked source, never the raw text |
+| `src/unitresults.ts` | `vscode`-free: the runner's `--json` report as one result per test method (`parseUnitReport` - a report that is empty, cut off or not the runner's is ONE error result, never an exception) and what it says about each known method (`outcomesFor` - a method the report does not name is "not run", never "passed": the runner stops at the first failure). The report carries NO source position |
 | `src/report2cloud.ts` | `vscode`-free: what "Migrate Classic Report to abap2UI5" decides - where abap-cloud-gui's report2cloud CLI is (`abap2ui5.report2cloud.path`, then `ABAP_CLOUD_GUI_HOME`, then a `cloudGui` directory under `mcp.reposRoot`; an explicit answer that does not hold is reported, never skipped), the program and class names the CLI derives, its arguments, what its exit code and output mean (0 converted, 2 refused with `file:row:col - reason` lines, 1 wrong call, a missing `npm ci`), and the range a refusal underlines |
 | `src/migratereport.ts` | The command's plumbing: report pick (explorer/editor uri, active `.prog.abap`, open dialog), class-name prompt, output folder, the overwrite question, the CLI through `childproc.run` with VS Code's own Node, refusals as diagnostics on the report, *Write Partial Result*, opening the class beside its migration report |
 | `src/unittests.ts` | The command's plumbing: the one reused "abap2UI5 unit tests" terminal (recreated when cwd or the `*_HOME` env changed), the class from the tree node / lens / active editor, the Restricted Mode refusal |
+| `src/testexplorer.ts` | The same tests in the Testing view (desktop only): a `TestController` with items per include / test class / method and one *Run* profile, run through `childproc.run` with `unitTestArgs` plus `--json`. Lazy - the workspace is searched when the Testing view asks, an include is parsed when it is expanded, opened or run; follows the test includes through the one watcher in `codelens.ts` (`onDidChangeTestInclude`). A failure is shown at the method's declaration, because the runner names no line |
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`, and the app tools below) |
@@ -158,7 +161,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`, `web/startup.ts`,
+`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
@@ -304,7 +307,9 @@ identity (see Conventions).
   first gate or completion) all wait for the first ABAP document, the first
   check or the first ask. What activation still does: loads the bundle (0.62
   MB - the render gate's `tar` and the vendored agent client are bundles of
-  their own, loaded on first use), creates the session's channels and status item, reads the 1.5 KB
+  their own, loaded on first use), creates the session's channels and status item and the
+  (empty) test controller - `testexplorer.ts` searches for test includes only when the Testing
+  view asks -, reads the 1.5 KB
   `dist/compat.json`, registers the commands, providers and the four
   FileSystemWatchers (ABAP sources, test includes, lint configs, baselines),
   re-checks the checkable documents already open (the visible ones at once,

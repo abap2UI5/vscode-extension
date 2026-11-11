@@ -98,6 +98,25 @@ async function projectFolder(classFile?: string): Promise<vscode.WorkspaceFolder
   });
 }
 
+/** Whether the tests may run - and, in Restricted Mode, the one message
+ *  that says why not. Shared with the Testing view (testexplorer.ts), so
+ *  both ways to run refuse in the same words. */
+export async function trustedOrExplain(): Promise<boolean> {
+  if (vscode.workspace.isTrusted) {
+    return true;
+  }
+  const manage = "Manage Workspace Trust";
+  const pick = await vscode.window.showWarningMessage(
+    "abap2UI5: the unit tests transpile and execute this repository's " +
+      "code, which Restricted Mode holds back. Trust the workspace to run them.",
+    manage
+  );
+  if (pick === manage) {
+    await vscode.commands.executeCommand("workbench.trust.manage");
+  }
+  return false;
+}
+
 export function registerUnitTests(
   context: vscode.ExtensionContext,
   log: (m: string) => void
@@ -112,16 +131,7 @@ export function registerUnitTests(
     vscode.commands.registerCommand(
       "abap2ui5.runUnitTests",
       async (node?: { uri?: vscode.Uri }) => {
-        if (!vscode.workspace.isTrusted) {
-          const manage = "Manage Workspace Trust";
-          const pick = await vscode.window.showWarningMessage(
-            "abap2UI5: the unit tests transpile and execute this repository's " +
-              "code, which Restricted Mode holds back. Trust the workspace to run them.",
-            manage
-          );
-          if (pick === manage) {
-            await vscode.commands.executeCommand("workbench.trust.manage");
-          }
+        if (!(await trustedOrExplain())) {
           return;
         }
         const classFile = classFileOf(node);
