@@ -41,6 +41,37 @@ before building on them.
 A task is done when its acceptance criteria hold, `npm run check` is green and
 the PR description lists what was verified by hand and what was not.
 
+## Status
+
+What is on this branch, and what a task still lacks. "Unit tests" means
+`npm test`; "desktop smoke" means `npm run test:desktop` passed in a real
+VS Code. Nothing here was exercised against a real SAP system, and
+`npm run test:web` was not run.
+
+| Task | State | Still open |
+| --- | --- | --- |
+| T01 | Done | The Testing view itself was never looked at. The runner reports no line, so a failure sits on the test method's declaration; running one method runs its class. |
+| T02 | Done | Shift+F12 not tried in an editor. |
+| T03 | Open | Needs the converter as a versioned artefact upstream (a), and a check of the CLI for namespaced names (b). |
+| T04 | Open | Needs real captures; the F9 picture needs a system. |
+| T05 | Done | Default flipped to `false`. The trust prompt and a real self-signed system are untested. |
+| T06 | T06b done | T06a (which mechanisms), T06c and T06d are open. The two basic-auth texts of the retry breaker are still in `proxy.ts`. |
+| T07 | Open | Needs the decision and a system to verify the ADT sequence against. |
+| T08 | Done | `auth` is reserved (`"basic"` only). The inline `@since` floor follows profile > setting but not the repository config, as before. |
+| T09 | Open | Needs T07. |
+| T10 | Done as option (a) | Three read-only tools, no chat participant. Whether hosts honour `when` on a tool entry is unconfirmed. |
+| T11 | Done | The modal was never shown for real. A timed-out modal stays open; a late answer is ignored. |
+| T12 | Open | Spike not started; needs T13. |
+| T13 | Open | Needs a serve entry point in mcp-server *(verify)*. |
+| T14 | Done | Whether a real backend accepts a replayed draft id and its stored session headers is unknown. |
+| T15 | Researched, no change | Theia (API 1.144) and VSCodium are above the 1.101 floor. BAS's Code-OSS version could not be confirmed from a primary source - check Help > About in a dev space. The newer APIs are already feature-detected. |
+| T16 | Done | Scheduling stayed in `viewcheck.ts` (shared state); `SapProxy` stayed whole. |
+| T17 | Done | Nothing needed hiding; three manifest tests now pin that. |
+| T18 | Done | The CI step has not run on GitHub yet. |
+
+Follow-up in `abap2UI5/docs` (`advanced/vscode`) for everything marked done
+and user-visible: T01, T02, T05, T08, T10, T11, T14.
+
 ## Order and dependencies
 
 | Wave | Tasks | Why this order |
