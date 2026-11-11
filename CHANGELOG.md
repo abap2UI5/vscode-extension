@@ -31,6 +31,16 @@ The bundled linter moves to v0.9.0.
   length over it is now refused before the first byte, and a stream is cut
   off the moment it passes it.
 
+- **Three read-only tools for the editor's chat.** In agent mode the chat
+  can now ask this window what no MCP server knows: the view check's
+  findings of a file exactly as the Problems panel lists them
+  (`#abap2ui5Findings`), the XML view reconstructed from an app class
+  (`#abap2ui5View`), and the live JSON model of the app shown in the preview
+  (`#abap2ui5Model`, desktop only; a large model is cut at 50 KB and the
+  answer says so). All three only read what the window already shows -
+  nothing is sent to a system, and the tools that act on one stay with the
+  MCP servers, so no tool is offered twice. `abap2ui5.chatTools` switches
+  them off.
 - **Find All References for events, control ids and bound attributes.**
   Shift+F12 on an event name lists the `WHEN` branch that handles it and
   every `_event( )` that raises it; on a control id, the control that

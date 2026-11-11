@@ -334,6 +334,45 @@ export function applyModelAwaited(
   });
 }
 
+/** What the preview answered to a `dumpModel` message. */
+export interface ModelDumpReply {
+  /** The model as the app serialised it - set unless `error` is. */
+  text?: string;
+  /** Why there is no model. */
+  error?: string;
+}
+
+/** The one dump request waiting for its marked `appModel` reply. */
+let modelDumpWaiter: ((reply: ModelDumpReply) => void) | undefined;
+
+/**
+ * Asks the shown preview for the running app's model and resolves with the
+ * answer - the { } button's command, for a caller instead of a document.
+ * A preview that is hidden or not listening answers nothing, so a timeout
+ * stands in for the missing reply.
+ */
+export function requestModelDump(
+  session: Session,
+  timeoutMs = MODEL_APPLY_TIMEOUT_MS
+): Promise<ModelDumpReply> {
+  return new Promise((resolve) => {
+    modelDumpWaiter?.({ error: "a later request superseded it" });
+    const settle = (reply: ModelDumpReply) => {
+      clearTimeout(timer);
+      if (modelDumpWaiter === settle) {
+        modelDumpWaiter = undefined;
+      }
+      resolve(reply);
+    };
+    const timer = setTimeout(
+      () => settle({ error: "the preview did not answer" }),
+      timeoutMs
+    );
+    modelDumpWaiter = settle;
+    postToShownApp(session, { type: "dumpModel" });
+  });
+}
+
 /** What one reload does BESIDES loading the page - the part every caller used
  *  to carry (or forget) on its own. */
 export interface ReloadOptions {
@@ -469,6 +508,7 @@ export function handleWebviewMessage(
         device?: string;
         ok?: boolean;
         reason?: string;
+        forHost?: boolean;
       }
     | undefined;
   // Inspect mode: a control was clicked in the running app.
@@ -492,6 +532,15 @@ export function handleWebviewMessage(
   }
   // The app answered the model-dump command.
   if (message?.type === "appModel") {
+    // Asked for by `requestModelDump`, not by the button: answer the asker
+    // and open nothing. Tab and panel may both answer - the first one wins,
+    // and the second finds no waiter and is dropped.
+    if (message.forHost === true) {
+      modelDumpWaiter?.(
+        message.error ? { error: message.error } : { text: message.text ?? "" }
+      );
+      return;
+    }
     void session.modelView?.show(target?.className ?? "APP", {
       text: message.text,
       error: message.error || undefined,

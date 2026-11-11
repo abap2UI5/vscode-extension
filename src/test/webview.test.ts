@@ -176,6 +176,31 @@ test("applyModel is answered in every branch, and the pickers can be rebuilt", (
   assert.ok(html.includes("fillSelect(languageEl, msg.languages, msg.language)"));
 });
 
+test("a host's dumpModel is answered to the host, the button's dump is not marked", () => {
+  const html = previewHtml({
+    frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",
+    externalUrl: "https://host:44300/sap/bc/z2ui5?app_start=ZCL_X",
+    className: "ZCL_X",
+    theme: "",
+    language: "",
+    modelRoots: [],
+    nonce: "n0nce",
+  });
+  // the host's message, handled after the "fromApp" refusal
+  const at = html.indexOf("msg.type === 'dumpModel'");
+  assert.ok(at > 0, "the dumpModel message is not handled");
+  assert.ok(html.lastIndexOf("if (fromApp) { return; }", at) > 0);
+  const branch = html.slice(at, html.indexOf("msg.type === 'applyModel'", at));
+  // no app loaded: answered at once, marked for the host
+  assert.ok(branch.includes("forHost: true, text: '', error: 'no app is loaded yet'"));
+  // otherwise the { } button's own command, with the answer marked
+  assert.ok(branch.includes("modelForHost = true;"));
+  assert.ok(branch.includes("__abap2ui5Cmd: 'model'"));
+  // the app's answer carries the mark once, and a click on the button clears it
+  assert.ok(html.includes("forHost: forHost,"));
+  assert.match(html, /addEventListener\('click', \(\) => \{\s*modelForHost = false;/);
+});
+
 test("the screenshot message names the device the preview shows", () => {
   const html = previewHtml({
     frameUrl: "http://127.0.0.1:1234/sap/bc/z2ui5?app_start=ZCL_X",

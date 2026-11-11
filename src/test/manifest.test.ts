@@ -564,6 +564,8 @@ const SETTING_POLICY: Record<string, "machine+restricted" | "restricted" | "open
   // presentation, check strictness, and switches that only turn features on
   // or off whose program/host is decided by the settings above
   "abap2ui5.codeLens": "open",
+  // three read-only chat tools over what the window already shows
+  "abap2ui5.chatTools": "open",
   "abap2ui5.openMode": "open",
   "abap2ui5.reloadOn": "open",
   "abap2ui5.reloadOnSave": "open",
@@ -615,4 +617,81 @@ test("every setting is classified for what a cloned repository may set", () => {
   // the rolling render-gate bundle is the user's choice (machine scope and
   // restricted, pinned above) - and off unless they make it
   assert.equal(properties["abap2ui5.viewCheck.rollingBundle"].default, false);
+});
+
+/*
+ * The language model tools, the same way as the commands: a tool in the
+ * manifest that no entry registers fails when the chat calls it, a
+ * registered one the manifest does not list is refused by `registerTool`.
+ * The registrations are data (`chatToolsOn` in `chattools.ts`, which
+ * `registerChatTools` maps over), so the list is compared per surface: the
+ * desktop entry registers everything, the web entry what carries no
+ * `!isWeb` in its `when`.
+ */
+import { CHAT_TOOLS, chatToolsOn, manifestEntry } from "../chattools";
+
+interface ToolEntry {
+  name: string;
+  when?: string;
+}
+
+const toolEntries = (
+  JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    contributes: { languageModelTools?: ToolEntry[] };
+  }
+).contributes.languageModelTools ?? [];
+
+/** The surface an entry point registers its chat tools for. */
+function chatToolSurfaceOf(entry: string): string | undefined {
+  const text = fs.readFileSync(path.join(ROOT, entry), "utf8");
+  return /registerChatTools\(\s*context,\s*"(desktop|web)"/.exec(text)?.[1];
+}
+
+test("the manifest's language model tools are the ones the desktop entry registers", () => {
+  assert.equal(chatToolSurfaceOf("src/extension.ts"), "desktop");
+  assert.deepEqual(
+    toolEntries.map((entry) => entry.name),
+    chatToolsOn("desktop").map((tool) => tool.name)
+  );
+});
+
+test("the web entry registers exactly the tools the manifest offers in the web host", () => {
+  assert.equal(chatToolSurfaceOf("src/web/extension.ts"), "web");
+  assert.deepEqual(
+    toolEntries
+      .filter((entry) => !/!isWeb\b/.test(entry.when ?? ""))
+      .map((entry) => entry.name),
+    chatToolsOn("web").map((tool) => tool.name)
+  );
+  // and it is a real subset: the model tool needs the preview
+  assert.ok(chatToolsOn("web").length < chatToolsOn("desktop").length);
+});
+
+test("every tool entry is the definition's, and follows the chatTools setting", () => {
+  assert.deepEqual(toolEntries, CHAT_TOOLS.map(manifestEntry));
+  for (const entry of toolEntries) {
+    assert.match(entry.name, /^abap2ui5_[\w-]+$/);
+    assert.match(entry.when ?? "", /\bconfig\.abap2ui5\.chatTools\b/);
+  }
+});
+
+test("only chattoolsview.ts registers a language model tool", () => {
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "test") {
+          walk(full);
+        }
+      } else if (
+        entry.name.endsWith(".ts") &&
+        /\bregisterTool\s*(<[^>]*>)?\(/.test(fs.readFileSync(full, "utf8"))
+      ) {
+        files.push(path.relative(path.join(ROOT, "src"), full));
+      }
+    }
+  };
+  walk(path.join(ROOT, "src"));
+  assert.deepEqual(files, ["chattoolsview.ts"]);
 });

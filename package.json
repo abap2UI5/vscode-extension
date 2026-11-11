@@ -352,6 +352,60 @@
         "label": "abap2UI5 MCP Server"
       }
     ],
+    "languageModelTools": [
+      {
+        "name": "abap2ui5_get_view_findings",
+        "displayName": "abap2UI5 View Findings",
+        "toolReferenceName": "abap2ui5Findings",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(checklist)",
+        "userDescription": "The abap2UI5 view check's findings for the active file, as the Problems panel shows them.",
+        "modelDescription": "Returns the abap2UI5 view check's findings for one document - an abap2UI5 app class (*.clas.abap) or an XML view - exactly as the editor's Problems panel shows them: rule id, severity, 1-based line and message per finding. Defaults to the active editor; pass `uri` for another document. It reads what the editor has already published and does not run a check: a file that is neither open nor covered by the last \"Check All Views in the Workspace\" has no findings to report. Read-only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string",
+              "description": "The document's URI (file:///..., or the URI of a class opened from a system), or an absolute file path. Omit it for the active editor."
+            }
+          }
+        },
+        "when": "config.abap2ui5.chatTools"
+      },
+      {
+        "name": "abap2ui5_get_reconstructed_view",
+        "displayName": "abap2UI5 Reconstructed XML View",
+        "toolReferenceName": "abap2ui5View",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(code)",
+        "userDescription": "The XML view an abap2UI5 app class builds, reconstructed from its builder chain.",
+        "modelDescription": "Returns the XML view(s) an abap2UI5 app class builds with z2ui5_cl_ui5_view_builder, reconstructed statically from the class source - the same document \"Show Reconstructed XML View\" opens. Use it to see the control tree, properties and bindings a builder chain produces without running the app. Defaults to the active editor; pass `uri` for another class. Read-only; no system is contacted.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string",
+              "description": "The document's URI (file:///..., or the URI of a class opened from a system), or an absolute file path. Omit it for the active editor."
+            }
+          }
+        },
+        "when": "config.abap2ui5.chatTools"
+      },
+      {
+        "name": "abap2ui5_get_running_app_model",
+        "displayName": "abap2UI5 Running App Model",
+        "toolReferenceName": "abap2ui5Model",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(json)",
+        "userDescription": "The live JSON model of the app shown in the abap2UI5 preview.",
+        "modelDescription": "Returns the live JSON model of the abap2UI5 app currently shown in the editor's embedded preview - the values the running app actually holds, as the preview's { } button shows them. Use it to answer why a bound control is empty or shows an unexpected value. Takes no input. Answers with a plain sentence when no app is running in the preview. A large model is cut at 50 KB and the answer says so. Read-only: it asks the page already loaded and sends nothing to the system.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "when": "config.abap2ui5.chatTools && !isWeb"
+      }
+    ],
     "menus": {
       "commandPalette": [
         {
@@ -1001,6 +1055,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Also offer the **abap2UI5 System** MCP server: real-system tools hosted by the extension itself - list the configured systems, search classes on the system (ADT quick search), run an app through the auth proxy with a headless screenshot, and - only with `#abap2ui5.agent.enableAppTools#` - operate an app through its JSON protocol. Uses the same credentials the preview stores; the run tool needs the render gate's Chromium."
+        },
+        "abap2ui5.chatTools": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer the editor's chat three read-only tools for what only this window knows: the view check's findings of a document as the Problems panel shows them (`#abap2ui5Findings`), the XML view reconstructed from an app class (`#abap2ui5View`) and the live JSON model of the app shown in the preview (`#abap2ui5Model`, desktop only). None of them contacts or changes a system - the tools that do stay with the MCP servers (`#abap2ui5.mcp.system#`)."
         },
         "abap2ui5.agent.enableAppTools": {
           "type": "boolean",
