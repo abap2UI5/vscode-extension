@@ -76,7 +76,9 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   ABAP Unit tests in the transpiled abap2UI5 backend through
   [mcp-server](https://github.com/abap2UI5/mcp-server)'s `abap2ui5-unit`, in
   a terminal, for one class or the whole `src/`: the editor's counterpart of
-  `npm run test:unit` in a project from app-template.
+  `npm run test:unit` in a project from app-template. The same tests are
+  listed in the Testing view, per test class and method, with each result on
+  its method.
 - **Migrate a classic report** — *Migrate Classic Report to abap2UI5* turns a
   `*.prog.abap` into an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui)
   report class with its converter report2cloud, opens the class beside its

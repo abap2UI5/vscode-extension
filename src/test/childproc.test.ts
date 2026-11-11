@@ -175,3 +175,24 @@ test("a taskkill that cannot start is not an uncaught error", async () => {
     child.kill("SIGKILL");
   }
 });
+
+test("stderr is handed on while the child runs, and a failing listener does not break the run", async () => {
+  const seen: string[] = [];
+  const outcome = await run(
+    process.execPath,
+    ["-e", "process.stderr.write('log');process.stdout.write('{}')"],
+    {
+      onStderr: (chunk) => {
+        seen.push(chunk);
+        throw new Error("listener");
+      },
+    }
+  );
+  assert.equal(outcome.kind, "closed");
+  if (outcome.kind !== "closed") {
+    return;
+  }
+  assert.equal(seen.join(""), "log");
+  assert.equal(outcome.stderr, "log");
+  assert.equal(outcome.stdout, "{}");
+});

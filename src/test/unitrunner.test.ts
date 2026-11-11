@@ -198,3 +198,59 @@ test("the banner names the checkouts it found instead", () => {
   assert.equal(lines[1], `framework: ${path.join(root, "abap2UI5")}`);
   assert.ok(!lines.join("\n").includes("slow"));
 });
+
+test("the Testing view's run: several classes, one path each, the report flag last", () => {
+  const cwd = path.join(root, "app");
+  const args = unitTestArgs({
+    cwd,
+    classFiles: [
+      path.join(cwd, "src", "zcl_a.clas.testclasses.abap"),
+      path.join(cwd, "src", "sub", "zcl_b.clas.testclasses.abap"),
+      path.join(cwd, "src", "zcl_a.clas.testclasses.abap"),
+    ],
+    home: path.join(root, "abap2UI5"),
+    json: true,
+    exists: () => true,
+  });
+  assert.deepEqual(args, [
+    "src",
+    "--class",
+    "zcl_a",
+    "--class",
+    "zcl_b",
+    "--home",
+    path.join(root, "abap2UI5"),
+    "--json",
+  ]);
+});
+
+test("a folder below another one is not walked twice", () => {
+  // the runner refuses an object it meets under two of its paths
+  const cwd = path.join(root, "app");
+  const args = unitTestArgs({
+    cwd,
+    classFiles: [
+      path.join(cwd, "lib", "deep", "zcl_b.clas.testclasses.abap"),
+      path.join(cwd, "lib", "zcl_a.clas.testclasses.abap"),
+      path.join(cwd, "other", "zcl_c.clas.testclasses.abap"),
+    ],
+    json: true,
+    exists: () => true,
+  });
+  assert.deepEqual(args, [
+    "lib",
+    "other",
+    "--class",
+    "zcl_b",
+    "--class",
+    "zcl_a",
+    "--class",
+    "zcl_c",
+    "--json",
+  ]);
+});
+
+test("the terminal's arguments carry no report flag", () => {
+  const cwd = path.join(root, "app");
+  assert.deepEqual(unitTestArgs({ cwd, exists: () => true }), ["src"]);
+});

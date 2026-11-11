@@ -44,6 +44,7 @@ import { formatTrafficLine, isRoundtrip } from "./traffic";
 import { MODEL_SCHEME, registerModelView } from "./modelview";
 import { registerMockFile } from "./mockfile";
 import { registerUnitTests } from "./unittests";
+import { registerTestExplorer } from "./testexplorer";
 import { registerMigrateReport } from "./migratereport";
 import { DEVICE_WIDTHS } from "./webview";
 import { applyModelMessage, staleMessage } from "./previewcore";
@@ -718,6 +719,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerViewPreview(context, log);
   registerMockFile(context, log);
   registerUnitTests(context, log);
+  registerTestExplorer(context, log);
   registerMigrateReport(context, log);
   registerQuickFix(context, log);
   registerLanguageFeatures(context, log);

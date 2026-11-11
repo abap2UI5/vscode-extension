@@ -39,6 +39,9 @@ export interface RunOptions {
   /** How often `abandoned` is asked. */
   pollMs?: number;
   platform?: NodeJS.Platform;
+  /** Told every piece of stderr as it arrives - for a caller that shows a
+   *  slow child's log live. The outcome still carries all of it. */
+  onStderr?: (chunk: string) => void;
 }
 
 export type RunOutcome =
@@ -178,7 +181,14 @@ export function run(
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (c) => (stdout += String(c)));
-    child.stderr?.on("data", (c) => (stderr += String(c)));
+    child.stderr?.on("data", (c) => {
+      stderr += String(c);
+      try {
+        options.onStderr?.(String(c));
+      } catch {
+        /* a listener's failure is not the child's */
+      }
+    });
     child.on("error", (error) => finish({ kind: "spawn-failed", error }));
     child.on("close", (code) => finish({ kind: "closed", code, stdout, stderr }));
   });

@@ -95,6 +95,12 @@ export interface UnitRunRequest {
   /** The class to run alone, as its file on disk (the class or its test
    *  include) - when the command was invoked on one. */
   classFile?: string;
+  /** Several classes to run together (the Testing view's selection), each
+   *  as its file on disk - instead of `classFile`. */
+  classFiles?: readonly string[];
+  /** Ask for the machine-readable report (`--json`: the result on stdout,
+   *  the log on stderr) - what the Testing view reads. */
+  json?: boolean;
   /** The abap2UI5 checkout under the repos root (what A2UI5_HOME names),
    *  when there is one. */
   home?: string;
@@ -105,7 +111,7 @@ export interface UnitRunRequest {
  *  well: `src` for a class under the project's src (or when no class is
  *  named and there is one), the class's own folder otherwise, `.` for a
  *  project without a src. Absolute only for a class outside the folder. */
-function pathArgument(req: UnitRunRequest): string {
+function pathArgument(req: Omit<UnitRunRequest, "classFiles">): string {
   const src = path.join(req.cwd, "src");
   const relative = (dir: string): string => {
     const rel = path.relative(req.cwd, dir);
@@ -126,19 +132,49 @@ function pathArgument(req: UnitRunRequest): string {
 }
 
 /**
- * The runner's arguments: the folder to walk, `--class` when one class is
- * meant, `--home` when the repos root holds the framework. The same shape
+ * The runner's arguments: the folder to walk, `--class` per class that is
+ * meant, `--home` when the repos root holds the framework, `--json` for the
+ * Testing view. The same shape
  * `npm run test:unit` has in a project from app-template (`abap2ui5-unit
  * src`), so what the terminal shows is what the README teaches.
  */
 export function unitTestArgs(req: UnitRunRequest): string[] {
-  const args = [pathArgument(req)];
-  const cls = req.classFile ? classOfFile(req.classFile) : undefined;
-  if (cls) {
+  const files = req.classFiles?.length
+    ? req.classFiles
+    : req.classFile
+      ? [req.classFile]
+      : [];
+  // every folder once, and none below another one: the runner walks each
+  // path it is given and refuses an object it meets twice
+  const dirs = [...new Set(files.map((classFile) => pathArgument({ ...req, classFile })))];
+  const absolute = (dir: string): string => path.resolve(req.cwd, dir);
+  const args = files.length
+    ? dirs.filter(
+        (dir) =>
+          !dirs.some((other) => {
+            if (other === dir) {
+              return false;
+            }
+            const rel = path.relative(absolute(other), absolute(dir));
+            return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+          })
+      )
+    : [pathArgument(req)];
+  const classes = new Set<string>();
+  for (const file of files) {
+    const cls = classOfFile(file);
+    if (cls) {
+      classes.add(cls);
+    }
+  }
+  for (const cls of classes) {
     args.push("--class", cls);
   }
   if (req.home) {
     args.push("--home", req.home);
+  }
+  if (req.json) {
+    args.push("--json");
   }
   return args;
 }

@@ -4,6 +4,19 @@
 
 The bundled linter moves to v0.9.0.
 
+- **Unit tests in the Testing view.** The ABAP Unit tests that *Run Unit
+  Tests (No System)* runs in a terminal are now listed in VS Code's Testing
+  view too: one entry per `*.clas.testclasses.abap`, its test classes and
+  their test methods, with the run buttons in the gutter of the test include.
+  A run uses the same `abap2ui5-unit` runner and marks each method passed,
+  failed or not run; a failure shows the assertion's message with expected
+  and actual value at the method's declaration (the runner reports no line).
+  The runner works per class and stops at the first failure, so running one
+  method runs its class and marks only that method, and what was never
+  reached is shown as skipped, not as passed. Nothing is searched or started
+  until the Testing view is opened or a test include is shown; Restricted
+  Mode refuses a run exactly as the command does. Desktop only - the terminal
+  command and its CodeLens stay as they are.
 - **Baselines keep working after the linter's key change.** Linter 0.9.0
   no longer writes a source position into the baseline keys of ten rules
   (`source-line-too-long`, `trailing-whitespace`, `empty-catch-block`, ...),
