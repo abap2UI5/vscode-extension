@@ -55,7 +55,11 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/webviewpreview.ts` | HTML for the running app's preview: toolbar, theme/language pickers, device sizes, loading overlay, the page script |
 | `src/webviewpanels.ts` | HTML for the pages that need no running app: the "Control Properties" form, the static view preview, the navigation map |
 | `src/webviewwelcome.ts` | HTML for the welcome screen (the open-mode-aware empty state) |
-| `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401; authorized by the token in its own url |
+| `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401; authorized by the token in its own url. Holds `SapProxy` whole (the listener, the token gate, the certificate check per request, the roundtrip ring) and re-exports the free-standing helpers of the four `proxy*.ts` parts - the module everyone imports from; the parts never import it (`proxysplit.test.ts` pins both) |
+| `src/proxyadt.ts` | `vscode`-free: the ADT side of the proxy as pure parsing and types - `AdtStatusError`, `AdtClassState`, `AdtClassRef`, `parseAdtClassRefs` |
+| `src/proxyhtml.ts` | `vscode`-free: what the proxy does to an HTML document - `allowFraming`, `injectRuntimeHook` with the injected script, `RUNTIME_MESSAGE_MARKER`, the size limit for injection |
+| `src/proxybody.ts` | `vscode`-free: reading a response body in the proxy - `describeRejection` (redacted) and its sniff limit, `decodeBody`, `withUtf8Charset` |
+| `src/proxyheaders.ts` | `vscode`-free: the proxy's header-level rules, free of state - the token segment and `TOKEN_COOKIE`, the constant-time `tokensEqual`, `isLoopbackHost`, `rewriteSetCookie`, `rebasedReferer`, `requestHostname`, the hop-by-hop list |
 | `src/authstrategy.ts` | `vscode`-free: how the proxy logs a request on to the system - `AuthStrategy` (the headers for every outgoing request, and whether a 401 from the system means "this logon was rejected", which trips the proxy's retry breaker) and `BasicAuthStrategy`, the only implementation; the prepared header sits in a `#private` field that neither serializes nor prints |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
 | `src/systemprofile.ts` | `vscode`-free: what a `systems` entry may say beyond name and url - `role`, `minUi5`, `distribution`, the reserved `auth` - parsed tolerantly (`profileFieldsOf`; what was ignored is `profileNotes`, logged once per change of the setting), `production` kept from the settings scopes a workspace's list shadows (`tightenRoles`), the status bar's role text, and the detected UI5 version written back into an entry (`withDetectedUi5`) |
@@ -184,7 +188,7 @@ not committed.
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
 `unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `report2cloud.ts`, `report.ts`, `roundtrips.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
-`proxy.ts`, `authstrategy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
+`proxy.ts` with its parts `proxyadt.ts`, `proxyhtml.ts`, `proxybody.ts` and `proxyheaders.ts`, `authstrategy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` with its parts `webviewshared.ts`, `webviewpreview.ts`,
 `webviewpanels.ts` and `webviewwelcome.ts` (HTML strings only — the state they render is
 passed in) must not import `vscode`: the test suite bundles them for plain
