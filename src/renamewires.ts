@@ -27,7 +27,13 @@ import {
   type AbapStatement,
 } from "./abapscan";
 
-import type { NamedSpan } from "./context";
+import {
+  eventNameAt,
+  eventNameSpans,
+  whenBranches,
+  whenNameAt,
+  type NamedSpan,
+} from "./context";
 
 /** The frontend actions whose first argument is a control id. Same set the
  *  linter's `frontend-action-unknown-id` judges - a wire naming an id no view
@@ -551,6 +557,119 @@ export function attributeAt(source: string, offset: number): NamedSpan | undefin
 /** The three things F2 renames here. They do not share a spelling rule,
  *  because only two of them are strings. */
 export type RenameKind = "event" | "id" | "attribute";
+
+/** What the cursor is on, with the kind that decides everything after it. */
+export interface RenameTarget {
+  kind: RenameKind;
+  span: NamedSpan;
+}
+
+/**
+ * What the cursor is on, in the order the three can be told apart: an event
+ * name (a literal in `_event( )` or `WHEN`), a control id (a literal in an
+ * `id` attribute or an id-taking wire), or an attribute the class declares.
+ *
+ * The ONE answer to "what is under the cursor" - F2 and Find All References
+ * both ask here, so the two cannot disagree about what a name is.
+ */
+export function renameTargetAt(
+  source: string,
+  offset: number
+): RenameTarget | undefined {
+  const event = eventNameAt(source, offset) ?? whenNameAt(source, offset);
+  if (event) {
+    return { kind: "event", span: event };
+  }
+  const id = idAt(source, offset);
+  if (id) {
+    return { kind: "id", span: id };
+  }
+  const attribute = attributeAt(source, offset);
+  return attribute ? { kind: "attribute", span: attribute } : undefined;
+}
+
+/** Everywhere the target's name is written - by the kind already resolved,
+ *  so the thing decided under the cursor is the thing replaced. */
+export function renameSpans(source: string, target: RenameTarget): RenameSpan[] {
+  const name = target.span.name;
+  if (target.kind === "event") {
+    return eventNameSpans(source, name);
+  }
+  if (target.kind === "id") {
+    return idSpans(source, name);
+  }
+  return attributeSpans(source, name);
+}
+
+/**
+ * The start offsets of the spans that DECLARE the target, out of the ones
+ * `renameSpans` answers with: the `WHEN` branches that handle an event (where
+ * Go to Definition lands), the `a( n = \`id\` v = … )` that puts an id on a
+ * control, and the attribute's name in its `DATA` / `CLASS-DATA` /
+ * `CONSTANTS` statement.
+ */
+function declaringStarts(source: string, target: RenameTarget): Set<number> {
+  const wanted = target.span.name.toUpperCase();
+  const out = new Set<number>();
+  if (target.kind === "event") {
+    for (const branch of whenBranches(source)) {
+      if (branch.name.toUpperCase() === wanted) {
+        out.add(branch.start);
+      }
+    }
+    return out;
+  }
+  if (target.kind === "id") {
+    for (const literal of idLiterals(source)) {
+      if (literal.role === "declaration" && literal.name === target.span.name) {
+        out.add(literal.start);
+      }
+    }
+    return out;
+  }
+  const lexed = lex(source);
+  const blanked = lexed.blanked;
+  lexed.statements.forEach((statement, index) => {
+    if (
+      !DECLARING.test(
+        blanked.slice(statement.start, statement.start + statement.text.length)
+      )
+    ) {
+      return;
+    }
+    for (const declared of lexed.declaredIn(index)) {
+      if (!declared.component && declared.name.toUpperCase() === wanted) {
+        out.add(statement.start + declared.at);
+      }
+    }
+  });
+  return out;
+}
+
+/**
+ * Find All References for the name at `offset`: exactly the spans F2 would
+ * edit there, and nothing when the cursor is on anything else - an empty
+ * answer leaves the question to whichever other provider knows the symbol.
+ *
+ * `includeDeclaration` false drops the declaring spans (see
+ * `declaringStarts`); the scope is the rename's own and never wider.
+ */
+export function wireReferences(
+  source: string,
+  offset: number,
+  includeDeclaration: boolean
+): RenameSpan[] {
+  const target = renameTargetAt(source, offset);
+  if (!target) {
+    return [];
+  }
+  const spans = renameSpans(source, target);
+  if (includeDeclaration) {
+    return spans;
+  }
+  const declaring = declaringStarts(source, target);
+  return spans.filter((span) => !declaring.has(span.start));
+}
 
 /**
  * An event name and a control id are STRINGS - the framework compares them

@@ -18,6 +18,14 @@ The bundled linter moves to v0.9.0.
   length over it is now refused before the first byte, and a stream is cut
   off the moment it passes it.
 
+- **Find All References for events, control ids and bound attributes.**
+  Shift+F12 on an event name lists the `WHEN` branch that handles it and
+  every `_event( )` that raises it; on a control id, the control that
+  declares it and every wire that addresses it; on a bound attribute, the
+  ABAP identifier and every `{/PATH}` bound to it. The list is exactly what
+  **F2** would rename, in the same class. Anywhere else the extension answers
+  nothing, so the ABAP extension's own references are not affected.
+
 - **Open a class from a link.** A `vscode://abap2ui5.abap2ui5/open` link
   opens the class it carries as an unsaved `.clas.abap` document and offers
   to run it with F9 - the abap2UI5 layout editor's "Open in VS Code" writes

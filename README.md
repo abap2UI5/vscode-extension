@@ -84,7 +84,8 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   ([details](#migrating-a-classic-report)).
 - **Navigate an app**: the view hierarchy in the Outline pane, Go to Definition
   between an event and its `WHEN`, F2 renaming every literal an app is wired
-  together with, and a navigation map of the workspace's apps.
+  together with, Find All References (Shift+F12) listing the same places, and
+  a navigation map of the workspace's apps.
 - **Open a class from a link**: `vscode://abap2ui5.abap2ui5/open?code=…`
   or `?src=<raw GitHub URL>` opens the class unsaved, ready for F9.
 - **Templates**: *New App from Template* is a gallery of linter-clean
