@@ -7,7 +7,6 @@ import {
   eventNameAt,
   eventNameSpans,
   eventUsagesOf,
-  NamedSpan,
   OutlineNode,
   viewOutline,
   whenBranchOf,
@@ -45,15 +44,14 @@ import { snapshot } from "./snapshot";
 import { CONFIG_SECTION } from "./settings";
 import { VIEW_SELECTOR } from "./selector";
 import {
-  attributeAt,
-  attributeSpans,
   idAt,
   idCompletionAt,
   idSpans,
   renameNameError,
+  renameSpans,
   renameSpelling,
-  type RenameKind,
-  type RenameSpan,
+  renameTargetAt,
+  wireReferences,
 } from "./renamewires";
 import { methodNameError, planExtract } from "./extractview";
 import { expandAbbreviation } from "./abbreviation";
@@ -768,45 +766,6 @@ class MethodWorkspaceSymbols implements vscode.WorkspaceSymbolProvider {
 // appears - an event, a control id, a bound attribute
 // ---------------------------------------------------------------------------
 
-interface RenameTarget {
-  kind: RenameKind;
-  span: NamedSpan;
-}
-
-/**
- * What the cursor is on, in the order the three can be told apart: an event
- * name (a literal in `_event( )` or `WHEN`), a control id (a literal in an
- * `id` attribute or an id-taking wire), or an attribute the class declares.
- */
-function renameTargetAt(text: string, offset: number): RenameTarget | undefined {
-  const event = eventNameAt(text, offset) ?? whenNameAt(text, offset);
-  if (event) {
-    return { kind: "event", span: event };
-  }
-  const id = idAt(text, offset);
-  if (id) {
-    return { kind: "id", span: id };
-  }
-  const attribute = attributeAt(text, offset);
-  return attribute ? { kind: "attribute", span: attribute } : undefined;
-}
-
-/** Everywhere that name is written - by the kind already resolved, so the
- *  thing decided in prepareRename is the thing replaced. */
-function renameSpans(
-  text: string,
-  target: RenameTarget,
-  name: string
-): RenameSpan[] {
-  if (target.kind === "event") {
-    return eventNameSpans(text, name);
-  }
-  if (target.kind === "id") {
-    return idSpans(text, name);
-  }
-  return attributeSpans(text, name);
-}
-
 class WireRename implements vscode.RenameProvider {
   /** Only the three names above are renameable here - anything else defers
    *  to other providers by throwing, which is the protocol for "not mine". */
@@ -858,7 +817,7 @@ class WireRename implements vscode.RenameProvider {
      * missing the other is silent: a wire that addresses nothing does
      * nothing at runtime, and a binding path that resolves to nothing
      * renders empty. Neither reports a thing. */
-    const targets = renameSpans(text, target, span.name);
+    const targets = renameSpans(text, target);
     for (const [index, target] of targets.entries()) {
       const range = new vscode.Range(
         doc.positionAt(target.start),
@@ -887,6 +846,34 @@ class WireRename implements vscode.RenameProvider {
       });
     }
     return edit;
+  }
+}
+
+/**
+ * Shift+F12 on an event name, a control id or a bound attribute: every place
+ * the class writes that name - the very spans F2 would edit, resolved by the
+ * same `vscode`-free function (`renamewires.ts`).
+ *
+ * Anything else answers with nothing, so the ABAP extension's own reference
+ * provider is not shadowed on the symbols it knows.
+ */
+class WireReferences implements vscode.ReferenceProvider {
+  provideReferences(
+    doc: vscode.TextDocument,
+    position: vscode.Position,
+    context: vscode.ReferenceContext
+  ): vscode.Location[] {
+    return wireReferences(
+      doc.getText(),
+      doc.offsetAt(position),
+      context.includeDeclaration
+    ).map(
+      (span) =>
+        new vscode.Location(
+          doc.uri,
+          new vscode.Range(doc.positionAt(span.start), doc.positionAt(span.end))
+        )
+    );
   }
 }
 
@@ -1064,6 +1051,10 @@ export function registerLanguageFeatures(
       new EventDefinition()
     ),
     vscode.languages.registerRenameProvider(ABAP_SELECTOR, new WireRename()),
+    vscode.languages.registerReferenceProvider(
+      ABAP_SELECTOR,
+      new WireReferences()
+    ),
     vscode.workspace.onDidCloseTextDocument((doc) => forgetModelShape(doc.uri)),
 
     vscode.commands.registerCommand("abap2ui5.extractViewMethod", () =>
@@ -1122,7 +1113,7 @@ export function registerLanguageFeatures(
   );
   log(
     "language: completion, hover, client API, chain formatting, " +
-      "method navigation, wire completion and highlights, and view outline registered"
+      "method navigation, wire completion, highlights and references, and view outline registered"
   );
 }
 

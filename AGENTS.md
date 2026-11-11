@@ -74,7 +74,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/mockfile.ts` | "Generate Mock Data for This App": writes the skeleton beside the class (asking before it replaces one), or opens it untitled for an ADT document |
 | `src/xmlpreview.ts` | "Show Reconstructed XML View": virtual document + live refresh |
 | `src/xmlformat.ts` | Pretty-printer for the reconstructed view trees (`prepareAbap( ).nodes`) |
-| `src/renamewires.ts` | `vscode`-free: where a control id and a bound attribute are written - both ends of the strings an app is wired with, for F2 |
+| `src/renamewires.ts` | `vscode`-free: where a control id and a bound attribute are written - both ends of the strings an app is wired with, for F2; and the one answer to "what is under the cursor" and "which spans belong to it" (`renameTargetAt`, `renameSpans`) that F2 and Find All References (`wireReferences`) share |
 | `src/extractview.ts` | `vscode`-free: the edits that move a chain tail into a handle-taking method (where a chain may be cut) |
 | `src/examples.ts` | `vscode`-free: finds and ranks a control's uses in the sample catalogues |
 | `src/catalogue.ts` | `vscode`-free: parses the sample repositories' committed `catalogue.json` (three sibling shapes, pinned in `src/test/fixtures/catalogue-*.json`) and matches a control against the entries |
