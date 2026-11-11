@@ -16,6 +16,7 @@ import {
 import { redact } from "./report";
 import { rebasedLocation } from "./urls";
 import { BodyTap, RoundtripBuffer } from "./roundtrips";
+import { AuthStrategy, BasicAuthStrategy } from "./authstrategy";
 
 /** Non-2xx answer from the ADT class lookup, with the status to decide on. */
 export class AdtStatusError extends Error {
@@ -694,7 +695,9 @@ export class SapProxy {
   private server?: http.Server;
   private port?: number;
   private target?: URL;
-  private authHeader?: string;
+  /** How requests are logged on to the system - see `authstrategy.ts`. It
+   *  holds the credentials, in memory only; the proxy never sees them. */
+  private auth?: AuthStrategy;
   /**
    * The shared secret in the proxy's own urls. The port is random but
    * scannable, and every request the proxy forwards carries the system
@@ -888,30 +891,46 @@ export class SapProxy {
   }
 
   /** Starts the proxy (or just refreshes auth if the target stays the same). */
-  start(targetOrigin: string, user: string, pass: string): Promise<number> {
-    return this.serialize(() => this.startNow(targetOrigin, user, pass));
+  start(targetOrigin: string, user: string, pass: string): Promise<number>;
+  start(targetOrigin: string, auth: AuthStrategy): Promise<number>;
+  start(
+    targetOrigin: string,
+    userOrAuth: string | AuthStrategy,
+    pass = ""
+  ): Promise<number> {
+    const auth =
+      typeof userOrAuth === "string"
+        ? new BasicAuthStrategy(userOrAuth, pass)
+        : userOrAuth;
+    return this.serialize(() => this.startNow(targetOrigin, auth));
+  }
+
+  /**
+   * Whether a 401 from the system trips the retry breaker (`authRejected`) -
+   * the strategy's answer. A proxy stopped while the request was under way
+   * has no strategy left; the answer then counts as it always did.
+   */
+  private rejectedBy401(authenticate: string | undefined): boolean {
+    return !this.auth || this.auth.onUnauthorized({ authenticate }) === "rejected";
   }
 
   private async startNow(
     targetOrigin: string,
-    user: string,
-    pass: string
+    auth: AuthStrategy
   ): Promise<number> {
     const target = new URL(targetOrigin);
-    const authHeader =
-      "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
     // new credentials are a new attempt, whether or not the server restarts
     this.authRejected = false;
 
     if (this.server && this.target && this.target.origin === target.origin) {
-      this.authHeader = authHeader;
+      this.auth = auth;
       return this.port!;
     }
 
     // assigned after stop( ), which clears the credentials of the proxy it
     // tears down - including, before this order, the ones just handed in
     await this.stopNow();
-    this.authHeader = authHeader;
+    this.auth = auth;
     this.target = target;
     this.token = randomBytes(16).toString("base64url");
     // one-shot tokens belong to the proxy that minted them
@@ -962,7 +981,7 @@ export class SapProxy {
 
   /** True once start() succeeded, i.e. target and credentials are known. */
   get isRunning(): boolean {
-    return !!this.server && !!this.target && !!this.authHeader;
+    return !!this.server && !!this.target && !!this.auth;
   }
 
   /** Which SYSTEM this proxy currently forwards to, normalised - undefined
@@ -988,7 +1007,7 @@ export class SapProxy {
     // close window the token is already gone, and `undefined === undefined`
     // used to AUTHORIZE a cookie-less request against the cleared state.
     const token = this.token;
-    if (!token || !this.target || !this.authHeader || this.port === undefined) {
+    if (!token || !this.target || !this.auth || this.port === undefined) {
       return undefined;
     }
 
@@ -1131,7 +1150,7 @@ export class SapProxy {
     options: { background?: boolean; signal?: AbortSignal; timeoutMs?: number } = {}
   ): Promise<{ status: number; body: string; authenticate?: string }> {
     const target = this.target;
-    const auth = this.authHeader;
+    const auth = this.auth;
     if (!target || !auth) {
       return Promise.reject(new Error("proxy not started"));
     }
@@ -1155,7 +1174,7 @@ export class SapProxy {
           method: "GET",
           path,
           headers: {
-            authorization: auth,
+            ...auth.requestHeaders(),
             accept,
           },
           rejectUnauthorized: stance.rejectUnauthorized,
@@ -1176,7 +1195,7 @@ export class SapProxy {
             // logon had stopped working.
             const authenticate = headerValue(res.headers["www-authenticate"]);
             if ((status === 401 || status === 403) && !options.background) {
-              if (status === 401) {
+              if (status === 401 && this.rejectedBy401(authenticate)) {
                 this.authRejected = true;
               }
               this.onResponse?.({
@@ -1284,7 +1303,7 @@ export class SapProxy {
       }
     }
     headers.host = target.host;
-    headers.authorization = this.authHeader;
+    Object.assign(headers, this.auth?.requestHeaders());
     if (headers.cookie) {
       const kept = String(headers.cookie)
         .split(";")
@@ -1425,7 +1444,10 @@ export class SapProxy {
         // rejection diagnosable is the sentence inside it, and these two
         // statuses are the only ones where waiting a few milliseconds buys
         // anything. A 401 also stops the burst of retries (`authRejected`).
-        if (status === 401) {
+        if (
+          status === 401 &&
+          this.rejectedBy401(headerValue(proxyRes.headers["www-authenticate"]))
+        ) {
           this.authRejected = true;
         }
         let sniff = "";
@@ -1817,7 +1839,10 @@ export class SapProxy {
       // to stop - while nothing ever offered the user to re-enter the
       // credentials, because nobody reported the answer.
       const status = proxyRes.statusCode ?? 502;
-      if (status === 401) {
+      if (
+        status === 401 &&
+        this.rejectedBy401(headerValue(proxyRes.headers["www-authenticate"]))
+      ) {
         this.authRejected = true;
       }
       this.onResponse?.({
@@ -1854,7 +1879,7 @@ export class SapProxy {
     this.target = undefined;
     // the credentials and the token outlived the server they belonged to,
     // and isRunning read true for a proxy that had already been stopped
-    this.authHeader = undefined;
+    this.auth = undefined;
     this.token = undefined;
     this.singleUseTokens.clear();
     // the bodies of the session that ends here go with it

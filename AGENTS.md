@@ -52,6 +52,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/modelview.ts` | The live-model document the preview's `{ }` button fills; "Apply the Model Document to the Running App" (registered in `extension.ts`) copies it for editing and pushes the edited JSON back through the pin's restore path |
 | `src/webview.ts` | HTML for the preview and the welcome screen (theme variables, CSP nonce, theme/language pickers, the open-mode-aware empty state) |
 | `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401; authorized by the token in its own url |
+| `src/authstrategy.ts` | `vscode`-free: how the proxy logs a request on to the system - `AuthStrategy` (the headers for every outgoing request, and whether a 401 from the system means "this logon was rejected", which trips the proxy's retry breaker) and `BasicAuthStrategy`, the only implementation; the prepared header sits in a `#private` field that neither serializes nor prints |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
 | `src/systemprofile.ts` | `vscode`-free: what a `systems` entry may say beyond name and url - `role`, `minUi5`, `distribution`, the reserved `auth` - parsed tolerantly (`profileFieldsOf`; what was ignored is `profileNotes`, logged once per change of the setting), `production` kept from the settings scopes a workspace's list shadows (`tightenRoles`), the status bar's role text, and the detected UI5 version written back into an entry (`withDetectedUi5`) |
 | `src/checktarget.ts` | The settings half of a desktop check's options: the four `viewCheck` settings with the active system's profile laid over them (`checkSettings`, the precedence itself is `settingsForSystem` in `configcore.ts`), and the change notice / generation the view check and the inline annotations re-check on |
@@ -168,7 +169,7 @@ not committed.
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
 `unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `report2cloud.ts`, `report.ts`, `roundtrips.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
-`proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
+`proxy.ts`, `authstrategy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
 passed in) must not import `vscode`: the test suite bundles them for plain
 Node, and an accidental import turns a unit test into a module-not-found
@@ -342,7 +343,8 @@ identity (see Conventions).
   `<style>`/`<script>` carry the CSP nonce - no `unsafe-inline`, and therefore
   no `style="..."` attributes in the markup either.
 - **Never log or persist credentials** anywhere but `context.secrets`. The
-  proxy holds them in memory only, as a prepared header. They are keyed by
+  proxy holds them in memory only, as a prepared header inside its
+  `AuthStrategy` (`authstrategy.ts`). They are keyed by
   origin (`abap2ui5.user:<origin>`); the unscoped pre-0.14 keys are migrated
   on first use, so do not reuse those names for anything else.
 - **Every local listener carries a secret in its path.** Both the auth proxy
