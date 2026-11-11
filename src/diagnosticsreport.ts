@@ -10,6 +10,7 @@ import { renderGateCli } from "./rendergate";
 import { LINTER_RELEASE } from "./linterrelease";
 import { activeSystem, allSystems } from "./systems";
 import { Session } from "./session";
+import { certificatePins } from "./certprompt";
 import * as path from "path";
 
 /*
@@ -124,6 +125,7 @@ export function registerDiagnosticsReport(
           configured: allSystems().length,
           active: activeSystem(context)?.name,
           proxyRunning: session.proxy.isRunning,
+          pinnedCertificates: Object.keys(certificatePins(context)).length,
         },
         relatedExtensions: relatedExtensions(),
         recentLog: session.recentLog(),

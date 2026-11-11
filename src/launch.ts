@@ -10,6 +10,8 @@ import {
   SystemProfile,
 } from "./systems";
 import { FOCUS_BOUNCE_MS, PreviewSurface, Session } from "./session";
+import { ensureCertificateTrust, reportTrustRefusal } from "./certprompt";
+import { CertificateTrustError } from "./certtrust";
 import { postToShownApp, reloadShownApp, showInTab } from "./preview";
 import { staleMessage } from "./previewcore";
 import { describeRejection } from "./proxy";
@@ -101,6 +103,14 @@ export async function runApp(
   }
 
   // tab / panel: load through the auth proxy so the login takes effect.
+  // The certificate first: a system that cannot be verified is asked about
+  // before a password is typed for it, and before anything is sent.
+  const trust = await ensureCertificateTrust(session, origin, { interactive: true });
+  if (!trust.trusted) {
+    session.log(`run: ${className} not started - ${trust.message}`);
+    reportTrustRefusal(trust);
+    return;
+  }
   const creds = await ensureCredentials(session.ctx, origin);
   if (!creds) {
     return;
@@ -293,6 +303,24 @@ export async function activateAndReload(session: Session): Promise<void> {
  *  that was merely warming up. */
 const CHECK_TIMEOUT_MS = 30_000;
 
+/**
+ * The check's certificate question: asks about an unverifiable certificate
+ * (this is one of the two places that do), and turns a refusal into the
+ * failing step of the report. True when the probes may go ahead.
+ */
+async function certificateStep(
+  session: Session,
+  origin: string,
+  steps: CheckStep[]
+): Promise<boolean> {
+  const trust = await ensureCertificateTrust(session, origin, { interactive: true });
+  if (trust.trusted) {
+    return true;
+  }
+  steps.push(describeConnectFailure({ code: trust.code, message: trust.message }));
+  return false;
+}
+
 /** The proxy could not start - told apart from a probe failure, which is
  *  the system's. */
 class ProxyStartError extends Error {
@@ -348,6 +376,8 @@ export async function checkConnection(session: Session): Promise<void> {
         detail: "the expanded launch URL does not parse as a URL",
         fix: 'Check the template with "abap2UI5: Set Launch URL".',
       });
+    } else if (!(await certificateStep(session, origin, steps))) {
+      // reported below, as the step it is
     } else {
       const creds = await ensureCredentials(session.ctx, origin);
       if (!creds) {
@@ -599,7 +629,17 @@ export function watchProxyStatus(session: Session): void {
  * shared by "Run an App from the System" and the system MCP tools.
  */
 export function makeConnectSystem(
-  session: Session
+  session: Session,
+  options: {
+    /**
+     * Whether this flow may ask about a certificate that cannot be verified.
+     * A caller the user is not looking at (the MCP tools) passes false: an
+     * untrusted certificate then THROWS the refusal that names "Check System
+     * Connection" and F9 - never a prompt out of nowhere, never a silent
+     * accept.
+     */
+    askAboutCertificates: boolean;
+  } = { askAboutCertificates: true }
 ): () => Promise<{ sapClient?: string } | undefined> {
   return async () => {
     const system = await ensureSystem(session.ctx);
@@ -610,6 +650,16 @@ export function makeConnectSystem(
     const origin = originOf(expanded);
     if (!origin) {
       reportBadLaunchUrl(system);
+      return undefined;
+    }
+    const trust = await ensureCertificateTrust(session, origin, {
+      interactive: options.askAboutCertificates,
+    });
+    if (!trust.trusted) {
+      if (!options.askAboutCertificates) {
+        throw new CertificateTrustError(trust.code, trust.message);
+      }
+      reportTrustRefusal(trust);
       return undefined;
     }
     const creds = await ensureCredentials(session.ctx, origin);

@@ -164,3 +164,11 @@ test("a backslash in a cell cannot open a column of its own", () => {
   assert.ok(line, report);
   assert.deepEqual(cellsOf(line), ["workspace folders", "weird\\|name"]);
 });
+
+test("the report counts the pinned certificates and names none of their hosts", () => {
+  assert.doesNotMatch(buildReport(INPUT), /trusted per system/);
+  const one = buildReport({ ...INPUT, systems: { ...INPUT.systems, pinnedCertificates: 1 } });
+  assert.match(one, /proxy running, 1 certificate trusted per system/);
+  const none = buildReport({ ...INPUT, systems: { ...INPUT.systems, pinnedCertificates: 0 } });
+  assert.match(none, /0 certificates trusted per system/);
+});

@@ -70,6 +70,7 @@ import {
   runApp,
   watchProxyStatus,
 } from "./launch";
+import { forgetTrustedCertificates } from "./certprompt";
 import {
   activeSystem,
   allSystems,
@@ -343,6 +344,9 @@ export function activate(context: vscode.ExtensionContext): void {
         "abap2UI5: stored SAP credentials deleted."
       );
     }),
+    vscode.commands.registerCommand("abap2ui5.forgetTrustedCertificates", () =>
+      forgetTrustedCertificates(session)
+    ),
     vscode.commands.registerCommand("abap2ui5.showTraffic", () => {
       session.trafficOutput.show(true);
     }),
@@ -607,7 +611,9 @@ export function activate(context: vscode.ExtensionContext): void {
           host: shortUrl(s.template),
         })),
       }),
-      connect: connectSystem,
+      // no certificate question from an agent's call: an untrusted
+      // certificate is a refusal that says where to answer it
+      connect: makeConnectSystem(session, { askAboutCertificates: false }),
       proxy: session.proxy,
       frameUrlFor: (className) => {
         const system = activeSystem(context);

@@ -260,7 +260,7 @@ test("the render gate's switch and the TLS stance are not a repository's to set"
   assert.ok(restricted.includes("abap2ui5.allowUnauthorizedCerts"));
   const certs = pkg.contributes.configuration.properties["abap2ui5.allowUnauthorizedCerts"];
   assert.equal(certs.scope, "machine", "a cloned repository must not switch TLS verification off");
-  assert.equal(certs.default, true, "the default is unchanged");
+  assert.equal(certs.default, false, "verification is on unless the user turns it off");
 });
 
 // ---------------------------------------------------------------------------

@@ -226,6 +226,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Select System | `abap2ui5.selectSystem` |  |
 | Check System Connection | `abap2ui5.checkConnection` |  |
 | Clear Stored SAP Credentials | `abap2ui5.resetCredentials` |  |
+| Forget Trusted Certificates | `abap2ui5.forgetTrustedCertificates` |  |
 | New App from Template | `abap2ui5.newApp` |  |
 | New Project from Template | `abap2ui5.newProject` |  |
 | Add Agent Setup to Workspace | `abap2ui5.addAgentSetup` |  |
@@ -276,7 +277,7 @@ when the two drift apart.
 | --- | --- | --- |
 | `abap2ui5.launchUrlTemplate` | `""` | URL template used to launch an abap2UI5 app. The `{class}` placeholder is replaced with the (upper-cased) class name. |
 | `abap2ui5.systems` | `[]` | The systems F9 can launch against. The active one is picked with the command **"abap2UI5: Select System"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again. |
-| `abap2ui5.allowUnauthorizedCerts` | `true` | Allow the embedded preview's local auth proxy to talk to systems whose **TLS certificate cannot be verified** - self-signed certificates, private CAs not in the OS trust store, hostname mismatches. SAP development systems typically serve self-signed certificates, which is why this is on by default. |
+| `abap2ui5.allowUnauthorizedCerts` | `false` | Accept **every** TLS certificate that cannot be verified - self-signed certificates, private CAs not in the OS trust store, hostname mismatches - on **every** system, without asking. Off by default. |
 | `abap2ui5.codeLens` | `true` | Show *Run*, *Activate & reload*, *Check views* and *Autofix n findings* above the class definition of an abap2UI5 app. The autofix lens appears only while the view check has findings it can correct mechanically. |
 | `abap2ui5.openMode` | `"tab"` | How F9 opens the app. |
 | `abap2ui5.reloadOn` | `"activation"` | When the preview of the shown app class reloads by itself. |

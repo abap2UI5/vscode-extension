@@ -143,17 +143,36 @@ export function describeConnectFailure(failure: {
         "connected, or a firewall between this machine and the system.",
     };
   }
+  if (code === "CERT_PIN_MISMATCH") {
+    return {
+      label,
+      ok: false,
+      detail:
+        "the system presents a different TLS certificate than the one that " +
+        "was trusted for it - nothing was sent",
+      fix:
+        "If the certificate was renewed, run \"abap2UI5: Forget Trusted " +
+        "Certificates\" and check again to review the new one. If nobody " +
+        "changed it, something sits between this machine and the system.",
+    };
+  }
   if (/^(CERT_|ERR_TLS_|DEPTH_ZERO|SELF_SIGNED|UNABLE_TO_|ERR_SSL)/.test(code) ||
     code === "HOSTNAME_MISMATCH"
   ) {
     return {
       label,
       ok: false,
-      detail: `the TLS certificate was rejected (${code})`,
+      detail:
+        code === "CERT_NOT_TRUSTED"
+          ? "the TLS certificate cannot be verified and was not trusted - nothing was sent"
+          : `the TLS certificate was rejected (${code})`,
       fix:
-        "For a dev system with a self-signed certificate enable " +
-        "abap2ui5.allowUnauthorizedCerts; for one that should have a valid " +
-        "certificate, fix the trust chain instead.",
+        "For a dev system with a self-signed certificate, run this check " +
+        "(or press F9) again and choose \"Trust This Certificate\" - it is " +
+        "then accepted for this system only. For a system that should have " +
+        "a valid certificate, fix the trust chain instead. " +
+        "abap2ui5.allowUnauthorizedCerts accepts every certificate of every " +
+        "system, unasked.",
     };
   }
   if (code === "EPROTO") {
