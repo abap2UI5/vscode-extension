@@ -539,7 +539,10 @@ ${BASE_CSS}
     markInspect(!inspectOn);
     postToApp({ __abap2ui5Cmd: 'inspect', on: inspectOn });
   });
+  // True between a host's 'dumpModel' and the app's answer to it.
+  let modelForHost = false;
   modelBtn.addEventListener('click', () => {
+    modelForHost = false;
     postToApp({ __abap2ui5Cmd: 'model' });
   });
   document.getElementById('shot').addEventListener('click', () => {
@@ -804,8 +807,13 @@ ${BASE_CSS}
       return;
     }
     if (kind === 'model') {
+      // asked for by the host (a chat tool) rather than by the { } button:
+      // marked, so the host answers the asker and opens no document
+      const forHost = modelForHost;
+      modelForHost = false;
       vscodeApi.postMessage({
         type: 'appModel',
+        forHost: forHost,
         text: String(msg.text || ''),
         error: String(msg.error || ''),
       });
@@ -850,6 +858,17 @@ ${BASE_CSS}
       rtEl.textContent = msg.ms + ' ms';
       rtEl.classList.add('show');
       rtEl.classList.toggle('slow', msg.ms >= 1000);
+      return;
+    }
+    if (msg.type === 'dumpModel') {
+      // The host asks for the running app's model (the chat tool) - the
+      // { } button's command, answered to the host instead of a document.
+      if (body.dataset.state !== 'ready') {
+        vscodeApi.postMessage({ type: 'appModel', forHost: true, text: '', error: 'no app is loaded yet' });
+        return;
+      }
+      modelForHost = true;
+      postToApp({ __abap2ui5Cmd: 'model' });
       return;
     }
     if (msg.type === 'applyModel') {

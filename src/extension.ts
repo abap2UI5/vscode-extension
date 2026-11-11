@@ -26,6 +26,7 @@ import { registerViewPreview } from "./viewpreview";
 import { registerFindingsBar } from "./findingsbar";
 import { registerExamples } from "./exampleview";
 import { registerFindingsView } from "./findingsview";
+import { registerChatTools } from "./chattoolsview";
 import { registerInlineAnnotations } from "./inlineview";
 import { registerAppView } from "./appview";
 import { registerDiagnosticsReport } from "./diagnosticsreport";
@@ -62,6 +63,7 @@ import {
   PreviewViewProvider,
   refreshPickers,
   reloadShownApp,
+  requestModelDump,
 } from "./preview";
 import {
   activateAndReload,
@@ -737,6 +739,22 @@ export function activate(context: vscode.ExtensionContext): void {
       ),
     clearBaselineCache,
     recheckOpenDocuments,
+  });
+  // The chat's language model tools: what only the window knows. The
+  // running app's model is the one that needs the preview.
+  registerChatTools(context, "desktop", log, async () => {
+    const className = session.currentTarget?.className;
+    if (!className) {
+      return {
+        unavailable:
+          "No app is running in the abap2UI5 preview. Run one first (F9 on an " +
+          "app class), then ask again.",
+      };
+    }
+    const reply = await requestModelDump(session);
+    return reply.error
+      ? { unavailable: `The model of ${className} could not be read: ${reply.error}.` }
+      : { className, text: reply.text ?? "" };
   });
   registerInlineAnnotations(context, log);
   registerAppView(context);
