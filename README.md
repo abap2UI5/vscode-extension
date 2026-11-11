@@ -64,14 +64,21 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   waivers that CI honours, and a findings view grouping the repository's
   findings by rule. An open `abaplint.jsonc` whose abap2UI5 pin is below the
   release the bundled linter assumes gets a warning on its `branch` line.
+
+  ![A builder chain in the editor: the unknown property maxLenght on an Input is underlined in red, an obsolete _bind_edit( ) call in yellow, and the Quick Fix menu lists the fix for the obsolete binder next to the suppress and turn-off entries for both rules](media/readme/view-check-quick-fix.png)
 - **The whole UI5 API in completion and hover**, plus the binding paths your
   class's model actually has, and the `client->` API with its ABAP signature.
 - **Write the view faster**: Format Document repairs a chain's indentation,
   Emmet-style abbreviations expand into one, Extract to View Method splits a
-  long one, and *Convert XML View to Builder Chain* turns a demo kit sample
-  into ABAP.
+  long one, *Convert XML View to Builder Chain* turns a demo kit sample
+  into ABAP, and the *Control Properties* view edits the attributes of the
+  control under the cursor.
+
+  ![The Control Properties view beside a builder chain: with the cursor on the StepInput tag( ) call, the view lists the control's value, min, max and width attributes for editing and offers a field to add another property](media/readme/control-properties.png)
 - **See the view without a system** — *Preview View (No System)* renders what
   the class builds, with a device matrix and a compare-with-HEAD mode.
+
+  ![Preview View (No System) beside the class source: the same view rendered by the render gate at 390x844 and at 1280x900, with the SAP Horizon theme and a model derived from the class](media/readme/preview-device-matrix.png)
 - **Test without a system** — *Run Unit Tests (No System)* runs the app's
   ABAP Unit tests in the transpiled abap2UI5 backend through
   [mcp-server](https://github.com/abap2UI5/mcp-server)'s `abap2ui5-unit`, in
