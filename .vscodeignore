@@ -6,6 +6,7 @@ scripts/**
 AGENTS.md
 CLAUDE.md
 RELEASING.md
+docs/**
 CONTRIBUTING.md
 SECURITY.md
 package-lock.json
