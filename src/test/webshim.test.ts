@@ -222,6 +222,62 @@ test("the fs shim answers a seeded file and nothing else", () => {
   assert.throws(() => fsShim.readFileSync("/not/seeded.json", "utf8"));
 });
 
+test("seedLinterData hands each file to the shim and reports what it could not read", async () => {
+  /*
+   * In this bundle `fs` is node's own, which has no `seedFile`; the web
+   * build's has. So the shim's one extra member is lent to node's `fs` for
+   * this test - before linterdata.ts is first loaded, which is why the test
+   * sits ahead of the others that load it.
+   */
+  const nodeFs = require("fs") as { seedFile?: (file: string, text: string) => void };
+  const seeded = new Map<string, string>();
+  nodeFs.seedFile = (file, text) => seeded.set(file, text);
+  try {
+    const { seedLinterData, LINTER_DATA_FILES } =
+      require("../web/linterdata") as typeof import("../web/linterdata");
+    const asked: string[] = [];
+    const failed = await seedLinterData(async (packaged) => {
+      asked.push(packaged.join("/"));
+      return `content of ${packaged.join("/")}`;
+    });
+    assert.deepEqual(failed, []);
+    assert.deepEqual(asked, LINTER_DATA_FILES.map((f) => f.packaged.join("/")));
+    assert.deepEqual(
+      [...seeded],
+      LINTER_DATA_FILES.map((f) => [f.path, `content of ${f.packaged.join("/")}`]),
+      "seeded under the path the linter reads, with what was read"
+    );
+
+    // a required file that cannot be read is reported with its reason; an
+    // optional one is not worth a log line
+    seeded.clear();
+    const unreadable = await seedLinterData(async (packaged) => {
+      if (packaged.join("/") === "data/icons.json") {
+        throw new Error("not packaged");
+      }
+      throw new Error("not packaged either");
+    });
+    const required = LINTER_DATA_FILES.filter((f) => !f.optional);
+    assert.ok(required.length < LINTER_DATA_FILES.length, "the fixture has an optional file");
+    assert.deepEqual(unreadable, ["data/icons.json: not packaged"]);
+    assert.deepEqual([...seeded], []);
+
+    // outside the web build there is nothing to seed and nothing to report
+    delete nodeFs.seedFile;
+    let read = false;
+    assert.deepEqual(
+      await seedLinterData(async () => {
+        read = true;
+        return "";
+      }),
+      []
+    );
+    assert.equal(read, false, "nothing is read when nothing can be seeded");
+  } finally {
+    delete nodeFs.seedFile;
+  }
+});
+
 test("the icon data is seeded where the bundled linter looks for it in the web build", () => {
   const { LINTER_DATA_FILES } = require("../web/linterdata") as typeof import("../web/linterdata");
   // the linter's own formula - a change to it has to fail here, not on vscode.dev

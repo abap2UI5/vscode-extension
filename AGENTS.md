@@ -280,6 +280,8 @@ modules as shipped. A line counts when the bundler emitted code for it, so
 comments and types are not in the denominator - which is why the table is
 computed in `scripts/lib/coverage.mjs` rather than by
 `--experimental-test-coverage`, whose view through a source map counts them.
+`npm run test:coverage -- src/a.ts src/b.ts` also prints the lines of the
+named modules that have code and did not run (`uncoveredLines`).
 Source maps exist in the test build and the development build only; the
 `.vsix` carries none (`**/*.map` in `.vscodeignore`, and the production build
 writes none).

@@ -18,6 +18,7 @@ const {
   tallyBundle,
   textTable,
   totalOf,
+  uncoveredLines,
 } = require("../../scripts/lib/coverage.mjs");
 
 const ROOT = path.join(__dirname, "..");
@@ -88,6 +89,23 @@ test("a line is counted when code was emitted for it and covered when that code 
   assert.match(textTable(rows), /^all\s+66\.7%\s+2\s+3$/m);
   assert.ok(markdownTable(rows).includes("| `a.ts` | 100.0% | 2 | 2 |"));
   assert.ok(markdownTable(rows).includes("| **all** | **66.7%** | 2 | 3 |"));
+});
+
+test("uncoveredLines names the lines that did not run as ranges", () => {
+  // insertion order is not line order: the segments of a bundle come in the
+  // order of the generated code
+  const perLine = new Map<number, boolean>([
+    [9, false],
+    [3, false],
+    [4, false],
+    [5, false],
+    [6, true],
+    [12, false],
+    [7, false],
+  ]);
+  assert.equal(uncoveredLines(perLine), "3-5, 7, 9, 12");
+  assert.equal(uncoveredLines(new Map([[1, true], [2, true]])), "");
+  assert.equal(uncoveredLines(new Map()), "");
 });
 
 test("the source maps coverage reads stay out of the package", () => {

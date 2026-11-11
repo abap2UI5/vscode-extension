@@ -16,6 +16,9 @@
  * to the bundles and does not exist in plain Node). The `vscode`-free modules
  * no test loads are listed after it; the modules that import `vscode` are
  * covered by the two in-host smoke tests alone and are only counted.
+ *
+ * `npm run test:coverage -- src/a.ts src/b.ts` also prints, after the table,
+ * the lines of those modules that have code and did not run.
  */
 import fs from "fs";
 import path from "path";
@@ -28,6 +31,7 @@ import {
   tallyBundle,
   textTable,
   totalOf,
+  uncoveredLines,
 } from "./lib/coverage.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -227,6 +231,14 @@ function main() {
     `${host} more modules import \`vscode\` and run in the two in-host smoke tests only.`,
   ];
   console.log(`\nTest coverage of src/\n\n${textTable(rows)}\n\n${notes.join("\n")}`);
+  for (const file of process.argv.slice(2)) {
+    const perLine = lines.get(file);
+    console.log(
+      perLine
+        ? `\nNot run in ${file}: ${uncoveredLines(perLine) || "none"}`
+        : `\n${file} is not loaded by the suite`
+    );
+  }
   const summary = process.env.GITHUB_STEP_SUMMARY;
   if (summary) {
     fs.appendFileSync(

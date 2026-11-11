@@ -169,3 +169,58 @@ test("the raw url mirrors the blob url's repo, branch and file", () => {
     "https://raw.githubusercontent.com/abap2UI5/samples-stack/02-smart-controls/src/z.clas.abap"
   );
 });
+
+test("entries that are not objects, and keywords of no known shape, are read safely", () => {
+  const entries = parseCatalogue(
+    JSON.stringify({
+      samples: [
+        null,
+        7,
+        "z2ui5_cl_app_001",
+        { class: "z2ui5_cl_app_002", file: "src/z2ui5_cl_app_002.clas.abap", keywords: 5 },
+        { class: "z2ui5_cl_app_003", path: "src/z2ui5_cl_app_003.clas.abap", keywords: ["Table", 3, "GRID"] },
+      ],
+    })
+  );
+  assert.deepEqual(
+    entries.map((e) => [e.className, e.keywords]),
+    [
+      ["z2ui5_cl_app_002", []],
+      ["z2ui5_cl_app_003", ["table", "grid"]],
+    ]
+  );
+});
+
+test("JSON that is a bare value is an empty catalogue too", () => {
+  assert.deepEqual(parseCatalogue("null"), []);
+  assert.deepEqual(parseCatalogue("42"), []);
+  assert.deepEqual(parseCatalogue('"samples"'), []);
+});
+
+test("a control name with nothing after its library matches nothing", () => {
+  const entries = parseCatalogue(CONTROLS);
+  assert.deepEqual(matchCatalogue(entries, "", "samples-controls"), []);
+  assert.deepEqual(matchCatalogue(entries, "sap.m.", "samples-controls"), []);
+});
+
+test("a title or summary word is the weakest hit, below a keyword", () => {
+  const entries = parseCatalogue(
+    JSON.stringify({
+      samples: [
+        { class: "z2ui5_cl_b", file: "b.clas.abap", title: "Editable Table with totals" },
+        { class: "z2ui5_cl_c", file: "c.clas.abap", summary: "Shows a table of orders" },
+        { class: "z2ui5_cl_a", file: "a.clas.abap", title: "Orders", keywords: ["table"] },
+        { class: "z2ui5_cl_d", file: "d.clas.abap", title: "A TableSelectDialog" },
+      ],
+    })
+  );
+  const hits = matchCatalogue(entries, "sap.m.Table", "samples");
+  assert.deepEqual(
+    hits.map((h) => [h.className, h.score]),
+    [
+      ["z2ui5_cl_a", 2],
+      ["z2ui5_cl_b", 1],
+      ["z2ui5_cl_c", 1],
+    ]
+  );
+});
