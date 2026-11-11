@@ -597,7 +597,7 @@ Facts an agent cannot see from the code but will trip over:
   linter's `generate-rules-page` emits one anchor per rule for. The rule ids
   themselves come from the linter's exported `RULES`, so an id that stops
   existing stops being linked rather than producing a dead link — but the page
-  URL is hard-coded in `viewcheck.ts` and moves with the linter's Pages
+  URL is hard-coded in `diagnostics.ts` (`RULES_PAGE`) and moves with the linter's Pages
   deployment.
 - **The snapshot's shape is a contract now.** `metadata.ts` reads
   `parent` / `members` / `properties` / `aggregations` / `associations` /
