@@ -299,8 +299,11 @@ export function registerMigrateReport(
         await showClass(
           result,
           `${result.className} written - ${plural(result.mapped, "construct")} mapped, ` +
-            `${plural(result.todos, "TODO")}, ${plural(result.release, "object")} to check for ABAP Cloud ` +
-            "(see the migration report)."
+            `${plural(result.todos, "TODO")}` +
+            (result.release !== undefined
+              ? `, ${plural(result.release, "object")} to check for ABAP Cloud`
+              : "") +
+            " (see the migration report)."
         );
         return;
       }

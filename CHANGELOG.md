@@ -4,6 +4,14 @@
 
 The bundled linter moves to v0.9.0.
 
+- **Migrate Classic Report works with a current abap-cloud-gui checkout.**
+  The addon renamed its converter from report2cloud to report2UI5 after its
+  1.0.0 and moved it to `tools/report2ui5`; the command looked only for
+  `tools/report2cloud/cli.mjs` and told a freshly pulled checkout it was not
+  one. Both paths are found now, the new one first, and a conversion no
+  longer reports "0 objects to check for ABAP Cloud" for a converter that
+  stopped counting them. The setting keeps its name,
+  `abap2ui5.report2cloud.path`.
 - **Unit tests in the Testing view.** The ABAP Unit tests that *Run Unit
   Tests (No System)* runs in a terminal are now listed in VS Code's Testing
   view too: one entry per `*.clas.testclasses.abap`, its test classes and

@@ -7,6 +7,8 @@ import { run, type RunOutcome } from "../childproc";
 import { CLOUD_GUI_DIRS } from "../repolayout";
 import {
   CLI_PATH,
+  LEGACY_CLI_PATH,
+  cliIn,
   HOME_VAR,
   PARSER_PROBE,
   defaultClassName,
@@ -54,6 +56,44 @@ test("the setting wins and names the checkout's CLI", () => {
     exists: () => true,
   });
   assert.deepEqual(r, { ok: true, root: gui, cli: path.join(gui, CLI_PATH), source: "setting" });
+});
+
+test("a checkout from before the rename still resolves, to its report2cloud CLI", () => {
+  const gui = path.join(repos, "old-gui");
+  const there = new Set([path.join(gui, LEGACY_CLI_PATH), path.join(gui, "node_modules", "@abaplint", "core", "package.json")]);
+  const r = resolveReport2cloud({ setting: gui, env: {}, reposRoot: "", dirs: [], exists: (f) => there.has(f) });
+  assert.deepEqual(r, { ok: true, root: gui, cli: path.join(gui, LEGACY_CLI_PATH), source: "setting" });
+});
+
+test("a checkout with both CLIs runs report2UI5, the current one", () => {
+  const gui = path.join(repos, "gui");
+  assert.equal(cliIn(gui, () => true), path.join(gui, CLI_PATH));
+  assert.equal(cliIn(gui, none), undefined);
+  assert.match(CLI_PATH, /report2ui5/);
+  assert.match(LEGACY_CLI_PATH, /report2cloud/);
+});
+
+test("a checkout with neither CLI names both paths", () => {
+  const gui = path.join(repos, "empty");
+  const r = resolveReport2cloud({ setting: gui, env: {}, reposRoot: "", dirs: [], exists: none });
+  assert.equal(r.ok, false);
+  if (!r.ok && r.reason === "no-cli") {
+    assert.ok(r.message.includes(CLI_PATH) && r.message.includes(LEGACY_CLI_PATH), r.message);
+  } else {
+    assert.fail(`expected no-cli, got ${JSON.stringify(r)}`);
+  }
+});
+
+test("the repos-root rung finds a checkout by either CLI", () => {
+  const gui = path.join(repos, "abap-cloud-gui");
+  const there = new Set([path.join(gui, LEGACY_CLI_PATH), path.join(gui, "node_modules", "@abaplint", "core", "package.json")]);
+  const r = resolveReport2cloud({ setting: "", env: {}, reposRoot: repos, dirs: ["abap-cloud-gui"], exists: (f) => there.has(f) });
+  assert.equal(r.ok && r.cli, path.join(gui, LEGACY_CLI_PATH));
+});
+
+test("a setting pointing at report2UI5's folder or CLI resolves to the checkout", () => {
+  assert.equal(rootOf("/x/abap-cloud-gui/tools/report2ui5/cli.mjs"), "/x/abap-cloud-gui");
+  assert.equal(rootOf("/x/abap-cloud-gui/tools/report2ui5/"), "/x/abap-cloud-gui");
 });
 
 test("a setting pointing at the tool or its CLI resolves to the checkout", () => {
@@ -227,6 +267,26 @@ test("exit 0: the class, its files and the counts", () => {
     todos: 2,
     release: 1,
   });
+});
+
+test("exit 0 from report2UI5: the summary ends after the TODOs, no ABAP Cloud count", () => {
+  // the lines of tools/report2ui5/cli.mjs: the counts, then what it inlined
+  const stdout =
+    "zcl_r: 12 constructs mapped, 2 TODO(s), 1 include(s) inlined\n" +
+    "  /w/zcl_r.clas.abap\n  /w/zcl_r.clas.xml\n  /w/zcl_r.migration.md\n";
+  const r = interpretRun(closed(0, stdout), req, none);
+  assert.deepEqual(r, {
+    kind: "converted",
+    className: "zcl_r",
+    files: ["/w/zcl_r.clas.abap", "/w/zcl_r.clas.xml"],
+    classFile: "/w/zcl_r.clas.abap",
+    report: "/w/zcl_r.migration.md",
+    mapped: 12,
+    todos: 2,
+  });
+  const bare = interpretRun(closed(0, "zcl_r: 3 constructs mapped, 0 TODO(s)\n  /w/zcl_r.clas.abap\n"), req, none);
+  assert.equal(bare.kind === "converted" && bare.mapped, 3);
+  assert.equal(bare.kind === "converted" && bare.release, undefined, "nothing to check is not 0 objects");
 });
 
 test("exit 2: the refusals and the migration report, no class", () => {
@@ -423,6 +483,8 @@ test("stub CLI, exit 1 and a checkout without its parser", async () => {
 
 /** A real abap-cloud-gui checkout with npm ci done: ABAP_CLOUD_GUI_HOME, or a
  *  sibling of this repository. CI has none, so these skip there. */
+/** The CLI of a real checkout - report2UI5's, or report2cloud's in a 1.0.0
+ *  one; its corpus and snapshots sit beside it. */
 function realCheckout(): string | undefined {
   for (const candidate of [process.env[HOME_VAR], path.join(ROOT, "..", "abap-cloud-gui")]) {
     if (!candidate) {
@@ -430,15 +492,17 @@ function realCheckout(): string | undefined {
     }
     const r = resolveReport2cloud({ setting: candidate, env: {}, reposRoot: "", dirs: [], exists: (f) => fs.existsSync(f) });
     if (r.ok) {
-      return r.root;
+      return r.cli;
     }
   }
   return undefined;
 }
 
 const REAL = realCheckout();
-const CORPUS = REAL ? path.join(REAL, "tools", "report2cloud", "test", "corpus") : "";
-const SNAPSHOTS = REAL ? path.join(REAL, "tools", "report2cloud", "test", "snapshots") : "";
+/** The checkout itself - the CLI is <root>/tools/<tool>/cli.mjs. */
+const REAL_ROOT = REAL ? path.resolve(path.dirname(REAL), "..", "..") : "";
+const CORPUS = REAL ? path.join(path.dirname(REAL), "test", "corpus") : "";
+const SNAPSHOTS = REAL ? path.join(path.dirname(REAL), "test", "snapshots") : "";
 const realSkip = REAL ? false : "no abap-cloud-gui checkout with npm ci (ABAP_CLOUD_GUI_HOME or ../abap-cloud-gui)";
 
 async function realMigrate(name: string, className: string, partial = false) {
@@ -450,8 +514,8 @@ async function realMigrate(name: string, className: string, partial = false) {
     }
   }
   const file = path.join(work, `${name}.prog.abap`);
-  const req: MigrateRequest = { cli: path.join(REAL!, CLI_PATH), file, className, out: work, partial };
-  const outcome = await run(process.execPath, migrateArgs(req), { cwd: REAL, timeoutMs: 60_000 });
+  const req: MigrateRequest = { cli: REAL!, file, className, out: work, partial };
+  const outcome = await run(process.execPath, migrateArgs(req), { cwd: REAL_ROOT, timeoutMs: 60_000 });
   return { req, file, result: interpretRun(outcome, req, (f) => fs.existsSync(f)) };
 }
 

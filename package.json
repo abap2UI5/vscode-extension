@@ -1137,7 +1137,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose `tools/report2cloud` converter *\"abap2UI5: Migrate Classic Report to abap2UI5\"* runs - report2cloud is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose.\n\nIt decides which program is started, so it is read from your user settings only."
+          "markdownDescription": "Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose converter *\"abap2UI5: Migrate Classic Report to abap2UI5\"* runs - report2UI5 in `tools/report2ui5`, or report2cloud in `tools/report2cloud` in a checkout of the addon's 1.0.0; it is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose.\n\nIt decides which program is started, so it is read from your user settings only."
         }
       }
     },
