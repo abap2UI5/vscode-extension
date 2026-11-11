@@ -12,10 +12,15 @@ import {
 } from "./mcprpc";
 import { searchClassRefs, searchClasses } from "./appsearch";
 import {
+  CONFIRM_ACTIONS_KEY,
+  confirmDetail,
+  confirmSummary,
   createAgentAppTools,
   ENABLE_APP_TOOLS_KEY,
   PROBE_CLASS,
   type AgentSystem,
+  type ConfirmAnswer,
+  type ConfirmRequest,
 } from "./agentapps";
 import { snapshot } from "./snapshot";
 import { isLoopbackHost, type SapProxy } from "./proxy";
@@ -34,7 +39,8 @@ import { CONFIG_SECTION } from "./settings";
  * auth proxy - and lets an agent search classes on the system and run an
  * app against it, screenshot included, or operate it semantically through
  * the abap2UI5 JSON protocol (the app_* tools, agentapps.ts - gated by
- * `abap2ui5.agent.enableAppTools`).
+ * `abap2ui5.agent.enableAppTools`, and every acting step confirmed by the
+ * user while `abap2ui5.agent.confirmActions` is on).
  *
  * Hosted over plain streamable HTTP on 127.0.0.1 with a random path token,
  * and registered through the same MCP definition provider as it.
@@ -104,6 +110,42 @@ function shareConnect(
     }
     return inFlight;
   };
+}
+
+/**
+ * The question agentapps.ts puts before an acting step: a modal, because the
+ * step waits for it and a notification in the corner is missed. Closing the
+ * dialog (Escape, its Cancel) is a no. A modal cannot be taken down again,
+ * so one answered after the tool gave up (`request.signal`) is told that
+ * its answer no longer counted - nothing is sent for it.
+ */
+async function confirmAgentStep(request: ConfirmRequest): Promise<ConfirmAnswer> {
+  const allow = "Allow";
+  const allowSession = "Allow for This Session";
+  const deny = "Deny";
+  const summary = confirmSummary(request);
+  const choice = await vscode.window.showWarningMessage(
+    `abap2UI5: an AI agent wants to ${summary}.`,
+    {
+      modal: true,
+      detail:
+        `${confirmDetail(request)}\n\n"${allowSession}" stops the questions for ` +
+        `${request.className} on '${request.system}' until this window closes.`,
+    },
+    allow,
+    allowSession,
+    deny
+  );
+  if (request.signal.aborted) {
+    if (choice === allow || choice === allowSession) {
+      void vscode.window.showInformationMessage(
+        `abap2UI5: the confirmation had already timed out - the agent was told you declined, ` +
+          `and nothing was sent (${summary}).`
+      );
+    }
+    return "deny";
+  }
+  return choice === allow ? "allow" : choice === allowSession ? "allow-session" : "deny";
 }
 
 function buildTools(deps: SystemMcpDeps): McpTool[] {
@@ -391,6 +433,12 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
           vscode.workspace
             .getConfiguration(CONFIG_SECTION)
             .get<boolean>(ENABLE_APP_TOOLS_KEY, false) === true,
+        // read per call as well; anything but an explicit `false` asks
+        confirmActions: () =>
+          vscode.workspace
+            .getConfiguration(CONFIG_SECTION)
+            .get<boolean>(CONFIRM_ACTIONS_KEY, true) !== false,
+        confirm: confirmAgentStep,
         activeSystem,
         systemNames: () => deps.listSystems().systems.map((s) => s.name),
         connect,

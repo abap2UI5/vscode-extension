@@ -140,6 +140,14 @@ real system:
   `abap2ui5.agent.enableAppTools` is on - off by default, and settable in your
   User settings only, never by a workspace. While it is off they stay listed
   and answer with how to switch them on, without contacting the system.
+- **Every acting step asks you first.** While
+  `abap2ui5.agent.confirmActions` is on (the default; User settings only,
+  too), each event `app_act` fires and the first `app_start` of a class
+  opens a dialog that names the system, the class, the event, its arguments
+  and the values sent with it: *Allow*, *Allow for This Session* (that class
+  on that system, until the window closes) or *Deny*. Deny - or no answer
+  within two minutes - tells the agent that you declined, and nothing is
+  sent.
 - **The active system.** Like `run_app_on_system` they work on the system
   *Select System* made active, through the auth proxy (the credentials stay
   there; the requests show in the traffic log). The optional `system`
@@ -293,6 +301,7 @@ when the two drift apart.
 | `abap2ui5.mcp.enabled` | `true` | Offer the [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server) to MCP clients in this window (Copilot agent mode and others). The server gives AI agents the abap2UI5 dev loop without an SAP system: capability queries, static view validation, deploy, build, headless run with screenshot. |
 | `abap2ui5.mcp.system` | `true` | Also offer the **abap2UI5 System** MCP server: real-system tools hosted by the extension itself - list the configured systems, search classes on the system (ADT quick search), run an app through the auth proxy with a headless screenshot, and - only with `abap2ui5.agent.enableAppTools` - operate an app through its JSON protocol. Uses the same credentials the preview stores; the run tool needs the render gate's Chromium. |
 | `abap2ui5.agent.enableAppTools` | `false` | Allow the **abap2UI5 System** MCP server's app tools (`app_list`, `app_start`, `app_describe`, `app_act`) to operate abap2UI5 apps on the **real** active system: an AI agent fills fields and fires events through the abap2UI5 JSON protocol, **as the configured user** - an event runs for real and may save, post or delete data. Off by default; while it is off the tools stay listed and answer with how to allow them, sending nothing. User settings only: a workspace cannot turn it on. |
+| `abap2ui5.agent.confirmActions` | `true` | Ask before every acting step of the **abap2UI5 System** MCP server's app tools (see `abap2ui5.agent.enableAppTools`): each event an AI agent fires with `app_act`, and the first `app_start` of a class, opens a dialog naming the system, the class, the event, its arguments and the values sent with it - **Allow**, **Allow for This Session** (that class on that system, until the window closes) or **Deny**. Deny, or no answer within two minutes, tells the agent that you declined, and nothing is sent. On by default. User settings only: a workspace cannot turn it off. |
 | `abap2ui5.mcp.command` | `""` | Command that starts the MCP server. Leave empty for the default: a local checkout under `abap2ui5.mcp.reposRoot` when present, otherwise `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp`. |
 | `abap2ui5.mcp.reposRoot` | `""` | Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, `samples`, `samples-stack`, and optionally `linter`, `mcp-server`, `abap-cloud-gui`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `SAMPLES_HOME` / `SAMPLES_STACK_HOME` / `AI_VIEW_CHECK_HOME` / `ABAP_CLOUD_GUI_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx. |
 | `abap2ui5.report2cloud.path` | `""` | Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose `tools/report2cloud` converter *"abap2UI5: Migrate Classic Report to abap2UI5"* runs - report2cloud is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose. |

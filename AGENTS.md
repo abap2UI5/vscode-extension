@@ -94,7 +94,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`, and the app tools below) |
 | `src/agent-client.ts` | The entry of the `dist/agent-client.js` bundle (the vendored client, snapshot and viewxml alone) `agentapps.ts` loads on the first app_* call - ~50 KB that stays out of the activation bundle, the way `rendergate-tar.ts` keeps `tar` out; the test build puts the same file in `dist-test/` so the real loader runs in `npm test` |
-| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the vendored client loaded through `createRequire` from `dist/agent-client.js` on first use (`agentClient( )`), the client's `transport` through the auth proxy (endpoint, method, cookies - the CSRF handshake and the `sap-contextid` per session are the vendored client's, the transport only carries their headers) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client |
+| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the vendored client loaded through `createRequire` from `dist/agent-client.js` on first use (`agentClient( )`), the client's `transport` through the auth proxy (endpoint, method, cookies - the CSRF handshake and the `sap-contextid` per session are the vendored client's, the transport only carries their headers) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client, and the confirmation of every acting step (`abap2ui5.agent.confirmActions`: an `app_act` event and the first `app_start` of a class wait for the injected `confirm` - the modal itself is `confirmAgentStep` in `mcpsystem.ts` - with a timeout, one question at a time, and the per-system-and-class *Allow for This Session* memory) |
 | `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
 | `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
@@ -332,13 +332,16 @@ identity (see Conventions).
   the extension spawns; machine scope keeps a cloned repository's
   `.vscode/settings.json` out of that decision. They are listed under
   `capabilities.untrustedWorkspaces.restrictedConfigurations`, together with
-  `systems`, `launchUrlTemplate`, `agent.enableAppTools`, `report2cloud.path` (the
+  `systems`, `launchUrlTemplate`, `agent.enableAppTools`, `agent.confirmActions`, `report2cloud.path` (the
   abap-cloud-gui checkout whose report2cloud CLI the migrate command runs),
   `viewCheck.render`, `viewCheck.rollingBundle` and `allowUnauthorizedCerts` -
-  ten settings a cloned repository must not be able to set. `agent.enableAppTools` is machine scope
+  eleven settings a cloned repository must not be able to set. `agent.enableAppTools` is machine scope
   too, for the same reason in another shape: it lets an agent act on the
   system AS THE USER, so only the user's own settings may turn it on
   (`agentapps.test.ts` pins its scope, default and restriction).
+  `agent.confirmActions` is its counterpart - on by default, it puts every
+  acting step of that agent to the user first, so only the user's own
+  settings may turn it OFF (pinned in the same test).
   `allowUnauthorizedCerts` is machine scope as well - it decides whether the
   proxy that injects the credentials verifies the system's certificate - and
   so is `viewCheck.rollingBundle`, which decides which build of the render

@@ -28,9 +28,16 @@
  *     `system` argument that must name it (nothing here switches systems);
  *     a session remembers the system it was started on;
  *   - the GATE: the tools act as the configured user on a real system, so
- *     they answer only while `abap2ui5.agent.enableAppTools` is on.
+ *     they answer only while `abap2ui5.agent.enableAppTools` is on;
+ *   - the CONFIRMATION: while `abap2ui5.agent.confirmActions` is on (the
+ *     default), every `app_act` that fires an event and the first
+ *     `app_start` of a class is put to the user before anything is sent -
+ *     allow once, allow that class on that system until the window closes,
+ *     or deny. The question itself (a modal) is the plumbing's: it arrives
+ *     here as the `confirm` dependency.
  *
- * `vscode`-free: the setting, the systems and the proxy arrive as functions,
+ * `vscode`-free: the settings, the systems, the proxy and the question
+ * arrive as functions,
  * so the whole decision tree is covered by src/test/agentapps.test.ts.
  */
 
@@ -80,6 +87,106 @@ export const DISABLED_MESSAGE =
   'save, post or delete data). To allow it, set "abap2ui5.agent.' +
   'enableAppTools": true in the VS Code User settings (a workspace cannot ' +
   "set it). Nothing was sent.";
+
+// ---------------------------------------------------------------------------
+// The confirmation of an acting step
+// ---------------------------------------------------------------------------
+
+/** The setting that puts every acting step to the user, under the
+ *  `abap2ui5.` prefix. On by default. */
+export const CONFIRM_ACTIONS_KEY = "agent.confirmActions";
+
+/** How long a confirmation waits for the user. No answer by then is a
+ *  refusal: an agent's call must not hang on a dialog nobody looks at, and
+ *  an answer nobody gave must never read as a yes. */
+export const CONFIRM_TIMEOUT_MS = 120_000;
+
+/** What the user answered: this one step, every step of this class on this
+ *  system until the window closes, or no. */
+export type ConfirmAnswer = "allow" | "allow-session" | "deny";
+
+/** One acting step, as it is put to the user. */
+export interface ConfirmRequest {
+  /** `start`: app_start runs the class; `event`: app_act fires an event. */
+  kind: "start" | "event";
+  /** The system the step runs on. */
+  system: string;
+  /** The app class, upper case. */
+  className: string;
+  /** The event as the agent named it (its name or an action id). */
+  event?: string;
+  /** The screen's action behind `event`, when the screen has one. */
+  action?: { id: string; event: string; label: string };
+  /** The event arguments the agent passed. */
+  args?: unknown[];
+  /** The row of a row action. */
+  row?: number;
+  /** What goes out with the step: the edits already pending in the session
+   *  and the values of this call, by field id, model path or name. */
+  values: Record<string, unknown>;
+  /** Aborted once the answer no longer counts (the timeout passed). */
+  signal: AbortSignal;
+}
+
+const CONFIRM_VALUE_MAX = 120;
+const CONFIRM_LINES_MAX = 12;
+
+const shown = (value: unknown): string => {
+  let text: string;
+  try {
+    text = JSON.stringify(value) ?? String(value);
+  } catch {
+    text = String(value);
+  }
+  return text.length > CONFIRM_VALUE_MAX ? `${text.slice(0, CONFIRM_VALUE_MAX)}...` : text;
+};
+
+/** The step in one line - the question's headline, and what a refusal names. */
+export function confirmSummary(request: Omit<ConfirmRequest, "signal">): string {
+  if (request.kind === "start") {
+    return `start ${request.className} on system '${request.system}'`;
+  }
+  const named =
+    request.action && request.action.event !== request.event
+      ? `${request.action.event} (${request.event})`
+      : String(request.event ?? "");
+  return `fire event ${named} in ${request.className} on system '${request.system}'`;
+}
+
+/** Everything else the user decides on, as the lines under the headline:
+ *  the button behind the event, its arguments and row, and the values that
+ *  go out with it. Long values and long lists are cut - a dialog is read,
+ *  not scrolled. */
+export function confirmDetail(request: Omit<ConfirmRequest, "signal">): string {
+  const lines: string[] = [];
+  if (request.kind === "start") {
+    lines.push("Starting an app runs its code on the system, as you.");
+  } else {
+    lines.push("The event runs for real, as you - it may save, post or delete data.");
+    if (request.action?.label) {
+      lines.push(`Action: ${request.action.label}`);
+    }
+    if (request.args?.length) {
+      lines.push(`Arguments: ${shown(request.args)}`);
+    }
+    if (request.row !== undefined) {
+      lines.push(`Row: ${request.row}`);
+    }
+  }
+  const entries = Object.entries(request.values);
+  if (entries.length) {
+    lines.push(request.kind === "start" ? "Values filled in after the start:" : "Values sent with it:");
+    for (const [key, value] of entries.slice(0, CONFIRM_LINES_MAX)) {
+      lines.push(`  ${key} = ${shown(value)}`);
+    }
+    if (entries.length > CONFIRM_LINES_MAX) {
+      lines.push(`  ... and ${entries.length - CONFIRM_LINES_MAX} more`);
+    }
+  } else if (request.kind === "event") {
+    lines.push("No values are sent with it.");
+  }
+  return lines.join("\n");
+}
 
 // ---------------------------------------------------------------------------
 // Argument checks - mcp-server's, so a refusal reads the same on both servers
@@ -360,6 +467,16 @@ export interface AgentSystem {
 export interface AgentAppsDeps {
   /** `abap2ui5.agent.enableAppTools`, read at call time. */
   enabled(): boolean;
+  /** `abap2ui5.agent.confirmActions`, read at call time. */
+  confirmActions(): boolean;
+  /**
+   * Puts one acting step to the user (a modal in the extension). Called
+   * before anything is sent, one question at a time. Anything but "allow" /
+   * "allow-session" - a rejection included - is a no.
+   */
+  confirm(request: ConfirmRequest): Promise<ConfirmAnswer | undefined>;
+  /** Defaults to `CONFIRM_TIMEOUT_MS`. */
+  confirmTimeoutMs?: number;
   /** The active system, or undefined while none is chosen. */
   activeSystem(): AgentSystem | undefined;
   /** The names of every configured system. */
@@ -390,6 +507,11 @@ const REAL =
   "Runs FOR REAL on the active SAP system as the configured user, through " +
   "the extension's auth proxy - an event may save, post or delete data. " +
   "Answers only while the user allows it (setting abap2ui5.agent.enableAppTools).";
+
+const ASKS =
+  " The user is asked to confirm it first (unless they allowed the class for the session or " +
+  "switched abap2ui5.agent.confirmActions off); when they decline or do not answer, the " +
+  "answer says so and nothing was sent - do not retry it then unless the user asks.";
 
 const SYSTEM_PROP = {
   type: "string",
@@ -560,6 +682,155 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
 
   const disabled = () => textResult(DISABLED_MESSAGE, true);
 
+  // ------------------------------------------------- the confirmation ----
+
+  const timeoutMs = deps.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS;
+  const stepKey = (systemName: string, className: string): string =>
+    `${systemName}\n${className.toUpperCase()}`;
+  /** system + class the user allowed until the window closes - starts and events. */
+  const allowedForSession = new Set<string>();
+  /** system + class whose start the user allowed once: only the FIRST start
+   *  of a class is asked about, its events still are. */
+  const startAllowed = new Set<string>();
+  /** One question at a time: a second modal would be answered blind, and an
+   *  "Allow for This Session" must count for the calls waiting behind it. */
+  let asking: Promise<unknown> = Promise.resolve();
+
+  const ask = async (
+    what: Omit<ConfirmRequest, "signal">
+  ): Promise<ConfirmAnswer | "timeout"> => {
+    const expired = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => {
+        expired.abort();
+        resolve("timeout");
+      }, timeoutMs);
+    });
+    try {
+      const answer = await Promise.race([
+        // a question that cannot be asked was not answered with yes
+        Promise.resolve()
+          .then(() => deps.confirm({ ...what, signal: expired.signal }))
+          .catch((err) => {
+            deps.log(`agent: the confirmation failed - ${String(err)}`);
+            return "deny" as const;
+          }),
+        timeout,
+      ]);
+      return answer === "allow" || answer === "allow-session" || answer === "timeout"
+        ? answer
+        : "deny";
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  /**
+   * The user's word on one acting step: undefined when it may go ahead, the
+   * tool's answer when it may not. A refusal is NOT an error result - the
+   * tool worked, the user said no - and it says that nothing was sent.
+   */
+  const confirmed = (
+    what: Omit<ConfirmRequest, "signal">
+  ): Promise<McpToolResult | undefined> => {
+    const key = stepKey(what.system, what.className);
+    const covered = (): boolean =>
+      !deps.confirmActions() ||
+      allowedForSession.has(key) ||
+      (what.kind === "start" && startAllowed.has(key));
+    if (covered()) {
+      return Promise.resolve(undefined);
+    }
+    const turn = asking.then(async (): Promise<McpToolResult | undefined> => {
+      // the question in front of this one may have answered it
+      if (covered()) {
+        return undefined;
+      }
+      const answer = await ask(what);
+      const summary = confirmSummary(what);
+      if (answer === "allow-session") {
+        allowedForSession.add(key);
+        deps.log(`agent: the user allowed ${what.className} on '${what.system}' for this session`);
+        return undefined;
+      }
+      if (answer === "allow") {
+        if (what.kind === "start") {
+          startAllowed.add(key);
+        }
+        deps.log(`agent: the user allowed to ${summary}`);
+        return undefined;
+      }
+      if (answer === "timeout") {
+        deps.log(`agent: no answer within ${timeoutMs / 1000} s - not allowed to ${summary}`);
+        return textResult(
+          `The user did not answer the confirmation within ${timeoutMs / 1000} s, which counts ` +
+            `as declined: the request to ${summary} was not carried out. Nothing was sent to ` +
+            "the system. Do not retry it unless the user asks for it."
+        );
+      }
+      deps.log(`agent: the user declined to ${summary}`);
+      return textResult(
+        `The user declined the request to ${summary}. Nothing was sent to the system. ` +
+          "Do not retry it unless the user asks for it."
+      );
+    });
+    asking = turn.catch(() => undefined);
+    return turn;
+  };
+
+  const valuesOf = (values: unknown): Record<string, unknown> =>
+    values && typeof values === "object" && !Array.isArray(values)
+      ? { ...(values as Record<string, unknown>) }
+      : {};
+
+  /**
+   * The question for an `app_act` with an event, from the session's last
+   * screen (memory only, as app_describe reads it): its class, the action
+   * behind the event, and the values that go out - the edits already
+   * pending plus this call's. A session the client does not know is its
+   * refusal, in its words; nothing is sent for it either.
+   */
+  const confirmedEvent = async (
+    client: AppClient,
+    systemName: string,
+    args: Record<string, unknown>,
+    row: number | undefined
+  ): Promise<McpToolResult | undefined> => {
+    if (!deps.confirmActions()) {
+      return undefined;
+    }
+    let screen: AgentSnapshot;
+    try {
+      screen = client.describe(args.session);
+    } catch (err) {
+      if (err instanceof agentClient().AgentError) {
+        return textResult(err.message, true);
+      }
+      throw err;
+    }
+    const event = String(args.event);
+    const action = screen.actions.find((a) => a.id === event || a.event === event);
+    const values: Record<string, unknown> = {};
+    for (const pending of screen.pending ?? []) {
+      const field = screen.fields.find(
+        (f) => f.path === pending || f.id === pending || f.name === pending
+      );
+      values[pending] = field ? field.value : "(edited)";
+    }
+    Object.assign(values, valuesOf(args.values));
+    return confirmed({
+      kind: "event",
+      system: systemName,
+      className: String(screen.app ?? "").toUpperCase(),
+      event,
+      ...(action ? { action: { id: action.id, event: action.event, label: action.label } } : {}),
+      ...(Array.isArray(args.args) && args.args.length ? { args: args.args } : {}),
+      ...(row !== undefined ? { row } : {}),
+      values,
+    });
+  };
+
   return [
     {
       name: "app_list",
@@ -629,7 +900,8 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
         "right after the start. Same tools, snapshot and refusals as the abap2UI5 server's " +
         "sandbox app_start; run_app_on_system shows a screenshot instead. May ask the user for " +
         "credentials on first contact. " +
-        REAL,
+        REAL +
+        ASKS,
       inputSchema: {
         type: "object",
         properties: {
@@ -667,6 +939,16 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
           return chosen;
         }
         const { system } = chosen;
+        // starting runs the class's code: the first start of a class is asked about
+        const refusal = await confirmed({
+          kind: "start",
+          system: system.name,
+          className: cls.toUpperCase(),
+          values: valuesOf(args.values),
+        });
+        if (refusal) {
+          return refusal;
+        }
         return snapshotAnswer(
           () => clientFor(system).start(cls, { values: args.values, maxRows }),
           system.name
@@ -730,7 +1012,8 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
         "error names what is allowed - and nothing is sent. \"@CLOSE_POPUP\" / \"@CLOSE_POPOVER\" " +
         "actions close the dialog locally, as the browser does without a roundtrip. The session " +
         "must still run on the active system. " +
-        REAL,
+        REAL +
+        ASKS,
       inputSchema: {
         type: "object",
         properties: {
@@ -774,6 +1057,8 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
         const row =
           args.row === undefined || args.row === null ? undefined : Number(args.row);
         const session = String(args.session ?? "");
+        // as the client decides it: without an event the values stay pending
+        const fires = args.event !== undefined && args.event !== null && args.event !== "";
         const systemName = registry.get(session);
         if (systemName) {
           const active = deps.activeSystem();
@@ -784,6 +1069,12 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
                 'only; the user switches back with "abap2UI5: Select System" (the session is kept)',
               true
             );
+          }
+          if (fires) {
+            const refusal = await confirmedEvent(clientFor(active), systemName, args, row);
+            if (refusal) {
+              return refusal;
+            }
           }
           // connect only when the proxy does not already forward there (see
           // `served`)
@@ -806,8 +1097,21 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
           );
         }
         // unknown here: the client refuses it in its own words, sending nothing
+        // - and a session only the client still knows is asked about first
+        const client = clientOfSession(session);
+        if (fires) {
+          const refusal = await confirmedEvent(
+            client,
+            deps.activeSystem()?.name ?? "",
+            args,
+            row
+          );
+          if (refusal) {
+            return refusal;
+          }
+        }
         return snapshotAnswer(() =>
-          clientOfSession(session).act(args.session, {
+          client.act(args.session, {
             values: args.values,
             event: args.event,
             args: args.args,

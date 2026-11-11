@@ -18,6 +18,18 @@ The bundled linter moves to v0.9.0.
   length over it is now refused before the first byte, and a stream is cut
   off the moment it passes it.
 
+- **An agent's acting steps ask you first.** With
+  `abap2ui5.agent.enableAppTools` on, an AI agent could fire any event on
+  the real system as you without another question. Now every event
+  `app_act` fires, and the first `app_start` of a class, opens a dialog
+  naming the system, the class, the event, its arguments and the values
+  sent with it: *Allow*, *Allow for This Session* (that class on that
+  system, until the window closes) or *Deny*. Deny, or no answer within two
+  minutes, tells the agent that you declined - nothing is sent. The new
+  setting `abap2ui5.agent.confirmActions` is on by default and, like the
+  switch itself, read from your User settings only: a workspace cannot turn
+  the questions off.
+
 - **Open a class from a link.** A `vscode://abap2ui5.abap2ui5/open` link
   opens the class it carries as an unsaved `.clas.abap` document and offers
   to run it with F9 - the abap2UI5 layout editor's "Open in VS Code" writes
