@@ -32,6 +32,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/preview.ts` | The preview surfaces: panel view provider, editor tab, webview message handling, moving the app between tab and panel |
 | `src/launch.ts` | F9 (`runApp`), the Ctrl+F3 activate-and-reload command, the proxy-status watch, the connect-system flow, the connection check command |
 | `src/connectcheck.ts` | `vscode`-free: what the connection check's probes MEAN - launch-URL shape, DNS/TCP/TLS failure and HTTP-status classification, bootstrap-page detection - behind "Check System Connection" |
+| `src/certtrust.ts` | `vscode`-free: certificate trust per system - what a presented certificate means for its origin (`decideTrust`: `trusted` / `pinned-match` / `pinned-mismatch` / `unknown`), the pin map keyed by https origin (SHA-256 fingerprints, `readPins` / `withPin`), the refusal wording, and `probeCertificate`, the handshake-only look at a host's certificate that sends no request |
+| `src/certprompt.ts` | The plumbing around `certtrust.ts`: the pins in `globalState`, `ensureCertificateTrust` (the one modal that shows a certificate and asks, or the refusal for a flow without a UI), "Forget Trusted Certificates" |
 | `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list, and what an edited model document may push into the running app (`applyModelMessage`) |
 | `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
 | `src/web/startup.ts` | `vscode`-free: the web activation's ORDER - the registrations first, the data reads after, and the `DataGate` that holds the checks until the reads are in (a gate run before them would memoise an empty icon registry in the linter for the session; completion and hover need no holding) - `webstartup.test.ts`, since the in-host smoke test cannot run everywhere |
@@ -154,7 +156,7 @@ not committed.
 `abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `sourcecache.ts`, `checkschedule.ts`, `settings.ts`, `linterrelease.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
-`abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
+`abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
 `unitrunner.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
@@ -340,7 +342,8 @@ identity (see Conventions).
   system AS THE USER, so only the user's own settings may turn it on
   (`agentapps.test.ts` pins its scope, default and restriction).
   `allowUnauthorizedCerts` is machine scope as well - it decides whether the
-  proxy that injects the credentials verifies the system's certificate - and
+  proxy that injects the credentials verifies the system's certificate (off
+  by default; the per-system answer is a pin, next bullet) - and
   so is `viewCheck.rollingBundle`, which decides which build of the render
   gate "Install Render Gate" downloads and runs. `SETTING_POLICY` in
   `manifest.test.ts` classifies EVERY setting (machine + restricted,
@@ -348,6 +351,20 @@ identity (see Conventions).
   the render gate does not run at all in Restricted Mode (`viewcheck.ts`
   asks `workspace.isTrusted`); its last-resort `npx` fallback is pinned to
   `LINTER_COMMIT` like the bundle download (`checkcore.test.ts` pins both).
+- **An unverifiable certificate is trusted per system, never by default.**
+  The proxy verifies every https system unless `allowUnauthorizedCerts` is
+  explicitly on (the blanket override) or the user pinned that origin's
+  certificate: SHA-256 fingerprints in `globalState`, keyed by origin, which
+  no workspace can write (`certtrust.ts`, `certprompt.ts`). A pinned origin
+  is connected to with verification off, so the comparison is the proxy's
+  own and happens on EVERY request before its first byte is written
+  (`whenTrusted` in `proxy.ts` holds back `end( )`/`pipe( )` until the
+  handshake has produced the peer certificate - the headers carry the
+  credentials). Only F9, "Check System Connection" and "Run an App from the
+  System" ask (`ensureCertificateTrust`, interactive); the MCP tools get a
+  refusal that names the first two. Do not add a path that accepts an
+  unverified certificate without a pin, and do not add a workspace-settable
+  switch that weakens verification.
 - **A file the repository's config names is confined before it is written.**
   The `baseline` of an `abap2ui5lint.jsonc` is replaced with JSON by "Add to
   Baseline" / "Update Baseline"; `baselinefile.ts` refuses every write whose

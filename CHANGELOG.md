@@ -18,6 +18,25 @@ The bundled linter moves to v0.9.0.
   length over it is now refused before the first byte, and a stream is cut
   off the moment it passes it.
 
+- **Certificates are trusted per system, and verified by default.** The
+  local auth proxy used to accept every TLS certificate on every system
+  (`abap2ui5.allowUnauthorizedCerts` was on by default). It now verifies
+  them. When a system's certificate cannot be verified - the self-signed
+  certificate of a typical development system - F9, *Check System
+  Connection* and *Run an App from the System* show its subject, issuer,
+  validity and SHA-256 fingerprint and ask once; *Trust This Certificate*
+  accepts it for that system only, and nothing is sent before you answer.
+  If a trusted system later presents a different certificate, the connection
+  is refused and says so. The new command *Forget Trusted Certificates*
+  drops those answers, and *Copy Diagnostics for a Bug Report* says how many
+  there are (never for which hosts). Systems with a certificate from a
+  public CA are never asked about. The AI-agent tools do not ask: on an
+  untrusted certificate they refuse and tell you to run *Check System
+  Connection* or F9 once. **If you set
+  `abap2ui5.allowUnauthorizedCerts` to `true` yourself, nothing changes** -
+  every certificate is still accepted without a question; if you relied on
+  the old default, you are asked once per system.
+
 - **Open a class from a link.** A `vscode://abap2ui5.abap2ui5/open` link
   opens the class it carries as an unsaved `.clas.abap` document and offers
   to run it with F9 - the abap2UI5 layout editor's "Open in VS Code" writes

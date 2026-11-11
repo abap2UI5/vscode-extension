@@ -18,6 +18,8 @@
  * password is worse than no report at all.
  */
 
+import { plural } from "./text";
+
 export interface ReportDocument {
   /** As `labelOf` names it - a file name, or the class for an ADT document. */
   label: string;
@@ -43,7 +45,14 @@ export interface ReportInput {
   /** The `abap2ui5.*` settings, already flattened to key -> value. */
   settings: Record<string, unknown>;
   renderGate: { installed: boolean; cli?: string; pin?: string };
-  systems: { configured: number; active?: string; proxyRunning: boolean };
+  systems: {
+    configured: number;
+    active?: string;
+    proxyRunning: boolean;
+    /** How many origins carry a pinned certificate - the COUNT only: which
+     *  hosts they are is nothing a public issue needs. */
+    pinnedCertificates?: number;
+  };
   /** Other extensions that matter here - the ADT ones above all. */
   relatedExtensions: string[];
   /** Newest last. */
@@ -203,7 +212,10 @@ export function buildReport(input: ReportInput): string {
       "systems",
       `${input.systems.configured} configured` +
         (input.systems.active ? `, active: ${input.systems.active}` : "") +
-        `, proxy ${input.systems.proxyRunning ? "running" : "stopped"}`,
+        `, proxy ${input.systems.proxyRunning ? "running" : "stopped"}` +
+        (input.systems.pinnedCertificates === undefined
+          ? ""
+          : `, ${plural(input.systems.pinnedCertificates, "certificate")} trusted per system`),
     ])
   );
   if (input.relatedExtensions.length) {

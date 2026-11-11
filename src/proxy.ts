@@ -3,7 +3,16 @@ import * as https from "https";
 import type { Duplex } from "stream";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { StringDecoder } from "string_decoder";
+import type { TLSSocket } from "tls";
 import { URL } from "url";
+import {
+  CertificateTrustError,
+  changedMessage,
+  decideTrust,
+  explainTlsError,
+  mayConnect,
+  peerOf,
+} from "./certtrust";
 import { redact } from "./report";
 import { rebasedLocation } from "./urls";
 
@@ -724,12 +733,102 @@ export class SapProxy {
   private readonly tunnels = new Set<Duplex>();
 
   /**
-   * Whether requests to the system may proceed when its TLS certificate
-   * cannot be verified (self-signed, private CA, hostname mismatch).
-   * Defaults to true because typical SAP dev systems serve self-signed
-   * certificates - the `abap2ui5.allowUnauthorizedCerts` setting feeds it.
+   * The blanket override: whether requests may proceed to ANY system whose
+   * TLS certificate cannot be verified (self-signed, private CA, hostname
+   * mismatch), unasked. Off unless the user's own
+   * `abap2ui5.allowUnauthorizedCerts` says otherwise - a certificate that
+   * does not verify is otherwise accepted only for an origin it was pinned
+   * for (`pinFor`, see certtrust.ts).
    */
-  allowUnauthorized = true;
+  allowUnauthorized = false;
+
+  /**
+   * The SHA-256 fingerprint the user pinned for an origin, if any. A pinned
+   * origin is connected to with verification off, and the peer's fingerprint
+   * is compared with the pin on every connection before the request - and
+   * with it the credentials - is written (`whenTrusted`).
+   */
+  pinFor: (origin: string) => string | undefined = () => undefined;
+
+  /** Called when a connection is refused over the system's certificate, with
+   *  the message the request failed with - for the log. */
+  onTrustRefused?: (message: string) => void;
+
+  /**
+   * How a request to `target` treats the certificate: verified by Node,
+   * accepted unseen (the blanket override), or accepted only when it is the
+   * pinned one.
+   */
+  private tlsStance(target: URL): { rejectUnauthorized: boolean; pin?: string } {
+    if (target.protocol !== "https:" || this.allowUnauthorized) {
+      return { rejectUnauthorized: false };
+    }
+    const pin = this.pinFor(target.origin);
+    return pin ? { rejectUnauthorized: false, pin } : { rejectUnauthorized: true };
+  }
+
+  /**
+   * Runs `send` - the step that writes the request - once the connection may
+   * carry it. Without a pin that is at once: Node verifies, or the blanket
+   * override is on.
+   *
+   * With a pin the connection is made unverified, so the check is ours, and
+   * it has to come BEFORE the first byte of the request: the headers carry
+   * the credentials. A `ClientRequest` writes nothing until its first
+   * `write( )`/`end( )`, so holding `send` back until the handshake has
+   * produced the peer certificate is what keeps them home. Per request
+   * rather than per socket on purpose - a kept-alive socket is checked again
+   * each time it is used, whichever agent handed it out.
+   */
+  private whenTrusted(
+    req: http.ClientRequest,
+    target: URL,
+    pin: string | undefined,
+    send: () => void
+  ): void {
+    if (!pin) {
+      send();
+      return;
+    }
+    const refuse = (presented: string) => {
+      const err = new CertificateTrustError(
+        "CERT_PIN_MISMATCH",
+        changedMessage(target.origin, pin, presented)
+      );
+      this.onTrustRefused?.(err.message);
+      req.destroy(err);
+    };
+    req.once("socket", (socket) => {
+      const tlsSocket = socket as TLSSocket;
+      if (typeof tlsSocket.getPeerCertificate !== "function") {
+        refuse(""); // not a TLS connection at all
+        return;
+      }
+      const check = () => {
+        const peer = peerOf(tlsSocket);
+        if (peer && mayConnect(decideTrust(peer, pin))) {
+          send();
+        } else {
+          refuse(peer?.fingerprint256 ?? "");
+        }
+      };
+      if (peerOf(tlsSocket)) {
+        check(); // a reused connection - the handshake is long done
+      } else {
+        tlsSocket.once("secureConnect", check);
+      }
+    });
+  }
+
+  /** A request error as callers see it - a certificate Node refused gets the
+   *  message that says how to trust it (certtrust.ts), and is reported. */
+  private explained(err: unknown, target: URL): Error {
+    const explained = explainTlsError(err, target.origin);
+    if (explained !== err && explained instanceof CertificateTrustError) {
+      this.onTrustRefused?.(explained.message);
+    }
+    return explained;
+  }
 
   /**
    * Called for every answer the system gives. The proxy is the only place
@@ -1031,6 +1130,7 @@ export class SapProxy {
     }
     const isHttps = target.protocol === "https:";
     const mod = isHttps ? https : http;
+    const stance = this.tlsStance(target);
 
     return new Promise((resolve, reject) => {
       const req = mod.request(
@@ -1044,7 +1144,7 @@ export class SapProxy {
             authorization: auth,
             accept,
           },
-          rejectUnauthorized: !this.allowUnauthorized,
+          rejectUnauthorized: stance.rejectUnauthorized,
           signal: options.signal,
         },
         (res) => {
@@ -1100,8 +1200,8 @@ export class SapProxy {
         options.timeoutMs ?? FETCH_TIMEOUT_MS
       );
       req.on("close", () => clearTimeout(deadline));
-      req.on("error", reject);
-      req.end();
+      req.on("error", (err) => reject(this.explained(err, target)));
+      this.whenTrusted(req, target, stance.pin, () => req.end());
     });
   }
 
@@ -1239,6 +1339,7 @@ export class SapProxy {
     const isHttps = target.protocol === "https:";
     const mod = isHttps ? https : http;
     const startedAt = Date.now();
+    const stance = this.tlsStance(target);
 
     // One traffic entry per request, whichever way it ends - completed,
     // failed toward the system, or abandoned by the client.
@@ -1282,9 +1383,9 @@ export class SapProxy {
       method: req.method,
       path,
       headers,
-      // dev systems often have self-signed certificates - verification is
-      // opt-in via the abap2ui5.allowUnauthorizedCerts setting
-      rejectUnauthorized: !this.allowUnauthorized,
+      // verified unless this origin's certificate was pinned or the blanket
+      // override is on - see `tlsStance`
+      rejectUnauthorized: stance.rejectUnauthorized,
     };
 
     const proxyReq = mod.request(options, (proxyRes) => {
@@ -1489,7 +1590,8 @@ export class SapProxy {
       proxyReq.destroy(new Error(`no answer within ${FORWARD_TIMEOUT_MS} ms`))
     );
 
-    proxyReq.on("error", (err) => {
+    proxyReq.on("error", (raw) => {
+      const err = this.explained(raw, target);
       if (res.writableEnded || res.destroyed) {
         // the client is already gone - nothing left to tell, but the log
         // still gets its line (status 0: no answer reached anybody)
@@ -1525,7 +1627,9 @@ export class SapProxy {
     req.on("error", () => proxyReq.destroy());
     res.on("error", () => proxyReq.destroy());
 
-    req.pipe(proxyReq);
+    // held back until a pinned certificate has been compared - piping is
+    // what writes the request, credentials included
+    this.whenTrusted(proxyReq, target, stance.pin, () => req.pipe(proxyReq));
   }
 
   /**
@@ -1563,6 +1667,7 @@ export class SapProxy {
     this.tunnels.add(socket);
     socket.on("close", () => this.tunnels.delete(socket));
 
+    const stance = this.tlsStance(target);
     const proxyReq = mod.request({
       protocol: target.protocol,
       hostname: requestHostname(target),
@@ -1570,7 +1675,7 @@ export class SapProxy {
       method: req.method,
       path,
       headers,
-      rejectUnauthorized: !this.allowUnauthorized,
+      rejectUnauthorized: stance.rejectUnauthorized,
     });
     // A system that accepts the connection and never answers the upgrade
     // held both sockets until stop( ) - the plain path has had this limit
@@ -1684,8 +1789,11 @@ export class SapProxy {
       );
       proxyRes.destroy();
     });
-    proxyReq.on("error", () => socket.destroy());
-    proxyReq.end();
+    proxyReq.on("error", (err) => {
+      this.explained(err, target); // reported; the client only sees a hangup
+      socket.destroy();
+    });
+    this.whenTrusted(proxyReq, target, stance.pin, () => proxyReq.end());
   }
 
   stop(): Promise<void> {

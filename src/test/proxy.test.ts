@@ -4,6 +4,8 @@ import * as http from "http";
 import * as https from "https";
 import * as net from "net";
 import { AddressInfo } from "net";
+import { X509Certificate } from "crypto";
+import { decideTrust, probeCertificate } from "../certtrust";
 import {
   allowFraming,
   decodeBody,
@@ -104,11 +106,26 @@ fYkHKjGur5RcsR7CxUccfV14xsT3wp3vYLmv/Hpz2Vo+y4GLK1C3pwsnjwWL9eBD
 mnIc4E8lsievg68XwxDMIhbFuYLcbFC6+A1DYx0xLqtqYcXTATIYN6yXew==
 -----END CERTIFICATE-----`;
 
-/** An https "SAP system" answering 200 to everything. */
-function selfSignedSystem(): Promise<{ origin: string; close: () => void }> {
+/** SHA-256 of the fixture above - what a user would pin. */
+const SELF_SIGNED_FINGERPRINT = new X509Certificate(SELF_SIGNED_CERT).fingerprint256;
+/** A well-formed fingerprint of some other certificate. */
+const OTHER_FINGERPRINT = Array.from({ length: 32 }, () => "0F").join(":");
+
+/** An https "SAP system" answering 200 to everything - and counting what
+ *  reached it, with or without credentials. */
+function selfSignedSystem(): Promise<{
+  origin: string;
+  close: () => void;
+  requests: { path: string; authorization?: string }[];
+}> {
+  const requests: { path: string; authorization?: string }[] = [];
   const server = https.createServer(
     { key: SELF_SIGNED_KEY, cert: SELF_SIGNED_CERT },
-    (_req, res) => {
+    (req, res) => {
+      requests.push({
+        path: String(req.url),
+        authorization: req.headers.authorization,
+      });
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("system answer");
     }
@@ -118,7 +135,11 @@ function selfSignedSystem(): Promise<{ origin: string; close: () => void }> {
       const port = (server.address() as AddressInfo).port;
       resolve({
         origin: `https://127.0.0.1:${port}`,
-        close: () => server.close(),
+        close: () => {
+          server.close();
+          server.closeAllConnections();
+        },
+        requests,
       });
     });
   });
@@ -141,9 +162,42 @@ function throughProxy(
   });
 }
 
-test("by default the proxy accepts a self-signed system certificate", async () => {
+test("by default the proxy refuses a self-signed system - and says where to trust it", async () => {
   const system = await selfSignedSystem();
   const proxy = new SapProxy();
+  const refusals: string[] = [];
+  proxy.onTrustRefused = (message) => refusals.push(message);
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    // the direct fetch rejects with the refusal, Node's code kept for the
+    // connection check...
+    await assert.rejects(
+      proxy.fetchFromSystem("/sap/bc/adt/probe"),
+      (err: Error & { code?: string }) =>
+        /certificate/i.test(err.message) &&
+        /Check System Connection/.test(err.message) &&
+        /F9/.test(err.message) &&
+        err.code === "DEPTH_ZERO_SELF_SIGNED_CERT"
+    );
+    // ...and a forwarded request turns into the proxy's 502 with the same text
+    const proxied = await throughProxy(proxy, "/sap/bc/z2ui5");
+    assert.equal(proxied.status, 502);
+    assert.match(proxied.body, /abap2UI5 proxy error/);
+    assert.match(proxied.body, /Check System Connection/);
+    assert.equal(system.requests.length, 0, "nothing reached the system");
+    assert.ok(refusals.length >= 2, "both refusals were reported");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("with the blanket override every self-signed system is accepted, unasked", async () => {
+  const system = await selfSignedSystem();
+  const proxy = new SapProxy();
+  proxy.allowUnauthorized = true;
+  // a pin that does not match is beside the point while the override is on
+  proxy.pinFor = () => OTHER_FINGERPRINT;
   try {
     await proxy.start(system.origin, "user", "pass");
     const direct = await proxy.fetchFromSystem("/sap/bc/adt/probe");
@@ -157,31 +211,11 @@ test("by default the proxy accepts a self-signed system certificate", async () =
   }
 });
 
-test("with allowUnauthorized off the self-signed system is refused", async () => {
-  const system = await selfSignedSystem();
-  const proxy = new SapProxy();
-  proxy.allowUnauthorized = false;
-  try {
-    await proxy.start(system.origin, "user", "pass");
-    // the direct fetch rejects with the TLS error...
-    await assert.rejects(
-      proxy.fetchFromSystem("/sap/bc/adt/probe"),
-      (err: Error) => /self[- ]signed|certificate/i.test(err.message)
-    );
-    // ...and a forwarded request turns into the proxy's 502
-    const proxied = await throughProxy(proxy, "/sap/bc/z2ui5");
-    assert.equal(proxied.status, 502);
-    assert.match(proxied.body, /abap2UI5 proxy error/);
-  } finally {
-    await proxy.stop();
-    system.close();
-  }
-});
-
 test("flipping allowUnauthorized applies to the next request", async () => {
   // the setting listener mutates the running proxy - no restart involved
   const system = await selfSignedSystem();
   const proxy = new SapProxy();
+  proxy.allowUnauthorized = true;
   try {
     await proxy.start(system.origin, "user", "pass");
     proxy.allowUnauthorized = false;
@@ -192,6 +226,152 @@ test("flipping allowUnauthorized applies to the next request", async () => {
   } finally {
     await proxy.stop();
     system.close();
+  }
+});
+
+test("a pinned origin connects while it presents the pinned certificate", async () => {
+  const system = await selfSignedSystem();
+  const proxy = new SapProxy();
+  const asked: string[] = [];
+  proxy.pinFor = (origin) => {
+    asked.push(origin);
+    return origin === system.origin ? SELF_SIGNED_FINGERPRINT : undefined;
+  };
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const direct = await proxy.fetchFromSystem("/sap/bc/adt/probe");
+    assert.equal(direct.status, 200);
+    const proxied = await throughProxy(proxy, "/sap/bc/z2ui5");
+    assert.equal(proxied.status, 200);
+    assert.equal(proxied.body, "system answer");
+    // a second request - over a kept-alive connection or a new one - too
+    assert.equal((await proxy.fetchFromSystem("/again")).status, 200);
+    assert.equal(system.requests.length, 3);
+    assert.ok(system.requests.every((r) => r.authorization?.startsWith("Basic ")));
+    assert.ok(asked.every((origin) => origin === system.origin), "the pin is asked for by origin");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a pinned origin that presents another certificate is refused before anything is sent", async () => {
+  const system = await selfSignedSystem();
+  const proxy = new SapProxy();
+  // the user trusted some OTHER certificate for this origin: from the
+  // proxy's side that is exactly what a swapped certificate looks like
+  proxy.pinFor = () => OTHER_FINGERPRINT;
+  const refusals: string[] = [];
+  proxy.onTrustRefused = (message) => refusals.push(message);
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    await assert.rejects(
+      proxy.fetchFromSystem("/sap/bc/adt/probe"),
+      (err: Error & { code?: string }) =>
+        err.code === "CERT_PIN_MISMATCH" &&
+        /changed since it was trusted/.test(err.message) &&
+        err.message.includes(OTHER_FINGERPRINT) &&
+        err.message.includes(SELF_SIGNED_FINGERPRINT) &&
+        /Forget Trusted Certificates/.test(err.message)
+    );
+    const proxied = await throughProxy(proxy, "/sap/bc/z2ui5");
+    assert.equal(proxied.status, 502);
+    assert.match(proxied.body, /changed since it was trusted/);
+    // the point of comparing BEFORE the request is written: no path, no
+    // credentials, nothing at all arrived
+    assert.equal(system.requests.length, 0);
+    assert.equal(refusals.length, 2);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the pin is compared on every request, a kept-alive connection included", async () => {
+  const system = await selfSignedSystem();
+  const proxy = new SapProxy();
+  let pin = SELF_SIGNED_FINGERPRINT;
+  proxy.pinFor = () => pin;
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    assert.equal((await proxy.fetchFromSystem("/first")).status, 200);
+    // the pin changes under an open connection (forgotten and re-pinned to
+    // something else): the connection that was fine a moment ago is not
+    pin = OTHER_FINGERPRINT;
+    await assert.rejects(
+      proxy.fetchFromSystem("/second"),
+      (err: Error & { code?: string }) => err.code === "CERT_PIN_MISMATCH"
+    );
+    assert.deepEqual(system.requests.map((r) => r.path), ["/first"]);
+    // and a forgotten pin falls back to verification, which refuses
+    proxy.pinFor = () => undefined;
+    await assert.rejects(
+      proxy.fetchFromSystem("/third"),
+      (err: Error & { code?: string }) => err.code === "DEPTH_ZERO_SELF_SIGNED_CERT"
+    );
+    assert.equal(system.requests.length, 1);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a WebSocket upgrade to a pinned origin with another certificate never leaves", async () => {
+  const system = await selfSignedSystem();
+  const proxy = new SapProxy();
+  proxy.pinFor = () => OTHER_FINGERPRINT;
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const url = new URL(proxy.origin);
+    const closed = await new Promise<string>((resolve) => {
+      const socket = net.connect(Number(url.port), "127.0.0.1", () => {
+        socket.write(
+          `GET ${url.pathname}/ws HTTP/1.1\r\nHost: 127.0.0.1:${url.port}\r\n` +
+            "Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+        );
+      });
+      let received = "";
+      socket.on("data", (chunk) => (received += chunk.toString()));
+      socket.on("close", () => resolve(received));
+      socket.on("error", () => resolve(received));
+    });
+    assert.equal(closed, "", "the client is hung up on, no answer relayed");
+    assert.equal(system.requests.length, 0);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the certificate probe reads the certificate without sending a request", async () => {
+  const system = await selfSignedSystem();
+  try {
+    const peer = await probeCertificate(system.origin);
+    assert.equal(peer.authorized, false);
+    assert.equal(peer.authorizationError, "DEPTH_ZERO_SELF_SIGNED_CERT");
+    assert.equal(peer.fingerprint256, SELF_SIGNED_FINGERPRINT);
+    assert.match(String(peer.subject), /CN=localhost/);
+    assert.match(String(peer.issuer), /CN=localhost/);
+    assert.ok(peer.validFrom && peer.validTo);
+    // what the interactive flow decides from it, before and after the answer
+    assert.equal(decideTrust(peer, undefined), "unknown");
+    assert.equal(decideTrust(peer, peer.fingerprint256), "pinned-match");
+    assert.equal(decideTrust(peer, OTHER_FINGERPRINT), "pinned-mismatch");
+    assert.equal(system.requests.length, 0);
+  } finally {
+    system.close();
+  }
+});
+
+test("the certificate probe rejects when there is no TLS host to read", async () => {
+  const plain = net.createServer((socket) => socket.destroy());
+  await new Promise<void>((resolve) => plain.listen(0, "127.0.0.1", resolve));
+  const port = (plain.address() as AddressInfo).port;
+  try {
+    await assert.rejects(probeCertificate(`https://127.0.0.1:${port}`, 2000));
+    await assert.rejects(probeCertificate("not a url"));
+  } finally {
+    plain.close();
   }
 });
 

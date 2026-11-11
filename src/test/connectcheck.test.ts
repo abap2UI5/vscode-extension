@@ -97,6 +97,25 @@ test("certificate rejections point at allowUnauthorizedCerts", () => {
   }
 });
 
+test("an unverifiable certificate points at trusting it per system first", () => {
+  const step = describeConnectFailure({ code: "DEPTH_ZERO_SELF_SIGNED_CERT" });
+  assert.match(String(step.fix), /Trust This Certificate/);
+  assert.match(String(step.fix), /this system only/);
+  // the question was asked and declined: no Node code to quote
+  const declined = describeConnectFailure({ code: "CERT_NOT_TRUSTED" });
+  assert.equal(declined.ok, false);
+  assert.match(declined.detail, /was not trusted/);
+  assert.match(String(declined.fix), /Trust This Certificate/);
+});
+
+test("a changed certificate on a pinned system is its own finding", () => {
+  const step = describeConnectFailure({ code: "CERT_PIN_MISMATCH" });
+  assert.equal(step.ok, false);
+  assert.match(step.detail, /different TLS certificate/);
+  assert.match(String(step.fix), /Forget Trusted Certificates/);
+  assert.ok(!step.fix?.includes("allowUnauthorizedCerts"), "never the way out of a mismatch");
+});
+
 test("EPROTO is the scheme/port mismatch", () => {
   const step = describeConnectFailure({ code: "EPROTO" });
   assert.ok(step.fix?.includes("https://"));
