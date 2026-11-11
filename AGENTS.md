@@ -110,6 +110,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/apptemplatefile.ts` | Where that snapshot comes from at runtime, for both entries: `dist/app-template.json` next to the bundle (copied by `esbuild.js`), read through `workspace.fs` the first time "New Project from Template" or "Add Agent Setup to Workspace" runs - never at activation |
 | `src/agentsetup.ts` | `vscode`/`fs`/`path`-free: what "Add Agent Setup to Workspace" writes into an EXISTING project - app-template's `agentSetup` key executed over the snapshot, ported function by function from that repository's `create/agent-setup.mjs` (never overwrite, `package.json`/`.gitignore` only gain entries, the gates pointed at `.abapgit.xml`'s `STARTING_FOLDER`, nothing planned into the source folder), decided as a plan over a `WorkspaceProbe` before anything is written |
 | `src/agentsetupview.ts` | The command's plumbing, shared by both entries: the workspace folder, the modal confirmation listing what is written and skipped, a re-plan right before writing (a folder that changed under the dialog is refused), the writes through `workspace.fs`, the "abap2UI5 Agent Setup" output with the next steps |
+| `scripts/coverage.mjs` | `npm run test:coverage`: runs the suite with `NODE_V8_COVERAGE` over the build of `node esbuild.js --tests --coverage` and prints a per-module line table for `src/` (into `$GITHUB_STEP_SUMMARY` in CI); the arithmetic - source-map segments, V8 ranges, the table - is `scripts/lib/coverage.mjs`, pinned by `src/test/coverage.test.ts` |
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` (the template's `files.shared` and `files.named`, BOM stripped, plus its `template.json`) from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
 | `src/rendergate-tar.ts` | The entry of the `dist/rendergate-tar.js` bundle (`tar` alone) `rendergate.ts` loads on first use |
 | `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot, and the `*_HOME` variable each checkout is handed to mcp-server as (`checkoutHomes`) |
@@ -235,6 +236,21 @@ skip into a failure so "it quietly stopped running" cannot become normal.
 `npm test` also runs on `windows-latest` in CI: `childproc.ts` exists for
 cross-platform shell quoting and process-tree kill, and `checkcore.ts` /
 `scaffold.ts` build paths — all of it used to be proven on Ubuntu only.
+
+`npm run test:coverage` is a measurement, not a gate: the same suite with
+Node's coverage collection on (`NODE_V8_COVERAGE`, no dependency) and a table
+of line coverage per `src/` module, least covered first - CI's `build` job
+puts it into the job summary. There is no threshold. It reads the test
+build's source maps, and builds with `--coverage`, which only switches
+tree-shaking off: a function no test imports is otherwise in no bundle, and
+its module would look covered. `npm test` does not take the flag and runs the
+modules as shipped. A line counts when the bundler emitted code for it, so
+comments and types are not in the denominator - which is why the table is
+computed in `scripts/lib/coverage.mjs` rather than by
+`--experimental-test-coverage`, whose view through a source map counts them.
+Source maps exist in the test build and the development build only; the
+`.vsix` carries none (`**/*.map` in `.vscodeignore`, and the production build
+writes none).
 
 ## Releasing
 
