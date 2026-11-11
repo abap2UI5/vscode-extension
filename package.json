@@ -1154,6 +1154,7 @@
     "vsix": "vsce package",
     "lint": "tsc --noEmit && eslint .",
     "test": "node esbuild.js --tests && node --test dist-test/*.test.cjs",
+    "test:coverage": "node esbuild.js --tests --coverage && node scripts/coverage.mjs",
     "test:grep": "node esbuild.js --tests && node --test --test-name-pattern",
     "test:web": "node esbuild.js && node esbuild.js --webtest && vscode-test-web --browserType=chromium --headless --extensionDevelopmentPath=. --extensionTestsPath=dist/web/test.js",
     "test:desktop": "node esbuild.js && node esbuild.js --desktoptest && node src/test/desktop/runner.mjs",

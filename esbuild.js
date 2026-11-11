@@ -5,6 +5,8 @@ const path = require("path");
 const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
 const tests = process.argv.includes("--tests");
+// with --tests: the build `npm run test:coverage` measures (see buildTests)
+const coverage = process.argv.includes("--coverage");
 const webTests = process.argv.includes("--webtest");
 const desktopTests = process.argv.includes("--desktoptest");
 
@@ -211,7 +213,14 @@ async function buildTests() {
     platform: "node",
     outdir: "dist-test",
     outExtension: { ".js": ".cjs" },
+    // Also what `npm run test:coverage` reads the `src/` lines off - the
+    // test build is the only one whose maps leave the build machine
+    // (.vscodeignore drops every `*.map`, the production build writes none).
     sourcemap: true,
+    // Coverage alone keeps what the bundler would drop: a function no test
+    // imports is otherwise in no bundle at all, and a table that cannot see
+    // it calls its module covered. `npm test` runs the modules as shipped.
+    ...(coverage ? { treeShaking: false } : {}),
     external: ["vscode", "node:test", "node:assert"],
     logLevel: "info",
     ...ESM_IN_CJS,

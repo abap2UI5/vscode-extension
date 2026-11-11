@@ -77,6 +77,14 @@ jobs:
       # separately built the same bundles twice.
       - run: npm run lint
       - run: npm test
+      # The same suite once more with Node's coverage collection on, for the
+      # per-module table it writes into the job summary - which `vscode`-free
+      # modules the tests leave untouched. No threshold: it fails only when
+      # the suite does. A step of its own, so `npm test` stays the gate on
+      # the bundles as they are shipped (the coverage build keeps what the
+      # bundler would tree-shake). Before the packaging step: the production
+      # build empties dist-test/.
+      - run: npm run test:coverage
       - run: npm run vsix
 
       # What actually ships. The package embeds the linter's properties.json
