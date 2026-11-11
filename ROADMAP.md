@@ -45,32 +45,43 @@ the PR description lists what was verified by hand and what was not.
 
 What is on this branch, and what a task still lacks. "Unit tests" means
 `npm test`; "desktop smoke" means `npm run test:desktop` passed in a real
-VS Code. Nothing here was exercised against a real SAP system, and
-`npm run test:web` was not run.
+VS Code; `npm run test:web` passed too (with this environment's Chromium
+mapped in). Nothing here was exercised against a real SAP system.
 
 | Task | State | Still open |
 | --- | --- | --- |
 | T01 | Done | The Testing view itself was never looked at. The runner reports no line, so a failure sits on the test method's declaration; running one method runs its class. |
 | T02 | Done | Shift+F12 not tried in an editor. |
-| T03 | Open | Needs the converter as a versioned artefact upstream (a), and a check of the CLI for namespaced names (b). |
-| T04 | Open | Needs real captures; the F9 picture needs a system. |
+| T03 | (b) checked, still blocked upstream | The converter is report2UI5 now (`tools/report2ui5`); the command finds it again (it had broken on the rename). (b): report2UI5 does not turn `/ns/cl_x` into abapGit's `#ns#` file names for the class it writes (`tools/report2ui5/lib/convert.mjs` 1130-1138, read, not run). (a) still needs a versioned artefact upstream. |
+| T04 | Done, three of four pictures | Quick fix, Control Properties, device matrix - real captures. The F9 picture needs a system. |
 | T05 | Done | Default flipped to `false`. The trust prompt and a real self-signed system are untested. |
-| T06 | T06b done | T06a (which mechanisms), T06c and T06d are open. The two basic-auth texts of the retry breaker are still in `proxy.ts`. |
+| T06 | T06a and T06b done | `docs/auth.md` ranks browser logon through the extension's own Chromium first, OAuth with a service key second; its decisions list needs a maintainer. T06c/T06d wait on that. |
 | T07 | Open | Needs the decision and a system to verify the ADT sequence against. |
 | T08 | Done | `auth` is reserved (`"basic"` only). The inline `@since` floor follows profile > setting but not the repository config, as before. |
 | T09 | Open | Needs T07. |
 | T10 | Done as option (a) | Three read-only tools, no chat participant. Whether hosts honour `when` on a tool entry is unconfirmed. |
 | T11 | Done | The modal was never shown for real. A timed-out modal stays open; a late answer is ignored. |
-| T12 | Open | Spike not started; needs T13. |
-| T13 | Open | Needs a serve entry point in mcp-server *(verify)*. |
+| T12 | Spike done: no-go for now | `docs/systemless-preview.md`: the runtime would fit the `.vsix` gate only without an in-browser transpiler, and the framework needs node builtins in a worker. |
+| T13 | Spike done: go | Round trip proven locally against `@abap2ui5/node-runtime`. Needs a `serve` entry point (and a token) in mcp-server first - list in `docs/systemless-preview.md`. |
 | T14 | Done | Whether a real backend accepts a replayed draft id and its stored session headers is unknown. |
 | T15 | Researched, no change | Theia (API 1.144) and VSCodium are above the 1.101 floor. BAS's Code-OSS version could not be confirmed from a primary source - check Help > About in a dev space. The newer APIs are already feature-detected. |
 | T16 | Done | Scheduling stayed in `viewcheck.ts` (shared state); `SapProxy` stayed whole. |
 | T17 | Done | Nothing needed hiding; three manifest tests now pin that. |
-| T18 | Done | The CI step has not run on GitHub yet. |
+| T18 | Done | The CI step has not run on GitHub yet. Follow-up done: no own module below 92 % (total 93.8 %). |
+
+**Release blocker found on the way (not caused by this branch):** the bundled
+linter 0.9.0 (already on `main`) records release commit `369f4afdd199`, and
+`render-gate-bundle-369f4afdd199` does not exist on the linter's releases
+(HTTP 404), so *Install Render Gate* fails for a build of this tree. The
+linter has to publish that bundle (its `bundle.yml`), or the pin has to move
+to a release that has one; the rolling bundle is deliberately no fallback.
+
+Also fixed on the way: *Migrate Classic Report* after abap-cloud-gui's rename
+of report2cloud to report2UI5, and removing an attribute of an upper-case
+chain in Control Properties.
 
 Follow-up in `abap2UI5/docs` (`advanced/vscode`) for everything marked done
-and user-visible: T01, T02, T05, T08, T10, T11, T14.
+and user-visible: T01, T02, T05, T08, T10, T11, T14, and the report2UI5 rename.
 
 ## Order and dependencies
 
@@ -730,7 +741,7 @@ slower by more than a few seconds; the `.vsix` contains no source map.
 | T01 | `abap2UI5/mcp-server` | A machine-readable reporter for `abap2ui5-unit` *(verify it is missing)* |
 | T03a | `abap2UI5-addons/abap-cloud-gui` | report2cloud as an immutable, versioned artefact |
 | T03b | `abap2UI5-addons/abap-cloud-gui` | CLI accepts a namespaced class name *(verify)* |
-| T13 | `abap2UI5/mcp-server` | An entry point that serves the transpiled backend over HTTP *(verify)* |
+| T13 | Spike done: go | Round trip proven locally against `@abap2ui5/node-runtime`. Needs a `serve` entry point (and a token) in mcp-server first - list in `docs/systemless-preview.md`. |
 | all user-visible | `abap2UI5/docs` | The `advanced/vscode` page follows each feature |
 
 ## Decisions a maintainer has to make
@@ -739,8 +750,8 @@ slower by more than a few seconds; the `.vsix` contains no source map.
 | --- | --- |
 | T03a | npm package or release bundle for report2cloud? |
 | T05 | Flip `allowUnauthorizedCerts` to `false` by default? |
-| T06 | Which logon mechanisms, in which order? |
+| T06 | T06a and T06b done | `docs/auth.md` ranks browser logon through the extension's own Chromium first, OAuth with a service key second; its decisions list needs a maintainer. T06c/T06d wait on that. |
 | T07 | Should the extension write source to a system at all? |
 | T10 | LM tools as a complement to MCP, or as a second surface for the same tools? |
-| T12 | Go / no-go after the spike |
+| T12 | Spike done: no-go for now | `docs/systemless-preview.md`: the runtime would fit the `.vsix` gate only without an in-browser transpiler, and the framework needs node builtins in a worker. |
 | T15 | Keep the 1.101 floor or lower it? |
