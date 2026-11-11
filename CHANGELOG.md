@@ -4,6 +4,10 @@
 
 The bundled linter moves to v0.9.0.
 
+- **Control Properties removes an attribute of an upper-case chain.** In a
+  chain written `)->A( n = ...`, the view added attributes but refused to
+  remove one, calling the layout unusual. ABAP does not care about case,
+  and neither does the removal now.
 - **Migrate Classic Report works with a current abap-cloud-gui checkout.**
   The addon renamed its converter from report2cloud to report2UI5 after its
   1.0.0 and moved it to `tools/report2ui5`; the command looked only for

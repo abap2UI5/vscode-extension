@@ -487,3 +487,19 @@ test("a message is the same as itself, and nothing is the same as nothing", () =
   assert.ok(sameMessage(undefined, undefined));
   assert.ok(!sameMessage(form, undefined));
 });
+
+test("an attribute of a chain written in upper case can be removed, as it can be added", () => {
+  // ABAP is case-insensitive and the chain parser reads `)->A(` as an
+  // attribute call - the removal used to match lower case only and refuse
+  const upper = SOURCE.replace(/\)->a\(/g, ")->A(");
+  const call = controlCallAt(upper, upper.indexOf("`Press me`"))!;
+  const edit = removeAttributeEdit(upper, call, "text");
+  assert.ok(edit, "the edit is offered");
+  const next = apply(upper, edit!);
+  assert.ok(!next.includes("Press me"));
+  assert.ok(next.includes(")->tag( `Button`\n                )->A( n = `press`"), next);
+  const last = controlCallAt(upper, upper.indexOf("mv_value )"))!;
+  const tail = removeAttributeEdit(upper, last, "value");
+  assert.ok(tail, "the last attribute too");
+  assert.ok(apply(upper, tail!).includes(")->tag( `Input` ).\n"));
+});
