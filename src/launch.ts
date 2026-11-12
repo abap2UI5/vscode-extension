@@ -10,6 +10,7 @@ import {
   SystemProfile,
 } from "./systems";
 import { FOCUS_BOUNCE_MS, PreviewSurface, Session } from "./session";
+import { isLocalTarget, rebuildAndReload, runLocal } from "./localbackendview";
 import { ensureCertificateTrust, reportTrustRefusal } from "./certprompt";
 import { CertificateTrustError } from "./certtrust";
 import { postToShownApp, reloadShownApp, showInTab } from "./preview";
@@ -81,6 +82,11 @@ export async function runApp(
 
   const system = await ensureSystem(session.ctx);
   if (!system) {
+    return;
+  }
+  if (system.local) {
+    // no URL, no certificate, no credentials: build, serve, load
+    await runLocal(session, provider, system, className, editor);
     return;
   }
 
@@ -212,6 +218,11 @@ async function findAbapActivateCommand(): Promise<string | undefined> {
  * and not a plain save - is what the preview reloads on.
  */
 export async function activateAndReload(session: Session): Promise<void> {
+  if (isLocalTarget(session.currentTarget)) {
+    // the local backend has no activation: the file on disk is the version
+    await rebuildAndReload(session, "Rebuilt and reloaded");
+    return;
+  }
   const editor = vscode.window.activeTextEditor;
   const isAbap = editor?.document.languageId === "abap";
   const activateCommand = await findAbapActivateCommand();
@@ -345,6 +356,12 @@ class ProxyStartError extends Error {
 export async function checkConnection(session: Session): Promise<void> {
   const system = await ensureSystem(session.ctx);
   if (!system) {
+    return;
+  }
+  if (system.local) {
+    vscode.window.showInformationMessage(
+      `abap2UI5: ${system.name} is no system to check - F9 builds and starts it; its log is the "abap2UI5 Local Backend" output.`
+    );
     return;
   }
 
@@ -645,6 +662,16 @@ export function makeConnectSystem(
   return async () => {
     const system = await ensureSystem(session.ctx);
     if (!system) {
+      return undefined;
+    }
+    if (system.local) {
+      // no ADT and no logon there - and the host must not be started from
+      // a flow the user is not looking at
+      const message = `${system.name} offers no system tools - select a system with "abap2UI5: Select System"`;
+      if (!options.askAboutCertificates) {
+        throw new Error(message);
+      }
+      vscode.window.showInformationMessage(`abap2UI5: ${message}.`);
       return undefined;
     }
     const expanded = session.urlFor(system, "PROBE");

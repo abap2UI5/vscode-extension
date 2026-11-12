@@ -46,6 +46,13 @@ import { registerRoundtripCommands } from "./roundtripview";
 import { MODEL_SCHEME, registerModelView } from "./modelview";
 import { registerMockFile } from "./mockfile";
 import { registerUnitTests } from "./unittests";
+import {
+  isInBuiltFolder,
+  isLocalTarget,
+  rebuildAndReload,
+  registerLocalBackend,
+  stopLocalBackend,
+} from "./localbackendview";
 import { registerTestExplorer } from "./testexplorer";
 import { registerMigrateReport } from "./migratereport";
 import { DEVICE_WIDTHS } from "./webview";
@@ -258,6 +265,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!system) {
         return;
       }
+      if (!system.local) {
+        stopLocalBackend("another system was selected");
+      }
       provider.refreshWelcome();
       log(
         `system: now launching against ${system.name}` +
@@ -278,7 +288,9 @@ export function activate(context: vscode.ExtensionContext): void {
       // Edit the ACTIVE system, wherever it is stored. Writing the single
       // `launchUrlTemplate` while a profile list is configured did not edit
       // anything - it grew an extra system next to the one on screen.
-      const active = activeSystem(context);
+      const selected = activeSystem(context);
+      // the built-in local profile has no launch URL to edit
+      const active = selected?.local ? undefined : selected;
       const current =
         active?.template ??
         vscode.workspace.getConfiguration(CONFIG_SECTION).get<string>(TEMPLATE_KEY, "");
@@ -338,6 +350,14 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const trigger = session.reloadTrigger();
       if (trigger === "never") {
+        return;
+      }
+      // The local backend has no activation: a save of any object it was
+      // built from is the new version - rebuild, restart, reload.
+      if (isLocalTarget(session.currentTarget)) {
+        if (doc.uri.scheme === "file" && isInBuiltFolder(doc.uri.fsPath)) {
+          void rebuildAndReload(session, "Rebuilt after save");
+        }
         return;
       }
       // The cheap name check first: it dismisses every save of another class
@@ -653,7 +673,7 @@ export function activate(context: vscode.ExtensionContext): void {
       proxy: session.proxy,
       frameUrlFor: (className) => {
         const system = activeSystem(context);
-        if (!system || !session.proxy.isRunning) {
+        if (!system || system.local || !session.proxy.isRunning) {
           return undefined;
         }
         const externalUrl = session.urlFor(system, className);
@@ -679,7 +699,8 @@ export function activate(context: vscode.ExtensionContext): void {
       // of what the backend is told about its location
       activeSystem: () => {
         const system = activeSystem(context);
-        return system
+        // the local backend is not a system the agent tools may drive
+        return system && !system.local
           ? {
               name: system.name,
               role: system.role,
@@ -761,6 +782,8 @@ export function activate(context: vscode.ExtensionContext): void {
   registerViewPreview(context, log);
   registerMockFile(context, log);
   registerUnitTests(context, log);
+  // the "Local (transpiled)" system: its host ends with the window
+  registerLocalBackend(context);
   registerTestExplorer(context, log);
   registerMigrateReport(context, log);
   registerQuickFix(context, log);

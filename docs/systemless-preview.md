@@ -23,6 +23,17 @@ work is a `serve` binary in mcp-server: it should collect a folder the way
 `abap2ui5-unit` does, report the port it actually bound, and accept a
 token.
 
+**Implemented since** (T13): without waiting for the upstream `serve` bin,
+the extension ships `src/localbackend-host.mjs`, which imports `buildNpm`,
+`startHost` and abap2ui5-unit's `collectObjects`/`writeObjects` from an
+exactly pinned mcp-server (`localBackend.mcpServer` in `package.json`) and
+reports the port it bound in one machine-readable line. The token of
+section 4.2 is added by that launcher, not upstream: a constant-time check
+of `x-abap2ui5-local-token` in front of npm-host's own handlers, sent only by
+the proxy's `LocalBackendAuth`. Mock seeding (4.3) is not implemented - there
+is still no seam. Upstream items 1-4 of section 5 would let the launcher
+shrink to a call of the bin.
+
 ## 1. T13 - the backend over HTTP for a project folder
 
 ### 1.1 How mcp-server starts the backend today

@@ -1,4 +1,4 @@
-# The one implementation behind all four weekly bump workflows.
+# The one implementation behind all the weekly bump workflows.
 #
 # `bump-linter.yml`, `bump-client-api.yml`, `bump-app-template.yml` and
 # `bump-repo-dirs.yml` all do the same four things - regenerate a committed
@@ -7,7 +7,8 @@
 # shape. Every fix therefore had to be made four times, and the one that
 # mattered most (the token below) had been made zero times. They are now thin
 # callers that pass in what actually differs: what to regenerate, which files
-# that touches, and what to say in the PR.
+# that touches, and what to say in the PR. `bump-local-backend.yml` (the
+# mcp-server version the local backend drives) joined them as a fifth caller.
 #
 # ---------------------------------------------------------------------------
 # BUMP_PR_TOKEN - the repository secret this workflow wants

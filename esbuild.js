@@ -70,11 +70,20 @@ function copySnapshot() {
  *  by every window that activated the extension. The test build gets the
  *  same copies: `clientapi.ts` resolves its file next to its own bundle. */
 const OWN_DATA_FILES = ["app-template.json", "client-api.json"];
+const LOCAL_BACKEND_LAUNCHER = "localbackend-host.mjs";
 function copyOwnData(outDir) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const file of OWN_DATA_FILES) {
     fs.copyFileSync(path.join("src", "data", file), path.join(outDir, file));
   }
+  /* The local backend's launcher (src/localbackend.ts starts it with node,
+   * or through npx with the pinned mcp-server on PATH): a plain ES module
+   * that imports mcp-server's own library at run time, so it is copied, never
+   * bundled. The test build gets it too - localbackend.test.ts starts it. */
+  fs.copyFileSync(
+    path.join("src", LOCAL_BACKEND_LAUNCHER),
+    path.join(outDir, LOCAL_BACKEND_LAUNCHER)
+  );
 }
 
 /** Copies a data file the bundled linter release may not ship yet; removes a

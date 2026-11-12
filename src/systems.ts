@@ -34,7 +34,32 @@ export interface SystemProfile extends ProfileFields {
   /** URL template with the `{class}` placeholder. */
   template: string;
   // role, minUi5, distribution, auth: see `ProfileFields` (systemprofile.ts)
+  /** The built-in "Local (transpiled)" profile (`localSystem`) - never a
+   *  configured one: no `systems` entry can set this. */
+  local?: true;
 }
+
+/** The built-in profile that needs no system: the workspace's classes,
+ *  transpiled and served on this machine (`localbackend.ts`). Its template
+ *  is a placeholder - the port is known only once the host runs - and F9
+ *  branches on `local` before anything reads it. Not in `allSystems( )`:
+ *  it has no credentials, no certificate and no entry in the settings. */
+export const LOCAL_SYSTEM_NAME = "Local (transpiled)";
+const LOCAL_ACTIVE = "abap2ui5:local";
+
+export function localSystem(): SystemProfile {
+  return {
+    name: LOCAL_SYSTEM_NAME,
+    template: "http://127.0.0.1/?app_start={class}",
+    role: "development",
+    local: true,
+  };
+}
+
+const LOCAL_PICK = {
+  label: LOCAL_SYSTEM_NAME,
+  description: "no system - builds this workspace's classes and runs them on this machine",
+};
 
 function config() {
   return vscode.workspace.getConfiguration(CONFIG_SECTION);
@@ -149,8 +174,11 @@ export function uniqueName(name: string, taken: readonly string[]): string {
 export function activeSystem(
   context: vscode.ExtensionContext
 ): SystemProfile | undefined {
-  const all = allSystems();
   const chosen = context.workspaceState.get<string>(ACTIVE_KEY);
+  if (chosen === LOCAL_ACTIVE) {
+    return localSystem();
+  }
+  const all = allSystems();
   return all.find((s) => s.name === chosen) ?? all[0];
 }
 
@@ -158,7 +186,7 @@ async function setActive(
   context: vscode.ExtensionContext,
   system: SystemProfile
 ): Promise<void> {
-  await context.workspaceState.update(ACTIVE_KEY, system.name);
+  await context.workspaceState.update(ACTIVE_KEY, system.local ? LOCAL_ACTIVE : system.name);
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +296,23 @@ export async function ensureSystem(
   if (active) {
     return active;
   }
+  // Nothing configured: a launch URL, or the local backend - which is what
+  // a fresh project without any system can run on at all.
+  const way = await vscode.window.showQuickPick(
+    [
+      { label: "$(globe) Enter a launch URL...", description: "an abap2UI5 system", url: true },
+      { ...LOCAL_PICK, label: `$(server-process) ${LOCAL_SYSTEM_NAME}`, url: false },
+    ],
+    { title: "abap2UI5: No System Configured Yet", placeHolder: "Where should the app run?" }
+  );
+  if (!way) {
+    return undefined;
+  }
+  if (!way.url) {
+    const local = localSystem();
+    await setActive(context, local);
+    return local;
+  }
   const template = await askForTemplate("");
   if (!template) {
     return undefined;
@@ -288,11 +333,16 @@ export async function pickSystem(
   const active = activeSystem(context);
   const items: Array<vscode.QuickPickItem & { system?: SystemProfile; add?: boolean }> =
     all.map((system) => ({
-      label: system.name === active?.name ? `$(check) ${system.name}` : system.name,
+      label: system.name === active?.name && !active?.local ? `$(check) ${system.name}` : system.name,
       description:
         shortUrl(system.template) + (system.role ? ` · ${system.role}` : ""),
       system,
     }));
+  items.push({
+    ...LOCAL_PICK,
+    label: active?.local ? `$(check) ${LOCAL_SYSTEM_NAME}` : `$(server-process) ${LOCAL_SYSTEM_NAME}`,
+    system: localSystem(),
+  });
   items.push({
     label: "$(add) Add a system...",
     description: "asks for a name and a launch URL",
