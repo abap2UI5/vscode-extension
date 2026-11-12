@@ -13,9 +13,13 @@ import { CLI_PATH, PARSER_PROBE } from "./report2cloud";
  * report2UI5 (abap-cloud-gui's `tools/report2ui5`) is published neither on
  * npm nor as a release bundle. The immutable artefact is therefore the
  * source tarball of a PINNED COMMIT from GitHub's codeload - a branch tip is
- * never downloaded - checked against the SHA-256 the snapshot
- * `src/data/report2ui5.json` records (and package.json's `report2ui5Release`
- * repeats, `report2ui5.test.ts` holds the two together), plus the
+ * never downloaded. What is checked is not the tarball's bytes (GitHub does
+ * not promise byte-stable compression of its archives) but what it holds:
+ * the snapshot `src/data/report2ui5.json` records, for every file the CLI
+ * needs, its size and the SHA-256 of its unpacked content, and only those
+ * files are taken out of the archive and each held to its record
+ * (package.json's `report2ui5Release` repeats the commit,
+ * `report2ui5.test.ts` holds the two together). Plus the
  * converter's npm dependency closure, each tarball checked against the
  * `integrity` of abap-cloud-gui's own package-lock.json at that commit - so
  * the converter parses with exactly the @abaplint/core its gates use.
@@ -30,7 +34,9 @@ import { CLI_PATH, PARSER_PROBE } from "./report2cloud";
  * the CLI can tell - `report2cloud.ts`'s `cliIn` and `PARSER_PROBE` accept it
  * like one, and node resolves `@abaplint/core` from `tools/` upwards.
  *
- * Nothing is unpacked before its bytes are verified, nothing outside the
+ * Nothing is written before its bytes are verified - a package against its
+ * integrity before it is read, each pinned file against its size and
+ * SHA-256 once it is read out of the source tarball - nothing outside the
  * pinned file list is unpacked from the source tarball, every path is
  * checked (no `..`, nothing absolute, no backslash, no link) and the copy is
  * built in a staging directory beside its final place and renamed into it
@@ -57,12 +63,21 @@ export interface Report2ui5Dep {
   path: string;
 }
 
+/** One file the CLI needs, as the pinned commit holds it. */
+export interface Report2ui5File {
+  /** Relative to the repository, forward slashes. */
+  path: string;
+  /** Bytes of the unpacked content. */
+  size: number;
+  /** SHA-256 (hex) of the unpacked content. */
+  sha256: string;
+}
+
 /** The snapshot `src/data/report2ui5.json`. */
 export interface Report2ui5Pin {
   commit: string;
-  tarballSha256: string;
-  /** The files under `tools/` the CLI needs, relative to the repository. */
-  files: string[];
+  /** The files under `tools/` the CLI needs. */
+  files: Report2ui5File[];
   deps: Report2ui5Dep[];
 }
 
@@ -101,16 +116,25 @@ export function pinProblems(pin: Report2ui5Pin): string[] {
   if (!/^[0-9a-f]{40}$/.test(pin.commit ?? "")) {
     out.push("commit is not a full 40-hex commit SHA");
   }
-  if (!/^[0-9a-f]{64}$/.test(pin.tarballSha256 ?? "")) {
-    out.push("tarballSha256 is not a 64-hex SHA-256");
-  }
   const files = Array.isArray(pin.files) ? pin.files : [];
-  if (!files.includes("tools/report2ui5/cli.mjs")) {
+  if (!files.some((f) => f.path === "tools/report2ui5/cli.mjs")) {
     out.push("files does not contain tools/report2ui5/cli.mjs");
   }
+  const seen = new Set<string>();
   for (const f of files) {
-    if (!isSafeRelative(f) || !/^tools\/(?:report2ui5|report2cloud\/lib)\//.test(f)) {
-      out.push(`file outside tools/report2ui5 and tools/report2cloud/lib: ${f}`);
+    const p = typeof f?.path === "string" ? f.path : "";
+    if (!isSafeRelative(p) || !/^tools\/(?:report2ui5|report2cloud\/lib)\//.test(p)) {
+      out.push(`file outside tools/report2ui5 and tools/report2cloud/lib: ${p}`);
+    }
+    if (seen.has(p)) {
+      out.push(`file listed twice: ${p}`);
+    }
+    seen.add(p);
+    if (!Number.isSafeInteger(f?.size) || f.size < 0) {
+      out.push(`${p}: size is not a byte count`);
+    }
+    if (!/^[0-9a-f]{64}$/.test(f?.sha256 ?? "")) {
+      out.push(`${p}: sha256 is not a 64-hex SHA-256`);
     }
   }
   const deps = Array.isArray(pin.deps) ? pin.deps : [];
@@ -134,8 +158,9 @@ export function pinProblems(pin: Report2ui5Pin): string[] {
 /** One download of a plan. */
 export interface PlannedDownload {
   url: string;
-  /** What the bytes are held to. */
-  check: { sha256: string } | { integrity: string };
+  /** What the bytes are held to: a package's integrity before it is read;
+   *  the source tarball's files, each to its record, once read. */
+  check: { files: Report2ui5File[] } | { integrity: string };
   /** Where its contents go, relative to the install root ("" for the source
    *  tarball, whose own paths are kept). */
   into: string;
@@ -148,7 +173,7 @@ export interface InstallPlan {
   root: string;
   downloads: PlannedDownload[];
   /** The files the source tarball has to yield. */
-  files: string[];
+  files: Report2ui5File[];
 }
 
 /** Everything one install will do, before it does any of it. */
@@ -156,11 +181,11 @@ export function installPlan(pin: Report2ui5Pin, storage: string): InstallPlan {
   return {
     commit: pin.commit,
     root: installRoot(storage, pin.commit),
-    files: [...pin.files],
+    files: pin.files.map((f) => ({ ...f })),
     downloads: [
       {
         url: tarballUrl(pin.commit),
-        check: { sha256: pin.tarballSha256 },
+        check: { files: pin.files.map((f) => ({ ...f })) },
         into: "",
         label: `abap-cloud-gui@${pin.commit.slice(0, 12)}`,
       },
@@ -174,12 +199,16 @@ export function installPlan(pin: Report2ui5Pin, storage: string): InstallPlan {
   };
 }
 
-/** Why `bytes` are not the tarball with that SHA-256, or undefined. */
-export function sha256Error(bytes: Uint8Array, expected: string, label: string): string | undefined {
-  const actual = createHash("sha256").update(bytes).digest("hex");
-  return actual === expected.toLowerCase()
+/** Why `data` is not the pinned file, or undefined - size first, then the
+ *  SHA-256 of the content. */
+export function fileError(data: Uint8Array, file: Report2ui5File, label: string): string | undefined {
+  if (data.byteLength !== file.size) {
+    return `${label}: ${file.path} is ${data.byteLength} bytes, the pin says ${file.size} - nothing was installed`;
+  }
+  const actual = createHash("sha256").update(data).digest("hex");
+  return actual === file.sha256.toLowerCase()
     ? undefined
-    : `${label}: the download does not match the pinned SHA-256 (expected ${expected}, got ${actual}) - nothing was unpacked`;
+    : `${label}: ${file.path} does not match its pinned SHA-256 (expected ${file.sha256}, got ${actual}) - nothing was installed`;
 }
 
 /**
@@ -295,25 +324,34 @@ function isAtOrAbove(rel: string, file: string): boolean {
   return rel === file || file.startsWith(`${rel}/`);
 }
 
-/** The pinned files out of the verified source tarball - every one of them
- *  present as a regular file, no link at or above any of them. */
+/** The pinned files out of the source tarball - every one of them present
+ *  as a regular file, no link at or above any of them, each its pinned size
+ *  and SHA-256. Throws on the first that is not; nothing is returned (and
+ *  so nothing written) unless all of them are. */
 export async function sourceFiles(
   tar: TarApi,
   bytes: Uint8Array,
-  files: readonly string[],
+  files: readonly Report2ui5File[],
   label: string
 ): Promise<Map<string, Buffer>> {
-  const wanted = new Set(files);
+  const paths = files.map((f) => f.path);
+  const wanted = new Set(paths);
   const got = await readArchive(
     tar,
     bytes,
     label,
     (rel) => wanted.has(rel),
-    (rel) => files.some((f) => isAtOrAbove(rel, f))
+    (rel) => paths.some((f) => isAtOrAbove(rel, f))
   );
-  const missing = files.filter((f) => !got.has(f));
+  const missing = paths.filter((f) => !got.has(f));
   if (missing.length) {
     throw new Error(`${label}: the archive lacks ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ` and ${missing.length - 3} more` : ""}`);
+  }
+  for (const f of files) {
+    const bad = fileError(got.get(f.path)!, f, label);
+    if (bad) {
+      throw new Error(bad);
+    }
   }
   return got;
 }
@@ -424,17 +462,18 @@ export async function installReport2ui5(opts: InstallOptions): Promise<InstallRe
       const bytes = await opts.download(d.url, signal);
       cancelled(signal);
       downloaded += bytes.byteLength;
-      const bad =
-        "sha256" in d.check
-          ? sha256Error(bytes, d.check.sha256, d.label)
-          : integrityError(bytes, d.check.integrity, d.label);
-      if (bad) {
-        throw new Error(bad);
+      let files: Map<string, Buffer>;
+      if ("files" in d.check) {
+        // the archive's bytes are not pinned (codeload's compression is not
+        // promised stable) - its pinned files are, each checked when read
+        files = await sourceFiles(opts.tar, bytes, d.check.files, d.label);
+      } else {
+        const bad = integrityError(bytes, d.check.integrity, d.label);
+        if (bad) {
+          throw new Error(bad);
+        }
+        files = await packageFiles(opts.tar, bytes, d.label);
       }
-      const files =
-        d.into === ""
-          ? await sourceFiles(opts.tar, bytes, plan.files, d.label)
-          : await packageFiles(opts.tar, bytes, d.label);
       written += await writeFiles(d.into ? path.join(staging, ...d.into.split("/")) : staging, files);
       count += files.size;
     }

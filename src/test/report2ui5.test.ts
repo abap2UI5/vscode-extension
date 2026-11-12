@@ -16,9 +16,10 @@ import {
   integrityError,
   isSafeRelative,
   pinProblems,
-  sha256Error,
+  fileError,
   tarballUrl,
   type Download,
+  type Report2ui5File,
   type Report2ui5Pin,
 } from "../report2ui5install";
 
@@ -37,7 +38,7 @@ import {
 
 const ROOT = path.join(__dirname, "..");
 const PKG = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
-  report2ui5Release?: { commit: string; tarballSha256: string };
+  report2ui5Release?: { commit: string };
 };
 const PIN = snapshot as Report2ui5Pin;
 
@@ -93,14 +94,23 @@ const sri = (b: Buffer): string => `sha512-${createHash("sha512").update(b).dige
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const TOP = `abap-cloud-gui-${COMMIT}`;
-const FILES = ["tools/report2ui5/cli.mjs", "tools/report2ui5/lib/convert.mjs"];
+const TEXTS: Record<string, string> = {
+  "tools/report2ui5/cli.mjs": 'import "./lib/convert.mjs";\n',
+  "tools/report2ui5/lib/convert.mjs": 'import "@abaplint/core";\n',
+};
+const record = (p: string, text = TEXTS[p]): Report2ui5File => ({
+  path: p,
+  size: Buffer.byteLength(text),
+  sha256: sha256(Buffer.from(text)),
+});
+const FILES: Report2ui5File[] = Object.keys(TEXTS).map((p) => record(p));
 
 function sourceEntries(extra: FakeEntry[] = []): FakeEntry[] {
   return [
     { path: `${TOP}/`, type: "5" },
     { path: `${TOP}/README.md`, data: "# not needed" },
-    { path: `${TOP}/tools/report2ui5/cli.mjs`, data: 'import "./lib/convert.mjs";\n' },
-    { path: `${TOP}/tools/report2ui5/lib/convert.mjs`, data: 'import "@abaplint/core";\n' },
+    { path: `${TOP}/tools/report2ui5/cli.mjs`, data: TEXTS["tools/report2ui5/cli.mjs"] },
+    { path: `${TOP}/tools/report2ui5/lib/convert.mjs`, data: TEXTS["tools/report2ui5/lib/convert.mjs"] },
     { path: `${TOP}/tools/report2ui5/test/big.abap`, data: "x".repeat(2000) },
     ...extra,
   ];
@@ -117,7 +127,6 @@ const JSON5_URL = "https://registry.npmjs.org/json5/-/json5-2.2.3.tgz";
 function fixture(source = tgz(sourceEntries())): { pin: Report2ui5Pin; blobs: Map<string, Buffer> } {
   const pin: Report2ui5Pin = {
     commit: COMMIT,
-    tarballSha256: sha256(source),
     files: FILES,
     deps: [
       { name: "@abaplint/core", version: "9.9.9", url: CORE_URL, integrity: sri(CORE), path: "node_modules/@abaplint/core" },
@@ -162,18 +171,22 @@ function tree(dir: string): string[] {
 
 test("the committed snapshot passes the install's own shape check", () => {
   assert.deepEqual(pinProblems(PIN), []);
-  assert.ok(PIN.files.includes("tools/report2ui5/cli.mjs"));
-  assert.deepEqual([...PIN.files].sort(), PIN.files, "the generator writes the files sorted");
+  const paths = PIN.files.map((f) => f.path);
+  assert.ok(paths.includes("tools/report2ui5/cli.mjs"));
+  assert.deepEqual([...paths].sort(), paths, "the generator writes the files sorted");
   assert.ok(PIN.deps.some((d) => d.name === "@abaplint/core"));
 });
 
-test("package.json's report2ui5Release names the snapshot's commit and checksum", () => {
-  assert.deepEqual(PKG.report2ui5Release, { commit: PIN.commit, tarballSha256: PIN.tarballSha256 });
+test("package.json's report2ui5Release names the snapshot's commit", () => {
+  assert.deepEqual(PKG.report2ui5Release, { commit: PIN.commit });
 });
 
 test("the snapshot is not bundled code: report2ui5.json carries data only", () => {
   const keys = Object.keys(snapshot).sort();
-  assert.deepEqual(keys, ["commit", "deps", "files", "note", "source", "tarballSha256"]);
+  assert.deepEqual(keys, ["commit", "deps", "files", "note", "source"]);
+  for (const f of PIN.files) {
+    assert.deepEqual(Object.keys(f).sort(), ["path", "sha256", "size"]);
+  }
 });
 
 // -------------------------------------------------------------- the plan
@@ -187,7 +200,7 @@ test("the plan: codeload's tarball of the commit, then each package, into <stora
     plan.downloads.map((d) => d.url),
     [`https://codeload.github.com/abap2UI5-addons/abap-cloud-gui/tar.gz/${COMMIT}`, CORE_URL, JSON5_URL]
   );
-  assert.deepEqual(plan.downloads[0].check, { sha256: pin.tarballSha256 });
+  assert.deepEqual(plan.downloads[0].check, { files: pin.files });
   assert.deepEqual(plan.downloads[1].check, { integrity: pin.deps[0].integrity });
   assert.equal(plan.downloads[1].into, "node_modules/@abaplint/core");
 });
@@ -196,9 +209,11 @@ test("a pin that would download a branch, an unknown host or outside the tools i
   const { pin } = fixture();
   assert.deepEqual(pinProblems(pin), []);
   assert.match(pinProblems({ ...pin, commit: "main" }).join(), /commit/);
-  assert.match(pinProblems({ ...pin, tarballSha256: "abc" }).join(), /tarballSha256/);
-  assert.match(pinProblems({ ...pin, files: [...FILES, "../etc/passwd"] }).join(), /outside/);
-  assert.match(pinProblems({ ...pin, files: [...FILES, "scripts/x.mjs"] }).join(), /outside/);
+  assert.match(pinProblems({ ...pin, files: [...FILES, record("tools/report2ui5/cli.mjs")] }).join(), /listed twice/);
+  assert.match(pinProblems({ ...pin, files: [...FILES, { ...FILES[0], path: "tools/report2ui5/x.mjs", sha256: "abc" }] }).join(), /sha256/);
+  assert.match(pinProblems({ ...pin, files: [...FILES, { ...FILES[0], path: "tools/report2ui5/x.mjs", size: -1 }] }).join(), /size/);
+  assert.match(pinProblems({ ...pin, files: [...FILES, record("../etc/passwd", "x")] }).join(), /outside/);
+  assert.match(pinProblems({ ...pin, files: [...FILES, record("scripts/x.mjs", "x")] }).join(), /outside/);
   const evil = { ...pin.deps[0], url: "https://example.com/core.tgz" };
   assert.match(pinProblems({ ...pin, deps: [evil] }).join(), /registry\.npmjs\.org/);
   const nested = { ...pin.deps[1], path: "node_modules/../../json5" };
@@ -214,10 +229,11 @@ test("safe relative paths: no .., nothing absolute, no backslash, no NUL", () =>
 
 // ---------------------------------------------------------- verification
 
-test("sha256: the pinned bytes pass, any other bytes are refused before unpacking", () => {
-  const b = Buffer.from("hello");
-  assert.equal(sha256Error(b, sha256(b), "x"), undefined);
-  assert.match(sha256Error(Buffer.from("hellO"), sha256(b), "x") ?? "", /does not match the pinned SHA-256/);
+test("a pinned file: its size and the SHA-256 of its content, nothing else passes", () => {
+  const f = record("tools/report2ui5/cli.mjs", "hello");
+  assert.equal(fileError(Buffer.from("hello"), f, "x"), undefined);
+  assert.match(fileError(Buffer.from("hellO"), f, "x") ?? "", /tools\/report2ui5\/cli\.mjs does not match its pinned SHA-256/);
+  assert.match(fileError(Buffer.from("hello!"), f, "x") ?? "", /is 6 bytes, the pin says 5/);
 });
 
 test("integrity: npm's SRI string, the strongest algorithm decides", () => {
@@ -301,10 +317,44 @@ async function refused(
   }
 }
 
-test("a tampered source tarball is refused and nothing is left behind", async () => {
+test("the tarball's own bytes are not pinned: other compression of the same files installs", async () => {
+  const dir = storage();
+  try {
+    const { pin, blobs } = fixture();
+    const plain = zlib.gunzipSync(blobs.get(tarballUrl(COMMIT))!);
+    const recompressed = zlib.gzipSync(plain, { level: 1 });
+    assert.notDeepEqual(recompressed, blobs.get(tarballUrl(COMMIT)));
+    blobs.set(tarballUrl(COMMIT), recompressed);
+    const r = await installReport2ui5({ pin, storage: dir, download: downloader(blobs), tar });
+    assert.equal(r.installed, true);
+    assert.equal(fs.readFileSync(path.join(r.root, "tools/report2ui5/cli.mjs"), "utf8"), TEXTS["tools/report2ui5/cli.mjs"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("one changed byte in one pinned file refuses the whole install, naming the file", async () => {
   const { pin, blobs } = fixture();
-  blobs.set(tarballUrl(COMMIT), tgz(sourceEntries([{ path: `${TOP}/tools/report2ui5/extra.mjs`, data: "evil" }])));
-  await refused(blobs, pin, /does not match the pinned SHA-256/);
+  const tampered = sourceEntries().map((e) =>
+    e.path.endsWith("lib/convert.mjs") ? { ...e, data: e.data!.replace("core", "corf") } : e
+  );
+  blobs.set(tarballUrl(COMMIT), tgz(tampered));
+  await refused(blobs, pin, /tools\/report2ui5\/lib\/convert\.mjs does not match its pinned SHA-256/);
+});
+
+test("a pinned file of another size is refused, and a file the pin does not name is never unpacked", async () => {
+  const { pin, blobs } = fixture();
+  const longer = sourceEntries().map((e) => (e.path.endsWith("cli.mjs") ? { ...e, data: `${e.data}// more\n` } : e));
+  blobs.set(tarballUrl(COMMIT), tgz(longer));
+  await refused(blobs, pin, /tools\/report2ui5\/cli\.mjs is \d+ bytes, the pin says/);
+  const dir = storage();
+  try {
+    const extra = fixture(tgz(sourceEntries([{ path: `${TOP}/tools/report2ui5/extra.mjs`, data: "evil" }])));
+    const r = await installReport2ui5({ pin: extra.pin, storage: dir, download: downloader(extra.blobs), tar });
+    assert.equal(fs.existsSync(path.join(r.root, "tools/report2ui5/extra.mjs")), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a package that does not match its integrity is refused, and an older install stays", async () => {
@@ -480,8 +530,13 @@ test("generator: commit, checksum, the CLI's import closure and the lock's closu
     assert.equal(r.status, 0, r.stderr);
     const out = JSON.parse(fs.readFileSync(path.join(dir, "r.json"), "utf8")) as Report2ui5Pin & { source: string };
     assert.equal(out.commit, COMMIT);
-    assert.equal(out.tarballSha256, sha256(source));
-    assert.deepEqual(out.files, ["tools/report2ui5/cli.mjs", "tools/report2ui5/lib/convert.mjs", "tools/report2ui5/lib/gate.mjs"]);
+    assert.deepEqual(out.files.map((f) => f.path), ["tools/report2ui5/cli.mjs", "tools/report2ui5/lib/convert.mjs", "tools/report2ui5/lib/gate.mjs"]);
+    assert.deepEqual(out.files[0], record("tools/report2ui5/cli.mjs", GOOD_CLI));
+    // the archive's compression does not enter the snapshot
+    const recompressed = zlib.gzipSync(zlib.gunzipSync(source), { level: 1 });
+    fs.writeFileSync(path.join(dir, "src.tgz"), recompressed);
+    const same = generate(dir, ["--check"]);
+    assert.equal(same.status, 0, same.stderr);
     assert.deepEqual(
       out.deps.map((d) => `${d.path}@${d.version}`),
       ["node_modules/@abaplint/core@9.9.9", "node_modules/@abaplint/core/node_modules/strnum@2.5.1", "node_modules/json5@2.2.3"]
@@ -490,7 +545,7 @@ test("generator: commit, checksum, the CLI's import closure and the lock's closu
       name: "json5", version: "2.2.3", url: JSON5_URL, integrity: sri(JSON5), path: "node_modules/json5",
     });
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
-    assert.deepEqual(pkg.report2ui5Release, { commit: COMMIT, tarballSha256: sha256(source) });
+    assert.deepEqual(pkg.report2ui5Release, { commit: COMMIT });
 
     // --check over the same artefact: up to date
     const ok = generate(dir, ["--check"]);

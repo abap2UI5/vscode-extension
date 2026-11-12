@@ -12,10 +12,10 @@ The bundled linter moves to v0.9.0.
   need a `git clone` of abap-cloud-gui, an `npm ci` and a setting before the
   first run. *Install Report Converter* - offered by the migrate command
   when nothing is configured - now downloads it in one click: the addon at a
-  commit this release pins, checked against its recorded SHA-256, with the
+  commit this release pins, of which only the converter's own files are
+  unpacked, each checked against its recorded size and SHA-256, with the
   exact parser packages the addon's own lockfile names, each checked
-  against its integrity; only the converter's files are unpacked, into the
-  extension's storage. A checkout you configured still wins, and one that
+  against its integrity, into the extension's storage. A checkout you configured still wins, and one that
   does not hold is still reported rather than skipped. Restricted Mode
   neither downloads nor runs the installed copy.
 - **Migrate Classic Report works with a current abap-cloud-gui checkout.**

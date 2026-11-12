@@ -1317,7 +1317,6 @@
     "commit": "369f4afdd19932df8ba8fb8ee7df227c51029ba8"
   },
   "report2ui5Release": {
-    "commit": "78358275fdaf1452d3948d38eef9103586bbf058",
-    "tarballSha256": "19f8fcae8dff3f38c1d32c8b80cee270468670f6f028a051621eb0c0154f4def"
+    "commit": "78358275fdaf1452d3948d38eef9103586bbf058"
   }
 }

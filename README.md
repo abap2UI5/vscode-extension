@@ -184,10 +184,10 @@ either shape works), the converter behind the MCP server's `migrate_report`
 tool. It is not on npm - and it needs no checkout either: the first time,
 the command offers *Install* (or run *Install Report Converter* yourself),
 one click that downloads the converter at the abap-cloud-gui commit this
-extension release pins, checks the archive against the SHA-256 recorded for
-that commit and every npm package of its parser against its lockfile
-integrity, and unpacks only the converter's own files and those packages
-into the extension's storage (about 2 MB downloaded, 8 MB on disk). The
+extension release pins, unpacks only the converter's own files from it -
+each checked against the size and SHA-256 recorded for it - and every npm
+package of its parser, each checked against its lockfile integrity, into
+the extension's storage (about 2 MB downloaded, 8 MB on disk). The
 pinned commit moves with extension releases, never with the addon's branch.
 Nothing is downloaded or run from there in Restricted Mode.
 

@@ -113,8 +113,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/unitdiscovery.ts` | `vscode`-free: the test classes (`CLASS … FOR TESTING`) and test methods (`METHODS … FOR TESTING`) of a `*.clas.testclasses.abap` with the range each is declared at, plus the fixtures (`setup`, `class_setup`, …) - read off the blanked source, never the raw text |
 | `src/unitresults.ts` | `vscode`-free: the runner's `--json` report as one result per test method (`parseUnitReport` - a report that is empty, cut off or not the runner's is ONE error result, never an exception) and what it says about each known method (`outcomesFor` - a method the report does not name is "not run", never "passed": the runner stops at the first failure). The report carries NO source position |
 | `src/report2cloud.ts` | `vscode`-free: what "Migrate Classic Report to abap2UI5" decides - where abap-cloud-gui's converter CLI is - report2UI5's `tools/report2ui5/cli.mjs`, else 1.0.0's `tools/report2cloud/cli.mjs` (`cliIn`) - (`abap2ui5.report2cloud.path`, then `ABAP_CLOUD_GUI_HOME`, then a `cloudGui` directory under `mcp.reposRoot`, then the copy "Install Report Converter" installed - not handed in in Restricted Mode; an explicit answer that does not hold is reported, never skipped), the program and class names the CLI derives, its arguments, what its exit code and output mean (0 converted, 2 refused with `file:row:col - reason` lines, 1 wrong call, a missing `npm ci`), and the range a refusal underlines |
-| `src/report2ui5install.ts` | `vscode`-free: what "Install Report Converter" does - the plan out of the `src/data/report2ui5.json` pin (codeload's tarball of the pinned abap-cloud-gui commit, then each npm package of the parser's closure; root `<storage>/report2ui5/<commit>/` with `tools/...` and `node_modules/...`), the verification before anything is unpacked (SHA-256 of the tarball, npm's SRI `integrity` of each package), the reading of the archives through an injected `tar` `Parser` (only the pinned files of the source tarball, refusing `..`, absolute paths, backslashes, links at or above a pinned file, any link in a package, duplicates), and the atomic finish (a staging directory renamed into place, older commits removed after) |
-| `scripts/generate-report2ui5.mjs` | Regenerates `src/data/report2ui5.json` and package.json's `report2ui5Release` from abap-cloud-gui (a commit: `--ref`, a checkout's HEAD, or main's tip; its codeload tarball, or `--tarball <file>`): the tarball's SHA-256, the CLI's import closure read by esbuild out of the archive, and the `@abaplint/core` closure out of the archive's own package-lock.json; `--check` fails when either file is stale |
+| `src/report2ui5install.ts` | `vscode`-free: what "Install Report Converter" does - the plan out of the `src/data/report2ui5.json` pin (codeload's tarball of the pinned abap-cloud-gui commit, then each npm package of the parser's closure; root `<storage>/report2ui5/<commit>/` with `tools/...` and `node_modules/...`), the verification before anything is written (each pinned file's size and SHA-256 of its unpacked content - the tarball's own bytes are not pinned, GitHub does not promise byte-stable archives; npm's SRI `integrity` of each package before it is read), the reading of the archives through an injected `tar` `Parser` (only the pinned files of the source tarball, refusing `..`, absolute paths, backslashes, links at or above a pinned file, any link in a package, duplicates, missing files), and the atomic finish (a staging directory renamed into place, older commits removed after) |
+| `scripts/generate-report2ui5.mjs` | Regenerates `src/data/report2ui5.json` and package.json's `report2ui5Release` from abap-cloud-gui (a commit: `--ref`, a checkout's HEAD, or main's tip; its codeload tarball, or `--tarball <file>` - a `git archive` of the commit does as well): the CLI's import closure read by esbuild out of the archive, each file with its size and SHA-256, and the `@abaplint/core` closure out of the archive's own package-lock.json; `--check` fails when either file is stale |
 | `src/migratereport.ts` | The command's plumbing: report pick (explorer/editor uri, active `.prog.abap`, open dialog), the installed copy's root (none in Restricted Mode) for the ladder's last rung, *Install* before *Configure…* when nothing is configured, "Install Report Converter" itself (refused in Restricted Mode; `fetch` with progress, cancellation, a timeout and a size cap; `tar` from `dist/rendergate-tar.js` through `loadTar`), class-name prompt, output folder, the overwrite question, the CLI through `childproc.run` with VS Code's own Node, refusals as diagnostics on the report, *Write Partial Result*, opening the class beside its migration report |
 | `src/unittests.ts` | The command's plumbing: the one reused "abap2UI5 unit tests" terminal (recreated when cwd or the `*_HOME` env changed), the class from the tree node / lens / active editor, the Restricted Mode refusal |
 | `src/testexplorer.ts` | The same tests in the Testing view (desktop only): a `TestController` with items per include / test class / method and one *Run* profile, run through `childproc.run` with `unitTestArgs` plus `--json`. Lazy - the workspace is searched when the Testing view asks, an include is parsed when it is expanded, opened or run; follows the test includes through the one watcher in `codelens.ts` (`onDidChangeTestInclude`). A failure is shown at the method's declaration, because the runner names no line |
@@ -785,9 +785,10 @@ Facts an agent cannot see from the code but will trip over:
   bundle, so "Install Report Converter" downloads codeload's tarball of one
   commit (`https://codeload.github.com/abap2UI5-addons/abap-cloud-gui/tar.gz/<sha>`)
   and the npm closure of `@abaplint/core` as that commit's package-lock.json
-  resolves it. `src/data/report2ui5.json` records the commit, the tarball's
-  SHA-256, the CLI's files and each package's url and `integrity`;
-  package.json's `report2ui5Release` repeats commit and checksum as the
+  resolves it. `src/data/report2ui5.json` records the commit, the CLI's
+  files with the size and SHA-256 of each one's unpacked content, and each
+  package's url and `integrity`; package.json's `report2ui5Release` repeats
+  the commit as the
   record of which artefact a release installs (`report2ui5.test.ts` holds
   the two together and runs the install's shape check over the snapshot).
   `scripts/generate-report2ui5.mjs` writes both, `npm run report2ui5:check`
@@ -795,11 +796,14 @@ Facts an agent cannot see from the code but will trip over:
   weekly through a PR - the converter a user runs changes only with a
   release of this extension. The generator needs `npm ci` (it reads the
   archive with `tar` and the import graph with esbuild, executing nothing of
-  it) and so does that bump's regenerate step. The SHA-256 is of codeload's
-  BYTES: generate it from a download (or `--tarball` of a file that IS that
-  download), never from a `git archive` of a checkout, whose compression
-  need not match. The install verifies before it unpacks, unpacks only the
-  pinned files, refuses links and traversal, and renames a complete staging
+  it) and so does that bump's regenerate step. Do NOT pin the tarball's
+  own bytes: GitHub does not promise byte-stable compression of its
+  archives, so a recorded archive checksum can stop matching codeload at
+  any time and every install would refuse. What is pinned is the CONTENT -
+  which is also why the snapshot can be generated offline from
+  `git archive --format=tar.gz <commit>` of a checkout (`--tarball`). The
+  install verifies each package before it reads it and each pinned file
+  before anything is written, unpacks only the pinned files, refuses links and traversal, and renames a complete staging
   directory into `<globalStorage>/report2ui5/<commit>/`; it is the LAST rung
   of the migrate command's resolution (setting > `ABAP_CLOUD_GUI_HOME` >
   repos root > installed) and is neither downloaded nor run in Restricted
