@@ -644,7 +644,9 @@ export function watchProxyStatus(session: Session): void {
     // A launch URL may carry sap-user/sap-password, and the path is logged
     // verbatim below - the same rule the traffic log applies (report.ts).
     const safePath = redactQueryCredentials(path);
-    if (status !== 401 && status !== 403) {
+    // an answer the strategy read as an expired logon (a redirect to the
+    // identity provider, a logon form) is offered like a 401
+    if (status !== 401 && status !== 403 && !expired) {
       if (status >= 500) {
         session.log(`proxy: the system answered ${status} for ${safePath}`);
       }

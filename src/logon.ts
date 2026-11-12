@@ -6,6 +6,7 @@ import {
   InteractiveLogonRequired,
 } from "./authstrategy";
 import type { AuthKind } from "./systemprofile";
+import { BrowserLogonStrategy, BrowserSession } from "./browserlogon";
 
 /*
  * logon - which `AuthStrategy` a system profile logs on with.
@@ -28,6 +29,10 @@ export interface LogonDeps {
   /** The client certificate chosen for `origin`, read and checked
    *  (certificate) - asking for one when none is chosen yet. */
   clientCertificate(origin: string): Promise<ClientCertificateMaterial | undefined>;
+  /** The live browser logon of `origin` (browser) - opening the browser
+   *  when there is none; a flow without a UI is refused instead
+   *  (`browserLogonNeeded`). */
+  browserSession(origin: string): Promise<BrowserSession | undefined>;
 }
 
 /** The profile fields the factory reads. */
@@ -50,6 +55,10 @@ export async function strategyFor(
     case "certificate": {
       const material = await deps.clientCertificate(origin);
       return material ? new CertificateAuthStrategy(material) : undefined;
+    }
+    case "browser": {
+      const session = await deps.browserSession(origin);
+      return session ? new BrowserLogonStrategy(origin, session) : undefined;
     }
     case "basic": {
       const creds = await deps.basicCredentials(origin);

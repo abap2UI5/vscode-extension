@@ -21,7 +21,7 @@ import { originOf } from "./urls";
 
 /** The logon mechanisms a profile may name (docs/auth.md). Each one is a
  *  case of `strategyFor` (`logon.ts`). */
-export const AUTH_KINDS = ["basic", "certificate"] as const;
+export const AUTH_KINDS = ["basic", "certificate", "browser"] as const;
 export type AuthKind = (typeof AUTH_KINDS)[number];
 
 export type SystemRole = "development" | "production";
@@ -38,9 +38,17 @@ export interface ProfileFields {
    *  `viewCheck.distribution` while the system is active. */
   distribution?: "sapui5" | "openui5";
   /** How the proxy logs on to the system: `"basic"` (user and password,
-   *  the default) or `"certificate"` (an X.509 client certificate the user
-   *  chooses per host). */
+   *  the default), `"certificate"` (an X.509 client certificate the user
+   *  chooses per host) or `"browser"` (a logon in a browser the extension
+   *  starts, its session cookies replayed - `browserlogon.ts`). */
   auth?: AuthKind;
+}
+
+/** `a`, `a and b`, `a, b and c`. */
+function listOf(words: string[]): string {
+  return words.length < 3
+    ? words.join(" and ")
+    : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
 }
 
 const UI5_VERSION_RE = /^\d+\.\d+(\.\d+)?$/;
@@ -99,7 +107,7 @@ function read(entry: unknown): { fields: ProfileFields; notes: string[] } {
   } else if (auth) {
     notes.push(
       `"auth": ${shown(raw.auth)} is ignored - the values accepted so far are ` +
-        AUTH_KINDS.map((kind) => `"${kind}"`).join(" and ")
+        listOf(AUTH_KINDS.map((kind) => `"${kind}"`))
     );
   }
   return { fields, notes };

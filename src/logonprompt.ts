@@ -12,6 +12,20 @@ import {
   withChoice,
 } from "./clientcert";
 import { certificateNeeded, secretKeysFor, strategyFor } from "./logon";
+import {
+  BrowserLogonError,
+  browserLogonNeeded,
+  BrowserSession,
+  browserSessions,
+  logonUrlOf,
+  pickExecutable,
+  removeStaleProfiles,
+  runBrowserLogon,
+} from "./browserlogon";
+import { findChromium } from "./screenshot";
+import { renderGateBrowsers } from "./rendergate";
+import { CONFIG_SECTION } from "./settings";
+import * as path from "path";
 import { ensureCredentials, ensureSystem, rememberOrigin, SystemProfile } from "./systems";
 import { originOf } from "./urls";
 import type { Session } from "./session";
@@ -52,7 +66,137 @@ export async function strategyForSystem(
   return strategyFor(system, origin, {
     basicCredentials: (o) => ensureCredentials(context, o),
     clientCertificate: (o) => ensureClientCertificate(context, o, options),
+    browserSession: (o) => ensureBrowserSession(context, system, o, options),
   });
+}
+
+/**
+ * The live browser logon of `origin` - in memory, for this window. None (or
+ * an expired one): `mayAsk` opens the browser on the profile's launch URL
+ * and waits for the user (progress notification with Cancel); a flow
+ * without a UI is refused, naming F9 and "Log On in Browser".
+ */
+async function ensureBrowserSession(
+  context: vscode.ExtensionContext,
+  system: SystemProfile,
+  origin: string,
+  options: { mayAsk: boolean; log?: (message: string) => void }
+): Promise<BrowserSession | undefined> {
+  const live = browserSessions.get(origin);
+  if (live) {
+    return live;
+  }
+  if (!options.mayAsk) {
+    throw browserLogonNeeded(hostOf(origin));
+  }
+  return logOnInBrowserFor(context, system, origin, options.log);
+}
+
+/** Opens the browser for `origin` and keeps what it hands over. Undefined
+ *  when the user cancelled or no browser could be found (both told). */
+async function logOnInBrowserFor(
+  context: vscode.ExtensionContext,
+  system: SystemProfile,
+  origin: string,
+  log: (message: string) => void = () => undefined
+): Promise<BrowserSession | undefined> {
+  const configured = vscode.workspace
+    .getConfiguration(CONFIG_SECTION)
+    .get<string>("logon.browserExecutable", "");
+  const picked = pickExecutable(configured, findChromium(renderGateBrowsers(context)));
+  if (!picked.executable) {
+    log(`logon: ${picked.problem}`);
+    const install = "Install Render Gate";
+    const settings = "Open Settings";
+    void vscode.window
+      .showErrorMessage(`abap2UI5: ${picked.problem}.`, install, settings)
+      .then((pick) => {
+        if (pick === install) {
+          void vscode.commands.executeCommand("abap2ui5.installRenderGate");
+        } else if (pick === settings) {
+          void vscode.commands.executeCommand(
+            "workbench.action.openSettings",
+            "abap2ui5.logon.browserExecutable"
+          );
+        }
+      });
+    return undefined;
+  }
+  const profileRoot = path.join(context.globalStorageUri.fsPath, "logon-profiles");
+  removeStaleProfiles(profileRoot);
+  const host = hostOf(origin);
+  try {
+    const cookies = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `abap2UI5: log on to ${host} in the browser window`,
+        cancellable: true,
+      },
+      (_progress, token) => {
+        const abort = new AbortController();
+        token.onCancellationRequested(() => abort.abort());
+        return runBrowserLogon({
+          executable: picked.executable!,
+          url: logonUrlOf(system.template),
+          origin,
+          profileRoot,
+          signal: abort.signal,
+          log,
+        });
+      }
+    );
+    const session = new BrowserSession(cookies);
+    browserSessions.set(origin, session);
+    log(`logon: browser logon for ${host} kept in memory (${session.describe()})`);
+    return session;
+  } catch (err) {
+    if (err instanceof BrowserLogonError && (err.reason === "closed" || err.reason === "aborted")) {
+      log(`logon: ${err.message}`);
+      return undefined;
+    }
+    throw err;
+  }
+}
+
+/**
+ * "abap2UI5: Log On in Browser" - for the active system's host, whatever a
+ * session there says: the old one is dropped, the browser opens, and a
+ * running proxy on that host is restarted with the new logon.
+ */
+export async function logOnInBrowser(
+  session: Session,
+  restart: (system: SystemProfile, origin: string) => Promise<void>
+): Promise<void> {
+  const system = await ensureSystem(session.ctx);
+  if (!system) {
+    return;
+  }
+  const origin = originOf(session.urlFor(system, "PROBE"));
+  if (!origin) {
+    return;
+  }
+  if ((system.auth ?? "basic") !== "browser") {
+    void vscode.window.showInformationMessage(
+      `abap2UI5: ${system.name} logs on with "${system.auth ?? "basic"}" - set "auth": "browser" ` +
+        "in its abap2ui5.systems entry to log on in the browser."
+    );
+    return;
+  }
+  browserSessions.forget(origin);
+  if (session.proxy.systemOrigin === origin) {
+    await restart(system, origin);
+    return;
+  }
+  try {
+    const logged = await logOnInBrowserFor(session.ctx, system, origin, (m) => session.log(m));
+    if (logged) {
+      void vscode.window.showInformationMessage(
+        `abap2UI5: logged on to ${hostOf(origin)} - press F9 to run an app.`
+      );
+    }
+  } catch (err) {
+    reportLogonFailure(err, (m) => session.log(m));
+  }
 }
 
 /** The chosen certificate of `origin`, read and checked - asking for one

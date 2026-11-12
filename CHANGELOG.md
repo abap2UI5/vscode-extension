@@ -48,6 +48,21 @@ The bundled linter moves to v0.9.0.
   when a workspace lists it without the field. The bug report says which
   logon each system uses, and redacts cookies, bearer tokens and
   passphrases should a log line ever quote one.
+- **Log on in the browser (single sign-on).** A system entry in
+  `abap2ui5.systems` can now say `"auth": "browser"`: F9 opens a browser
+  window on the system, you log on there the way the system wants - SAML 2.0
+  single sign-on, Kerberos, a certificate from your OS store, the logon form
+  - and the window closes itself once the system serves the page. The
+  preview, the inspector, the live model, the traffic log, screenshots, the
+  connection check and the agent tools then run with that logon. The browser
+  is the Chromium *Install Render Gate* downloads, or your own Chrome or Edge
+  (`abap2ui5.logon.browserExecutable`, user settings only); it starts with a
+  fresh profile that is deleted afterwards. Only the system's session cookies
+  are kept, in memory for this window - nothing is stored, and the preview
+  never sees them. When the session runs out, the preview says so and offers
+  *Log On Again*; *abap2UI5: Log On in Browser* starts a fresh logon at any
+  time. The agent tools never open a browser themselves - they ask you to
+  press F9 first. The logon waits five minutes; closing the window cancels it.
 - **Control Properties removes an attribute of an upper-case chain.** In a
   chain written `)->A( n = ...`, the view added attributes but refused to
   remove one, calling the layout unusual. ABAP does not care about case,

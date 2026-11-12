@@ -145,6 +145,7 @@ that proxy logs on, in its `auth` field:
 | --- | --- | --- |
 | `"basic"` (default) | user and password, asked for once per host | both in the VS Code SecretStorage |
 | `"certificate"` | an X.509 client certificate the system maps to your user - a `.pfx`/`.p12` file, or a PEM certificate and its key | the file PATH in VS Code's machine-local state, the passphrase in the SecretStorage; the file is read each time the proxy starts |
+| `"browser"` | you log on in a browser window the extension opens - whatever the system asks for (SAML 2.0 single sign-on, Kerberos, a certificate from the OS store, the logon form) | nothing: the system's session cookies (`MYSAPSSO2`, `SAP_SESSIONID_*`) are kept in memory for this VS Code window only |
 
 ```json
 "abap2ui5.systems": [
@@ -163,10 +164,26 @@ than basic that your user settings name for a host stays in effect when a
 workspace lists the same host without it. **Clear Stored SAP Credentials**
 forgets passwords, passphrases and certificate choices alike.
 
+For a `"browser"` system, F9 opens a browser window on the system's
+abap2UI5 service the first time in a window (or run **abap2UI5: Log On in
+Browser**). Log on there; once the system serves its page and has issued the
+session cookie, the window closes and the app loads in the preview. The
+browser is the Chromium **abap2UI5: Install Render Gate** downloads, or your
+own Chrome or Edge named in `abap2ui5.logon.browserExecutable` (user
+settings only). It runs with a fresh profile that is deleted afterwards and
+is driven over a pipe, without a network port. Only `MYSAPSSO2` and
+`SAP_SESSIONID_*` of the system's host are kept - the identity provider's
+cookies stay in the deleted profile - and the proxy keeps both out of the
+preview's own cookies. When the session runs out (the system redirects to
+its identity provider, sends its logon form or answers 401) the preview says
+so and offers **Log On Again**. The logon waits five minutes; closing the
+window cancels it. The agent tools never open a browser: without a logon
+they ask you to press F9 first. Desktop only; on a remote host without a
+display the window cannot be shown.
+
 **Check System Connection** reports a missing or refused client certificate
-as its own step, and for a system that answers without offering basic auth
-it names the `auth` field. A browser (SSO) logon is planned; until then such
-a system runs with `abap2ui5.openMode` set to `"external"`.
+as its own step, an expired browser logon as one, and for a system that
+answers without offering basic auth it names the `auth` field.
 
 ## Agent app tools on the system
 
@@ -362,6 +379,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Check System Connection | `abap2ui5.checkConnection` |  |
 | Clear Stored SAP Credentials | `abap2ui5.resetCredentials` |  |
 | Choose Client Certificate | `abap2ui5.chooseClientCertificate` |  |
+| Log On in Browser | `abap2ui5.logOnInBrowser` |  |
 | Forget Trusted Certificates | `abap2ui5.forgetTrustedCertificates` |  |
 | New App from Template | `abap2ui5.newApp` |  |
 | New Project from Template | `abap2ui5.newProject` |  |
@@ -417,6 +435,7 @@ when the two drift apart.
 | `abap2ui5.launchUrlTemplate` | `""` | URL template used to launch an abap2UI5 app. The `{class}` placeholder is replaced with the (upper-cased) class name. |
 | `abap2ui5.systems` | `[]` | The systems F9 can launch against. The active one is picked with the command **"abap2UI5: Select System"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again. An entry may also name the UI5 version and distribution its system serves (`minUi5`, `distribution` - used by the view check while that system is active) and its `role` (`"production"`: the agent app tools refuse to act there). |
 | `abap2ui5.allowUnauthorizedCerts` | `false` | Accept **every** TLS certificate that cannot be verified - self-signed certificates, private CAs not in the OS trust store, hostname mismatches - on **every** system, without asking. Off by default. |
+| `abap2ui5.logon.browserExecutable` | `""` | The browser a system with `"auth": "browser"` logs on in - the full path of a Chrome, Edge or Chromium executable. Empty (the default): the Chromium **"abap2UI5: Install Render Gate"** downloads. The browser is started with a fresh, temporary profile that is deleted after the logon, controlled over a pipe (no network port); the session cookies it hands over are kept in memory for this VS Code window only. |
 | `abap2ui5.codeLens` | `true` | Show *Run*, *Activate & reload*, *Check views* and *Autofix n findings* above the class definition of an abap2UI5 app. The autofix lens appears only while the view check has findings it can correct mechanically. |
 | `abap2ui5.openMode` | `"tab"` | How F9 opens the app. |
 | `abap2ui5.reloadOn` | `"activation"` | When the preview of the shown app class reloads by itself. |

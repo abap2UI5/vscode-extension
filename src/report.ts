@@ -148,6 +148,12 @@ export function redact(text: string): string {
       )
       // the logon ticket and the ICF session anywhere else
       .replace(/\b(MYSAPSSO2|SAP_SESSIONID_[A-Za-z0-9_]*)=(?!<redacted>)[^;\s,"']*/g, "$1=<redacted>")
+      // ...and as a cookie object of the DevTools protocol (the browser
+      // logon reads them with Network.getCookies): the value follows the name
+      .replace(
+        /("name"\s*:\s*"(?:MYSAPSSO2|SAP_SESSIONID_[A-Za-z0-9_]*)"\s*,\s*"value"\s*:\s*")(?!<redacted>)[^"]*/g,
+        "$1<redacted>"
+      )
       // OAuth and certificate secrets in JSON or query strings
       .replace(
         /("?\b(?:access_token|refresh_token|id_token|client_secret|clientsecret|passphrase|password)"?\s*[:=]\s*"?)(?!<redacted>)[^"&\s,}]+/gi,

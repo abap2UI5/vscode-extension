@@ -55,17 +55,19 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/webviewpreview.ts` | HTML for the running app's preview: toolbar, theme/language pickers, device sizes, loading overlay, the page script |
 | `src/webviewpanels.ts` | HTML for the pages that need no running app: the "Control Properties" form, the static view preview, the navigation map |
 | `src/webviewwelcome.ts` | HTML for the welcome screen (the open-mode-aware empty state) |
-| `src/proxy.ts` | Local reverse proxy that logs every request on with its `AuthStrategy` (basic auth, a client certificate) so the embedded iframe avoids a 401; authorized by the token in its own url. Holds `SapProxy` whole (the listener, the token gate, the certificate check per request, the roundtrip ring) and re-exports the free-standing helpers of the four `proxy*.ts` parts - the module everyone imports from; the parts never import it (`proxysplit.test.ts` pins both) |
+| `src/proxy.ts` | Local reverse proxy that logs every request on with its `AuthStrategy` (basic auth, a client certificate, the session cookies of a browser logon) so the embedded iframe avoids a 401; authorized by the token in its own url. Holds `SapProxy` whole (the listener, the token gate, the certificate check per request, the roundtrip ring) and re-exports the free-standing helpers of the four `proxy*.ts` parts - the module everyone imports from; the parts never import it (`proxysplit.test.ts` pins both) |
 | `src/proxyadt.ts` | `vscode`-free: the ADT side of the proxy as pure parsing and types - `AdtStatusError`, `AdtClassState`, `AdtClassRef`, `parseAdtClassRefs` |
 | `src/proxyhtml.ts` | `vscode`-free: what the proxy does to an HTML document - `allowFraming`, `injectRuntimeHook` with the injected script, `RUNTIME_MESSAGE_MARKER`, the size limit for injection |
 | `src/proxybody.ts` | `vscode`-free: reading a response body in the proxy - `describeRejection` (redacted) and its sniff limit, `decodeBody`, `withUtf8Charset` |
 | `src/proxyheaders.ts` | `vscode`-free: the proxy's header-level rules, free of state - the token segment and `TOKEN_COOKIE`, the constant-time `tokensEqual`, `isLoopbackHost`, `rewriteSetCookie`, `rebasedReferer`, `requestHostname`, the hop-by-hop list |
 | `src/authstrategy.ts` | `vscode`-free: how the proxy logs a request on to the system - `AuthStrategy` (the headers for every outgoing request; optionally `prepare( )` awaited before each request, cookies merged into the client's `Cookie` header with `takeSetCookie` for a sliding session, TLS options for the handshake, `classifyAnswer` for a redirect to the IdP or a logon form; what a 401 means - `rejected` / `expired` / `ignore` - and the `texts` the breaker answers with) and its implementations `BasicAuthStrategy` (the old breaker sentences verbatim, `BASIC_TEXTS`) and `CertificateAuthStrategy` (no header, the client certificate in the TLS options); the secret sits in a `#private` field that neither serializes nor prints. `InteractiveLogonRequired` is a logon that needs the user |
 | `src/logon.ts` | `vscode`-free: `strategyFor(profile, origin, deps)` - the ONE place a profile's `auth` becomes a strategy, one `case` per mechanism, the secrets from injected `deps`; `secretKeysFor` (every mechanism's per-origin SecretStorage key, `session`/`oauth` reserved); the refusal for a flow without a UI (`certificateNeeded`) |
-| `src/logonprompt.ts` | Its plumbing: `strategyForSystem` (basic via `ensureCredentials`, the certificate from `globalState` + SecretStorage + file), the file picker and passphrase prompt behind "Choose Client Certificate", `reportLogonFailure` |
+| `src/logonprompt.ts` | Its plumbing: `strategyForSystem` (basic via `ensureCredentials`, the certificate from `globalState` + SecretStorage + file, the browser logon from `browserSessions` or a new logon with a cancellable progress notification - never for `mayAsk: false`), the file picker and passphrase prompt behind "Choose Client Certificate", "Log On in Browser", the executable pick (`abap2ui5.logon.browserExecutable`, else the render gate's Chromium via `findChromium`, else "Install Render Gate" / the setting), `reportLogonFailure` |
+| `src/browserlogon.ts` | `vscode`-free: the browser logon of `auth: "browser"` (docs/auth.md 3.1) - `runBrowserLogon` (a headed Chromium over `cdp.ts` with a throwaway `--user-data-dir` under the given root, deleted on every path - leftovers of a crash by `removeStaleProfiles`; the launch page navigated to over the protocol, never in argv; done when a top-level 200 of the system's origin is not the logon form (`isAppAnswer`, `looksLikeLogonPage` of `connectcheck.ts`) AND a session cookie exists (`Network.getCookies`, HttpOnly included); timeout, closed window and abort end it as `BrowserLogonError`), which cookies are kept (`sessionCookiesOf`: `MYSAPSSO2` and `SAP_SESSIONID_*` of the host, nothing else), `BrowserSession` / `browserSessions` (MEMORY ONLY, per origin, `#private`), `BrowserLogonStrategy` (cookies only, `takeSetCookie` for the sliding session, `expired` on a 401, a redirect off the origin or to `/sap/saml2/`, or an HTML answer where data was expected - `browserAnswerVerdict`), `logonUrlOf`, `pickExecutable`, `browserLogonNeeded` (the MCP refusal naming F9) |
+| `src/cdp.ts` | `vscode`-free: the minimal Chrome DevTools Protocol client over `--remote-debugging-pipe` (fd 3/4, NUL-framed JSON; no port): commands with ids, events, flattened target sessions, everything failed once the pipe closes; never logs a message (cookie values travel in them) |
 | `src/clientcert.ts` | `vscode`-free: the client certificate of `auth: "certificate"` as data - the remembered choice per origin (`choiceFor` / `withChoice`, a PATH, read tolerantly), `loadClientCertificate` (reads the files, checks passphrase, key match and expiry - `notAfter` of a PKCS#12 through the secure context - warns 14 days ahead), and `clientCertificateRefusal`, the sentence for a server's TLS alert about the client side of the handshake |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
-| `src/systemprofile.ts` | `vscode`-free: what a `systems` entry may say beyond name and url - `role`, `minUi5`, `distribution`, `auth` (`AUTH_KINDS`: `basic`, `certificate`) - parsed tolerantly (`profileFieldsOf`; what was ignored is `profileNotes`, logged once per change of the setting), `production` and a non-basic `auth` kept from the settings scopes a workspace's list shadows (`tightenRoles`, `tightenAuth`), the status bar's role text, and the detected UI5 version written back into an entry (`withDetectedUi5`) |
+| `src/systemprofile.ts` | `vscode`-free: what a `systems` entry may say beyond name and url - `role`, `minUi5`, `distribution`, `auth` (`AUTH_KINDS`: `basic`, `certificate`, `browser`) - parsed tolerantly (`profileFieldsOf`; what was ignored is `profileNotes`, logged once per change of the setting), `production` and a non-basic `auth` kept from the settings scopes a workspace's list shadows (`tightenRoles`, `tightenAuth`), the status bar's role text, and the detected UI5 version written back into an entry (`withDetectedUi5`) |
 | `src/checktarget.ts` | The settings half of a desktop check's options: the four `viewCheck` settings with the active system's profile laid over them (`checkSettings`, the precedence itself is `settingsForSystem` in `configcore.ts`), and the change notice / generation the view check and the inline annotations re-check on |
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics. The module everyone imports from; itself it holds the per-document check (`checkDocument`, its debounce timers and run generations, `findingsNow`) and the registration, and re-exports what lives in the four `viewcheck*` modules below |
 | `src/viewcheckoptions.ts` | The view check's questions about a DOCUMENT (VS Code plumbing): `isCheckable` with its per-version memo, `hasOwnView`, `pickDocument`, the directory a repo config is discovered from, the options and the baseline root governing a file |
@@ -199,7 +201,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `localbackend.ts`, `report2cloud.ts`, `report2ui5install.ts`, `report.ts`, `logon.ts`, `clientcert.ts`, `roundtrips.ts`, `adtwrite.ts`, `adtmessages.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
+`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `localbackend.ts`, `report2cloud.ts`, `report2ui5install.ts`, `report.ts`, `logon.ts`, `browserlogon.ts`, `cdp.ts`, `clientcert.ts`, `roundtrips.ts`, `adtwrite.ts`, `adtmessages.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts` with its parts `proxyadt.ts`, `proxyhtml.ts`, `proxybody.ts` and `proxyheaders.ts`, `authstrategy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` with its parts `webviewshared.ts`, `webviewpreview.ts`,
 `webviewpanels.ts` and `webviewwelcome.ts` (HTML strings only — the state they render is
@@ -388,9 +390,13 @@ identity (see Conventions).
   deletes all of them. A client certificate's FILE PATH is no secret and
   lives in `globalState` per origin (`abap2ui5.clientCertificates`), never
   in a setting a workspace could write; the file is read when the proxy
-  starts. Session cookies of a browser logon stay in memory only, and the
-  proxy keeps a cookie strategy's cookies and `MYSAPSSO2` out of the
-  answers to the preview (`withoutOwnCookies`). Every new mechanism is one
+  starts. Session cookies of a browser logon stay in memory only
+  (`browserSessions` in `browserlogon.ts`, per origin, emptied by "Clear
+  Stored SAP Credentials"; the browser's throwaway profile, which holds them
+  on disk while it runs, is deleted after every logon), and the proxy keeps
+  a cookie strategy's cookies and `MYSAPSSO2` out of the answers to the
+  preview (`withoutOwnCookies`). A flow without a UI never opens the browser
+  (`browserLogonNeeded`). Every new mechanism is one
   more `case` in `strategyFor`, never a call site that builds a strategy
   itself. `report.ts` redacts cookie values, bearer tokens, OAuth secrets
   and passphrases. The unscoped pre-0.14 keys are migrated on first use, so
@@ -418,14 +424,17 @@ identity (see Conventions).
   (argv is visible to every local user) and the launcher removes it from
   there before anything else runs. It is never started in Restricted Mode.
 - **A setting that names a program to start is `"scope": "machine"`.**
-  `viewCheck.command`, `mcp.command` and `mcp.reposRoot` decide which binary
+  `viewCheck.command`, `mcp.command`, `mcp.reposRoot` and
+  `logon.browserExecutable` (the browser a browser logon starts - it then
+  holds the session cookies) decide which binary
   the extension spawns; machine scope keeps a cloned repository's
   `.vscode/settings.json` out of that decision. They are listed under
   `capabilities.untrustedWorkspaces.restrictedConfigurations`, together with
   `systems`, `launchUrlTemplate`, `agent.enableAppTools`, `agent.confirmActions`, `report2cloud.path` (the
   abap-cloud-gui checkout whose report2cloud CLI the migrate command runs),
-  `viewCheck.render`, `viewCheck.rollingBundle` and `allowUnauthorizedCerts` -
-  eleven settings a cloned repository must not be able to set. `agent.enableAppTools` is machine scope
+  `viewCheck.render`, `viewCheck.rollingBundle`, `allowUnauthorizedCerts` and
+  `logon.browserExecutable` - twelve settings a cloned repository must not
+  be able to set. `agent.enableAppTools` is machine scope
   too, for the same reason in another shape: it lets an agent act on the
   system AS THE USER, so only the user's own settings may turn it on
   (`agentapps.test.ts` pins its scope, default and restriction).

@@ -18,6 +18,7 @@ import {
   setCookieValue,
 } from "../authstrategy";
 import { ProxyResponse, SapProxy } from "../proxy";
+import { BrowserSession } from "../browserlogon";
 import { authKindOf, certificateNeeded, secretKeysFor, strategyFor } from "../logon";
 import { AUTH_KINDS, profileFieldsOf, tightenAuth } from "../systemprofile";
 import { classifyBody, classifyStatus, describeConnectFailure, relogonOffer } from "../connectcheck";
@@ -399,6 +400,10 @@ test("strategyFor: the profile's auth picks the case, a missing auth is basic, a
       asked.push(`cert ${origin}`);
       return { cert: "c", key: "k" };
     },
+    browserSession: async (origin: string) => {
+      asked.push(`browser ${origin}`);
+      return new BrowserSession({ SAP_SESSIONID_X_100: "s" });
+    },
   };
   const basic = await strategyFor({}, "https://a", deps);
   assert.ok(basic instanceof BasicAuthStrategy);
@@ -411,6 +416,7 @@ test("strategyFor: the profile's auth picks the case, a missing auth is basic, a
   const cancelled = {
     basicCredentials: async () => undefined,
     clientCertificate: async () => undefined,
+    browserSession: async () => undefined,
   };
   assert.equal(await strategyFor({}, "https://a", cancelled), undefined);
   assert.equal(await strategyFor({ auth: "certificate" }, "https://a", cancelled), undefined);

@@ -245,6 +245,21 @@ export function classifyStatus(answer: {
   if (status >= 200 && status < 300) {
     return { label, ok: true, detail: `the system answered ${status}` };
   }
+  if ((status === 401 || (status >= 300 && status < 400)) && answer.auth === "browser") {
+    return {
+      label,
+      ok: false,
+      detail:
+        status === 401
+          ? "the system did not accept the browser logon (401)." + said
+          : `the system redirects (${status}) to its logon instead of serving the page`,
+      fix:
+        "The session of the browser logon has run out, or it was made for " +
+        "another client than the sap-client of the launch URL. Run " +
+        '"abap2UI5: Log On in Browser" (or this check again) and finish the ' +
+        "logon in the browser window.",
+    };
+  }
   if (status === 401 && certificate) {
     return {
       label,
@@ -410,13 +425,20 @@ export function classifyClientProbe(probe: {
  * abap2UI5 bootstrap is the sneakiest white preview of all: every earlier
  * step passes, and only the page itself says the URL points somewhere else.
  */
+/** Whether an HTML answer is the SAP logon page (the ICF form) rather than
+ *  an app - shared by `classifyBody` and the browser logon (`browserlogon.ts`),
+ *  which waits for the first answer that is not it. */
+export function looksLikeLogonPage(body: string): boolean {
+  return /sap-system-login|logonForm|SL__FORM/i.test(body);
+}
+
 export function classifyBody(body: string, auth?: string): CheckStep {
   const label = "Page content";
   const ui5Bootstrap = /sap-ui-bootstrap|sap-ui-core\.js/i.test(body);
   if (ui5Bootstrap && /abap2ui5|z2ui5/i.test(body)) {
     return { label, ok: true, detail: "the answer is an abap2UI5 bootstrap page" };
   }
-  if (/sap-system-login|logonForm|SL__FORM/i.test(body)) {
+  if (looksLikeLogonPage(body)) {
     return {
       label,
       ok: false,
@@ -512,6 +534,14 @@ export function relogonOffer(
   expired: boolean,
   offeredBasic: boolean
 ): { message: string; button: string } {
+  if (expired && kind === "browser") {
+    return {
+      message:
+        `abap2UI5: the browser logon to the system has expired (HTTP ${status})${said}. ` +
+        "Log on again in the browser window that opens.",
+      button: "Log On Again",
+    };
+  }
   if (expired) {
     return {
       message: `abap2UI5: the logon to the system has expired (HTTP ${status})${said}.`,
