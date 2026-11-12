@@ -73,10 +73,18 @@ export interface ResolveInput {
   /** The directory names an abap-cloud-gui checkout can carry
    *  (CLOUD_GUI_DIRS - empty while the repo-dirs snapshot has none). */
   dirs: readonly string[];
+  /** The copy "Install Report Converter" put into global storage for the
+   *  commit this build pins (`report2ui5install.ts`), whether or not it is
+   *  there - undefined where it must not run: Restricted Mode, or a host
+   *  without global storage. */
+  installed?: string;
+  /** The window is in Restricted Mode - said in the "not configured"
+   *  message, which then offers no install. */
+  restricted?: boolean;
   exists: (file: string) => boolean;
 }
 
-export type ConverterSource = "setting" | "environment" | "repos root";
+export type ConverterSource = "setting" | "environment" | "repos root" | "installed";
 
 export type Resolution =
   | { ok: true; root: string; cli: string; source: ConverterSource }
@@ -91,6 +99,7 @@ const NAMED: Record<ConverterSource, string> = {
   setting: PATH_SETTING,
   environment: HOME_VAR,
   "repos root": "abap2ui5.mcp.reposRoot",
+  installed: "Install Report Converter",
 };
 
 /** A configured path to the checkout - or to the tool's folder or its CLI,
@@ -124,8 +133,10 @@ function check(root: string, source: ConverterSource, exists: (f: string) => boo
       root,
       source,
       message:
-        `report2cloud in ${root} cannot run yet - its parser (@abaplint/core) is not ` +
-        `installed. Run \`npm ci\` in ${root} once.`,
+        source === "installed"
+          ? `The installed report converter in ${root} lacks its parser (@abaplint/core) - run Install Report Converter again.`
+          : `report2cloud in ${root} cannot run yet - its parser (@abaplint/core) is not ` +
+            `installed. Run \`npm ci\` in ${root} once.`,
     };
   }
   return { ok: true, root, cli, source };
@@ -134,7 +145,9 @@ function check(root: string, source: ConverterSource, exists: (f: string) => boo
 /**
  * The converter, in the order mcp-server resolves the same checkout plus the
  * extension's own setting in front: the setting, then ABAP_CLOUD_GUI_HOME,
- * then an `abap-cloud-gui` checkout under the repos root. An EXPLICIT answer
+ * then an `abap-cloud-gui` checkout under the repos root, then the copy
+ * "Install Report Converter" downloaded - last, so a checkout somebody
+ * configured always wins over it. An EXPLICIT answer
  * that does not hold is reported as such - it never falls through to the
  * next rung, because a checkout somebody pointed at on purpose must be the
  * one that runs, or the reason it cannot.
@@ -157,13 +170,18 @@ export function resolveReport2cloud(input: ResolveInput): Resolution {
       }
     }
   }
+  if (input.installed && cliIn(input.installed, input.exists)) {
+    return check(input.installed, "installed", input.exists);
+  }
   return {
     ok: false,
     reason: "unconfigured",
-    message:
-      "report2cloud is not configured. It is not on npm: clone " +
-      "https://github.com/abap2UI5-addons/abap-cloud-gui, run `npm ci` there and " +
-      `point ${PATH_SETTING} at the checkout.`,
+    message: input.restricted
+      ? "report2cloud is not configured, and in Restricted Mode the extension neither installs nor runs " +
+        "its own copy - trust the workspace, or point ABAP_CLOUD_GUI_HOME at an abap-cloud-gui checkout."
+      : "report2cloud is not configured. Install it with one click (Install Report Converter), or clone " +
+        "https://github.com/abap2UI5-addons/abap-cloud-gui, run `npm ci` there and " +
+        `point ${PATH_SETTING} at the checkout.`,
   };
 }
 

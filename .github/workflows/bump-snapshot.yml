@@ -1,4 +1,5 @@
-# The one implementation behind all four weekly bump workflows.
+# The one implementation behind all the weekly bump workflows (the four
+# below, and `bump-report2ui5.yml`, which pins the report converter).
 #
 # `bump-linter.yml`, `bump-client-api.yml`, `bump-app-template.yml` and
 # `bump-repo-dirs.yml` all do the same four things - regenerate a committed

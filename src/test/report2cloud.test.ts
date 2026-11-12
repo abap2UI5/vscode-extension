@@ -171,6 +171,71 @@ test("a checkout without npm ci is a setup step, not a converter error", () => {
   assert.match(!r.ok ? r.message : "", /npm ci/);
 });
 
+// ------------------------------------------- the installed copy, last rung
+
+const installed = path.join(path.sep, "storage", "report2ui5", "a".repeat(40));
+const complete = (root: string) => (f: string) =>
+  f === path.join(root, CLI_PATH) || f === path.join(root, PARSER_PROBE);
+
+test("the installed copy is the last rung - used when nothing else is configured", () => {
+  const r = resolveReport2cloud({ setting: "", env: {}, reposRoot: "", dirs: [], installed, exists: complete(installed) });
+  assert.equal(r.ok && r.source, "installed");
+  assert.equal(r.ok && r.root, installed);
+  assert.equal(r.ok && r.cli, path.join(installed, CLI_PATH));
+});
+
+test("every configured rung wins over the installed copy", () => {
+  const gui = path.join(repos, "abap-cloud-gui");
+  const both = (f: string) => complete(gui)(f) || complete(installed)(f);
+  for (const input of [
+    { setting: gui, env: {}, reposRoot: "", dirs: [] },
+    { setting: "", env: { [HOME_VAR]: gui }, reposRoot: "", dirs: [] },
+    { setting: "", env: {}, reposRoot: repos, dirs: ["abap-cloud-gui"] },
+  ]) {
+    const r = resolveReport2cloud({ ...input, installed, exists: both });
+    assert.equal(r.ok && r.root, gui);
+  }
+});
+
+test("an explicit setting that does not hold is reported, never skipped for the installed copy", () => {
+  const gui = path.join(repos, "nothing-here");
+  const r = resolveReport2cloud({ setting: gui, env: {}, reposRoot: "", dirs: [], installed, exists: complete(installed) });
+  assert.equal(!r.ok && r.reason, "no-cli");
+  assert.equal(!r.ok && r.reason === "no-cli" && r.source, "setting");
+  const home = resolveReport2cloud({ setting: "", env: { [HOME_VAR]: gui }, reposRoot: "", dirs: [], installed, exists: complete(installed) });
+  assert.equal(!home.ok && home.reason === "no-cli" && home.source, "environment");
+});
+
+test("no installed copy on disk: unconfigured, and the message offers the one-click install first", () => {
+  const r = resolveReport2cloud({ setting: "", env: {}, reposRoot: "", dirs: [], installed, exists: () => false });
+  assert.equal(!r.ok && r.reason, "unconfigured");
+  const message = !r.ok ? r.message : "";
+  assert.ok(message.indexOf("Install Report Converter") >= 0);
+  assert.ok(message.indexOf("Install Report Converter") < message.indexOf("npm ci"));
+});
+
+test("Restricted Mode: the installed copy is not handed in, so it is not run, and the message says why", () => {
+  // the plumbing passes `installed: undefined` in Restricted Mode
+  const r = resolveReport2cloud({ setting: "", env: {}, reposRoot: "", dirs: [], restricted: true, exists: complete(installed) });
+  assert.equal(!r.ok && r.reason, "unconfigured");
+  assert.match(!r.ok ? r.message : "", /Restricted Mode/);
+  assert.doesNotMatch(!r.ok ? r.message : "", /Install Report Converter/);
+});
+
+test("an installed copy that lost its parser asks for a reinstall, not npm ci", () => {
+  const r = resolveReport2cloud({
+    setting: "",
+    env: {},
+    reposRoot: "",
+    dirs: [],
+    installed,
+    exists: (f) => f === path.join(installed, CLI_PATH),
+  });
+  assert.equal(!r.ok && r.reason, "no-deps");
+  assert.equal(!r.ok && r.reason === "no-deps" && r.source, "installed");
+  assert.match(!r.ok ? r.message : "", /Install Report Converter again/);
+});
+
 // ------------------------------------------------------ names and arguments
 
 test("a report is a .prog.abap file", () => {

@@ -20,7 +20,8 @@ import { bundleTrust } from "./checkcore";
  */
 type Tar = typeof import("./rendergate-tar");
 let tarModule: Tar | undefined;
-function loadTar(): Tar {
+/** Also the `tar` "Install Report Converter" reads its archives with. */
+export function loadTar(): Tar {
   if (!tarModule) {
     tarModule = createRequire(__filename)(path.join(__dirname, "rendergate-tar.js")) as Tar;
   }

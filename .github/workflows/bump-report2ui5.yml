@@ -1,0 +1,58 @@
+# src/data/report2ui5.json (and package.json's `report2ui5Release`) pin the
+# report2UI5 converter "Install Report Converter" downloads: a COMMIT of
+# abap2UI5-addons/abap-cloud-gui, the SHA-256 of codeload's tarball of it,
+# the files of tools/report2ui5 the CLI imports and the npm closure of
+# @abaplint/core from that commit's package-lock.json. abap-cloud-gui
+# publishes no npm package and no release bundle, so a commit is the one
+# immutable thing to pin - and the pin only moves through this workflow:
+# weekly regenerate against main's tip, full gate, PR.
+#
+# The generator reads the tarball with `tar` and the CLI's imports with
+# `esbuild`, so the regeneration installs first and the gate reuses that
+# install (needs-npm-ci: false, like the linter bump).
+#
+# The mechanics live in bump-snapshot.yml, shared with the other bumps.
+
+name: Bump report2UI5
+
+on:
+  schedule:
+    # Mondays 07:23 UTC - after the repo-dirs bump (07:05), off the
+    # full-hour spikes.
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+  # Fired by the upstream repository when a relevant change merges, so the
+  # bump lands the same day instead of waiting for the weekly schedule
+  # (send a repository_dispatch with this event type via the GitHub API).
+  repository_dispatch:
+    types: [bump-report2ui5]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    uses: ./.github/workflows/bump-snapshot.yml
+    secrets: inherit
+    with:
+      label: src/data/report2ui5.json
+      timeout-minutes: 30
+      paths: |
+        src/data/report2ui5.json
+        package.json
+      needs-npm-ci: false
+      regenerate: |
+        npm ci
+        node scripts/generate-report2ui5.mjs
+      branch: bump-report2ui5
+      title: "chore: pin report2UI5 to abap-cloud-gui's main"
+      body: |
+        Weekly regeneration of `src/data/report2ui5.json` and package.json's
+        `report2ui5Release` from `abap2UI5-addons/abap-cloud-gui` main - the
+        commit, codeload tarball checksum, CLI file list and @abaplint/core
+        closure "Install Report Converter" downloads.
+
+        Read the diff before merging: a new file or package is new code that
+        runs on users' machines with the next release, and a moved
+        @abaplint/core changes what the converter can parse.
