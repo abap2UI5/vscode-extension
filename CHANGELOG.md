@@ -4,6 +4,9 @@
 
 The bundled linter moves to v0.9.0.
 
+- **A local backend that fails to start is gone before the failure is
+  shown.** On Windows the launcher was still being killed when the error
+  arrived, so an immediate retry could find the old one in its folder.
 - **Log on to SAP BTP ABAP Environment with a service key.** A system whose
   profile says `"auth": "oauth"` logs on with OAuth 2.0: run *Load Service
   Key* once and pick the instance's service key, and F9 opens your browser

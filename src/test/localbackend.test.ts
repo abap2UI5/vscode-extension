@@ -435,7 +435,11 @@ test("the launcher: token required, loopback only, reached through the proxy", a
     });
     assert.equal(host.port, port);
   } finally {
-    host?.stop();
+    // gone before its folder is removed - Windows will not delete a busy one
+    if (host) {
+      host.stop();
+      await host.exited;
+    }
     await proxy.stop();
     fs.rmSync(dir, RM_OPTIONS);
   }
@@ -569,7 +573,11 @@ test("real local backend: app-template's starter app starts, and an event reache
     assert.equal(event.status, 200);
     assert.match(event.body, /Saved, Ada/);
   } finally {
-    host?.stop();
+    // gone before its folder is removed - Windows will not delete a busy one
+    if (host) {
+      host.stop();
+      await host.exited;
+    }
     await proxy.stop();
     fs.rmSync(dir, RM_OPTIONS);
   }
