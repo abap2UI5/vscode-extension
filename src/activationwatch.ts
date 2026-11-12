@@ -152,6 +152,17 @@ export class ActivationWatch {
     );
   }
 
+  /**
+   * The server's change timestamp of `className` as the preview last loaded
+   * it (F9 or a reload), or undefined when none was captured for that class.
+   * "Push and Activate" compares the server against it before it writes.
+   */
+  shownChangedAt(className: string): string | undefined {
+    return this.baselineClass?.toUpperCase() === className.toUpperCase()
+      ? this.baselineChangedAt
+      : undefined;
+  }
+
   stop(): void {
     this.generation++;
     if (this.timer) {

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shape: exc:exception as in lock-held.xml (abap-adt-api src/AdtException.ts fromResponse). The wording is
+     illustrative - the client only looks for "transport" or "corrNr" in it (verify on a system). -->
+<exc:exception xmlns:exc="http://www.sap.com/abapxml/types/communicationframework"><namespace id="com.sap.adt"/><type id="ExceptionResourceInvalidRequest"/><message lang="EN">A transport request is required for this object (parameter corrNr)</message><localizedMessage lang="EN">A transport request is required for this object (parameter corrNr)</localizedMessage><properties/></exc:exception>

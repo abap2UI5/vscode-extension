@@ -476,3 +476,13 @@ test("a superseded capture leaves no baseline behind, not the previous version's
 
   assert.deepEqual(reloads, [], "nothing was activated since v2 was shown");
 });
+
+test("shownChangedAt: the captured timestamp, for that class only", async () => {
+  const h = harness([{ version: "active", changedAt: "2026-01-01T00:00:00Z" }]);
+  assert.equal(h.watch.shownChangedAt("ZCL_APP"), undefined);
+  h.watch.captureBaseline();
+  await until(() => h.watch.shownChangedAt("zcl_app") !== undefined);
+  assert.equal(h.watch.shownChangedAt("ZCL_APP"), "2026-01-01T00:00:00Z");
+  assert.equal(h.watch.shownChangedAt("ZCL_OTHER"), undefined);
+  h.watch.dispose();
+});

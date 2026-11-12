@@ -65,7 +65,7 @@ export function welcomeHtml(options: WelcomeOptions): string {
             }, the cursor stays in the code.`
           : "Open an app class and press <kbd>F9</kbd>."
       }</span></li>
-      <li><span class="num">3</span><span>Activate the class &mdash; <kbd>Ctrl+F3</kbd> in an ADT document, or the <em>activate</em> button in the preview toolbar / the command <em>Activate and Reload Preview</em> &mdash; and the preview reloads on its own. A save alone leaves the server on the active version, so it does not reload.</span></li>
+      <li><span class="num">3</span><span>Activate the class &mdash; <kbd>Ctrl+F3</kbd> in an ADT document (in an app class file on disk it pushes the class to the system first), or the <em>activate</em> button in the preview toolbar / the command <em>Activate and Reload Preview</em> &mdash; and the preview reloads on its own. A save alone leaves the server on the active version, so it does not reload.</span></li>
     </ol>`;
 
   // An app is running, just not in this view: say where it is, not how to start.

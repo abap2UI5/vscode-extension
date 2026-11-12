@@ -282,7 +282,7 @@ ${BASE_CSS}
     <span class="dot" id="dot"></span>
     <span class="name" id="name">${className}</span>
     <button class="badge" id="stale" title="The source was saved but not activated - the preview still shows the active version. Click to reload it anyway.">not activated</button>
-    <button class="badge" id="act" title="Activate the class through your ABAP tooling and reload - the command 'Activate and Reload Preview', Ctrl+F3 in an ADT document">activate</button>
+    <button class="badge" id="act" title="Activate the class through your ABAP tooling and reload - the command 'Activate and Reload Preview', Ctrl+F3 in an ADT document or, through Push and Activate, in an app class file on disk">activate</button>
     <button class="errors" id="errors" title="Runtime errors the app reported since the last load. Click to jump to the likely source line and open the abap2UI5 output log."></button>
     <button class="rt" id="rt" title="Last backend roundtrip (POST through the auth proxy). Click to open the traffic log."></button>
     <span class="url" id="url" title="${externalUrl}">${urlLabel}</span>
