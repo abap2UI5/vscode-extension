@@ -381,6 +381,11 @@ export interface BrowserLogonOptions {
   /** TESTS ONLY: `--headless=new`. The product starts the browser headed -
    *  the user has to see the identity provider. */
   headless?: boolean;
+  /** TESTS ONLY: `--no-sandbox` for a non-root user. CI runners on Ubuntu
+   *  24.04 forbid the unprivileged user namespaces Chromium's sandbox needs;
+   *  the product never switches the sandbox off for a page of the identity
+   *  provider - it explains the failure instead (`sandboxFailure`). */
+  noSandbox?: boolean;
   /** Ends the logon as "aborted" (the progress notification's Cancel). */
   signal?: AbortSignal;
   /** Progress lines - never a cookie, never a URL's query. */
@@ -390,11 +395,35 @@ export interface BrowserLogonOptions {
   onWindow?: (window: { close(): Promise<void> }) => void;
 }
 
+/** How much of the browser's stderr is kept - the last lines, enough for
+ *  the reason it died while starting. */
+const STDERR_TAIL = 4096;
+
+/** What a browser whose sandbox cannot start prints before it exits -
+ *  Ubuntu 24.04 and other systems that restrict unprivileged user namespaces
+ *  stop a downloaded Chromium (the render gate's) this way. */
+export function sandboxFailure(stderr: string): boolean {
+  return /No usable sandbox|SUID sandbox helper binary|Failed to move to new namespace|user namespaces? (?:is|are) (?:not|disabled)/i.test(
+    stderr
+  );
+}
+
+/** What the user is told then - never "run it without the sandbox": the
+ *  browser shows the identity provider's pages. */
+export const SANDBOX_MESSAGE =
+  "the browser could not start its sandbox - this system restricts the user " +
+  "namespaces a downloaded Chromium needs (Ubuntu 24.04 does). Set " +
+  "abap2ui5.logon.browserExecutable to an installed Google Chrome or " +
+  "Microsoft Edge, which bring their own sandbox setup.";
+
 /** The arguments the browser is started with - the profile directory, the
  *  pipe, no first-run UI, no OS keyring prompt. */
-export function browserArgs(profileDir: string, options: { headless?: boolean; root?: boolean }): string[] {
+export function browserArgs(
+  profileDir: string,
+  options: { headless?: boolean; root?: boolean; noSandbox?: boolean }
+): string[] {
   return [
-    ...(options.root ? ["--no-sandbox"] : []),
+    ...(options.root || options.noSandbox ? ["--no-sandbox"] : []),
     ...(options.headless ? ["--headless=new"] : []),
     "--remote-debugging-pipe",
     `--user-data-dir=${profileDir}`,
@@ -469,22 +498,28 @@ export async function runBrowserLogon(options: BrowserLogonOptions): Promise<Rec
   const posix = process.platform !== "win32";
   let child: ChildProcess | undefined;
   let cdp: CdpPipe | undefined;
+  let stderrTail = "";
   try {
     child = spawn(
       options.executable,
       browserArgs(profileDir, {
         headless: options.headless,
+        noSandbox: options.noSandbox,
         root: posix && typeof process.getuid === "function" && process.getuid() === 0,
       }),
       {
-        // fd 3: what the browser reads, fd 4: what it writes
-        stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
+        // fd 3: what the browser reads, fd 4: what it writes; stderr is kept
+        // (its tail only) to explain a browser that dies while starting
+        stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"],
         // its own process group, so the whole tree can be killed
         detached: posix,
         windowsHide: false,
       }
     );
     const started = child;
+    started.stderr?.on("data", (chunk: Buffer) => {
+      stderrTail = (stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL);
+    });
     const spawnFailed = new Promise<never>((_, reject) => {
       started.once("error", (err) =>
         reject(new BrowserLogonError("failed", `the browser could not be started: ${err.message}`))
@@ -494,6 +529,13 @@ export async function runBrowserLogon(options: BrowserLogonOptions): Promise<Rec
     cdp = new CdpPipe(started.stdio[4] as Readable, started.stdio[3] as Writable);
     log(`logon: browser started for ${origin}`);
     return await Promise.race([watchLogon(cdp, started, origin, options, log), spawnFailed]);
+  } catch (err) {
+    // a browser that could not start its sandbox exits at once - "the window
+    // was closed" would be a puzzle; say what happened and what helps
+    if (err instanceof BrowserLogonError && err.reason === "closed" && sandboxFailure(stderrTail)) {
+      throw new BrowserLogonError("failed", SANDBOX_MESSAGE);
+    }
+    throw err;
   } finally {
     await closeBrowser(cdp, child);
     removeProfile(profileDir);

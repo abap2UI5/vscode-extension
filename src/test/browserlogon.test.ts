@@ -24,6 +24,8 @@ import {
   pickExecutable,
   removeStaleProfiles,
   runBrowserLogon,
+  SANDBOX_MESSAGE,
+  sandboxFailure,
   sessionCookiesOf,
 } from "../browserlogon";
 import { CdpPipe } from "../cdp";
@@ -168,6 +170,19 @@ test("which browser: the setting first (must exist), else the render gate's Chro
   assert.equal(none.executable, undefined);
   assert.match(none.problem ?? "", /Install Render Gate/);
   assert.match(none.problem ?? "", /abap2ui5\.logon\.browserExecutable/);
+});
+
+test("a browser whose sandbox cannot start is explained, not reported as a closed window", () => {
+  // what Chromium prints on Ubuntu 24.04 (user namespaces restricted by AppArmor)
+  assert.ok(sandboxFailure("[1:1:ERROR:zygote_host_impl_linux.cc(127)] No usable sandbox! If this is a Debian system, ..."));
+  assert.ok(sandboxFailure("The SUID sandbox helper binary was found, but is not configured correctly."));
+  assert.ok(!sandboxFailure("Failed to connect to MCS endpoint with error -101"));
+  assert.ok(!sandboxFailure(""));
+  assert.match(SANDBOX_MESSAGE, /abap2ui5\.logon\.browserExecutable/);
+  assert.doesNotMatch(SANDBOX_MESSAGE, /--no-sandbox/, "the product never advises switching the sandbox off");
+  // a test may switch it off; the product starts it on unless it runs as root
+  assert.ok(browserArgs("/tmp/p", { noSandbox: true }).includes("--no-sandbox"));
+  assert.ok(!browserArgs("/tmp/p", {}).includes("--no-sandbox"));
 });
 
 test("browser arguments: the pipe, the throwaway profile, headless only when asked, no system URL", () => {
@@ -430,6 +445,7 @@ test("browser logon end to end: SSO in a real Chromium, cookies replayed by the 
       url: `${land.system}/sap/bc/z2ui5?sap-client=100`,
       profileRoot: root,
       headless: true,
+      noSandbox: true,
       timeoutMs: 45_000,
       log: (m) => lines.push(m),
     });
@@ -498,6 +514,7 @@ test("browser logon: a user who never finishes runs into the timeout", { skip: S
         url: `${land.system}/sap/bc/z2ui5?sap-client=100`,
         profileRoot: root,
         headless: true,
+        noSandbox: true,
         timeoutMs: 4_000,
       }),
       (err: unknown) => err instanceof BrowserLogonError && err.reason === "timeout"
@@ -520,6 +537,7 @@ test("browser logon: closing the window cancels; so does the abort signal", { sk
         url: `${land.system}/sap/bc/z2ui5?sap-client=100`,
         profileRoot: root,
         headless: true,
+        noSandbox: true,
         timeoutMs: 45_000,
         onWindow: (window) => {
           setTimeout(() => void window.close().catch(() => undefined), 500);
@@ -536,6 +554,7 @@ test("browser logon: closing the window cancels; so does the abort signal", { sk
         url: `${land.system}/sap/bc/z2ui5?sap-client=100`,
         profileRoot: root,
         headless: true,
+        noSandbox: true,
         timeoutMs: 45_000,
         signal: abort.signal,
         onWindow: () => setTimeout(() => abort.abort(), 300),
