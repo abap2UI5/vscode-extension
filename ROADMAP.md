@@ -52,22 +52,27 @@ mapped in). Nothing here was exercised against a real SAP system.
 | --- | --- | --- |
 | T01 | Done | The Testing view itself was never looked at. The runner reports no line, so a failure sits on the test method's declaration; running one method runs its class. |
 | T02 | Done | Shift+F12 not tried in an editor. |
-| T03 | (b) checked, still blocked upstream | The converter is report2UI5 now (`tools/report2ui5`); the command finds it again (it had broken on the rename). (b): report2UI5 does not turn `/ns/cl_x` into abapGit's `#ns#` file names for the class it writes (`tools/report2ui5/lib/convert.mjs` 1130-1138, read, not run). (a) still needs a versioned artefact upstream. |
+| T03 | (a) done, (b) blocked upstream | *Install Report Converter* installs report2UI5 from a pinned commit, each file checked by SHA-256 and each package by its npm integrity. Not run here against codeload itself (403 in this environment) nor the converter afterwards. (b): report2UI5 does not write `#ns#` file names for `/ns/cl_x` (`tools/report2ui5/lib/convert.mjs` 1130-1138). |
 | T04 | Done, three of four pictures | Quick fix, Control Properties, device matrix - real captures. The F9 picture needs a system. |
 | T05 | Done | Default flipped to `false`. The trust prompt and a real self-signed system are untested. |
-| T06 | T06a and T06b done | `docs/auth.md` ranks browser logon through the extension's own Chromium first, OAuth with a service key second; its decisions list needs a maintainer. T06c/T06d wait on that. |
-| T07 | Open | Needs the decision and a system to verify the ADT sequence against. |
+| T06 | Done | Four mechanisms: `basic`, `certificate`, `oauth`, `browser`. Certificate proven end to end against a local TLS server, OAuth against a fake UAA, browser logon with a real Chromium against a fake IdP. Unverified against real systems: XSUAA's acceptance of a random loopback redirect, SAML/SPNEGO cookie names, certificate user mapping - see `docs/auth.md`. |
+| T07 | Done | Push and Activate (Ctrl+F3 on a class file on disk). The ADT requests follow abap-adt-api; the fixtures are written from it, not recorded from a system. |
 | T08 | Done | `auth` is reserved (`"basic"` only). The inline `@since` floor follows profile > setting but not the repository config, as before. |
-| T09 | Open | Needs T07. |
+| T09 | Done | Activation messages on their line in the right abapGit file. Untested against a real activation answer. |
 | T10 | Done as option (a) | Three read-only tools, no chat participant. Whether hosts honour `when` on a tool entry is unconfirmed. |
 | T11 | Done | The modal was never shown for real. A timed-out modal stays open; a late answer is ignored. |
-| T12 | Spike done: no-go for now | `docs/systemless-preview.md`: the runtime would fit the `.vsix` gate only without an in-browser transpiler, and the framework needs node builtins in a worker. |
-| T13 | Spike done: go | Round trip proven locally against `@abap2ui5/node-runtime`. Needs a `serve` entry point (and a token) in mcp-server first - list in `docs/systemless-preview.md`. |
+| T12 | No-go, decided | `docs/systemless-preview.md`: needs node builtins in a worker, and a transpiler in the browser would not fit the `.vsix` gate. T13 covers the systemless preview on the desktop. |
+| T13 | Done | "Local (transpiled)" in *Select System*: one real round trip ran here. Drives mcp-server 1.0.0's internals at an exact pin until it ships a `serve` bin. `<class>.mock.json` is not applied (no seam). |
 | T14 | Done | Whether a real backend accepts a replayed draft id and its stored session headers is unknown. |
-| T15 | Researched, no change | Theia (API 1.144) and VSCodium are above the 1.101 floor. BAS's Code-OSS version could not be confirmed from a primary source - check Help > About in a dev space. The newer APIs are already feature-detected. |
+| T15 | Done: floor kept, pinned by a test | `src/test/apifloor.test.ts` classifies every contribution point. Theia (API 1.144) and VSCodium are above the 1.101 floor. BAS's Code-OSS version could not be confirmed from a primary source - check Help > About in a dev space. The newer APIs are already feature-detected. |
 | T16 | Done | Scheduling stayed in `viewcheck.ts` (shared state); `SapProxy` stayed whole. |
 | T17 | Done | Nothing needed hiding; three manifest tests now pin that. |
 | T18 | Done | The CI step has not run on GitHub yet. Follow-up done: no own module below 92 % (total 93.8 %). |
+
+All maintainer decisions below were taken in favour of implementing: the
+extension writes source to a system (T07), logon order browser > OAuth >
+certificate with all three built (T06), LM tools as a complement to MCP
+(T10), the floor stays at 1.101 (T15), T12 is no-go.
 
 **Release blocker found on the way (not caused by this branch):** the bundled
 linter 0.9.0 (already on `main`) records release commit `369f4afdd199`, and
@@ -81,7 +86,8 @@ of report2cloud to report2UI5, and removing an attribute of an upper-case
 chain in Control Properties.
 
 Follow-up in `abap2UI5/docs` (`advanced/vscode`) for everything marked done
-and user-visible: T01, T02, T05, T08, T10, T11, T14, and the report2UI5 rename.
+and user-visible: T01, T02, T03a, T05, T06, T07, T08, T09, T10, T11, T13, T14,
+and the report2UI5 rename.
 
 ## Order and dependencies
 
@@ -741,7 +747,7 @@ slower by more than a few seconds; the `.vsix` contains no source map.
 | T01 | `abap2UI5/mcp-server` | A machine-readable reporter for `abap2ui5-unit` *(verify it is missing)* |
 | T03a | `abap2UI5-addons/abap-cloud-gui` | report2cloud as an immutable, versioned artefact |
 | T03b | `abap2UI5-addons/abap-cloud-gui` | CLI accepts a namespaced class name *(verify)* |
-| T13 | Spike done: go | Round trip proven locally against `@abap2ui5/node-runtime`. Needs a `serve` entry point (and a token) in mcp-server first - list in `docs/systemless-preview.md`. |
+| T13 | Done | "Local (transpiled)" in *Select System*: one real round trip ran here. Drives mcp-server 1.0.0's internals at an exact pin until it ships a `serve` bin. `<class>.mock.json` is not applied (no seam). |
 | all user-visible | `abap2UI5/docs` | The `advanced/vscode` page follows each feature |
 
 ## Decisions a maintainer has to make
@@ -750,8 +756,8 @@ slower by more than a few seconds; the `.vsix` contains no source map.
 | --- | --- |
 | T03a | npm package or release bundle for report2cloud? |
 | T05 | Flip `allowUnauthorizedCerts` to `false` by default? |
-| T06 | T06a and T06b done | `docs/auth.md` ranks browser logon through the extension's own Chromium first, OAuth with a service key second; its decisions list needs a maintainer. T06c/T06d wait on that. |
-| T07 | Should the extension write source to a system at all? |
+| T06 | Done | Four mechanisms: `basic`, `certificate`, `oauth`, `browser`. Certificate proven end to end against a local TLS server, OAuth against a fake UAA, browser logon with a real Chromium against a fake IdP. Unverified against real systems: XSUAA's acceptance of a random loopback redirect, SAML/SPNEGO cookie names, certificate user mapping - see `docs/auth.md`. |
+| T07 | Done | Push and Activate (Ctrl+F3 on a class file on disk). The ADT requests follow abap-adt-api; the fixtures are written from it, not recorded from a system. |
 | T10 | LM tools as a complement to MCP, or as a second surface for the same tools? |
-| T12 | Spike done: no-go for now | `docs/systemless-preview.md`: the runtime would fit the `.vsix` gate only without an in-browser transpiler, and the framework needs node builtins in a worker. |
+| T12 | No-go, decided | `docs/systemless-preview.md`: needs node builtins in a worker, and a transpiler in the browser would not fit the `.vsix` gate. T13 covers the systemless preview on the desktop. |
 | T15 | Keep the 1.101 floor or lower it? |
