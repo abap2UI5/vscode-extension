@@ -57,7 +57,7 @@ mapped in). Nothing here was exercised against a real SAP system.
 | T05 | Done | Default flipped to `false`. The trust prompt and a real self-signed system are untested. |
 | T06 | Done | Four mechanisms: `basic`, `certificate`, `oauth`, `browser`. Certificate proven end to end against a local TLS server, OAuth against a fake UAA, browser logon with a real Chromium against a fake IdP. Unverified against real systems: XSUAA's acceptance of a random loopback redirect, SAML/SPNEGO cookie names, certificate user mapping - see `docs/auth.md`. |
 | T07 | Done | Push and Activate (Ctrl+F3 on a class file on disk). The ADT requests follow abap-adt-api; the fixtures are written from it, not recorded from a system. |
-| T08 | Done | `auth` is reserved (`"basic"` only). The inline `@since` floor follows profile > setting but not the repository config, as before. |
+| T08 | Done | `auth` now takes `basic`, `certificate`, `oauth`, `browser` (T06). The inline `@since` floor follows profile > setting but not the repository config, as before. |
 | T09 | Done | Activation messages on their line in the right abapGit file. Untested against a real activation answer. |
 | T10 | Done as option (a) | Three read-only tools, no chat participant. Whether hosts honour `when` on a tool entry is unconfirmed. |
 | T11 | Done | The modal was never shown for real. A timed-out modal stays open; a late answer is ignored. |
