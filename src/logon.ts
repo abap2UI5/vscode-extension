@@ -7,6 +7,7 @@ import {
 } from "./authstrategy";
 import type { AuthKind } from "./systemprofile";
 import { OAuthMaterial, OAuthStrategy } from "./oauth";
+import { BrowserLogonStrategy, BrowserSession } from "./browserlogon";
 
 /*
  * logon - which `AuthStrategy` a system profile logs on with.
@@ -33,6 +34,10 @@ export interface LogonDeps {
    *  tokens - renewed with the stored refresh token, or obtained in the
    *  browser when the flow may ask. */
   oauthLogon(origin: string): Promise<OAuthMaterial | undefined>;
+  /** The live browser logon of `origin` (browser) - opening the browser
+   *  when there is none; a flow without a UI is refused instead
+   *  (`browserLogonNeeded`). */
+  browserSession(origin: string): Promise<BrowserSession | undefined>;
 }
 
 /** The profile fields the factory reads. */
@@ -59,6 +64,10 @@ export async function strategyFor(
     case "oauth": {
       const material = await deps.oauthLogon(origin);
       return material ? new OAuthStrategy(material) : undefined;
+    }
+    case "browser": {
+      const session = await deps.browserSession(origin);
+      return session ? new BrowserLogonStrategy(origin, session) : undefined;
     }
     case "basic": {
       const creds = await deps.basicCredentials(origin);

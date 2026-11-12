@@ -82,7 +82,7 @@ import {
   runApp,
   watchProxyStatus,
 } from "./launch";
-import { chooseClientCertificate } from "./logonprompt";
+import { chooseClientCertificate, logOnInBrowser } from "./logonprompt";
 import { loadServiceKey } from "./oauthprompt";
 import { forgetTrustedCertificates } from "./certprompt";
 import {
@@ -414,6 +414,12 @@ export function activate(context: vscode.ExtensionContext): void {
     // auth: "oauth" - which service key a host logs on with
     vscode.commands.registerCommand("abap2ui5.loadServiceKey", () =>
       loadServiceKey(session, async (system, origin) => {
+        await restartLogon(session, system, origin);
+      })
+    ),
+    // auth: "browser" - a fresh logon in the browser for the active system
+    vscode.commands.registerCommand("abap2ui5.logOnInBrowser", () =>
+      logOnInBrowser(session, async (system, origin) => {
         await restartLogon(session, system, origin);
       })
     ),

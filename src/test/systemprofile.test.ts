@@ -83,13 +83,14 @@ test("`auth` accepts the implemented mechanisms; anything else is ignored with a
   assert.deepEqual(profileFieldsOf({ auth: "basic" }), { auth: "basic" });
   assert.deepEqual(profileFieldsOf({ auth: "certificate" }), { auth: "certificate" });
   assert.deepEqual(profileFieldsOf({ auth: "OAuth" }), { auth: "oauth" });
+  assert.deepEqual(profileFieldsOf({ auth: "Browser" }), { auth: "browser" });
   for (const value of ["sso", "x509", "none", 1, true]) {
     assert.deepEqual(profileFieldsOf({ auth: value }), {}, String(value));
     assert.equal(profileNotes([{ name: "S", url: URL, auth: value }]).length, 1, String(value));
   }
   assert.match(
     profileNotes([{ name: "S", url: URL, auth: "sso" }])[0],
-    /"auth": "sso" is ignored - the values accepted so far are "basic" and "certificate" and "oauth"/
+    /"auth": "sso" is ignored - the values accepted so far are "basic", "certificate", "oauth" and "browser"/
   );
 });
 
@@ -109,7 +110,7 @@ test("the schema knows exactly these fields - and none that could switch a check
   assert.deepEqual(items.required, ["name", "url"]);
   assert.deepEqual(items.properties.role.enum, ["development", "production"]);
   assert.deepEqual(items.properties.distribution.enum, ["sapui5", "openui5"]);
-  assert.deepEqual(items.properties.auth.enum, ["basic", "certificate", "oauth"]);
+  assert.deepEqual(items.properties.auth.enum, ["basic", "certificate", "oauth", "browser"]);
   // the schema's words are the parser's
   assert.deepEqual(items.properties.auth.enum, [...AUTH_KINDS]);
   // the schema's version pattern is the parser's

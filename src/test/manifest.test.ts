@@ -554,6 +554,8 @@ const SETTING_POLICY: Record<string, "machine+restricted" | "restricted" | "open
   "abap2ui5.agent.enableAppTools": "machine+restricted",
   // whether each acting step of that agent is put to the user first
   "abap2ui5.agent.confirmActions": "machine+restricted",
+  // which browser a browser logon starts (it then holds the session cookies)
+  "abap2ui5.logon.browserExecutable": "machine+restricted",
   // where F9 and the credential prompt go - a team shares them per workspace,
   // so trusted workspaces keep them; credentials are stored per origin
   "abap2ui5.systems": "restricted",

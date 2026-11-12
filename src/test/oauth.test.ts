@@ -653,6 +653,7 @@ test("the MCP path: a refresh token works without a browser, none gets the refus
       basicCredentials: async () => assert.fail("no password"),
       clientCertificate: async () => assert.fail("no certificate"),
       oauthLogon: async () => ({ key, refreshToken: tokens.refreshToken, post: postForm }),
+      browserSession: async () => assert.fail("no browser logon"),
     });
     assert.ok(fromStore instanceof OAuthStrategy);
     await proxy.start(system.origin, fromStore);
@@ -670,6 +671,7 @@ test("the MCP path: a refresh token works without a browser, none gets the refus
         oauthLogon: async () => {
           throw oauthLogonNeeded("abc.example.com", true);
         },
+        browserSession: async () => undefined,
       }),
       /F9/
     );

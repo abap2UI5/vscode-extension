@@ -1,7 +1,7 @@
 # Logon beyond basic authentication - design note (T06a)
 
 Status: **decided** (section 6); T06c started with the interface and the certificate;
-OAuth with a service key (3.3) is implemented too. It
+OAuth with a service key (3.3) and the browser logon (3.1) are implemented too. It
 answers T06a in `ROADMAP.md`: which mechanisms, in which order, how each gets,
 stores, renews and sends its secret, and what `AuthStrategy` (T06b) must gain
 for T06c. No SAP system was available: every unconfirmed statement about the
@@ -69,6 +69,11 @@ renewal, what the proxy sends, the fit with `AuthStrategy`, what the
 connection check and the agent tools must change, and the risks.
 
 ### 3.1 Browser logon, session cookies replayed (`auth: "browser"`)
+
+**Implemented** (`src/browserlogon.ts`, `src/cdp.ts`, plumbing in
+`src/logonprompt.ts`) - what was built and what is unverified is at the end
+of section 6. Where this section and the "Decided" paragraph differ (the
+cookies are NOT stored), the paragraph wins.
 
 **SAP side.** An ICF node checks its logon procedures in order (standard
 order: HTTP fields, client certificate, logon/assertion ticket, basic auth,
@@ -475,6 +480,69 @@ existing test unchanged. `strategyFor(profile, origin, deps)` lives in
 server's TLS alert; under TLS 1.3 the alert can lose the race against the
 server's close, and the client then sees a bare reset - reported as a
 connection failure, not as a certificate problem.
+
+What was built (T06c, browser logon): `auth: "browser"` is the third
+`AUTH_KINDS` word and the third case of `strategyFor`. The browser is the
+render gate's Chromium (`findChromium(renderGateBrowsers(...))`) or the
+machine-scope, restricted setting `abap2ui5.logon.browserExecutable` (the
+setting wins when set; a path that does not exist is an error, not a
+fallback); with neither, the logon says how to get one (*Install Render
+Gate*, *Open Settings*). It is started HEADED with `--remote-debugging-pipe`
+(own CDP client, no dependency, no port), a fresh profile directory under
+the extension's global storage (`logon-profiles/abap2ui5-logon-*`, deleted on
+every path; leftovers older than the timeout are deleted at the next start)
+and `about:blank`; the page - the profile's template with the `{class}` pair
+dropped, `sap-client` kept, `sap-user`/`sap-password` never - is navigated to
+over the protocol, so it is not in the argument vector. The logon is done
+when a top-level `Document` answer of the system's origin finished with 200
+and is not the ICF logon form (`looksLikeLogonPage`, the patterns of
+`classifyBody`), and `Network.getCookies` for that URL and the origin returns
+`SAP_SESSIONID_*` or `MYSAPSSO2` of the system's host; only those two are
+kept. Five minutes, a closed window (`Target.targetDestroyed`, a detached
+session or the process exiting) and the notification's Cancel end it
+cleanly; the browser is closed over the protocol, then killed. The cookies
+live in `browserSessions` (memory, per origin, shared by every strategy for
+that origin; *Clear Stored SAP Credentials* empties it); `abap2ui5.session:`
+stays reserved and unused. `BrowserLogonStrategy` sends no header, merges the
+cookies, takes `Set-Cookie` renewals of its own names, and calls the logon
+`expired` (marking the shared session dead, so the next F9 or *Log On Again*
+opens the browser) on a 401, a 3xx whose `Location` leaves the origin or
+points at `/sap/saml2/`, and a 200 `text/html` where data was expected.
+`watchProxyStatus` now offers *Log On Again* for an expiry seen on a non-401
+answer too (it used to look at 401/403 only). The MCP flow (`mayAsk: false`)
+gets `browserLogonNeeded` - "press F9 ... or run Log On in Browser". New
+command *abap2UI5: Log On in Browser*. `report.ts` also redacts the value of a
+`MYSAPSSO2`/`SAP_SESSIONID_*` cookie object in the DevTools protocol's JSON
+shape. Proven locally (`browserlogon.test.ts`): a real Chromium against a fake
+system on 127.0.0.1 whose root redirects to a fake identity provider on
+`localhost` that sends the browser straight back to a callback setting the
+cookies HttpOnly; the proxy then replays exactly the two cookies (not the
+IdP's, not `sap-usercontext`), keeps them out of the iframe's `Set-Cookie`,
+follows a renewal, and answers the expiry text once the fake system sends the
+browser to the IdP again; timeout, a closed window and Cancel each end with
+the profile directory gone. Headless in the tests only.
+
+Unverified - needs a real system and a maintainer:
+
+- a real SAML 2.0 / SPNEGO landscape: whether the cookies the system sets
+  after the ACS redirect are exactly `SAP_SESSIONID_<SID>_<client>` and/or
+  `MYSAPSSO2`, and whether replaying them from another client (the proxy)
+  is accepted - some landscapes bind a session to client properties;
+- the headed window on Windows and macOS (the tests ran headless on Linux);
+  on macOS closing the window may leave the browser running - the window's
+  target going away ends the logon anyway; Kerberos needs
+  `--auth-server-allowlist`, which is not passed yet;
+- a remote host (SSH, WSL, Codespaces): the window opens on the remote
+  machine's display, if it has one - not on the user's screen;
+- the expiry signals: which answer a real system gives a dead session on the
+  roundtrip POST and on ADT (3xx to the IdP is assumed; a 200 logon form in
+  reply to a DOCUMENT request is not detected, only where data was expected),
+  and whether some legitimate XHR for an HTML file could be read as expiry;
+- a `Set-Cookie` that issues a session cookie under a NEW name (another
+  client) reaches the preview's jar instead of the strategy (the proxy keeps
+  back only the names the strategy already holds, plus `MYSAPSSO2`);
+- the activation watch does not pause on *expired* yet; it fails its polls
+  like before until the user logs on again.
 
 **What a maintainer must decide**
 

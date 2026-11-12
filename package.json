@@ -48,7 +48,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "The view check, the MCP server and the report converter can be told which program to start, one setting allows AI agents to operate apps on the system as you and one decides whether each of their steps is put to you first, one lets the auth proxy accept every unverified TLS certificate and one decides which build of the render gate is downloaded. Those settings are read from your user settings only, so a repository cannot point them at something else. The launch settings, which decide the host F9 and the credential prompt talk to, and the switch that turns the render gate on are ignored from the workspace in Restricted Mode; a trusted workspace can set them, so a team can share its systems in the repository - and the render gate does not run in Restricted Mode at all. The MCP server, the unit-test runner and the report converter do start processes (the runner does not start at all in Restricted Mode: the tests are the repository's code), which is why this is limited rather than unconditional.",
+      "description": "The view check, the MCP server, the report converter and the browser logon can be told which program to start, one setting allows AI agents to operate apps on the system as you and one decides whether each of their steps is put to you first, one lets the auth proxy accept every unverified TLS certificate and one decides which build of the render gate is downloaded. Those settings are read from your user settings only, so a repository cannot point them at something else. The launch settings, which decide the host F9 and the credential prompt talk to, and the switch that turns the render gate on are ignored from the workspace in Restricted Mode; a trusted workspace can set them, so a team can share its systems in the repository - and the render gate does not run in Restricted Mode at all. The MCP server, the unit-test runner and the report converter do start processes (the runner does not start at all in Restricted Mode: the tests are the repository's code), which is why this is limited rather than unconditional.",
       "restrictedConfigurations": [
         "abap2ui5.viewCheck.command",
         "abap2ui5.mcp.command",
@@ -60,7 +60,8 @@
         "abap2ui5.report2cloud.path",
         "abap2ui5.viewCheck.render",
         "abap2ui5.viewCheck.rollingBundle",
-        "abap2ui5.allowUnauthorizedCerts"
+        "abap2ui5.allowUnauthorizedCerts",
+        "abap2ui5.logon.browserExecutable"
       ]
     }
   },
@@ -152,6 +153,11 @@
         "command": "abap2ui5.loadServiceKey",
         "category": "abap2UI5",
         "title": "Load Service Key"
+      },
+      {
+        "command": "abap2ui5.logOnInBrowser",
+        "category": "abap2UI5",
+        "title": "Log On in Browser"
       },
       {
         "command": "abap2ui5.forgetTrustedCertificates",
@@ -499,6 +505,10 @@
         },
         {
           "command": "abap2ui5.loadServiceKey",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.logOnInBrowser",
           "when": "!isWeb"
         },
         {
@@ -887,14 +897,16 @@
                 "enum": [
                   "basic",
                   "certificate",
-                  "oauth"
+                  "oauth",
+                  "browser"
                 ],
                 "enumDescriptions": [
                   "User and password, asked for once per host and kept in the VS Code SecretStorage (the default).",
                   "An X.509 client certificate (.pfx/.p12, or PEM certificate and key) you choose per host with \"abap2UI5: Choose Client Certificate\"; the system maps it to your user. Only the file path (machine-local) and the passphrase (SecretStorage) are stored.",
-                  "OAuth 2.0 with a service key (SAP BTP ABAP Environment): load the instance's service key per host with \"abap2UI5: Load Service Key\", then log on in your browser. The key and the refresh token are kept in the VS Code SecretStorage, the access token in memory only."
+                  "OAuth 2.0 with a service key (SAP BTP ABAP Environment): load the instance's service key per host with \"abap2UI5: Load Service Key\", then log on in your browser. The key and the refresh token are kept in the VS Code SecretStorage, the access token in memory only.",
+                  "A logon in a browser window the extension opens (the render gate's Chromium, or abap2ui5.logon.browserExecutable): whatever the system asks for - SAML 2.0 single sign-on, Kerberos, a certificate from the OS store, the logon form - happens there, and the session cookies are kept in memory for this VS Code window only. Nothing is stored."
                 ],
-                "description": "How the auth proxy logs on to this system. A host you set to \"certificate\" or \"oauth\" in your user settings keeps it when a workspace lists the same host without it."
+                "description": "How the auth proxy logs on to this system. A host you set to \"certificate\", \"oauth\" or \"browser\" in your user settings keeps it when a workspace lists the same host without it."
               }
             },
             "additionalProperties": false
@@ -906,6 +918,12 @@
           "default": false,
           "scope": "machine",
           "markdownDescription": "Accept **every** TLS certificate that cannot be verified - self-signed certificates, private CAs not in the OS trust store, hostname mismatches - on **every** system, without asking. Off by default.\n\nYou normally do not need this: when a system's certificate cannot be verified, F9 and **\"abap2UI5: Check System Connection\"** show the certificate (subject, issuer, validity, SHA-256 fingerprint) and ask once whether to trust it. A trusted certificate is accepted for that system only, and the connection is refused if the system ever presents a different one. **\"abap2UI5: Forget Trusted Certificates\"** drops those answers. A system with a certificate from a public CA is never asked about.\n\n**Security tradeoff:** while this is enabled, the connection to the system is encrypted but not authenticated - a machine-in-the-middle could present its own certificate and read the traffic, including the SAP credentials the local auth proxy injects.\n\nThis setting is read from your user settings only - a cloned repository cannot switch certificate verification off for you."
+        },
+        "abap2ui5.logon.browserExecutable": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "The browser a system with `\"auth\": \"browser\"` logs on in - the full path of a Chrome, Edge or Chromium executable. Empty (the default): the Chromium **\"abap2UI5: Install Render Gate\"** downloads. The browser is started with a fresh, temporary profile that is deleted after the logon, controlled over a pipe (no network port); the session cookies it hands over are kept in memory for this VS Code window only.\n\nThis setting is read from your user settings only - a cloned repository cannot choose which program is started."
         },
         "abap2ui5.codeLens": {
           "type": "boolean",

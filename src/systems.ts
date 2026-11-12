@@ -4,6 +4,7 @@ import { isUsableTemplate, originOf, shortUrl } from "./urls";
 import { ProfileFields, profileFieldsOf, tightenAuth, tightenRoles } from "./systemprofile";
 import { CLIENT_CERTIFICATES_KEY, withChoice } from "./clientcert";
 import { secretKeysFor } from "./logon";
+import { browserSessions } from "./browserlogon";
 
 /*
  * The systems the extension can launch against.
@@ -569,6 +570,12 @@ export async function clearCredentials(
     for (const key of Object.values(secretKeysFor(each))) {
       await context.secrets.delete(key);
     }
+  }
+  // a browser logon's session cookies live in memory only - dropped too
+  if (origin) {
+    browserSessions.forget(origin);
+  } else {
+    browserSessions.clear();
   }
   // and which certificate file was chosen - asked for again next time
   let chosen: unknown = context.globalState.get<unknown>(CLIENT_CERTIFICATES_KEY);
