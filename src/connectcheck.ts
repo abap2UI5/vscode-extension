@@ -15,6 +15,7 @@
 
 import { URL } from "url";
 import { shortUrl } from "./urls";
+import { isClientCertificateRefusal } from "./clientcert";
 
 /** One probe of the check: what was looked at, what was found, what fixes it. */
 export interface CheckStep {
@@ -102,10 +103,31 @@ export function reachedStep(origin: string): CheckStep {
 export function describeConnectFailure(failure: {
   code?: string;
   message?: string;
+  /** The profile's logon mechanism - a refused client certificate means
+   *  something else for a certificate profile than for a basic one. */
+  auth?: string;
 }): CheckStep {
   const label = "Host reachable";
   const code = failure.code ?? "";
   const message = failure.message ?? "connection failed";
+  if (isClientCertificateRefusal(code, message)) {
+    return {
+      label: "Client certificate",
+      ok: false,
+      detail:
+        failure.auth === "certificate"
+          ? "the system refused the client certificate in the TLS handshake - nothing was sent"
+          : "the system requires a client certificate in the TLS handshake",
+      fix:
+        failure.auth === "certificate"
+          ? "Check that the certificate is issued by a CA the system trusts " +
+            "(STRUST) and has not expired, or choose another one with " +
+            '"abap2UI5: Choose Client Certificate".'
+          : 'This system logs on with a client certificate: set "auth": ' +
+            '"certificate" in its abap2ui5.systems entry and choose one with ' +
+            '"abap2UI5: Choose Client Certificate".',
+    };
+  }
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
     return {
       label,
@@ -213,12 +235,29 @@ export function classifyStatus(answer: {
   authenticate?: string;
   /** The rejection page's own sentence, when there is one. */
   reason?: string;
+  /** The profile's logon mechanism (`auth`); absent means basic. */
+  auth?: string;
 }): CheckStep {
   const label = "HTTP status";
+  const certificate = answer.auth === "certificate";
   const { status, path } = answer;
   const said = answer.reason ? ` The system says: "${answer.reason}".` : "";
   if (status >= 200 && status < 300) {
     return { label, ok: true, detail: `the system answered ${status}` };
+  }
+  if (status === 401 && certificate) {
+    return {
+      label,
+      ok: false,
+      detail:
+        "the system did not log on with the client certificate (401)." + said,
+      fix:
+        "The certificate reached the system but is not mapped to a user " +
+        "there (rule-based mapping in CERTRULE, or table USREXTID), or the " +
+        "ICF node does not accept certificate logon - or a load balancer in " +
+        "front terminates TLS and drops it. " +
+        '"abap2UI5: Choose Client Certificate" picks another one.',
+    };
   }
   if (status === 401) {
     if (!answer.authenticate) {
@@ -230,7 +269,9 @@ export function classifyStatus(answer: {
           "asking for a password." + said,
         fix:
           "This service does not offer basic authentication, so no stored " +
-          'password can help. Set abap2ui5.openMode to "external" to reuse ' +
+          "password can help. If it logs you on with a client certificate, " +
+          'set "auth": "certificate" in its abap2ui5.systems entry. ' +
+          'Otherwise set abap2ui5.openMode to "external" to reuse ' +
           "your browser logon (SSO), or allow basic auth on the ICF node.",
       };
     }
@@ -267,6 +308,17 @@ export function classifyStatus(answer: {
         "URL match it exactly.",
     };
   }
+  if (status >= 300 && status < 400 && certificate) {
+    return {
+      label,
+      ok: false,
+      detail: `the system redirects (${status}) instead of serving the page`,
+      fix:
+        "Usually a redirect to a logon page: the client certificate did not " +
+        "log on - it is not mapped to a user, or the ICF node's logon " +
+        "procedure does not include certificates.",
+    };
+  }
   if (status >= 300 && status < 400) {
     return {
       label,
@@ -274,9 +326,11 @@ export function classifyStatus(answer: {
       detail: `the system redirects (${status}) instead of serving the page`,
       fix:
         "Usually a redirect to a logon page: the service wants form-based " +
-        "logon or SSO rather than basic authentication. Set " +
-        'abap2ui5.openMode to "external" to reuse the browser session, or ' +
-        "switch the ICF node's logon procedure.",
+        "logon or SSO rather than basic authentication. If it logs you on " +
+        'with a client certificate, set "auth": "certificate" in its ' +
+        'abap2ui5.systems entry; otherwise set abap2ui5.openMode to ' +
+        '"external" to reuse the browser session, or switch the ICF ' +
+        "node's logon procedure.",
     };
   }
   if (status >= 500) {
@@ -356,7 +410,7 @@ export function classifyClientProbe(probe: {
  * abap2UI5 bootstrap is the sneakiest white preview of all: every earlier
  * step passes, and only the page itself says the URL points somewhere else.
  */
-export function classifyBody(body: string): CheckStep {
+export function classifyBody(body: string, auth?: string): CheckStep {
   const label = "Page content";
   const ui5Bootstrap = /sap-ui-bootstrap|sap-ui-core\.js/i.test(body);
   if (ui5Bootstrap && /abap2ui5|z2ui5/i.test(body)) {
@@ -368,9 +422,14 @@ export function classifyBody(body: string): CheckStep {
       ok: false,
       detail: "the answer is the SAP logon page, not the app",
       fix:
-        "The service did not accept the logon and fell back to its form. " +
-        'Check user and password ("abap2UI5: Clear Stored SAP Credentials" ' +
-        "asks again) and the sap-client in the launch URL.",
+        auth === "certificate"
+          ? "The service did not log on with the client certificate and fell " +
+            "back to its form - the certificate is not mapped to a user in " +
+            "this client, or the node does not accept certificate logon. " +
+            "Check the sap-client in the launch URL too."
+          : "The service did not accept the logon and fell back to its form. " +
+            'Check user and password ("abap2UI5: Clear Stored SAP Credentials" ' +
+            "asks again) and the sap-client in the launch URL.",
     };
   }
   if (ui5Bootstrap) {
@@ -435,4 +494,47 @@ export function renderReport(steps: CheckStep[]): string[] {
     }
   }
   return lines;
+}
+
+// ---------------------------------------------------------------------------
+// The proxy's warning about a refused logon
+// ---------------------------------------------------------------------------
+
+/**
+ * What the warning about a refused or expired logon says, and what it
+ * offers - by the mechanism the proxy logs on with (T06d: no "openMode
+ * external" for a system whose profile names a mechanism of its own).
+ */
+export function relogonOffer(
+  kind: string,
+  status: number,
+  said: string,
+  expired: boolean,
+  offeredBasic: boolean
+): { message: string; button: string } {
+  if (expired) {
+    return {
+      message: `abap2UI5: the logon to the system has expired (HTTP ${status})${said}.`,
+      button: "Log On Again",
+    };
+  }
+  if (kind === "certificate") {
+    return {
+      message:
+        `abap2UI5: the system did not accept the client certificate (HTTP ${status})${said}. ` +
+        "It is not mapped to a user there, or the service does not accept certificate logon.",
+      button: "Choose Client Certificate",
+    };
+  }
+  return {
+    message:
+      `abap2UI5: the system rejected the logon (HTTP ${status})${said}.` +
+      (offeredBasic
+        ? " The stored user or password may be wrong."
+        : " The stored user or password may be wrong, or this system does " +
+          'not accept basic auth - if it logs on with a client certificate, set "auth": ' +
+          '"certificate" in its abap2ui5.systems entry, otherwise set ' +
+          'abap2ui5.openMode to "external".'),
+    button: "Re-enter Credentials",
+  };
 }

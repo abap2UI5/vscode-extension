@@ -14,8 +14,21 @@ import {
   peerOf,
 } from "./certtrust";
 import { rebasedLocation } from "./urls";
+import { clientCertificateRefusal } from "./clientcert";
 import { BodyTap, RoundtripBuffer } from "./roundtrips";
-import { AuthStrategy, BasicAuthStrategy } from "./authstrategy";
+import {
+  AuthStrategy,
+  BASIC_TEXTS,
+  BasicAuthStrategy,
+  ClassifiedAnswer,
+  InteractiveLogonRequired,
+  mergeCookies,
+  setCookieName,
+  setCookieValue,
+  StrategyTlsOptions,
+  TICKET_COOKIE,
+  VerdictText,
+} from "./authstrategy";
 import { AdtClassState, AdtStatusError } from "./proxyadt";
 import { allowFraming, INJECT_MAX_BYTES, injectRuntimeHook } from "./proxyhtml";
 import {
@@ -52,9 +65,10 @@ export {
 
 /**
  * Small local reverse proxy: accepts requests on 127.0.0.1 and forwards them
- * to the SAP system, injecting the basic-auth header into EVERY request. That
- * way the embedded browser (webview iframe) needs no login of its own and does
- * not run into a 401.
+ * to the SAP system, logging EVERY request on with its `AuthStrategy` (a
+ * basic-auth header, a client certificate - `authstrategy.ts`). That way the
+ * embedded browser (webview iframe) needs no login of its own and does not
+ * run into a 401.
  *
  * All paths are forwarded transparently (UI5 resources under /sap/public,
  * /sap/bc/ui5_ui5 and so on), since the iframe sends root-relative paths to
@@ -78,6 +92,13 @@ export interface ProxyResponse {
    * 100". The status alone cannot tell those apart.
    */
   reason?: string;
+  /**
+   * The answer meant the logon ran out rather than that it was refused: the
+   * strategy's `"expired"` verdict on a 401, its `classifyAnswer` on another
+   * status, or a `prepare( )` that needs the user. The host offers to log on
+   * again instead of re-entering a password.
+   */
+  expired?: boolean;
 }
 
 /** One finished request/response pair, as the traffic log records it. The
@@ -247,6 +268,14 @@ export class SapProxy {
   /** A request error as callers see it - a certificate Node refused gets the
    *  message that says how to trust it (certtrust.ts), and is reported. */
   private explained(err: unknown, target: URL): Error {
+    // the system refusing OUR side of the handshake - no or a wrong client
+    // certificate - is said as such, not as Node's alert code
+    const refusal = clientCertificateRefusal(err, target.host, this.auth?.kind);
+    if (refusal) {
+      return Object.assign(new Error(refusal), {
+        code: (err as { code?: unknown } | undefined)?.code,
+      });
+    }
     const explained = explainTlsError(err, target.origin);
     if (explained !== err && explained instanceof CertificateTrustError) {
       this.onTrustRefused?.(explained.message);
@@ -274,6 +303,32 @@ export class SapProxy {
    * credentials (and every F9) goes through.
    */
   private authRejected = false;
+
+  /**
+   * Set when the strategy called the logon EXPIRED (a 401 it reads that way,
+   * an answer `classifyAnswer` reads that way, or a `prepare( )` that needs
+   * the user). Stops forwarding exactly like `authRejected`, with the
+   * strategy's own `texts.expired` and no lockout wording; `start( )` clears
+   * it too.
+   */
+  private authExpired = false;
+
+  /** The mechanism of the running logon (`basic`, `certificate`, ...) - for
+   *  a message or the bug report, never a secret. */
+  get authKind(): string | undefined {
+    return this.auth?.kind;
+  }
+
+  /** What the proxy says while its breaker holds, or undefined while it
+   *  forwards. */
+  private breaker(): VerdictText | undefined {
+    const texts = this.auth?.texts ?? BASIC_TEXTS;
+    return this.authRejected
+      ? texts.rejected
+      : this.authExpired
+        ? texts.expired
+        : undefined;
+  }
 
   /** Called once per finished response, with the full roundtrip timing -
    *  what feeds the traffic log and the toolbar's roundtrip badge. */
@@ -326,12 +381,69 @@ export class SapProxy {
   }
 
   /**
-   * Whether a 401 from the system trips the retry breaker (`authRejected`) -
-   * the strategy's answer. A proxy stopped while the request was under way
-   * has no strategy left; the answer then counts as it always did.
+   * What a 401 from the system does to the breaker - the strategy's answer:
+   * `"rejected"` trips `authRejected`, `"expired"` trips `authExpired`. A
+   * proxy stopped while the request was under way has no strategy left; the
+   * answer then counts as rejected, as it always did. True when the logon
+   * EXPIRED (for the report).
    */
-  private rejectedBy401(authenticate: string | undefined): boolean {
-    return !this.auth || this.auth.onUnauthorized({ authenticate }) === "rejected";
+  private tripBy401(authenticate: string | undefined): boolean {
+    const verdict = this.auth ? this.auth.onUnauthorized({ authenticate }) : "rejected";
+    if (verdict === "rejected") {
+      this.authRejected = true;
+    } else if (verdict === "expired") {
+      this.authExpired = true;
+    }
+    return verdict === "expired";
+  }
+
+  /** Whether a non-401 answer means the logon ran out (`classifyAnswer`) -
+   *  and if so, trips `authExpired`. Only the strategy that was asked may
+   *  trip it: one swapped in meanwhile has its own logon. */
+  private expiredBy(auth: AuthStrategy | undefined, answer: ClassifiedAnswer): boolean {
+    if (!auth?.classifyAnswer || answer.status === 401) {
+      return false;
+    }
+    if (auth.classifyAnswer(answer) !== "expired") {
+      return false;
+    }
+    if (this.auth === auth) {
+      this.authExpired = true;
+    }
+    return true;
+  }
+
+  /** The strategy's TLS options (a client certificate) - spread into the
+   *  request options of an https system next to the pin stance, which they
+   *  never touch: a pinned origin and a client certificate coexist. */
+  private tlsOf(auth: AuthStrategy | undefined, target: URL): StrategyTlsOptions {
+    return target.protocol === "https:" ? (auth?.tlsOptions?.() ?? {}) : {};
+  }
+
+  /**
+   * The system's `Set-Cookie` lines minus the strategy's own cookies - which
+   * the strategy injects itself, so the client's jar need not hold them. For
+   * a strategy that injects cookies `MYSAPSSO2` is always one of them: a
+   * domain-wide logon ticket does not belong in the webview (docs/auth.md,
+   * section 6). Each kept-back cookie is offered to `takeSetCookie` (a
+   * sliding session). A strategy without cookies changes nothing.
+   */
+  private withoutOwnCookies(
+    lines: string[] | undefined,
+    auth: AuthStrategy | undefined
+  ): string[] | undefined {
+    if (!lines || !auth?.requestCookies) {
+      return lines;
+    }
+    const own = new Set([...Object.keys(auth.requestCookies()), TICKET_COOKIE]);
+    return lines.filter((line) => {
+      const name = setCookieName(line);
+      if (!own.has(name)) {
+        return true;
+      }
+      auth.takeSetCookie?.(name, setCookieValue(line));
+      return false;
+    });
   }
 
   private async startNow(
@@ -341,6 +453,7 @@ export class SapProxy {
     const target = new URL(targetOrigin);
     // new credentials are a new attempt, whether or not the server restarts
     this.authRejected = false;
+    this.authExpired = false;
 
     if (this.server && this.target && this.target.origin === target.origin) {
       this.auth = auth;
@@ -574,16 +687,41 @@ export class SapProxy {
     if (!target || !auth) {
       return Promise.reject(new Error("proxy not started"));
     }
-    if (this.authRejected) {
+    const stopped = this.breaker();
+    if (stopped) {
       // the activation poller runs on a timer, so without this it would keep
       // offering the rejected password long after the user stopped looking
-      return Promise.reject(
-        new Error("the system rejected the stored credentials")
-      );
+      return Promise.reject(new Error(stopped.error));
     }
+    // A strategy without `prepare` is sent at once, exactly as before.
+    if (!auth.prepare) {
+      return this.fetchNow(target, auth, path, accept, options);
+    }
+    return auth.prepare(options.signal).then(
+      () => this.fetchNow(target, auth, path, accept, options),
+      (err: unknown) => {
+        if (err instanceof InteractiveLogonRequired && !options.background) {
+          if (this.auth === auth) {
+            this.authExpired = true;
+          }
+          this.onResponse?.({ status: 401, path, expired: true, reason: err.message });
+        }
+        throw err;
+      }
+    );
+  }
+
+  private fetchNow(
+    target: URL,
+    auth: AuthStrategy,
+    path: string,
+    accept: string,
+    options: { background?: boolean; signal?: AbortSignal; timeoutMs?: number }
+  ): Promise<{ status: number; body: string; authenticate?: string }> {
     const isHttps = target.protocol === "https:";
     const mod = isHttps ? https : http;
     const stance = this.tlsStance(target);
+    const cookie = mergeCookies(undefined, auth.requestCookies?.());
 
     return new Promise((resolve, reject) => {
       const req = mod.request(
@@ -595,8 +733,10 @@ export class SapProxy {
           path,
           headers: {
             ...auth.requestHeaders(),
+            ...(cookie ? { cookie } : {}),
             accept,
           },
+          ...this.tlsOf(auth, target),
           rejectUnauthorized: stance.rejectUnauthorized,
           signal: options.signal,
         },
@@ -614,16 +754,32 @@ export class SapProxy {
             // timer rather than on a keystroke, so nothing in the UI said the
             // logon had stopped working.
             const authenticate = headerValue(res.headers["www-authenticate"]);
+            // a sliding session renews here too
+            this.withoutOwnCookies(res.headers["set-cookie"], auth);
             if ((status === 401 || status === 403) && !options.background) {
-              if (status === 401 && this.rejectedBy401(authenticate)) {
-                this.authRejected = true;
-              }
+              const expired = status === 401 && this.tripBy401(authenticate);
               this.onResponse?.({
                 status,
                 path,
                 authenticate,
                 reason: describeRejection(body),
+                ...(expired ? { expired } : {}),
               });
+            } else if (
+              !options.background &&
+              this.expiredBy(auth, {
+                status,
+                authenticate,
+                location: headerValue(res.headers.location),
+                contentType: headerValue(res.headers["content-type"]),
+                expectsData: !/text\/html/i.test(accept),
+              })
+            ) {
+              // a redirect to the identity provider or a logon form is no
+              // answer to hand on as if it were the one asked for
+              this.onResponse?.({ status, path, expired: true });
+              reject(new Error((auth.texts ?? BASIC_TEXTS).expired.error));
+              return;
             }
             // The header travels with the answer too: the connection check
             // needs it to tell "wrong password" from "no basic auth at all".
@@ -735,6 +891,18 @@ export class SapProxy {
         delete headers.cookie;
       }
     }
+    // the strategy's cookies (a browser logon's session): merged, never
+    // replacing the client's own - the agent transport keeps a jar of its own
+    const own = this.auth?.requestCookies?.();
+    if (own && Object.keys(own).length) {
+      const merged = mergeCookies(
+        headers.cookie === undefined ? undefined : String(headers.cookie),
+        own
+      );
+      if (merged) {
+        headers.cookie = merged;
+      }
+    }
     if (headers.origin) {
       headers.origin = target.origin;
     }
@@ -750,28 +918,82 @@ export class SapProxy {
       res.writeHead(404).end();
       return;
     }
-    if (this.authRejected) {
+    const stopped = this.breaker();
+    if (stopped) {
       // Answered here, without touching the system - see `authRejected`. The
       // status is the one the system gave, so the page behaves exactly as it
       // did on the answer that set the flag; the body says why nothing is
       // arriving, since this text is what an iframe ends up showing.
-      res
-        .writeHead(401, { "content-type": "text/plain; charset=utf-8" })
-        .end(
-          "abap2UI5: the system rejected the stored user or password. The " +
-            "extension stopped repeating the request so the account does not " +
-            "get locked. Enter the credentials again to retry."
-        );
-      this.onTraffic?.({
-        method: String(req.method ?? "GET"),
-        path,
-        status: 401,
-        durationMs: 0,
-        bytes: 0,
-      });
+      this.answerLocally(req, res, path, stopped.page);
       return;
     }
+    const auth = this.auth;
+    if (!auth?.prepare) {
+      // no preparation to wait for: forwarded at once, as it always was
+      this.forward(req, res, path);
+      return;
+    }
+    // The request body is not read before forward( ) attaches its listeners,
+    // so it waits, buffered, while the strategy renews its logon.
+    const token = this.token;
+    auth.prepare().then(
+      () => {
+        if (this.token !== token || this.auth !== auth) {
+          // stopped or switched while preparing - nothing to forward with
+          res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+          res.end("abap2UI5 proxy error: the proxy was restarted");
+          return;
+        }
+        const nowStopped = this.breaker();
+        if (nowStopped) {
+          this.answerLocally(req, res, path, nowStopped.page);
+          return;
+        }
+        this.forward(req, res, path);
+      },
+      (err: unknown) => {
+        if (res.writableEnded || res.destroyed) {
+          return;
+        }
+        if (err instanceof InteractiveLogonRequired) {
+          if (this.auth === auth) {
+            this.authExpired = true;
+          }
+          this.onResponse?.({ status: 401, path, expired: true, reason: err.message });
+          this.answerLocally(req, res, path, (auth.texts ?? BASIC_TEXTS).expired.page);
+          return;
+        }
+        res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+        res.end(
+          "abap2UI5 proxy error: " + (err instanceof Error ? err.message : String(err))
+        );
+      }
+    );
+  }
 
+  /** The breaker's local 401, with its line in the traffic log. */
+  private answerLocally(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    path: string,
+    body: string
+  ): void {
+    res.writeHead(401, { "content-type": "text/plain; charset=utf-8" }).end(body);
+    this.onTraffic?.({
+      method: String(req.method ?? "GET"),
+      path,
+      status: 401,
+      durationMs: 0,
+      bytes: 0,
+    });
+  }
+
+  /** One authorized request, sent on to the system. */
+  private forward(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    path: string
+  ): void {
     // an authorized request that came in prefixed leaves with the cookie, so
     // that an absolute-path resource is authorized too
     const seedCookie = String(req.url ?? "").startsWith(`/${TOKEN_SEGMENT}/`);
@@ -789,6 +1011,7 @@ export class SapProxy {
     const reportedPath = path;
 
     const target = this.target!;
+    const auth = this.auth;
     const isHttps = target.protocol === "https:";
     const mod = isHttps ? https : http;
     const startedAt = Date.now();
@@ -843,6 +1066,8 @@ export class SapProxy {
       method: req.method,
       path,
       headers,
+      // a client certificate, when the strategy presents one
+      ...this.tlsOf(auth, target),
       // verified unless this origin's certificate was pinned or the blanket
       // override is on - see `tlsStance`
       rejectUnauthorized: stance.rejectUnauthorized,
@@ -859,17 +1084,33 @@ export class SapProxy {
       });
 
       const status = proxyRes.statusCode ?? 0;
+      // A redirect to the identity provider, a logon form where data was
+      // expected: the strategy may call the logon expired. That answer is not
+      // handed on - the iframe would follow it off to the IdP - but answered
+      // here, the way every request after it is.
+      if (
+        this.expiredBy(auth, {
+          status,
+          authenticate: headerValue(proxyRes.headers["www-authenticate"]),
+          location: headerValue(proxyRes.headers.location),
+          contentType: headerValue(proxyRes.headers["content-type"]),
+          expectsData: !expectsHtml,
+        })
+      ) {
+        proxyRes.resume();
+        this.onResponse?.({ status, path: reportedPath, expired: true });
+        trafficLogged = true;
+        this.answerLocally(req, res, reportedPath, (auth?.texts ?? BASIC_TEXTS).expired.page);
+        return;
+      }
       if (status === 401 || status === 403) {
         // Reported after the body rather than at header time: what makes a
         // rejection diagnosable is the sentence inside it, and these two
         // statuses are the only ones where waiting a few milliseconds buys
         // anything. A 401 also stops the burst of retries (`authRejected`).
-        if (
+        const expired =
           status === 401 &&
-          this.rejectedBy401(headerValue(proxyRes.headers["www-authenticate"]))
-        ) {
-          this.authRejected = true;
-        }
+          this.tripBy401(headerValue(proxyRes.headers["www-authenticate"]));
         let sniff = "";
         const sniffDecoder = new StringDecoder("utf8");
         proxyRes.on("data", (chunk: Buffer) => {
@@ -891,6 +1132,7 @@ export class SapProxy {
             path: reportedPath,
             authenticate: headerValue(proxyRes.headers["www-authenticate"]),
             reason: describeRejection(sniff),
+            ...(expired ? { expired } : {}),
           });
         };
         proxyRes.once("end", reportRejection);
@@ -991,7 +1233,8 @@ export class SapProxy {
 
       // Make the system's cookies valid on the proxy's origin - Domain, Path
       // and Secure, see `rewriteSetCookie`.
-      const setCookie = proxyRes.headers["set-cookie"];
+      // (the strategy's own cookies stay here - `withoutOwnCookies`)
+      const setCookie = this.withoutOwnCookies(proxyRes.headers["set-cookie"], auth);
       const cookies = setCookie ? setCookie.map(rewriteSetCookie) : [];
       if (seedCookie) {
         // SameSite=None, not Lax: the page lives in an iframe whose top-level
@@ -1133,12 +1376,42 @@ export class SapProxy {
     head: Buffer
   ): void {
     const path = this.route(req);
-    if (path === undefined || this.authRejected) {
+    if (path === undefined || this.breaker()) {
       socket.destroy();
       return;
     }
+    const auth = this.auth;
+    if (!auth?.prepare) {
+      this.forwardUpgrade(req, socket, head, path);
+      return;
+    }
+    const token = this.token;
+    auth.prepare().then(
+      () => {
+        if (this.token !== token || this.auth !== auth || this.breaker()) {
+          socket.destroy();
+          return;
+        }
+        this.forwardUpgrade(req, socket, head, path);
+      },
+      (err: unknown) => {
+        if (err instanceof InteractiveLogonRequired && this.auth === auth) {
+          this.authExpired = true;
+          this.onResponse?.({ status: 401, path, expired: true, reason: err.message });
+        }
+        socket.destroy();
+      }
+    );
+  }
 
+  private forwardUpgrade(
+    req: http.IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+    path: string
+  ): void {
     const target = this.target!;
+    const auth = this.auth;
     const isHttps = target.protocol === "https:";
     const mod = isHttps ? https : http;
 
@@ -1164,6 +1437,7 @@ export class SapProxy {
       method: req.method,
       path,
       headers,
+      ...this.tlsOf(auth, target),
       rejectUnauthorized: stance.rejectUnauthorized,
     });
     // A system that accepts the connection and never answers the upgrade
@@ -1231,6 +1505,12 @@ export class SapProxy {
       for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
         const name = proxyRes.rawHeaders[i];
         const value = proxyRes.rawHeaders[i + 1];
+        if (
+          name.toLowerCase() === "set-cookie" &&
+          !this.withoutOwnCookies([value], auth)?.length
+        ) {
+          continue; // the strategy's own cookie stays here
+        }
         // the handshake may plant a session cookie exactly as a page does,
         // and it needs the same rebasing onto the proxy's origin - or it is
         // set once and never sent back
@@ -1259,16 +1539,20 @@ export class SapProxy {
       // to stop - while nothing ever offered the user to re-enter the
       // credentials, because nobody reported the answer.
       const status = proxyRes.statusCode ?? 502;
-      if (
-        status === 401 &&
-        this.rejectedBy401(headerValue(proxyRes.headers["www-authenticate"]))
-      ) {
-        this.authRejected = true;
-      }
+      const expired =
+        status === 401
+          ? this.tripBy401(headerValue(proxyRes.headers["www-authenticate"]))
+          : this.expiredBy(auth, {
+              status,
+              location: headerValue(proxyRes.headers.location),
+              contentType: headerValue(proxyRes.headers["content-type"]),
+              expectsData: true,
+            });
       this.onResponse?.({
         status,
         path,
         authenticate: headerValue(proxyRes.headers["www-authenticate"]),
+        ...(expired ? { expired } : {}),
       });
       // Ended AND destroyed once the refusal is out: nothing reads this socket
       // any more, and a WebSocket client has its first frame ready to send -

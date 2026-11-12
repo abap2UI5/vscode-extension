@@ -1,6 +1,6 @@
 # Logon beyond basic authentication - design note (T06a)
 
-Status: **proposal for the maintainers to decide on**; no code change. It
+Status: **decided** (section 6); T06c started with the interface and the certificate. It
 answers T06a in `ROADMAP.md`: which mechanisms, in which order, how each gets,
 stores, renews and sends its secret, and what `AuthStrategy` (T06b) must gain
 for T06c. No SAP system was available: every unconfirmed statement about the
@@ -392,6 +392,31 @@ Chromium cannot be shown *(verify)*; OAuth via `asExternalUri` *(verify)*.
    S.** Small, safe, narrow: only where keys are exportable.
 4. **Kerberos and the reentrance ticket: no mechanism of their own**; the
    ticket is a BTP add-on to evaluate once a system is available.
+
+**Decided.** The ranking stands - browser logon first, OAuth second,
+certificate third - but the implementation starts with the interface of
+section 7 and the certificate, because the certificate is the one mechanism
+fully testable without a system (a local https server that requires a client
+certificate). Session cookies of a browser logon are kept in memory only
+(`SAP_SESSIONID_*` and `MYSAPSSO2` alike; nothing under
+`abap2ui5.session:` yet). `MYSAPSSO2` is stripped from the answers to the
+preview iframe whenever the strategy injects cookies itself. `tightenAuth`
+is wanted. No `AuthenticationProvider`. For the certificate, the file PATH
+is stored in `globalState` per origin (machine-local, never from a
+workspace) and the passphrase in `context.secrets` under
+`abap2ui5.cert:<origin>`; the file is read when the proxy starts (the option
+"bytes in secrets" of 3.4 was not taken).
+
+What was built (T06c, first part, and T06d): all six interface changes of
+section 7 in `authstrategy.ts`, wired into the three request sites of
+`proxy.ts`; with `texts` optional and two sentences per verdict (`page`,
+`error`) - a strategy without `texts` gets basic's wording, which kept every
+existing test unchanged. `strategyFor(profile, origin, deps)` lives in
+`logon.ts` (vscode-free) rather than `systems.ts`; its plumbing is
+`logonprompt.ts`. A refused client certificate is detected from the
+server's TLS alert; under TLS 1.3 the alert can lose the race against the
+server's close, and the client then sees a bare reset - reported as a
+connection failure, not as a certificate problem.
 
 **What a maintainer must decide**
 

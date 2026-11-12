@@ -52,6 +52,11 @@ export interface ReportInput {
     /** How many origins carry a pinned certificate - the COUNT only: which
      *  hosts they are is nothing a public issue needs. */
     pinnedCertificates?: number;
+    /** The logon mechanism of each configured system, by its name - the
+     *  KIND only (`basic`, `certificate`), never a secret or a file path. */
+    logon?: Array<{ name: string; auth: string }>;
+    /** The mechanism the running proxy logs on with. */
+    proxyLogon?: string;
   };
   /** Other extensions that matter here - the ADT ones above all. */
   relatedExtensions: string[];
@@ -127,7 +132,47 @@ export function redact(text: string): string {
         (_all, header: string, sep: string, scheme?: string) =>
           `${header}${sep}${scheme ? `${scheme} ` : ""}<redacted>`
       )
+      // a bearer token after ANY header or key name (`x-token: Bearer …`,
+      // `"token": "Bearer …"`) - the authorization rule above covers its own
+      .replace(
+        /(\b[\w-]+"?\s*[:=]\s*"?)(bearer)\s+(?!<redacted>)[^\s",;]+/gi,
+        (_all, before: string, scheme: string) => `${before}${scheme} <redacted>`
+      )
+      // cookie headers, should a log line quote one: every value of the
+      // header goes (the SAP session, the logon ticket, the proxy's own token
+      // cookie), the names stay - they are the diagnostic part
+      .replace(
+        /\b(set-cookie|cookie)(\s*:\s*)([^\r\n]*)/gi,
+        (_all, header: string, sep: string, value: string) =>
+          `${header}${sep}${redactCookieValues(value, header.toLowerCase() === "set-cookie")}`
+      )
+      // the logon ticket and the ICF session anywhere else
+      .replace(/\b(MYSAPSSO2|SAP_SESSIONID_[A-Za-z0-9_]*)=(?!<redacted>)[^;\s,"']*/g, "$1=<redacted>")
+      // OAuth and certificate secrets in JSON or query strings
+      .replace(
+        /("?\b(?:access_token|refresh_token|id_token|client_secret|clientsecret|passphrase|password)"?\s*[:=]\s*"?)(?!<redacted>)[^"&\s,}]+/gi,
+        "$1<redacted>"
+      )
+      .replace(/([?&]code=)[^&\s"']+/g, "$1<redacted>")
   );
+}
+
+/**
+ * The values of a `Cookie` header (`a=1; b=2`) or a `Set-Cookie` line
+ * (`a=1; Path=/; HttpOnly`) blanked, the names kept. In a `Set-Cookie` only
+ * the first pair is a cookie; the attributes after it stay as they are.
+ */
+function redactCookieValues(value: string, setCookie: boolean): string {
+  return value
+    .split(";")
+    .map((part, index) => {
+      if (setCookie && index > 0) {
+        return part;
+      }
+      const eq = part.indexOf("=");
+      return eq < 0 ? part : `${part.slice(0, eq)}=<redacted>`;
+    })
+    .join(";");
 }
 
 /**
@@ -215,9 +260,20 @@ export function buildReport(input: ReportInput): string {
         `, proxy ${input.systems.proxyRunning ? "running" : "stopped"}` +
         (input.systems.pinnedCertificates === undefined
           ? ""
-          : `, ${plural(input.systems.pinnedCertificates, "certificate")} trusted per system`),
+          : `, ${plural(input.systems.pinnedCertificates, "certificate")} trusted per system`) +
+        (input.systems.proxyRunning && input.systems.proxyLogon
+          ? `, proxy logs on with ${input.systems.proxyLogon}`
+          : ""),
     ])
   );
+  if (input.systems.logon?.length) {
+    out.push(
+      row([
+        "logon per system",
+        input.systems.logon.map((system) => `${system.name}: ${system.auth}`).join(", "),
+      ])
+    );
+  }
   if (input.relatedExtensions.length) {
     out.push(row(["other extensions", input.relatedExtensions.join(", ")]));
   }

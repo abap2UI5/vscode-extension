@@ -126,6 +126,12 @@ export function registerDiagnosticsReport(
           active: activeSystem(context)?.name,
           proxyRunning: session.proxy.isRunning,
           pinnedCertificates: Object.keys(certificatePins(context)).length,
+          // the mechanism per system - the kind only, never a secret or path
+          logon: allSystems().map((system) => ({
+            name: system.name,
+            auth: system.auth ?? "basic",
+          })),
+          proxyLogon: session.proxy.authKind,
         },
         relatedExtensions: relatedExtensions(),
         recentLog: session.recentLog(),

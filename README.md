@@ -134,6 +134,40 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
 - **Works in the browser** — vscode.dev, github.dev and browser-based SAP
   Business Application Studio get the language half.
 
+## Systems and logon
+
+F9 loads the app through a local auth proxy that logs on to the system for
+the preview, so the inspector, the live model, the traffic log, screenshots
+and the system MCP tools all work. Each entry of `abap2ui5.systems` names how
+that proxy logs on, in its `auth` field:
+
+| `auth` | How | What is stored |
+| --- | --- | --- |
+| `"basic"` (default) | user and password, asked for once per host | both in the VS Code SecretStorage |
+| `"certificate"` | an X.509 client certificate the system maps to your user - a `.pfx`/`.p12` file, or a PEM certificate and its key | the file PATH in VS Code's machine-local state, the passphrase in the SecretStorage; the file is read each time the proxy starts |
+
+```json
+"abap2ui5.systems": [
+  { "name": "DEV", "url": "https://dev:44300/sap/bc/z2ui5?app_start={class}&sap-client=100", "auth": "certificate" }
+]
+```
+
+For a `"certificate"` system, F9 asks for the file the first time (or run
+**abap2UI5: Choose Client Certificate**); a certificate that has expired, or
+whose passphrase does not open it, is refused before anything is sent, and
+one that expires within 14 days is warned about. A certificate kept in the
+Windows certificate store or on a smart card with a non-exportable key cannot
+be used this way. A self-signed server certificate is trusted per system as
+before (*Trust This Certificate*), and both work together. A mechanism other
+than basic that your user settings name for a host stays in effect when a
+workspace lists the same host without it. **Clear Stored SAP Credentials**
+forgets passwords, passphrases and certificate choices alike.
+
+**Check System Connection** reports a missing or refused client certificate
+as its own step, and for a system that answers without offering basic auth
+it names the `auth` field. A browser (SSO) logon is planned; until then such
+a system runs with `abap2ui5.openMode` set to `"external"`.
+
 ## Agent app tools on the system
 
 The **abap2UI5 System** MCP server offers four tools that operate an
@@ -327,6 +361,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Select System | `abap2ui5.selectSystem` |  |
 | Check System Connection | `abap2ui5.checkConnection` |  |
 | Clear Stored SAP Credentials | `abap2ui5.resetCredentials` |  |
+| Choose Client Certificate | `abap2ui5.chooseClientCertificate` |  |
 | Forget Trusted Certificates | `abap2ui5.forgetTrustedCertificates` |  |
 | New App from Template | `abap2ui5.newApp` |  |
 | New Project from Template | `abap2ui5.newProject` |  |

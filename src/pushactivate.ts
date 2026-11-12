@@ -16,7 +16,8 @@ import { activateAndReload } from "./launch";
 import { postToShownApp, reloadShownApp } from "./preview";
 import { isNewer, staleMessage } from "./previewcore";
 import { Session } from "./session";
-import { allSystems, ensureCredentials, ensureSystem, SystemProfile } from "./systems";
+import { allSystems, ensureSystem, SystemProfile } from "./systems";
+import { reportLogonFailure, strategyForSystem } from "./logonprompt";
 import { originOf, sapClientOf } from "./urls";
 
 /*
@@ -244,12 +245,23 @@ export async function pushAndActivate(session: Session, uri?: vscode.Uri): Promi
     reportTrustRefusal(trust);
     return;
   }
-  const creds = await ensureCredentials(session.ctx, origin);
-  if (!creds) {
+  // the system's own logon (basic, client certificate, ...) - the same
+  // factory F9 starts the proxy with, never an assumed password
+  let auth;
+  try {
+    auth = await strategyForSystem(session.ctx, system, origin, {
+      mayAsk: true,
+      log: (m) => session.log(m),
+    });
+  } catch (err) {
+    reportLogonFailure(err, (m) => session.log(m));
+    return;
+  }
+  if (!auth) {
     return;
   }
   try {
-    await session.proxy.start(origin, creds.user, creds.pass);
+    await session.proxy.start(origin, auth);
   } catch (err) {
     vscode.window.showErrorMessage(
       `abap2UI5: could not start the proxy - ${err instanceof Error ? err.message : String(err)}`
