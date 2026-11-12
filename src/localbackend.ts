@@ -363,6 +363,10 @@ function lineReader(onLine: (line: string) => void): (chunk: string) => void {
  * get ready is killed. Its stdin stays open: the launcher exits when it
  * closes, so a host whose extension host died does not outlive it.
  */
+/** How long a failed start waits for the launcher to be gone before it
+ *  reports the failure. */
+const STOP_WAIT_MS = 5000;
+
 export function startLocalHost(
   command: LocalHostCommand,
   options: StartOptions
@@ -413,7 +417,12 @@ export function startLocalHost(
       settled = true;
       clearTimeout(limit);
       stop();
-      reject(new LocalBackendError(message, [...tail]));
+      // report once the launcher is really gone - on Windows taskkill runs
+      // asynchronously, and a caller that cleans up (or starts the next
+      // host) right away would find the old one still in its folder.
+      // Bounded: a process that will not die does not hold the error back.
+      const error = new LocalBackendError(message, [...tail]);
+      void Promise.race([exited, new Promise((done) => setTimeout(done, STOP_WAIT_MS))]).then(() => reject(error));
     };
     const limit = setTimeout(
       () => fail(`the local backend was not ready after ${Math.round((options.timeoutMs ?? START_TIMEOUT_MS) / 1000)} s`),
