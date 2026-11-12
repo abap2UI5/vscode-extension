@@ -291,7 +291,9 @@ export interface SystemResponse {
 export type SystemRequest = (
   url: string,
   init: {
-    method: "POST" | "HEAD";
+    /** GET and PUT are "Push and Activate"'s (`adtwrite.ts`); the app
+     *  tools send POST and HEAD only. */
+    method: "POST" | "HEAD" | "GET" | "PUT";
     headers: Record<string, string>;
     body?: string;
     signal?: AbortSignal;

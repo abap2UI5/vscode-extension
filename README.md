@@ -54,6 +54,16 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
 - **F9 runs the app** next to the source, and the cursor stays where it was.
   **Ctrl+F3** activates the class through your ABAP tooling and reloads the
   preview — activations done any other way are noticed on the server too.
+  In an app class **on disk** (an abapGit checkout, the layout app-template
+  creates) Ctrl+F3 runs **Push and Activate** instead: the class and its local
+  includes (`.clas.locals_def.abap`, `.clas.locals_imp.abap`,
+  `.clas.testclasses.abap`) are written to the system over ADT - locked,
+  written where they differ, unlocked, activated - and the preview reloads.
+  The class must already exist on the system. You are asked before the first
+  push of a class to a system, shown a diff when the server changed since your
+  last push or F9, and asked for a transport request when the system wants
+  one; production systems and Restricted Mode are refused. Activation errors
+  land in the Problems view on their line, in the file they belong to.
 - **The preview is more than a browser tab**: device widths, themes and
   languages; runtime errors forwarded into the editor; a click-the-control →
   jump-to-the-builder-call inspector; the live JSON model; a traffic log with
@@ -233,6 +243,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Run App | `abap2ui5.run` | `f9` |
 | Reload Preview | `abap2ui5.reload` |  |
 | Activate and Reload Preview | `abap2ui5.activate` | `ctrl+f3` / `cmd+f3` |
+| Push and Activate | `abap2ui5.pushActivate` |  |
 | Run a Recently Launched App | `abap2ui5.runRecent` |  |
 | Run an App from the System | `abap2ui5.runFromSystem` |  |
 | Show the Preview in the Panel | `abap2ui5.previewInPanel` |  |

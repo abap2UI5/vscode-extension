@@ -85,6 +85,12 @@
         "icon": "$(zap)"
       },
       {
+        "command": "abap2ui5.pushActivate",
+        "category": "abap2UI5",
+        "title": "Push and Activate",
+        "icon": "$(cloud-upload)"
+      },
+      {
         "command": "abap2ui5.runRecent",
         "category": "abap2UI5",
         "title": "Run a Recently Launched App",
@@ -433,6 +439,10 @@
           "when": "!isWeb"
         },
         {
+          "command": "abap2ui5.pushActivate",
+          "when": "!isWeb"
+        },
+        {
           "command": "abap2ui5.runRecent",
           "when": "!isWeb"
         },
@@ -589,7 +599,7 @@
         },
         {
           "command": "abap2ui5.activate",
-          "when": "resourceLangId == abap && resourceScheme == adt && !isWeb",
+          "when": "resourceLangId == abap && !isWeb && (resourceScheme == adt || resourceScheme == file && resourceFilename =~ /\\.clas\\.(locals_def\\.|locals_imp\\.|testclasses\\.)?abap$/i)",
           "group": "navigation@2"
         }
       ],
@@ -756,7 +766,7 @@
         "command": "abap2ui5.activate",
         "key": "ctrl+f3",
         "mac": "cmd+f3",
-        "when": "editorTextFocus && editorLangId == abap && resourceScheme == adt && !isWeb"
+        "when": "editorTextFocus && editorLangId == abap && !isWeb && (resourceScheme == adt || resourceScheme == file && resourceFilename =~ /\\.clas\\.(locals_def\\.|locals_imp\\.|testclasses\\.)?abap$/i)"
       }
     ],
     "viewsContainers": {

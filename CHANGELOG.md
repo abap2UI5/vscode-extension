@@ -4,6 +4,25 @@
 
 The bundled linter moves to v0.9.0.
 
+- **Push and Activate a class that lives on disk.** Ctrl+F3 in an app class
+  of an abapGit checkout used to do nothing useful - only ADT documents could
+  be activated, through another extension. It now writes the class and its
+  local definitions, implementations and test classes to the active system
+  over ADT (only the parts that differ), activates it and reloads the
+  preview; the command *Push and Activate* does the same for any class file.
+  The class has to exist on the system already. Before the first push of a
+  class to a system you are asked; when the server's version is newer than
+  the one you last pushed or ran, you are told and can compare the two first;
+  a transport request is asked for when the system needs one and never made
+  up; a lock held by somebody else is reported and nothing is written; the
+  lock is always released. A system whose profile says `"role":
+  "production"` and Restricted Mode are refused. Everything goes through the
+  extension's auth proxy, with its credentials and certificate trust.
+- **Activation errors in the Problems view.** When an activation through
+  Push and Activate fails, every message is shown on its line in the file it
+  belongs to (`.clas.abap`, `.clas.locals_def.abap`, `.clas.locals_imp.abap`,
+  `.clas.testclasses.abap`); a message without a position sits on line 1 of
+  the class. They disappear with the next successful activation.
 - **Control Properties removes an attribute of an upper-case chain.** In a
   chain written `)->A( n = ...`, the view added attributes but refused to
   remove one, calling the layout unusual. ABAP does not care about case,

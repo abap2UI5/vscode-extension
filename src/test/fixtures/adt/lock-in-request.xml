@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same shape as lock-local.xml (abap-adt-api src/api/objectcontents.ts lock/AdtLock): the object already sits in a
+     request, which the lock answer names in CORRNR. Hand-written, not recorded. -->
+<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA><LOCK_HANDLE>RQLOCK03</LOCK_HANDLE><CORRNR>A4HK900123</CORRNR><CORRUSER>DEVELOPER</CORRUSER><CORRTEXT>abap2UI5 apps</CORRTEXT><IS_LOCAL/><IS_LINK_UP/><MODIFICATION_SUPPORT>NoModification</MODIFICATION_SUPPORT></DATA></asx:values></asx:abap>

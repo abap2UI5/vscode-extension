@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shape: an activation answer that lists what stayed inactive - ioc:inactiveObjects/ioc:entry/ioc:object/ioc:ref -
+     after abap-adt-api src/api/activate.ts (parseInactive, toElement); that library counts any entry as a failed
+     activation. Hand-written, not recorded. -->
+<ioc:inactiveObjects xmlns:ioc="http://www.sap.com/abapxml/inactiveCtsObjects"><ioc:entry><ioc:object ioc:user="DEVELOPER" ioc:deleted="false"><ioc:ref xmlns:adtcore="http://www.sap.com/adt/core" adtcore:uri="/sap/bc/adt/oo/classes/zcl_demo_app" adtcore:type="CLAS/OC" adtcore:name="ZCL_DEMO_APP" adtcore:parentUri="/sap/bc/adt/packages/%24tmp"/></ioc:object></ioc:entry></ioc:inactiveObjects>

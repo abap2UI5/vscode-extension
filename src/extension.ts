@@ -43,6 +43,7 @@ import { registerPropertyEditor } from "./propview";
 import { takeScreenshot } from "./screenshot";
 import { formatTrafficLine, isRoundtrip } from "./traffic";
 import { registerRoundtripCommands } from "./roundtripview";
+import { activateOrPush, registerPushActivate } from "./pushactivate";
 import { MODEL_SCHEME, registerModelView } from "./modelview";
 import { registerMockFile } from "./mockfile";
 import { registerUnitTests } from "./unittests";
@@ -68,7 +69,6 @@ import {
   requestModelDump,
 } from "./preview";
 import {
-  activateAndReload,
   checkConnection,
   makeConnectSystem,
   runApp,
@@ -171,6 +171,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // "Show Roundtrip" / "Replay Roundtrip": the last roundtrips' bodies, kept
   // by the proxy in memory only.
   registerRoundtripCommands(context, session);
+  registerPushActivate(context, session);
   session.modelView = registerModelView(context, log);
   session.updateStatusItem();
 
@@ -209,8 +210,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       reloadShownApp(session);
     }),
+    // a class file on disk is pushed through ADT, an ADT document keeps
+    // the delegation to the ABAP tooling (pushactivate.ts)
     vscode.commands.registerCommand("abap2ui5.activate", () =>
-      activateAndReload(session)
+      activateOrPush(session)
     ),
     vscode.commands.registerCommand("abap2ui5.previewInPanel", () =>
       movePreview(session, provider, "panel")
