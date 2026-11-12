@@ -114,7 +114,7 @@ export function registerMockFile(
         if (unknownRoots.length) {
           vscode.window.showInformationMessage(
             `abap2UI5: ${plural(unknownRoots.length, "root")} typed outside ` +
-              `this class left empty - ${unknownRoots.join(", ")}. ` +
+              `this class left empty or partly filled - ${unknownRoots.join(", ")}. ` +
               "Fill in the fields the view binds."
           );
         }

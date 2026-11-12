@@ -288,7 +288,7 @@ function testChromium(): string | undefined {
       continue;
     }
     for (const build of builds) {
-      for (const layout of [["chrome-linux64", "chrome"], ["chrome-linux", "chrome"], ["chrome-win", "chrome.exe"], ["chrome-win64", "chrome.exe"], ["chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"], ["chrome-mac-arm64", "Chromium.app", "Contents", "MacOS", "Chromium"]]) {
+      for (const layout of [["chrome-linux64", "chrome"], ["chrome-linux", "chrome"], ["chrome-win", "chrome.exe"], ["chrome-win64", "chrome.exe"], ["chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"], ["chrome-mac-arm64", "Chromium.app", "Contents", "MacOS", "Chromium"], ["chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"], ["chrome-mac-x64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"]]) {
         const candidate = path.join(root, build, ...layout);
         if (fs.existsSync(candidate)) {
           return candidate;
