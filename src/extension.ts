@@ -71,9 +71,11 @@ import {
   activateAndReload,
   checkConnection,
   makeConnectSystem,
+  restartLogon,
   runApp,
   watchProxyStatus,
 } from "./launch";
+import { chooseClientCertificate } from "./logonprompt";
 import { forgetTrustedCertificates } from "./certprompt";
 import {
   activeSystem,
@@ -379,6 +381,12 @@ export function activate(context: vscode.ExtensionContext): void {
         "abap2UI5: stored SAP credentials deleted."
       );
     }),
+    // auth: "certificate" - which client certificate a host logs on with
+    vscode.commands.registerCommand("abap2ui5.chooseClientCertificate", () =>
+      chooseClientCertificate(session, async (system, origin) => {
+        await restartLogon(session, system, origin);
+      })
+    ),
     vscode.commands.registerCommand("abap2ui5.forgetTrustedCertificates", () =>
       forgetTrustedCertificates(session)
     ),

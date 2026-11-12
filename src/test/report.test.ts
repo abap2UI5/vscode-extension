@@ -282,3 +282,77 @@ test("a roundtrip that strays into the report's free-form fields carries no body
   assert.doesNotMatch(report, /MV_CUSTOMER|T_EVENT_ARG|S_FRONT/);
   assert.match(entry.requestText() ?? "", /REQUEST-BODY-VALUE/, "the fixture really holds one");
 });
+
+// ---------------------------------------------------------------------------
+// The secrets of the further logon mechanisms (docs/auth.md, section 4)
+// ---------------------------------------------------------------------------
+
+test("cookie headers lose their values, keep their names and attributes", () => {
+  const line =
+    "proxy: cookie: sap-usercontext=sap-client=100; MYSAPSSO2=AjQxMDMBABhE; SAP_SESSIONID_A4H_001=abc%3d";
+  const out = redact(line);
+  for (const secret of ["AjQxMDMBABhE", "abc%3d", "sap-client=100"]) {
+    assert.ok(!out.includes(secret), secret);
+  }
+  assert.match(out, /cookie: sap-usercontext=<redacted>; MYSAPSSO2=<redacted>; SAP_SESSIONID_A4H_001=<redacted>/);
+  const set = redact("Set-Cookie: MYSAPSSO2=AjQxMDMBABhE; path=/; domain=.example.com; HttpOnly");
+  assert.equal(set, "Set-Cookie: MYSAPSSO2=<redacted>; path=/; domain=.example.com; HttpOnly");
+});
+
+test("the logon ticket and the ICF session are redacted outside a cookie header too", () => {
+  const out = redact('{"jar":"MYSAPSSO2=AjQxMDMBABhE","s":"SAP_SESSIONID_A4H_100=zz9"} MYSAPSSO2=xyz');
+  assert.ok(!/AjQxMDMBABhE|zz9|xyz/.test(out), out);
+  assert.match(out, /MYSAPSSO2=<redacted>/);
+  assert.match(out, /SAP_SESSIONID_A4H_100=<redacted>/);
+});
+
+test("a bearer token goes after any header or key name, and with it OAuth's other secrets", () => {
+  const token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl";
+  for (const line of [
+    `x-csrf-whatever: Bearer ${token}`,
+    `authorization: Bearer ${token}`,
+    `{"token": "Bearer ${token}"}`,
+    `{"access_token":"${token}","refresh_token":"r-123456","expires_in":43199}`,
+    `client_secret=s3cr3t&grant_type=authorization_code&code=one-time-code-9`,
+    `GET /callback?state=abc&code=one-time-code-9`,
+  ]) {
+    const out = redact(line);
+    for (const secret of [token, "r-123456", "s3cr3t", "one-time-code-9"]) {
+      assert.ok(!out.includes(secret), `${secret} in ${out}`);
+    }
+  }
+  // the scheme and the harmless parts stay
+  assert.match(redact(`x-token: Bearer ${token}`), /x-token: Bearer <redacted>/);
+  assert.match(redact('{"expires_in":43199}'), /43199/);
+  // prose survives
+  const prose = "logon: the system answered with a bearer challenge";
+  assert.equal(redact(prose), prose);
+});
+
+test("a certificate passphrase never survives", () => {
+  for (const line of [
+    'settings {"passphrase": "pem-pass-123"}',
+    "passphrase=pem-pass-123",
+    "passphrase: pem-pass-123",
+  ]) {
+    assert.ok(!redact(line).includes("pem-pass-123"), line);
+  }
+});
+
+test("the report says which logon each system uses - the kind, never a secret", () => {
+  const report = buildReport({
+    ...INPUT,
+    systems: {
+      ...INPUT.systems,
+      logon: [
+        { name: "DEV", auth: "certificate" },
+        { name: "Sandbox", auth: "basic" },
+      ],
+      proxyLogon: "certificate",
+    },
+  });
+  assert.match(report, /\| logon per system \| DEV: certificate, Sandbox: basic \|/);
+  assert.match(report, /proxy running, proxy logs on with certificate/);
+  // absent when the host does not say
+  assert.doesNotMatch(buildReport(INPUT), /logon per system|logs on with/);
+});

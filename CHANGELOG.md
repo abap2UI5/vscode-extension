@@ -4,6 +4,21 @@
 
 The bundled linter moves to v0.9.0.
 
+- **Log on with a client certificate.** A system entry in
+  `abap2ui5.systems` can now say `"auth": "certificate"`: the preview, the
+  connection check and the agent tools then log on with an X.509 client
+  certificate instead of a password. F9 asks for the `.pfx`/`.p12` file (or
+  a PEM certificate and key) the first time, or run *abap2UI5: Choose Client
+  Certificate*; only the file's path and its passphrase are remembered, on
+  this machine. An expired certificate or a wrong passphrase is reported
+  before anything is sent, and a certificate the system refuses is named as
+  such - by the preview's warning, the connection check and the agent tools,
+  none of which tell you to switch to `openMode: external` for it any more.
+  For a system that offers no basic auth, the messages now mention the
+  `auth` field. A host your user settings set to `"certificate"` stays so
+  when a workspace lists it without the field. The bug report says which
+  logon each system uses, and redacts cookies, bearer tokens and
+  passphrases should a log line ever quote one.
 - **Control Properties removes an attribute of an upper-case chain.** In a
   chain written `)->A( n = ...`, the view added attributes but refused to
   remove one, calling the layout unusual. ABAP does not care about case,

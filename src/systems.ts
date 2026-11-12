@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
 import { isUsableTemplate, originOf, shortUrl } from "./urls";
-import { ProfileFields, profileFieldsOf, tightenRoles } from "./systemprofile";
+import { ProfileFields, profileFieldsOf, tightenAuth, tightenRoles } from "./systemprofile";
+import { CLIENT_CERTIFICATES_KEY, withChoice } from "./clientcert";
+import { secretKeysFor } from "./logon";
 
 /*
  * The systems the extension can launch against.
@@ -101,7 +103,8 @@ export function allSystems(): SystemProfile[] {
     single && !list.some((s) => s.template === single.template)
       ? [single, ...list]
       : list;
-  return withUniqueNames(tightenRoles(all, shadowedSystems()));
+  const shadowed = shadowedSystems();
+  return withUniqueNames(tightenAuth(tightenRoles(all, shadowed), shadowed));
 }
 
 /** The profiles of the settings scopes the effective `systems` value
@@ -361,7 +364,8 @@ export async function pickSystem(
  *  names), and a silent change to it would ask every user for their password
  *  again. */
 export function keysFor(origin: string): { user: string; pass: string } {
-  return { user: `abap2ui5.user:${origin}`, pass: `abap2ui5.pass:${origin}` };
+  const { user, pass } = secretKeysFor(origin);
+  return { user, pass };
 }
 
 /**
@@ -483,7 +487,7 @@ export async function ensureCredentials(
  */
 const STORED_ORIGINS_KEY = "abap2ui5.credentialOrigins";
 
-async function rememberOrigin(
+export async function rememberOrigin(
   context: vscode.ExtensionContext,
   origin: string
 ): Promise<void> {
@@ -509,11 +513,22 @@ export async function clearCredentials(
           ...context.globalState.get<string[]>(STORED_ORIGINS_KEY, []),
         ]),
       ];
+  // every mechanism's secrets (secretKeysFor): the password, a client
+  // certificate's passphrase, the reserved session and OAuth keys
   for (const each of origins) {
-    const keys = keysFor(each);
-    await context.secrets.delete(keys.user);
-    await context.secrets.delete(keys.pass);
+    for (const key of Object.values(secretKeysFor(each))) {
+      await context.secrets.delete(key);
+    }
   }
+  // and which certificate file was chosen - asked for again next time
+  let chosen: unknown = context.globalState.get<unknown>(CLIENT_CERTIFICATES_KEY);
+  for (const each of origins) {
+    chosen = withChoice(chosen, each, undefined);
+  }
+  await context.globalState.update(
+    CLIENT_CERTIFICATES_KEY,
+    origin ? chosen : undefined
+  );
   await context.secrets.delete(LEGACY_USER);
   await context.secrets.delete(LEGACY_PASS);
   if (!origin) {

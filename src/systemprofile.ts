@@ -11,10 +11,18 @@ import { originOf } from "./urls";
  *    ignored and named in the log (`profileNotes`); the entry survives
  *  - a field can only TIGHTEN what the extension does. `role: "production"`
  *    refuses things; `minUi5` / `distribution` choose what the view check
- *    compares against and decide nothing about security; `auth` is reserved.
- *    Nothing in a profile switches a check off - certificate trust and the
- *    agent switches are deliberately not profile fields.
+ *    compares against and decide nothing about security; `auth` only
+ *    CHOOSES the logon mechanism - every secret and every file behind it is
+ *    the user's own, never the profile's - and a workspace cannot take a
+ *    shadowed user profile's mechanism back to a password prompt
+ *    (`tightenAuth`). Nothing in a profile switches a check off - certificate
+ *    trust and the agent switches are deliberately not profile fields.
  */
+
+/** The logon mechanisms a profile may name (docs/auth.md). Each one is a
+ *  case of `strategyFor` (`logon.ts`). */
+export const AUTH_KINDS = ["basic", "certificate"] as const;
+export type AuthKind = (typeof AUTH_KINDS)[number];
 
 export type SystemRole = "development" | "production";
 
@@ -29,9 +37,10 @@ export interface ProfileFields {
   /** The UI5 distribution the system serves; stands in for
    *  `viewCheck.distribution` while the system is active. */
   distribution?: "sapui5" | "openui5";
-  /** RESERVED for further logon mechanisms. Only `"basic"` is accepted, and
-   *  it changes nothing: basic authentication is what the proxy does. */
-  auth?: "basic";
+  /** How the proxy logs on to the system: `"basic"` (user and password,
+   *  the default) or `"certificate"` (an X.509 client certificate the user
+   *  chooses per host). */
+  auth?: AuthKind;
 }
 
 const UI5_VERSION_RE = /^\d+\.\d+(\.\d+)?$/;
@@ -85,12 +94,12 @@ function read(entry: unknown): { fields: ProfileFields; notes: string[] } {
   }
 
   const auth = word("auth")?.toLowerCase();
-  if (auth === "basic") {
-    fields.auth = "basic";
+  if (auth && (AUTH_KINDS as readonly string[]).includes(auth)) {
+    fields.auth = auth as AuthKind;
   } else if (auth) {
     notes.push(
-      `"auth": ${shown(raw.auth)} is ignored - the field is reserved, and "basic" is the ` +
-        "only value accepted so far"
+      `"auth": ${shown(raw.auth)} is ignored - the values accepted so far are ` +
+        AUTH_KINDS.map((kind) => `"${kind}"`).join(" and ")
     );
   }
   return { fields, notes };
@@ -155,6 +164,41 @@ export function tightenRoles<T extends { template: string; role?: SystemRole }>(
     return profile.role !== "production" && origin && production.has(origin)
       ? { ...profile, role: "production" as const }
       : profile;
+  });
+}
+
+/**
+ * The profiles in effect, with a logon mechanism other than basic kept from
+ * the settings scopes the effective value SHADOWS - `tightenRoles` for
+ * `auth`.
+ *
+ * A workspace's `systems` list replaces the user's, so without this a
+ * repository could restate a certificate (or SSO) host as a plain entry and
+ * have the extension prompt for a password on an origin that normally never
+ * asks for one - a nudge to type an SSO password into a prompt. A system on
+ * the origin of a shadowed profile that names a non-basic mechanism therefore
+ * logs on with that mechanism; the nearest shadowed scope wins when two name
+ * different ones. By origin, like the roles.
+ */
+export function tightenAuth<T extends { template: string; auth?: AuthKind }>(
+  effective: readonly T[],
+  shadowed: ReadonlyArray<{ template: string; auth?: AuthKind }>
+): T[] {
+  const kept = new Map<string, AuthKind>();
+  for (const profile of shadowed) {
+    const origin =
+      profile.auth && profile.auth !== "basic" ? originOf(profile.template) : undefined;
+    if (origin && !kept.has(origin)) {
+      kept.set(origin, profile.auth!);
+    }
+  }
+  if (!kept.size) {
+    return [...effective];
+  }
+  return effective.map((profile) => {
+    const origin = originOf(profile.template);
+    const auth = origin ? kept.get(origin) : undefined;
+    return auth && profile.auth !== auth ? { ...profile, auth } : profile;
   });
 }
 

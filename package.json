@@ -138,6 +138,11 @@
         "title": "Clear Stored SAP Credentials"
       },
       {
+        "command": "abap2ui5.chooseClientCertificate",
+        "category": "abap2UI5",
+        "title": "Choose Client Certificate"
+      },
+      {
         "command": "abap2ui5.forgetTrustedCertificates",
         "category": "abap2UI5",
         "title": "Forget Trusted Certificates"
@@ -466,6 +471,10 @@
         },
         {
           "command": "abap2ui5.resetCredentials",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.chooseClientCertificate",
           "when": "!isWeb"
         },
         {
@@ -848,14 +857,19 @@
               "auth": {
                 "type": "string",
                 "enum": [
-                  "basic"
+                  "basic",
+                  "certificate"
                 ],
-                "description": "Reserved for further logon mechanisms. \"basic\" is the only value accepted and is what happens anyway; any other value is ignored."
+                "enumDescriptions": [
+                  "User and password, asked for once per host and kept in the VS Code SecretStorage (the default).",
+                  "An X.509 client certificate (.pfx/.p12, or PEM certificate and key) you choose per host with \"abap2UI5: Choose Client Certificate\"; the system maps it to your user. Only the file path (machine-local) and the passphrase (SecretStorage) are stored."
+                ],
+                "description": "How the auth proxy logs on to this system. A host you set to \"certificate\" in your user settings keeps it when a workspace lists the same host without it."
               }
             },
             "additionalProperties": false
           },
-          "markdownDescription": "The systems F9 can launch against. The active one is picked with the command **\"abap2UI5: Select System\"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again. An entry may also name the UI5 version and distribution its system serves (`minUi5`, `distribution` - used by the view check while that system is active) and its `role` (`\"production\"`: the agent app tools refuse to act there).\n\n```json\n[\n  { \"name\": \"DEV\", \"url\": \"https://dev:44300/sap/bc/z2ui5?app_start={class}&sap-client=100\", \"minUi5\": \"1.120\", \"distribution\": \"sapui5\" },\n  { \"name\": \"Sandbox\", \"url\": \"https://box:44300/sap/bc/z2ui5?app_start={class}\" },\n  { \"name\": \"PRD\", \"url\": \"https://prd:44300/sap/bc/z2ui5?app_start={class}\", \"role\": \"production\" }\n]\n```\n\nOptional per system: `minUi5` and `distribution` - what that system serves; while it is the active system they replace `#abap2ui5.viewCheck.minUi5#` and `#abap2ui5.viewCheck.distribution#` (a repository's `abap2ui5lint.jsonc` wins over both). `role`: `\"development\"` or `\"production\"` - on a production system the agent app tools refuse to start or operate apps, and the status bar shows the role; a system you marked as production in your user settings stays production when a workspace lists the same host without the mark. `auth` is reserved: only `\"basic\"` is accepted. A field with a value the extension does not understand is ignored and named in the *abap2UI5* output."
+          "markdownDescription": "The systems F9 can launch against. The active one is picked with the command **\"abap2UI5: Select System\"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again. An entry may also name the UI5 version and distribution its system serves (`minUi5`, `distribution` - used by the view check while that system is active) and its `role` (`\"production\"`: the agent app tools refuse to act there).\n\n```json\n[\n  { \"name\": \"DEV\", \"url\": \"https://dev:44300/sap/bc/z2ui5?app_start={class}&sap-client=100\", \"minUi5\": \"1.120\", \"distribution\": \"sapui5\" },\n  { \"name\": \"Sandbox\", \"url\": \"https://box:44300/sap/bc/z2ui5?app_start={class}\" },\n  { \"name\": \"PRD\", \"url\": \"https://prd:44300/sap/bc/z2ui5?app_start={class}\", \"role\": \"production\" }\n]\n```\n\nOptional per system: `minUi5` and `distribution` - what that system serves; while it is the active system they replace `#abap2ui5.viewCheck.minUi5#` and `#abap2ui5.viewCheck.distribution#` (a repository's `abap2ui5lint.jsonc` wins over both). `role`: `\"development\"` or `\"production\"` - on a production system the agent app tools refuse to start or operate apps, and the status bar shows the role; a system you marked as production in your user settings stays production when a workspace lists the same host without the mark. `auth`: `\"basic\"` (user and password, the default) or `\"certificate\"` (an X.509 client certificate you choose per host with **\"abap2UI5: Choose Client Certificate\"**) - a mechanism other than basic that your user settings name for a host stays in effect when a workspace lists the same host without it. A field with a value the extension does not understand is ignored and named in the *abap2UI5* output."
         },
         "abap2ui5.allowUnauthorizedCerts": {
           "type": "boolean",

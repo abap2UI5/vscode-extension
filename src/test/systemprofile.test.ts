@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+  AUTH_KINDS,
   isListedSystem,
   profileFieldsOf,
   profileNotes,
@@ -78,15 +79,16 @@ test("a field of the wrong type or with an unknown value is ignored - the rest s
   assert.deepEqual(profileNotes({ role: 1 }), []);
 });
 
-test("`auth` is reserved: only \"basic\" is accepted, anything else is ignored with a note", () => {
+test("`auth` accepts the implemented mechanisms; anything else is ignored with a note", () => {
   assert.deepEqual(profileFieldsOf({ auth: "basic" }), { auth: "basic" });
+  assert.deepEqual(profileFieldsOf({ auth: "certificate" }), { auth: "certificate" });
   for (const value of ["sso", "oauth", "x509", "none", 1, true]) {
     assert.deepEqual(profileFieldsOf({ auth: value }), {}, String(value));
     assert.equal(profileNotes([{ name: "S", url: URL, auth: value }]).length, 1, String(value));
   }
   assert.match(
     profileNotes([{ name: "S", url: URL, auth: "sso" }])[0],
-    /"auth": "sso" is ignored - the field is reserved, and "basic" is the only value accepted/
+    /"auth": "sso" is ignored - the values accepted so far are "basic" and "certificate"/
   );
 });
 
@@ -106,7 +108,9 @@ test("the schema knows exactly these fields - and none that could switch a check
   assert.deepEqual(items.required, ["name", "url"]);
   assert.deepEqual(items.properties.role.enum, ["development", "production"]);
   assert.deepEqual(items.properties.distribution.enum, ["sapui5", "openui5"]);
-  assert.deepEqual(items.properties.auth.enum, ["basic"]);
+  assert.deepEqual(items.properties.auth.enum, ["basic", "certificate"]);
+  // the schema's words are the parser's
+  assert.deepEqual(items.properties.auth.enum, [...AUTH_KINDS]);
   // the schema's version pattern is the parser's
   const pattern = new RegExp(items.properties.minUi5.pattern);
   for (const [value, ok] of [["1.120", true], ["1.71.60", true], ["latest", false], ["1", false]] as const) {
