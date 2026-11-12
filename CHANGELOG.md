@@ -4,6 +4,109 @@
 
 The bundled linter moves to v0.9.0.
 
+- **Log on to SAP BTP ABAP Environment with a service key.** A system whose
+  profile says `"auth": "oauth"` logs on with OAuth 2.0: run *Load Service
+  Key* once and pick the instance's service key, and F9 opens your browser
+  at the instance's logon page. The preview, the inspector, the traffic log
+  and the MCP tools then work through the extension's proxy with the token,
+  which is renewed before it runs out. When it cannot be renewed any more,
+  the preview says so and *Log On Again* opens the browser again. The key
+  and the refresh token are kept in VS Code's secret storage only. Not yet
+  tried against a real ABAP Environment - please report how it goes.
+- **Push and Activate a class that lives on disk.** Ctrl+F3 in an app class
+  of an abapGit checkout used to do nothing useful - only ADT documents could
+  be activated, through another extension. It now writes the class and its
+  local definitions, implementations and test classes to the active system
+  over ADT (only the parts that differ), activates it and reloads the
+  preview; the command *Push and Activate* does the same for any class file.
+  The class has to exist on the system already. Before the first push of a
+  class to a system you are asked; when the server's version is newer than
+  the one you last pushed or ran, you are told and can compare the two first;
+  a transport request is asked for when the system needs one and never made
+  up; a lock held by somebody else is reported and nothing is written; the
+  lock is always released. A system whose profile says `"role":
+  "production"` and Restricted Mode are refused. Everything goes through the
+  extension's auth proxy, with its credentials and certificate trust.
+- **Activation errors in the Problems view.** When an activation through
+  Push and Activate fails, every message is shown on its line in the file it
+  belongs to (`.clas.abap`, `.clas.locals_def.abap`, `.clas.locals_imp.abap`,
+  `.clas.testclasses.abap`); a message without a position sits on line 1 of
+  the class. They disappear with the next successful activation.
+- **Run an app without a system.** *Select System* offers a built-in
+  *Local (transpiled)* profile, and F9 offers it when no system is
+  configured. F9 on it transpiles the workspace's classes (the
+  `.abapgit.xml` starting folder, else `src/`) with mcp-server's npm
+  backend, serves them on 127.0.0.1 and shows the app in the usual preview,
+  so events reach the class and the inspector, live model and traffic log
+  work. A save in that folder and Ctrl+F3 rebuild and reload. The first run
+  installs the runtime (needs Node.js 22, npm, git and the network); the log
+  is in the "abap2UI5 Local Backend" output. Not in Restricted Mode,
+  desktop only; `<class>.mock.json` is not applied yet - see the README.
+- **Log on with a client certificate.** A system entry in
+  `abap2ui5.systems` can now say `"auth": "certificate"`: the preview, the
+  connection check and the agent tools then log on with an X.509 client
+  certificate instead of a password. F9 asks for the `.pfx`/`.p12` file (or
+  a PEM certificate and key) the first time, or run *abap2UI5: Choose Client
+  Certificate*; only the file's path and its passphrase are remembered, on
+  this machine. An expired certificate or a wrong passphrase is reported
+  before anything is sent, and a certificate the system refuses is named as
+  such - by the preview's warning, the connection check and the agent tools,
+  none of which tell you to switch to `openMode: external` for it any more.
+  For a system that offers no basic auth, the messages now mention the
+  `auth` field. A host your user settings set to `"certificate"` stays so
+  when a workspace lists it without the field. The bug report says which
+  logon each system uses, and redacts cookies, bearer tokens and
+  passphrases should a log line ever quote one.
+- **Log on in the browser (single sign-on).** A system entry in
+  `abap2ui5.systems` can now say `"auth": "browser"`: F9 opens a browser
+  window on the system, you log on there the way the system wants - SAML 2.0
+  single sign-on, Kerberos, a certificate from your OS store, the logon form
+  - and the window closes itself once the system serves the page. The
+  preview, the inspector, the live model, the traffic log, screenshots, the
+  connection check and the agent tools then run with that logon. The browser
+  is the Chromium *Install Render Gate* downloads, or your own Chrome or Edge
+  (`abap2ui5.logon.browserExecutable`, user settings only); it starts with a
+  fresh profile that is deleted afterwards. Only the system's session cookies
+  are kept, in memory for this window - nothing is stored, and the preview
+  never sees them. When the session runs out, the preview says so and offers
+  *Log On Again*; *abap2UI5: Log On in Browser* starts a fresh logon at any
+  time. The agent tools never open a browser themselves - they ask you to
+  press F9 first. The logon waits five minutes; closing the window cancels it.
+- **Control Properties removes an attribute of an upper-case chain.** In a
+  chain written `)->A( n = ...`, the view added attributes but refused to
+  remove one, calling the layout unusual. ABAP does not care about case,
+  and neither does the removal now.
+- **Migrate Classic Report without a checkout.** The converter used to
+  need a `git clone` of abap-cloud-gui, an `npm ci` and a setting before the
+  first run. *Install Report Converter* - offered by the migrate command
+  when nothing is configured - now downloads it in one click: the addon at a
+  commit this release pins, of which only the converter's own files are
+  unpacked, each checked against its recorded size and SHA-256, with the
+  exact parser packages the addon's own lockfile names, each checked
+  against its integrity, into the extension's storage. A checkout you configured still wins, and one that
+  does not hold is still reported rather than skipped. Restricted Mode
+  neither downloads nor runs the installed copy.
+- **Migrate Classic Report works with a current abap-cloud-gui checkout.**
+  The addon renamed its converter from report2cloud to report2UI5 after its
+  1.0.0 and moved it to `tools/report2ui5`; the command looked only for
+  `tools/report2cloud/cli.mjs` and told a freshly pulled checkout it was not
+  one. Both paths are found now, the new one first, and a conversion no
+  longer reports "0 objects to check for ABAP Cloud" for a converter that
+  stopped counting them. The setting keeps its name,
+  `abap2ui5.report2cloud.path`.
+- **Unit tests in the Testing view.** The ABAP Unit tests that *Run Unit
+  Tests (No System)* runs in a terminal are now listed in VS Code's Testing
+  view too: one entry per `*.clas.testclasses.abap`, its test classes and
+  their test methods, with the run buttons in the gutter of the test include.
+  A run uses the same `abap2ui5-unit` runner and marks each method passed,
+  failed or not run; a failure shows the assertion's message with expected
+  and actual value at the method's declaration (the runner reports no line).
+  The runner works per class and stops at the first failure, so running one
+  method runs its class and marks only that method, and what was never
+  reached is shown as skipped, not as passed. Nothing is searched or started
+  until the Testing view is opened or a test include is shown; Restricted
+  Mode refuses a run exactly as the command does. Desktop only - the terminal
+  command and its CodeLens stay as they are.
 - **Baselines keep working after the linter's key change.** Linter 0.9.0
   no longer writes a source position into the baseline keys of ten rules
   (`source-line-too-long`, `trailing-whitespace`, `empty-catch-block`, ...),
@@ -17,6 +120,88 @@ The bundled linter moves to v0.9.0.
   downloaded whole and compared against the limit afterwards; a declared
   length over it is now refused before the first byte, and a stream is cut
   off the moment it passes it.
+
+- **Three read-only tools for the editor's chat.** In agent mode the chat
+  can now ask this window what no MCP server knows: the view check's
+  findings of a file exactly as the Problems panel lists them
+  (`#abap2ui5Findings`), the XML view reconstructed from an app class
+  (`#abap2ui5View`), and the live JSON model of the app shown in the preview
+  (`#abap2ui5Model`, desktop only; a large model is cut at 50 KB and the
+  answer says so). All three only read what the window already shows -
+  nothing is sent to a system, and the tools that act on one stay with the
+  MCP servers, so no tool is offered twice. `abap2ui5.chatTools` switches
+  them off.
+- **Show Roundtrip: what an event changed.** The traffic log says that a
+  roundtrip happened and how long it took; *abap2UI5: Show Roundtrip* says
+  what it did. Pick one of the last 20 roundtrips of the running app (time,
+  event, class, duration, size) and the model before and after it opens in
+  the diff editor, under a header naming the event, its arguments and every
+  model path the backend changed, added or removed. What you typed before
+  pressing the button counts as "before", so it is not blamed on the
+  backend. The request and response bodies behind this are kept in memory
+  only - never in a file, an output channel or *Copy Diagnostics for a Bug
+  Report* - a body over 512 KB is not kept at all, and everything is dropped
+  when the proxy stops or the system changes. Desktop only.
+- **Replay Roundtrip: send an event again.** *abap2UI5: Replay Roundtrip*
+  sends a stored request through the auth proxy once more and shows the new
+  answer beside the recorded one. A replay runs the event for real - whatever
+  its handler saves or posts happens a second time - so it asks every time,
+  naming system, class and event, and is not available in Restricted Mode.
+  Desktop only.
+- **Find All References for events, control ids and bound attributes.**
+  Shift+F12 on an event name lists the `WHEN` branch that handles it and
+  every `_event( )` that raises it; on a control id, the control that
+  declares it and every wire that addresses it; on a bound attribute, the
+  ABAP identifier and every `{/PATH}` bound to it. The list is exactly what
+  **F2** would rename, in the same class. Anywhere else the extension answers
+  nothing, so the ABAP extension's own references are not affected.
+- **An agent's acting steps ask you first.** With
+  `abap2ui5.agent.enableAppTools` on, an AI agent could fire any event on
+  the real system as you without another question. Now every event
+  `app_act` fires, and the first `app_start` of a class, opens a dialog
+  naming the system, the class, the event, its arguments and the values
+  sent with it: *Allow*, *Allow for This Session* (that class on that
+  system, until the window closes) or *Deny*. Deny, or no answer within two
+  minutes, tells the agent that you declined - nothing is sent. The new
+  setting `abap2ui5.agent.confirmActions` is on by default and, like the
+  switch itself, read from your User settings only: a workspace cannot turn
+  the questions off.
+- **Certificates are trusted per system, and verified by default.** The
+  local auth proxy used to accept every TLS certificate on every system
+  (`abap2ui5.allowUnauthorizedCerts` was on by default). It now verifies
+  them. When a system's certificate cannot be verified - the self-signed
+  certificate of a typical development system - F9, *Check System
+  Connection* and *Run an App from the System* show its subject, issuer,
+  validity and SHA-256 fingerprint and ask once; *Trust This Certificate*
+  accepts it for that system only, and nothing is sent before you answer.
+  If a trusted system later presents a different certificate, the connection
+  is refused and says so. The new command *Forget Trusted Certificates*
+  drops those answers, and *Copy Diagnostics for a Bug Report* says how many
+  there are (never for which hosts). Systems with a certificate from a
+  public CA are never asked about. The AI-agent tools do not ask: on an
+  untrusted certificate they refuse and tell you to run *Check System
+  Connection* or F9 once. **If you set
+  `abap2ui5.allowUnauthorizedCerts` to `true` yourself, nothing changes** -
+  every certificate is still accepted without a question; if you relied on
+  the old default, you are asked once per system.
+- **A system profile says more than name and URL.** An entry of
+  `abap2ui5.systems` may now carry `minUi5` and `distribution` - what that
+  system serves - and a `role`. While a system is active, its `minUi5` and
+  `distribution` replace `abap2ui5.viewCheck.minUi5` and
+  `abap2ui5.viewCheck.distribution`: switching the system changes which
+  "too new for this release" findings and `@since` annotations you see. A
+  repository's `abap2ui5lint.jsonc` still wins over both, so the editor
+  keeps agreeing with CI; the *abap2UI5* output says where the target came
+  from. After the first launch against a system from the list, the detected
+  UI5 version is offered to that system's profile instead of the global
+  settings. `"role": "production"` makes the agent app tools refuse
+  `app_start` and `app_act` there - before any question and before anything
+  is sent - and the status bar, the system picker and `list_systems` show
+  the role; a system you marked as production in your User settings stays
+  production when a workspace lists the same host without the mark. `auth`
+  is reserved for further logon mechanisms: only `"basic"` is accepted.
+  Existing entries load unchanged, and a field the extension does not
+  understand is ignored and named in the output.
 
 - **Open a class from a link.** A `vscode://abap2ui5.abap2ui5/open` link
   opens the class it carries as an unsaved `.clas.abap` document and offers

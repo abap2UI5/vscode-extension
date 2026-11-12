@@ -54,6 +54,16 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
 - **F9 runs the app** next to the source, and the cursor stays where it was.
   **Ctrl+F3** activates the class through your ABAP tooling and reloads the
   preview — activations done any other way are noticed on the server too.
+  In an app class **on disk** (an abapGit checkout, the layout app-template
+  creates) Ctrl+F3 runs **Push and Activate** instead: the class and its local
+  includes (`.clas.locals_def.abap`, `.clas.locals_imp.abap`,
+  `.clas.testclasses.abap`) are written to the system over ADT - locked,
+  written where they differ, unlocked, activated - and the preview reloads.
+  The class must already exist on the system. You are asked before the first
+  push of a class to a system, shown a diff when the server changed since your
+  last push or F9, and asked for a transport request when the system wants
+  one; production systems and Restricted Mode are refused. Activation errors
+  land in the Problems view on their line, in the file they belong to.
 - **The preview is more than a browser tab**: device widths, themes and
   languages; runtime errors forwarded into the editor; a click-the-control →
   jump-to-the-builder-call inspector; the live JSON model; a traffic log with
@@ -64,27 +74,42 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   waivers that CI honours, and a findings view grouping the repository's
   findings by rule. An open `abaplint.jsonc` whose abap2UI5 pin is below the
   release the bundled linter assumes gets a warning on its `branch` line.
+
+  ![A builder chain in the editor: the unknown property maxLenght on an Input is underlined in red, an obsolete _bind_edit( ) call in yellow, and the Quick Fix menu lists the fix for the obsolete binder next to the suppress and turn-off entries for both rules](media/readme/view-check-quick-fix.png)
 - **The whole UI5 API in completion and hover**, plus the binding paths your
   class's model actually has, and the `client->` API with its ABAP signature.
 - **Write the view faster**: Format Document repairs a chain's indentation,
   Emmet-style abbreviations expand into one, Extract to View Method splits a
-  long one, and *Convert XML View to Builder Chain* turns a demo kit sample
-  into ABAP.
+  long one, *Convert XML View to Builder Chain* turns a demo kit sample
+  into ABAP, and the *Control Properties* view edits the attributes of the
+  control under the cursor.
+
+  ![The Control Properties view beside a builder chain: with the cursor on the StepInput tag( ) call, the view lists the control's value, min, max and width attributes for editing and offers a field to add another property](media/readme/control-properties.png)
 - **See the view without a system** — *Preview View (No System)* renders what
   the class builds, with a device matrix and a compare-with-HEAD mode.
+
+  ![Preview View (No System) beside the class source: the same view rendered by the render gate at 390x844 and at 1280x900, with the SAP Horizon theme and a model derived from the class](media/readme/preview-device-matrix.png)
+- **Run the app without a system** — pick *Local (transpiled)* in *Select
+  System* and F9 transpiles the workspace's classes and runs them on this
+  machine, in the same preview: events, the inspector, the live model and
+  the traffic log work as against a system
+  ([details](#running-an-app-without-a-system)).
 - **Test without a system** — *Run Unit Tests (No System)* runs the app's
   ABAP Unit tests in the transpiled abap2UI5 backend through
   [mcp-server](https://github.com/abap2UI5/mcp-server)'s `abap2ui5-unit`, in
   a terminal, for one class or the whole `src/`: the editor's counterpart of
-  `npm run test:unit` in a project from app-template.
+  `npm run test:unit` in a project from app-template. The same tests are
+  listed in the Testing view, per test class and method, with each result on
+  its method.
 - **Migrate a classic report** — *Migrate Classic Report to abap2UI5* turns a
   `*.prog.abap` into an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui)
-  report class with its converter report2cloud, opens the class beside its
+  report class with its converter report2UI5, opens the class beside its
   migration report and puts every statement it refuses into Problems
   ([details](#migrating-a-classic-report)).
 - **Navigate an app**: the view hierarchy in the Outline pane, Go to Definition
   between an event and its `WHEN`, F2 renaming every literal an app is wired
-  together with, and a navigation map of the workspace's apps.
+  together with, Find All References (Shift+F12) listing the same places, and
+  a navigation map of the workspace's apps.
 - **Open a class from a link**: `vscode://abap2ui5.abap2ui5/open?code=…`
   or `?src=<raw GitHub URL>` opens the class unsaved, ready for F9.
 - **Templates**: *New App from Template* is a gallery of linter-clean
@@ -108,6 +133,79 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   documentation.
 - **Works in the browser** — vscode.dev, github.dev and browser-based SAP
   Business Application Studio get the language half.
+
+## Systems and logon
+
+F9 loads the app through a local auth proxy that logs on to the system for
+the preview, so the inspector, the live model, the traffic log, screenshots
+and the system MCP tools all work. Each entry of `abap2ui5.systems` names how
+that proxy logs on, in its `auth` field:
+
+| `auth` | How | What is stored |
+| --- | --- | --- |
+| `"basic"` (default) | user and password, asked for once per host | both in the VS Code SecretStorage |
+| `"certificate"` | an X.509 client certificate the system maps to your user - a `.pfx`/`.p12` file, or a PEM certificate and its key | the file PATH in VS Code's machine-local state, the passphrase in the SecretStorage; the file is read each time the proxy starts |
+| `"oauth"` | OAuth 2.0 with the service key of an SAP BTP ABAP Environment instance: you log on in your default browser | the whole service key (it holds the client secret) and the refresh token in the SecretStorage; the access token in memory only |
+| `"browser"` | you log on in a browser window the extension opens - whatever the system asks for (SAML 2.0 single sign-on, Kerberos, a certificate from the OS store, the logon form) | nothing: the system's session cookies (`MYSAPSSO2`, `SAP_SESSIONID_*`) are kept in memory for this VS Code window only |
+
+```json
+"abap2ui5.systems": [
+  { "name": "DEV", "url": "https://dev:44300/sap/bc/z2ui5?app_start={class}&sap-client=100", "auth": "certificate" }
+]
+```
+
+For a `"certificate"` system, F9 asks for the file the first time (or run
+**abap2UI5: Choose Client Certificate**); a certificate that has expired, or
+whose passphrase does not open it, is refused before anything is sent, and
+one that expires within 14 days is warned about. A certificate kept in the
+Windows certificate store or on a smart card with a non-exportable key cannot
+be used this way. A self-signed server certificate is trusted per system as
+before (*Trust This Certificate*), and both work together. A mechanism other
+than basic that your user settings name for a host stays in effect when a
+workspace lists the same host without it. **Clear Stored SAP Credentials**
+forgets passwords, passphrases, certificate choices and service keys alike.
+
+For an `"oauth"` system, run **abap2UI5: Load Service Key** and pick the
+instance's service key (the JSON file from the BTP cockpit or `cf
+service-key`; it needs `url` and a `uaa` block with `url`, `clientid` and
+`clientsecret`, and both URLs must be https). A key issued for another host
+than the system's launch URL is asked about before it is used. F9 then opens
+your browser at the instance's UAA; after you log on there, the browser is
+sent back to a one-time listener on `127.0.0.1` (a random port and a random
+path, checked with `state` and PKCE), and the extension keeps the refresh
+token. The access token is renewed before it runs out, silently; when the UAA
+refuses the renewal, the preview says the logon has expired and **Log On
+Again** opens the browser once more. The MCP tools and the agent app tools
+never open a browser: they work while a refresh token is valid, and are
+refused with a sentence naming F9 otherwise.
+
+Not yet verified against a real ABAP Environment: whether its UAA accepts a
+redirect to `http://127.0.0.1` on a random port (no setting fixes the port
+yet - if your instance needs a fixed redirect URI, please open an issue),
+whether the host that serves the abap2UI5 HTTP service accepts the bearer
+token directly, and the logon from a Remote window (the callback goes through
+VS Code's port forwarding).
+
+For a `"browser"` system, F9 opens a browser window on the system's
+abap2UI5 service the first time in a window (or run **abap2UI5: Log On in
+Browser**). Log on there; once the system serves its page and has issued the
+session cookie, the window closes and the app loads in the preview. The
+browser is the Chromium **abap2UI5: Install Render Gate** downloads, or your
+own Chrome or Edge named in `abap2ui5.logon.browserExecutable` (user
+settings only). It runs with a fresh profile that is deleted afterwards and
+is driven over a pipe, without a network port. Only `MYSAPSSO2` and
+`SAP_SESSIONID_*` of the system's host are kept - the identity provider's
+cookies stay in the deleted profile - and the proxy keeps both out of the
+preview's own cookies. When the session runs out (the system redirects to
+its identity provider, sends its logon form or answers 401) the preview says
+so and offers **Log On Again**. The logon waits five minutes; closing the
+window cancels it. The agent tools never open a browser: without a logon
+they ask you to press F9 first. Desktop only; on a remote host without a
+display the window cannot be shown.
+
+**Check System Connection** reports a missing or refused client certificate
+as its own step, an expired browser logon as one, and for a system that
+answers without offering basic auth it names the `auth` field.
 
 ## Agent app tools on the system
 
@@ -140,6 +238,14 @@ real system:
   `abap2ui5.agent.enableAppTools` is on - off by default, and settable in your
   User settings only, never by a workspace. While it is off they stay listed
   and answer with how to switch them on, without contacting the system.
+- **Every acting step asks you first.** While
+  `abap2ui5.agent.confirmActions` is on (the default; User settings only,
+  too), each event `app_act` fires and the first `app_start` of a class
+  opens a dialog that names the system, the class, the event, its arguments
+  and the values sent with it: *Allow*, *Allow for This Session* (that class
+  on that system, until the window closes) or *Deny*. Deny - or no answer
+  within two minutes - tells the agent that you declined, and nothing is
+  sent.
 - **The active system.** Like `run_app_on_system` they work on the system
   *Select System* made active, through the auth proxy (the credentials stay
   there; the requests show in the traffic log). The optional `system`
@@ -160,20 +266,36 @@ of a `*.prog.abap` in the editor and the Explorer) converts a classic report
 into a class of the [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui)
 addon, which keeps the programming model of a report: the event blocks as
 methods, `write( )`, `alv( )` and `message( )` as calls. The converter is the
-addon's own report2cloud (`tools/report2cloud` in that repository), the same one the MCP server's `migrate_report` tool runs. It is not on npm,
-so the command runs it from a checkout of the addon:
+addon's own report2UI5 (`tools/report2ui5` in that repository - called
+report2cloud, in `tools/report2cloud`, up to the addon's 1.0.0; a checkout of
+either shape works), the converter behind the MCP server's `migrate_report`
+tool. It is not on npm - and it needs no checkout either: the first time,
+the command offers *Install* (or run *Install Report Converter* yourself),
+one click that downloads the converter at the abap-cloud-gui commit this
+extension release pins, unpacks only the converter's own files from it -
+each checked against the size and SHA-256 recorded for it - and every npm
+package of its parser, each checked against its lockfile integrity, into
+the extension's storage (about 2 MB downloaded, 8 MB on disk). The
+pinned commit moves with extension releases, never with the addon's branch.
+Nothing is downloaded or run from there in Restricted Mode.
+
+A checkout of your own still wins over the installed copy, in this order:
+`abap2ui5.report2cloud.path`, then the `ABAP_CLOUD_GUI_HOME` environment
+variable the MCP server reads, then an abap-cloud-gui folder under
+`abap2ui5.mcp.reposRoot`, and only then the installed copy. A checkout you
+named that does not hold the converter is reported as such - the command
+does not quietly use the installed copy instead. A checkout of your own is
+made with:
 
 ```sh
 git clone https://github.com/abap2UI5-addons/abap-cloud-gui
 cd abap-cloud-gui && npm ci
 ```
 
-and `abap2ui5.report2cloud.path` pointing at that folder (or the
-`ABAP_CLOUD_GUI_HOME` environment variable the MCP server reads). Without
-one the command says so and offers *Configure…*; a checkout without its
-`npm ci` gets *Run npm ci*. It runs with VS Code's own Node.js.
+A checkout without its `npm ci` gets *Run npm ci*. The converter runs with
+VS Code's own Node.js.
 
-1. It asks for the class name - report2cloud's default, `zcl_` + the report
+1. It asks for the class name - the converter's default, `zcl_` + the report
    name, is preselected - and whether to write next to the report or into
    another folder; existing files of that class are only replaced after you
    confirm.
@@ -181,10 +303,14 @@ one the command says so and offers *Configure…*; a checkout without its
    `.clas.locals_def/_imp.abap`) and `<class>.migration.md` are written in
    abapGit format, with the report's text pool when its `.prog.xml` lies
    beside it. The class opens with the migration report beside it - the work
-   list of TODOs, the tables and APIs not released on ABAP Cloud with their
-   successors, and what the list does not carry over.
+   list of TODOs and what the list does not carry over. (The 1.0.0 converter
+   also listed the tables and APIs not released on ABAP Cloud; report2UI5
+   converts the user interface only and copies the report's logic as it is
+   written, so whether that runs on the target system is yours to check.)
 3. A statement with no counterpart in a browser app (`CALL SCREEN`, a dynpro
-   module, batch input, `SUBMIT`, native SQL, ...) is **refused**: each one is
+   module, ...) is **refused** - which ones is the converter's decision, and
+   report2UI5 refuses fewer than 1.0.0 did (it copies native SQL and batch
+   input as written, for example): each one is
    an error in Problems, on the statement in the report, and no class is
    written. *Write Partial Result* writes the draft anyway, the refused
    statements marked in it.
@@ -192,8 +318,64 @@ one the command says so and offers *Configure…*; a checkout without its
    and *Check Views* are offered on it. A plain report class draws its screen
    through `z2ui5_cl_cgui_report` and has no view of its own to check.
 
-A namespaced class name (`/ns/cl_x`) is not offered here - run report2cloud's
-CLI for those.
+A namespaced class name (`/ns/cl_x`) is not offered here: the converter does
+not turn such a name into abapGit's file names (`#ns#cl_x.clas.abap`) for
+the class it writes.
+
+## Running an app without a system
+
+*abap2UI5: Select System* offers a built-in profile, **Local (transpiled)**,
+next to the configured systems - and F9 offers it when no system is
+configured at all. On that profile F9:
+
+1. saves the open ABAP documents of the project and collects every class,
+   interface, table and data element of the folder the class lives in -
+   `.abapgit.xml`'s `STARTING_FOLDER`, else `src/`, else the project folder
+   (a class outside it is built from its own folder);
+2. transpiles them against `@abap2ui5/node-runtime` - the release the
+   project's `abaplint.jsonc` pins (from 1.145.0 on), else the latest - with
+   [mcp-server](https://github.com/abap2UI5/mcp-server)'s npm backend, the
+   build `abap2ui5-unit` uses;
+3. serves them on `127.0.0.1` and loads `/?app_start=<CLASS>` through the
+   extension's auth proxy into the usual preview. UI5 itself comes from
+   `sdk.openui5.org`.
+
+The build log is in the **abap2UI5 Local Backend** output. The first start
+installs the runtime (about 60 MB, into the extension's global storage) and
+fetches open-abap-core with `git`, so it needs Node.js 22, npm, git and the
+network and takes a minute; a rebuild takes seconds. A **save** of an object
+in the built folder (unless `abap2ui5.reloadOn` is `never`) and
+**Ctrl+F3** rebuild, restart and reload - there is no activation, the file on
+disk is the version. F9 with nothing changed only reloads.
+
+The program is mcp-server, pinned to one exact version
+(`localBackend.mcpServer` in the extension's `package.json`): a checkout
+under `abap2ui5.mcp.reposRoot` when there is one, else
+`npx --yes -p @abap2ui5/mcp-server@<version>`, which npm caches after the
+first run. mcp-server has no `serve` command yet, so the extension ships a
+small launcher (`dist/localbackend-host.mjs`) that calls its build and host
+functions.
+
+What to know:
+
+- **It runs the repository's code** - transpiled, on your machine. It is
+  never started in Restricted Mode, and it stops with the window, when
+  another system is selected and when it is rebuilt.
+- **Nothing is reachable from outside.** The server listens on `127.0.0.1`
+  only, refuses a request not addressed to loopback, and answers 404 to
+  every request without a random per-start token that only the auth proxy
+  holds; the preview talks to the proxy alone. With `openMode` `external`
+  the app opens in the tab instead - a browser could not reach it.
+- **Only what the folder holds exists.** A class that reads a database
+  table the folder does not define, or calls a class it does not contain,
+  fails in the transpiled runtime - as it would in `abap2ui5-unit`.
+- **`<class>.mock.json` is not applied.** The backend has no way yet to
+  preset an app's attributes before its first `main( )`; the app starts with
+  what its own code initialises, and the output says so when a mock file is
+  there.
+- No ADT behind it: *Check System Connection*, *Run an App from the System*
+  and the agent app tools do not work on this profile.
+- Desktop only.
 
 ## Commands
 
@@ -208,6 +390,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Run App | `abap2ui5.run` | `f9` |
 | Reload Preview | `abap2ui5.reload` |  |
 | Activate and Reload Preview | `abap2ui5.activate` | `ctrl+f3` / `cmd+f3` |
+| Push and Activate | `abap2ui5.pushActivate` |  |
 | Run a Recently Launched App | `abap2ui5.runRecent` |  |
 | Run an App from the System | `abap2ui5.runFromSystem` |  |
 | Show the Preview in the Panel | `abap2ui5.previewInPanel` |  |
@@ -217,11 +400,17 @@ reference is generated from `package.json` with `npm run commands`, and
 | Select System | `abap2ui5.selectSystem` |  |
 | Check System Connection | `abap2ui5.checkConnection` |  |
 | Clear Stored SAP Credentials | `abap2ui5.resetCredentials` |  |
+| Choose Client Certificate | `abap2ui5.chooseClientCertificate` |  |
+| Load Service Key | `abap2ui5.loadServiceKey` |  |
+| Log On in Browser | `abap2ui5.logOnInBrowser` |  |
+| Forget Trusted Certificates | `abap2ui5.forgetTrustedCertificates` |  |
 | New App from Template | `abap2ui5.newApp` |  |
 | New Project from Template | `abap2ui5.newProject` |  |
 | Add Agent Setup to Workspace | `abap2ui5.addAgentSetup` |  |
 | Take App Screenshot | `abap2ui5.screenshot` |  |
 | Show Traffic Log | `abap2ui5.showTraffic` |  |
+| Show Roundtrip | `abap2ui5.showRoundtrip` |  |
+| Replay Roundtrip | `abap2ui5.replayRoundtrip` |  |
 | Convert XML View to Builder Chain | `abap2ui5.convertXml` |  |
 | Show App Navigation Map | `abap2ui5.showNavMap` |  |
 | Open Project on GitHub | `abap2ui5.openHomepage` |  |
@@ -239,6 +428,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Generate Mock Data for This App | `abap2ui5.generateMock` |  |
 | Run Unit Tests (No System) | `abap2ui5.runUnitTests` |  |
 | Migrate Classic Report to abap2UI5 | `abap2ui5.migrateReport` |  |
+| Install Report Converter | `abap2ui5.installReportConverter` |  |
 | Fix All View Findings in This File | `abap2ui5.fixAll` |  |
 | Install Render Gate | `abap2ui5.installRenderGate` |  |
 | Refresh the App List | `abap2ui5.refreshApps` |  |
@@ -266,8 +456,9 @@ when the two drift apart.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `abap2ui5.launchUrlTemplate` | `""` | URL template used to launch an abap2UI5 app. The `{class}` placeholder is replaced with the (upper-cased) class name. |
-| `abap2ui5.systems` | `[]` | The systems F9 can launch against. The active one is picked with the command **"abap2UI5: Select System"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again. |
-| `abap2ui5.allowUnauthorizedCerts` | `true` | Allow the embedded preview's local auth proxy to talk to systems whose **TLS certificate cannot be verified** - self-signed certificates, private CAs not in the OS trust store, hostname mismatches. SAP development systems typically serve self-signed certificates, which is why this is on by default. |
+| `abap2ui5.systems` | `[]` | The systems F9 can launch against. The active one is picked with the command **"abap2UI5: Select System"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again. An entry may also name the UI5 version and distribution its system serves (`minUi5`, `distribution` - used by the view check while that system is active) and its `role` (`"production"`: the agent app tools refuse to act there). |
+| `abap2ui5.allowUnauthorizedCerts` | `false` | Accept **every** TLS certificate that cannot be verified - self-signed certificates, private CAs not in the OS trust store, hostname mismatches - on **every** system, without asking. Off by default. |
+| `abap2ui5.logon.browserExecutable` | `""` | The browser a system with `"auth": "browser"` logs on in - the full path of a Chrome, Edge or Chromium executable. Empty (the default): the Chromium **"abap2UI5: Install Render Gate"** downloads. The browser is started with a fresh, temporary profile that is deleted after the logon, controlled over a pipe (no network port); the session cookies it hands over are kept in memory for this VS Code window only. |
 | `abap2ui5.codeLens` | `true` | Show *Run*, *Activate & reload*, *Check views* and *Autofix n findings* above the class definition of an abap2UI5 app. The autofix lens appears only while the view check has findings it can correct mechanically. |
 | `abap2ui5.openMode` | `"tab"` | How F9 opens the app. |
 | `abap2ui5.reloadOn` | `"activation"` | When the preview of the shown app class reloads by itself. |
@@ -292,10 +483,12 @@ when the two drift apart.
 | `abap2ui5.viewPreview.viewport` | `"1280x900"` | The viewport(s) the systemless preview renders at, `<width>x<height>` in CSS pixels - e.g. `390x844` to see the view the way a phone lays it out. **Several, comma-separated, become a device matrix**: `390x844,1280x900` renders both in one browser session and shows them side by side. The picture is taken full-page, so a view taller than the viewport is shown whole. |
 | `abap2ui5.mcp.enabled` | `true` | Offer the [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server) to MCP clients in this window (Copilot agent mode and others). The server gives AI agents the abap2UI5 dev loop without an SAP system: capability queries, static view validation, deploy, build, headless run with screenshot. |
 | `abap2ui5.mcp.system` | `true` | Also offer the **abap2UI5 System** MCP server: real-system tools hosted by the extension itself - list the configured systems, search classes on the system (ADT quick search), run an app through the auth proxy with a headless screenshot, and - only with `abap2ui5.agent.enableAppTools` - operate an app through its JSON protocol. Uses the same credentials the preview stores; the run tool needs the render gate's Chromium. |
+| `abap2ui5.chatTools` | `true` | Offer the editor's chat three read-only tools for what only this window knows: the view check's findings of a document as the Problems panel shows them (`#abap2ui5Findings`), the XML view reconstructed from an app class (`#abap2ui5View`) and the live JSON model of the app shown in the preview (`#abap2ui5Model`, desktop only). None of them contacts or changes a system - the tools that do stay with the MCP servers (`abap2ui5.mcp.system`). |
 | `abap2ui5.agent.enableAppTools` | `false` | Allow the **abap2UI5 System** MCP server's app tools (`app_list`, `app_start`, `app_describe`, `app_act`) to operate abap2UI5 apps on the **real** active system: an AI agent fills fields and fires events through the abap2UI5 JSON protocol, **as the configured user** - an event runs for real and may save, post or delete data. Off by default; while it is off the tools stay listed and answer with how to allow them, sending nothing. User settings only: a workspace cannot turn it on. |
+| `abap2ui5.agent.confirmActions` | `true` | Ask before every acting step of the **abap2UI5 System** MCP server's app tools (see `abap2ui5.agent.enableAppTools`): each event an AI agent fires with `app_act`, and the first `app_start` of a class, opens a dialog naming the system, the class, the event, its arguments and the values sent with it - **Allow**, **Allow for This Session** (that class on that system, until the window closes) or **Deny**. Deny, or no answer within two minutes, tells the agent that you declined, and nothing is sent. On by default. User settings only: a workspace cannot turn it off. |
 | `abap2ui5.mcp.command` | `""` | Command that starts the MCP server. Leave empty for the default: a local checkout under `abap2ui5.mcp.reposRoot` when present, otherwise `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp`. |
 | `abap2ui5.mcp.reposRoot` | `""` | Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, `samples`, `samples-stack`, and optionally `linter`, `mcp-server`, `abap-cloud-gui`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `SAMPLES_HOME` / `SAMPLES_STACK_HOME` / `AI_VIEW_CHECK_HOME` / `ABAP_CLOUD_GUI_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx. |
-| `abap2ui5.report2cloud.path` | `""` | Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose `tools/report2cloud` converter *"abap2UI5: Migrate Classic Report to abap2UI5"* runs - report2cloud is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose. |
+| `abap2ui5.report2cloud.path` | `""` | Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose converter *"abap2UI5: Migrate Classic Report to abap2UI5"* runs - report2UI5 in `tools/report2ui5`, or report2cloud in `tools/report2cloud` in a checkout of the addon's 1.0.0; it is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose, or else the copy *"abap2UI5: Install Report Converter"* downloaded. |
 <!-- END GENERATED SETTINGS -->
 
 ## Development

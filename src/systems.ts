@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import { CONFIG_SECTION } from "./settings";
 import { isUsableTemplate, originOf, shortUrl } from "./urls";
+import { ProfileFields, profileFieldsOf, tightenAuth, tightenRoles } from "./systemprofile";
+import { CLIENT_CERTIFICATES_KEY, withChoice } from "./clientcert";
+import { secretKeysFor } from "./logon";
+import { browserSessions } from "./browserlogon";
 
 /*
  * The systems the extension can launch against.
@@ -27,12 +31,38 @@ const ACTIVE_KEY = "abap2ui5.activeSystem";
 const LEGACY_USER = "abap2ui5.user";
 const LEGACY_PASS = "abap2ui5.pass";
 
-export interface SystemProfile {
+export interface SystemProfile extends ProfileFields {
   /** What the picker and the status bar show. */
   name: string;
   /** URL template with the `{class}` placeholder. */
   template: string;
+  // role, minUi5, distribution, auth: see `ProfileFields` (systemprofile.ts)
+  /** The built-in "Local (transpiled)" profile (`localSystem`) - never a
+   *  configured one: no `systems` entry can set this. */
+  local?: true;
 }
+
+/** The built-in profile that needs no system: the workspace's classes,
+ *  transpiled and served on this machine (`localbackend.ts`). Its template
+ *  is a placeholder - the port is known only once the host runs - and F9
+ *  branches on `local` before anything reads it. Not in `allSystems( )`:
+ *  it has no credentials, no certificate and no entry in the settings. */
+export const LOCAL_SYSTEM_NAME = "Local (transpiled)";
+const LOCAL_ACTIVE = "abap2ui5:local";
+
+export function localSystem(): SystemProfile {
+  return {
+    name: LOCAL_SYSTEM_NAME,
+    template: "http://127.0.0.1/?app_start={class}",
+    role: "development",
+    local: true,
+  };
+}
+
+const LOCAL_PICK = {
+  label: LOCAL_SYSTEM_NAME,
+  description: "no system - builds this workspace's classes and runs them on this machine",
+};
 
 function config() {
   return vscode.workspace.getConfiguration(CONFIG_SECTION);
@@ -68,7 +98,13 @@ export function profilesFrom(raw: unknown): SystemProfile[] {
     if (!isUsableTemplate(template)) {
       continue;
     }
-    list.push({ name: textOf(entry.name) || shortUrl(template), template });
+    list.push({
+      name: textOf(entry.name) || shortUrl(template),
+      template,
+      // the optional fields, each only when it holds a usable value - an
+      // entry of name and url loads exactly as it always did
+      ...profileFieldsOf(entry),
+    });
   }
   return list;
 }
@@ -93,7 +129,21 @@ export function allSystems(): SystemProfile[] {
     single && !list.some((s) => s.template === single.template)
       ? [single, ...list]
       : list;
-  return withUniqueNames(all);
+  const shadowed = shadowedSystems();
+  return withUniqueNames(tightenAuth(tightenRoles(all, shadowed), shadowed));
+}
+
+/** The profiles of the settings scopes the effective `systems` value
+ *  shadows - a workspace's list replaces the user's, and must not take a
+ *  `"role": "production"` away with it (`tightenRoles`). */
+function shadowedSystems(): SystemProfile[] {
+  const scopes = config().inspect<unknown>(SYSTEMS_KEY);
+  if (!scopes) {
+    return [];
+  }
+  const values = [scopes.workspaceFolderValue, scopes.workspaceValue, scopes.globalValue];
+  const effective = values.findIndex((value) => value !== undefined);
+  return effective < 0 ? [] : values.slice(effective + 1).flatMap(profilesFrom);
 }
 
 /**
@@ -128,8 +178,11 @@ export function uniqueName(name: string, taken: readonly string[]): string {
 export function activeSystem(
   context: vscode.ExtensionContext
 ): SystemProfile | undefined {
-  const all = allSystems();
   const chosen = context.workspaceState.get<string>(ACTIVE_KEY);
+  if (chosen === LOCAL_ACTIVE) {
+    return localSystem();
+  }
+  const all = allSystems();
   return all.find((s) => s.name === chosen) ?? all[0];
 }
 
@@ -137,7 +190,7 @@ async function setActive(
   context: vscode.ExtensionContext,
   system: SystemProfile
 ): Promise<void> {
-  await context.workspaceState.update(ACTIVE_KEY, system.name);
+  await context.workspaceState.update(ACTIVE_KEY, system.local ? LOCAL_ACTIVE : system.name);
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +300,23 @@ export async function ensureSystem(
   if (active) {
     return active;
   }
+  // Nothing configured: a launch URL, or the local backend - which is what
+  // a fresh project without any system can run on at all.
+  const way = await vscode.window.showQuickPick(
+    [
+      { label: "$(globe) Enter a launch URL...", description: "an abap2UI5 system", url: true },
+      { ...LOCAL_PICK, label: `$(server-process) ${LOCAL_SYSTEM_NAME}`, url: false },
+    ],
+    { title: "abap2UI5: No System Configured Yet", placeHolder: "Where should the app run?" }
+  );
+  if (!way) {
+    return undefined;
+  }
+  if (!way.url) {
+    const local = localSystem();
+    await setActive(context, local);
+    return local;
+  }
   const template = await askForTemplate("");
   if (!template) {
     return undefined;
@@ -267,10 +337,16 @@ export async function pickSystem(
   const active = activeSystem(context);
   const items: Array<vscode.QuickPickItem & { system?: SystemProfile; add?: boolean }> =
     all.map((system) => ({
-      label: system.name === active?.name ? `$(check) ${system.name}` : system.name,
-      description: shortUrl(system.template),
+      label: system.name === active?.name && !active?.local ? `$(check) ${system.name}` : system.name,
+      description:
+        shortUrl(system.template) + (system.role ? ` · ${system.role}` : ""),
       system,
     }));
+  items.push({
+    ...LOCAL_PICK,
+    label: active?.local ? `$(check) ${LOCAL_SYSTEM_NAME}` : `$(server-process) ${LOCAL_SYSTEM_NAME}`,
+    system: localSystem(),
+  });
   items.push({
     label: "$(add) Add a system...",
     description: "asks for a name and a launch URL",
@@ -339,7 +415,8 @@ export async function pickSystem(
  *  names), and a silent change to it would ask every user for their password
  *  again. */
 export function keysFor(origin: string): { user: string; pass: string } {
-  return { user: `abap2ui5.user:${origin}`, pass: `abap2ui5.pass:${origin}` };
+  const { user, pass } = secretKeysFor(origin);
+  return { user, pass };
 }
 
 /**
@@ -461,7 +538,7 @@ export async function ensureCredentials(
  */
 const STORED_ORIGINS_KEY = "abap2ui5.credentialOrigins";
 
-async function rememberOrigin(
+export async function rememberOrigin(
   context: vscode.ExtensionContext,
   origin: string
 ): Promise<void> {
@@ -487,11 +564,28 @@ export async function clearCredentials(
           ...context.globalState.get<string[]>(STORED_ORIGINS_KEY, []),
         ]),
       ];
+  // every mechanism's secrets (secretKeysFor): the password, a client
+  // certificate's passphrase, the reserved session and OAuth keys
   for (const each of origins) {
-    const keys = keysFor(each);
-    await context.secrets.delete(keys.user);
-    await context.secrets.delete(keys.pass);
+    for (const key of Object.values(secretKeysFor(each))) {
+      await context.secrets.delete(key);
+    }
   }
+  // a browser logon's session cookies live in memory only - dropped too
+  if (origin) {
+    browserSessions.forget(origin);
+  } else {
+    browserSessions.clear();
+  }
+  // and which certificate file was chosen - asked for again next time
+  let chosen: unknown = context.globalState.get<unknown>(CLIENT_CERTIFICATES_KEY);
+  for (const each of origins) {
+    chosen = withChoice(chosen, each, undefined);
+  }
+  await context.globalState.update(
+    CLIENT_CERTIFICATES_KEY,
+    origin ? chosen : undefined
+  );
   await context.secrets.delete(LEGACY_USER);
   await context.secrets.delete(LEGACY_PASS);
   if (!origin) {

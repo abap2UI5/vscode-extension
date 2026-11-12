@@ -12,10 +12,15 @@ import {
 } from "./mcprpc";
 import { searchClassRefs, searchClasses } from "./appsearch";
 import {
+  CONFIRM_ACTIONS_KEY,
+  confirmDetail,
+  confirmSummary,
   createAgentAppTools,
   ENABLE_APP_TOOLS_KEY,
   PROBE_CLASS,
   type AgentSystem,
+  type ConfirmAnswer,
+  type ConfirmRequest,
 } from "./agentapps";
 import { snapshot } from "./snapshot";
 import { isLoopbackHost, type SapProxy } from "./proxy";
@@ -23,6 +28,8 @@ import { runGate, VIEW_XML_RE } from "./gate";
 import { workspaceClassIndex } from "./classindexfeed";
 import { originOf, sapClientOf, withParams } from "./urls";
 import { CONFIG_SECTION } from "./settings";
+import { checkSettings } from "./checktarget";
+import { optionsFromSettings } from "./configcore";
 
 /*
  * The abap2UI5 SYSTEM MCP server - real-system tools for AI agents.
@@ -34,7 +41,8 @@ import { CONFIG_SECTION } from "./settings";
  * auth proxy - and lets an agent search classes on the system and run an
  * app against it, screenshot included, or operate it semantically through
  * the abap2UI5 JSON protocol (the app_* tools, agentapps.ts - gated by
- * `abap2ui5.agent.enableAppTools`).
+ * `abap2ui5.agent.enableAppTools`, and every acting step confirmed by the
+ * user while `abap2ui5.agent.confirmActions` is on).
  *
  * Hosted over plain streamable HTTP on 127.0.0.1 with a random path token,
  * and registered through the same MCP definition provider as it.
@@ -42,7 +50,10 @@ import { CONFIG_SECTION } from "./settings";
 
 export interface SystemMcpDeps {
   /** The configured launch systems, no prompting. */
-  listSystems(): { active?: string; systems: Array<{ name: string; host: string }> };
+  listSystems(): {
+    active?: string;
+    systems: Array<{ name: string; host: string; role?: string }>;
+  };
   /**
    * The connect flow F9 uses: pick/keep the system, ensure credentials,
    * start the proxy. May prompt the user; undefined when they back out.
@@ -106,6 +117,42 @@ function shareConnect(
   };
 }
 
+/**
+ * The question agentapps.ts puts before an acting step: a modal, because the
+ * step waits for it and a notification in the corner is missed. Closing the
+ * dialog (Escape, its Cancel) is a no. A modal cannot be taken down again,
+ * so one answered after the tool gave up (`request.signal`) is told that
+ * its answer no longer counted - nothing is sent for it.
+ */
+async function confirmAgentStep(request: ConfirmRequest): Promise<ConfirmAnswer> {
+  const allow = "Allow";
+  const allowSession = "Allow for This Session";
+  const deny = "Deny";
+  const summary = confirmSummary(request);
+  const choice = await vscode.window.showWarningMessage(
+    `abap2UI5: an AI agent wants to ${summary}.`,
+    {
+      modal: true,
+      detail:
+        `${confirmDetail(request)}\n\n"${allowSession}" stops the questions for ` +
+        `${request.className} on '${request.system}' until this window closes.`,
+    },
+    allow,
+    allowSession,
+    deny
+  );
+  if (request.signal.aborted) {
+    if (choice === allow || choice === allowSession) {
+      void vscode.window.showInformationMessage(
+        `abap2UI5: the confirmation had already timed out - the agent was told you declined, ` +
+          `and nothing was sent (${summary}).`
+      );
+    }
+    return "deny";
+  }
+  return choice === allow ? "allow" : choice === allowSession ? "allow-session" : "deny";
+}
+
 function buildTools(deps: SystemMcpDeps): McpTool[] {
   // every tool that may prompt goes through the shared flow, not deps.connect
   const connectFlow = shareConnect(() => deps.connect());
@@ -145,9 +192,14 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
           systems
             .map(
               (s) =>
-                `${s.name === active ? "* " : "  "}${s.name}  (${s.host})`
+                `${s.name === active ? "* " : "  "}${s.name}  (${s.host})` +
+                (s.role ? `  [${s.role}]` : "")
             )
-            .join("\n") + "\n\n* = active system"
+            .join("\n") +
+            "\n\n* = active system" +
+            (systems.some((s) => s.role === "production")
+              ? "\n[production] = app_start and app_act are refused there"
+              : "")
         );
       },
     },
@@ -320,16 +372,10 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
         }
         const filename = String(args.filename ?? "").trim() || "source.clas.abap";
         const isXml = VIEW_XML_RE.test(filename) || /^\s*</.test(source);
-        const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-        const rules = cfg.get<Record<string, unknown>>("viewCheck.rules");
+        // the settings with the active system's profile over them, as the
+        // editor's check reads them (checktarget.ts)
         const gate = runGate(source, filename, isXml, {
-          minUi5: cfg.get<string>("viewCheck.minUi5", "1.71"),
-          // "" is the setting's default and means "not decided" - the
-          // linter's own answer, never "sapui5" (which silences
-          // sapui5-only-control: see gate.ts and viewcheck.ts)
-          distribution: cfg.get<string>("viewCheck.distribution", "") || null,
-          allow: cfg.get<string[]>("viewCheck.allow", []),
-          rules: rules && Object.keys(rules).length > 0 ? rules : undefined,
+          ...optionsFromSettings(checkSettings()),
           // judged against the window's other classes, as the editor is
           classIndex: isXml ? undefined : workspaceClassIndex(),
         });
@@ -391,6 +437,12 @@ function buildTools(deps: SystemMcpDeps): McpTool[] {
           vscode.workspace
             .getConfiguration(CONFIG_SECTION)
             .get<boolean>(ENABLE_APP_TOOLS_KEY, false) === true,
+        // read per call as well; anything but an explicit `false` asks
+        confirmActions: () =>
+          vscode.workspace
+            .getConfiguration(CONFIG_SECTION)
+            .get<boolean>(CONFIRM_ACTIONS_KEY, true) !== false,
+        confirm: confirmAgentStep,
         activeSystem,
         systemNames: () => deps.listSystems().systems.map((s) => s.name),
         connect,

@@ -6,6 +6,9 @@ import { CLOUD_GUI_DIRS } from "./repolayout";
 import { run } from "./childproc";
 import { plural } from "./text";
 import { isCheckable } from "./viewcheck";
+import { loadTar } from "./rendergate";
+import { installReport2ui5, installRoot, type Report2ui5Pin } from "./report2ui5install";
+import report2ui5Pin from "./data/report2ui5.json";
 import {
   PATH_SETTING,
   defaultTargetClass,
@@ -33,6 +36,9 @@ import {
  * The setting that chooses the checkout decides which program runs, so it
  * is machine scoped and restricted in untrusted workspaces; the report
  * itself is only parsed, never executed, which is why the command also runs
+ * in Restricted Mode - with a checkout the user configured outside the
+ * workspace (ABAP_CLOUD_GUI_HOME). The copy "Install Report Converter" puts
+ * into global storage (`report2ui5install.ts`) is neither downloaded nor run
  * in Restricted Mode.
  */
 
@@ -99,18 +105,137 @@ async function outputFolder(reportFile: string): Promise<string | undefined> {
   return folders?.[0]?.fsPath;
 }
 
-async function offerConfigure(message: string, root?: string): Promise<void> {
+/** The pinned converter (`src/data/report2ui5.json`). */
+const PIN = report2ui5Pin as Report2ui5Pin;
+
+/** How long one install may take - a stalled download must not leave the
+ *  progress notification up for good. */
+const INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
+/** No archive of the closure comes near this; a response that does is not
+ *  the artefact, and is not held in memory to find that out. */
+const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+
+/** The installed copy's directory for the pinned commit - undefined in
+ *  Restricted Mode, where it is not run. */
+function installedRoot(context: vscode.ExtensionContext): string | undefined {
+  return vscode.workspace.isTrusted ? installRoot(context.globalStorageUri.fsPath, PIN.commit) : undefined;
+}
+
+/** One URL, whole, through VS Code's `fetch` - cancellable, capped. */
+async function download(url: string, signal?: AbortSignal): Promise<Uint8Array> {
+  const res = await fetch(url, { signal });
+  if (!res.ok || !res.body) {
+    throw new Error(`download failed - HTTP ${res.status} for ${url}`);
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+    size += chunk.byteLength;
+    if (size > MAX_DOWNLOAD_BYTES) {
+      throw new Error(`download of ${url} exceeds ${MAX_DOWNLOAD_BYTES / 1024 / 1024} MB - refused`);
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+let installing = false;
+
+/** "abap2UI5: Install Report Converter": the pinned report2UI5 and its
+ *  parser into global storage. True when a converter is installed
+ *  afterwards. Refused in Restricted Mode. */
+export async function installReportConverter(
+  context: vscode.ExtensionContext,
+  log: (m: string) => void,
+  force = false
+): Promise<boolean> {
+  if (!vscode.workspace.isTrusted) {
+    vscode.window.showWarningMessage(
+      "abap2UI5: the report converter is not downloaded in Restricted Mode - trust the workspace first."
+    );
+    return false;
+  }
+  if (installing) {
+    vscode.window.showInformationMessage("abap2UI5: the report converter is being installed already.");
+    return false;
+  }
+  installing = true;
+  const aborter = new AbortController();
+  const timer = setTimeout(() => aborter.abort(new Error("install timed out")), INSTALL_TIMEOUT_MS);
+  try {
+    const result = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "abap2UI5: installing the report converter",
+        cancellable: true,
+      },
+      (progress, token) => {
+        token.onCancellationRequested(() => aborter.abort(new Error("install cancelled")));
+        let reported = 0;
+        return installReport2ui5({
+          pin: PIN,
+          storage: context.globalStorageUri.fsPath,
+          download,
+          tar: loadTar(),
+          signal: aborter.signal,
+          log,
+          force,
+          progress: (message, done, total) => {
+            const pct = Math.round((done / total) * 100);
+            progress.report({ message: `${message}…`, increment: pct - reported });
+            reported = pct;
+          },
+        });
+      }
+    );
+    log(`report2ui5: ${result.installed ? "installed" : "already installed"} at ${result.root} (abap-cloud-gui ${PIN.commit.slice(0, 12)})`);
+    vscode.window.showInformationMessage(
+      result.installed
+        ? `abap2UI5: report converter installed (abap-cloud-gui ${PIN.commit.slice(0, 12)}) - Migrate Classic Report uses it when no checkout is configured.`
+        : `abap2UI5: the report converter (abap-cloud-gui ${PIN.commit.slice(0, 12)}) is installed already.`
+    );
+    return true;
+  } catch (err) {
+    const cause = aborter.signal.aborted && aborter.signal.reason instanceof Error ? aborter.signal.reason : err;
+    const text = cause instanceof Error ? cause.message : String(cause);
+    log(`report2ui5: install failed - ${text}`);
+    vscode.window.showErrorMessage(`abap2UI5: report converter install failed (${text.slice(0, 160)}).`);
+    return false;
+  } finally {
+    clearTimeout(timer);
+    installing = false;
+  }
+}
+
+/** The answer to a converter that cannot run. `reinstall` and `install`
+ *  come first when they would fix it; true when the command should run
+ *  again (an install just succeeded). */
+async function offerConfigure(
+  context: vscode.ExtensionContext,
+  log: (m: string) => void,
+  message: string,
+  opts: { root?: string; install?: boolean; reinstall?: boolean } = {}
+): Promise<boolean> {
   const configure = "Configure…";
   const npmCi = "Run npm ci";
-  const actions = root ? [npmCi, configure] : [configure];
+  const install = "Install";
+  const actions = [
+    ...(opts.install || opts.reinstall ? [install] : []),
+    ...(opts.root && !opts.reinstall ? [npmCi] : []),
+    configure,
+  ];
   const picked = await vscode.window.showWarningMessage(`abap2UI5: ${message}`, ...actions);
+  if (picked === install) {
+    return installReportConverter(context, log, Boolean(opts.reinstall));
+  }
   if (picked === configure) {
     await vscode.commands.executeCommand("workbench.action.openSettings", PATH_SETTING);
-  } else if (picked === npmCi && root) {
-    const term = vscode.window.createTerminal({ name: "abap-cloud-gui: npm ci", cwd: root });
+  } else if (picked === npmCi && opts.root) {
+    const term = vscode.window.createTerminal({ name: "abap-cloud-gui: npm ci", cwd: opts.root });
     term.show();
     term.sendText("npm ci", true);
   }
+  return false;
 }
 
 /** Opens a written file - the class in the current column, the migration
@@ -198,6 +323,9 @@ export function registerMigrateReport(
     // the refusals stay until the command runs on the report again - like
     // any checker run on demand, the next run is what says they are gone
     diagnostics,
+    vscode.commands.registerCommand("abap2ui5.installReportConverter", () =>
+      installReportConverter(context, log)
+    ),
     vscode.commands.registerCommand("abap2ui5.migrateReport", async (arg?: unknown) => {
       const uri = await reportUri(arg);
       if (!uri) {
@@ -215,11 +343,20 @@ export function registerMigrateReport(
         env: process.env,
         reposRoot: config().get<string>("mcp.reposRoot", ""),
         dirs: CLOUD_GUI_DIRS,
+        installed: installedRoot(context),
+        restricted: !vscode.workspace.isTrusted,
         exists: (f) => fs.existsSync(f),
       });
       if (!resolution.ok) {
         log(`report2cloud: ${resolution.message}`);
-        await offerConfigure(resolution.message, resolution.reason === "no-deps" ? resolution.root : undefined);
+        const again = await offerConfigure(context, log, resolution.message, {
+          root: resolution.reason === "no-deps" ? resolution.root : undefined,
+          install: resolution.reason === "unconfigured" && vscode.workspace.isTrusted,
+          reinstall: resolution.reason !== "unconfigured" && resolution.source === "installed",
+        });
+        if (again) {
+          await vscode.commands.executeCommand("abap2ui5.migrateReport", uri);
+        }
         return;
       }
 
@@ -299,13 +436,19 @@ export function registerMigrateReport(
         await showClass(
           result,
           `${result.className} written - ${plural(result.mapped, "construct")} mapped, ` +
-            `${plural(result.todos, "TODO")}, ${plural(result.release, "object")} to check for ABAP Cloud ` +
-            "(see the migration report)."
+            `${plural(result.todos, "TODO")}` +
+            (result.release !== undefined
+              ? `, ${plural(result.release, "object")} to check for ABAP Cloud`
+              : "") +
+            " (see the migration report)."
         );
         return;
       }
       if (result.kind === "no-deps") {
-        await offerConfigure(result.message, resolution.root);
+        await offerConfigure(context, log, result.message, {
+          root: resolution.root,
+          reinstall: resolution.source === "installed",
+        });
         return;
       }
       if (result.kind === "failed") {

@@ -4,7 +4,10 @@ import * as http from "http";
 import * as https from "https";
 import * as net from "net";
 import { AddressInfo } from "net";
+import { X509Certificate } from "crypto";
+import { decideTrust, probeCertificate } from "../certtrust";
 import {
+  AdtStatusError,
   allowFraming,
   decodeBody,
   describeRejection,
@@ -104,11 +107,26 @@ fYkHKjGur5RcsR7CxUccfV14xsT3wp3vYLmv/Hpz2Vo+y4GLK1C3pwsnjwWL9eBD
 mnIc4E8lsievg68XwxDMIhbFuYLcbFC6+A1DYx0xLqtqYcXTATIYN6yXew==
 -----END CERTIFICATE-----`;
 
-/** An https "SAP system" answering 200 to everything. */
-function selfSignedSystem(): Promise<{ origin: string; close: () => void }> {
+/** SHA-256 of the fixture above - what a user would pin. */
+const SELF_SIGNED_FINGERPRINT = new X509Certificate(SELF_SIGNED_CERT).fingerprint256;
+/** A well-formed fingerprint of some other certificate. */
+const OTHER_FINGERPRINT = Array.from({ length: 32 }, () => "0F").join(":");
+
+/** An https "SAP system" answering 200 to everything - and counting what
+ *  reached it, with or without credentials. */
+function selfSignedSystem(): Promise<{
+  origin: string;
+  close: () => void;
+  requests: { path: string; authorization?: string }[];
+}> {
+  const requests: { path: string; authorization?: string }[] = [];
   const server = https.createServer(
     { key: SELF_SIGNED_KEY, cert: SELF_SIGNED_CERT },
-    (_req, res) => {
+    (req, res) => {
+      requests.push({
+        path: String(req.url),
+        authorization: req.headers.authorization,
+      });
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("system answer");
     }
@@ -118,7 +136,11 @@ function selfSignedSystem(): Promise<{ origin: string; close: () => void }> {
       const port = (server.address() as AddressInfo).port;
       resolve({
         origin: `https://127.0.0.1:${port}`,
-        close: () => server.close(),
+        close: () => {
+          server.close();
+          server.closeAllConnections();
+        },
+        requests,
       });
     });
   });
@@ -141,9 +163,42 @@ function throughProxy(
   });
 }
 
-test("by default the proxy accepts a self-signed system certificate", async () => {
+test("by default the proxy refuses a self-signed system - and says where to trust it", async () => {
   const system = await selfSignedSystem();
   const proxy = new SapProxy();
+  const refusals: string[] = [];
+  proxy.onTrustRefused = (message) => refusals.push(message);
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    // the direct fetch rejects with the refusal, Node's code kept for the
+    // connection check...
+    await assert.rejects(
+      proxy.fetchFromSystem("/sap/bc/adt/probe"),
+      (err: Error & { code?: string }) =>
+        /certificate/i.test(err.message) &&
+        /Check System Connection/.test(err.message) &&
+        /F9/.test(err.message) &&
+        err.code === "DEPTH_ZERO_SELF_SIGNED_CERT"
+    );
+    // ...and a forwarded request turns into the proxy's 502 with the same text
+    const proxied = await throughProxy(proxy, "/sap/bc/z2ui5");
+    assert.equal(proxied.status, 502);
+    assert.match(proxied.body, /abap2UI5 proxy error/);
+    assert.match(proxied.body, /Check System Connection/);
+    assert.equal(system.requests.length, 0, "nothing reached the system");
+    assert.ok(refusals.length >= 2, "both refusals were reported");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("with the blanket override every self-signed system is accepted, unasked", async () => {
+  const system = await selfSignedSystem();
+  const proxy = new SapProxy();
+  proxy.allowUnauthorized = true;
+  // a pin that does not match is beside the point while the override is on
+  proxy.pinFor = () => OTHER_FINGERPRINT;
   try {
     await proxy.start(system.origin, "user", "pass");
     const direct = await proxy.fetchFromSystem("/sap/bc/adt/probe");
@@ -157,31 +212,11 @@ test("by default the proxy accepts a self-signed system certificate", async () =
   }
 });
 
-test("with allowUnauthorized off the self-signed system is refused", async () => {
-  const system = await selfSignedSystem();
-  const proxy = new SapProxy();
-  proxy.allowUnauthorized = false;
-  try {
-    await proxy.start(system.origin, "user", "pass");
-    // the direct fetch rejects with the TLS error...
-    await assert.rejects(
-      proxy.fetchFromSystem("/sap/bc/adt/probe"),
-      (err: Error) => /self[- ]signed|certificate/i.test(err.message)
-    );
-    // ...and a forwarded request turns into the proxy's 502
-    const proxied = await throughProxy(proxy, "/sap/bc/z2ui5");
-    assert.equal(proxied.status, 502);
-    assert.match(proxied.body, /abap2UI5 proxy error/);
-  } finally {
-    await proxy.stop();
-    system.close();
-  }
-});
-
 test("flipping allowUnauthorized applies to the next request", async () => {
   // the setting listener mutates the running proxy - no restart involved
   const system = await selfSignedSystem();
   const proxy = new SapProxy();
+  proxy.allowUnauthorized = true;
   try {
     await proxy.start(system.origin, "user", "pass");
     proxy.allowUnauthorized = false;
@@ -192,6 +227,152 @@ test("flipping allowUnauthorized applies to the next request", async () => {
   } finally {
     await proxy.stop();
     system.close();
+  }
+});
+
+test("a pinned origin connects while it presents the pinned certificate", async () => {
+  const system = await selfSignedSystem();
+  const proxy = new SapProxy();
+  const asked: string[] = [];
+  proxy.pinFor = (origin) => {
+    asked.push(origin);
+    return origin === system.origin ? SELF_SIGNED_FINGERPRINT : undefined;
+  };
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const direct = await proxy.fetchFromSystem("/sap/bc/adt/probe");
+    assert.equal(direct.status, 200);
+    const proxied = await throughProxy(proxy, "/sap/bc/z2ui5");
+    assert.equal(proxied.status, 200);
+    assert.equal(proxied.body, "system answer");
+    // a second request - over a kept-alive connection or a new one - too
+    assert.equal((await proxy.fetchFromSystem("/again")).status, 200);
+    assert.equal(system.requests.length, 3);
+    assert.ok(system.requests.every((r) => r.authorization?.startsWith("Basic ")));
+    assert.ok(asked.every((origin) => origin === system.origin), "the pin is asked for by origin");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a pinned origin that presents another certificate is refused before anything is sent", async () => {
+  const system = await selfSignedSystem();
+  const proxy = new SapProxy();
+  // the user trusted some OTHER certificate for this origin: from the
+  // proxy's side that is exactly what a swapped certificate looks like
+  proxy.pinFor = () => OTHER_FINGERPRINT;
+  const refusals: string[] = [];
+  proxy.onTrustRefused = (message) => refusals.push(message);
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    await assert.rejects(
+      proxy.fetchFromSystem("/sap/bc/adt/probe"),
+      (err: Error & { code?: string }) =>
+        err.code === "CERT_PIN_MISMATCH" &&
+        /changed since it was trusted/.test(err.message) &&
+        err.message.includes(OTHER_FINGERPRINT) &&
+        err.message.includes(SELF_SIGNED_FINGERPRINT) &&
+        /Forget Trusted Certificates/.test(err.message)
+    );
+    const proxied = await throughProxy(proxy, "/sap/bc/z2ui5");
+    assert.equal(proxied.status, 502);
+    assert.match(proxied.body, /changed since it was trusted/);
+    // the point of comparing BEFORE the request is written: no path, no
+    // credentials, nothing at all arrived
+    assert.equal(system.requests.length, 0);
+    assert.equal(refusals.length, 2);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the pin is compared on every request, a kept-alive connection included", async () => {
+  const system = await selfSignedSystem();
+  const proxy = new SapProxy();
+  let pin = SELF_SIGNED_FINGERPRINT;
+  proxy.pinFor = () => pin;
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    assert.equal((await proxy.fetchFromSystem("/first")).status, 200);
+    // the pin changes under an open connection (forgotten and re-pinned to
+    // something else): the connection that was fine a moment ago is not
+    pin = OTHER_FINGERPRINT;
+    await assert.rejects(
+      proxy.fetchFromSystem("/second"),
+      (err: Error & { code?: string }) => err.code === "CERT_PIN_MISMATCH"
+    );
+    assert.deepEqual(system.requests.map((r) => r.path), ["/first"]);
+    // and a forgotten pin falls back to verification, which refuses
+    proxy.pinFor = () => undefined;
+    await assert.rejects(
+      proxy.fetchFromSystem("/third"),
+      (err: Error & { code?: string }) => err.code === "DEPTH_ZERO_SELF_SIGNED_CERT"
+    );
+    assert.equal(system.requests.length, 1);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a WebSocket upgrade to a pinned origin with another certificate never leaves", async () => {
+  const system = await selfSignedSystem();
+  const proxy = new SapProxy();
+  proxy.pinFor = () => OTHER_FINGERPRINT;
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const url = new URL(proxy.origin);
+    const closed = await new Promise<string>((resolve) => {
+      const socket = net.connect(Number(url.port), "127.0.0.1", () => {
+        socket.write(
+          `GET ${url.pathname}/ws HTTP/1.1\r\nHost: 127.0.0.1:${url.port}\r\n` +
+            "Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+        );
+      });
+      let received = "";
+      socket.on("data", (chunk) => (received += chunk.toString()));
+      socket.on("close", () => resolve(received));
+      socket.on("error", () => resolve(received));
+    });
+    assert.equal(closed, "", "the client is hung up on, no answer relayed");
+    assert.equal(system.requests.length, 0);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the certificate probe reads the certificate without sending a request", async () => {
+  const system = await selfSignedSystem();
+  try {
+    const peer = await probeCertificate(system.origin);
+    assert.equal(peer.authorized, false);
+    assert.equal(peer.authorizationError, "DEPTH_ZERO_SELF_SIGNED_CERT");
+    assert.equal(peer.fingerprint256, SELF_SIGNED_FINGERPRINT);
+    assert.match(String(peer.subject), /CN=localhost/);
+    assert.match(String(peer.issuer), /CN=localhost/);
+    assert.ok(peer.validFrom && peer.validTo);
+    // what the interactive flow decides from it, before and after the answer
+    assert.equal(decideTrust(peer, undefined), "unknown");
+    assert.equal(decideTrust(peer, peer.fingerprint256), "pinned-match");
+    assert.equal(decideTrust(peer, OTHER_FINGERPRINT), "pinned-mismatch");
+    assert.equal(system.requests.length, 0);
+  } finally {
+    system.close();
+  }
+});
+
+test("the certificate probe rejects when there is no TLS host to read", async () => {
+  const plain = net.createServer((socket) => socket.destroy());
+  await new Promise<void>((resolve) => plain.listen(0, "127.0.0.1", resolve));
+  const port = (plain.address() as AddressInfo).port;
+  try {
+    await assert.rejects(probeCertificate(`https://127.0.0.1:${port}`, 2000));
+    await assert.rejects(probeCertificate("not a url"));
+  } finally {
+    plain.close();
   }
 });
 
@@ -1882,4 +2063,287 @@ test("a document without a header charset is read by its <meta charset>", () => 
     decodeBody(Buffer.from('<meta charset="iso-8859-1">Prüfen', "utf8"), "text/html; charset=utf-8") ?? "",
     /Prüfen/
   );
+});
+
+// ---------------------------------------------------------------------------
+// The rest of the forward and lookup paths
+// ---------------------------------------------------------------------------
+
+/** A plain http "SAP system" whose answers the test writes, keeping the path
+ *  and the headers of every request that reached it. */
+function scriptedSystem(
+  answer: (req: http.IncomingMessage, res: http.ServerResponse, origin: string) => void
+): Promise<{
+  origin: string;
+  seen: { path: string; headers: http.IncomingHttpHeaders }[];
+  close: () => void;
+}> {
+  const seen: { path: string; headers: http.IncomingHttpHeaders }[] = [];
+  let origin = "";
+  const server = http.createServer((req, res) => {
+    seen.push({ path: String(req.url), headers: req.headers });
+    answer(req, res, origin);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      resolve({
+        origin,
+        seen,
+        close: () => {
+          server.close();
+          server.closeAllConnections();
+        },
+      });
+    });
+  });
+}
+
+test("the system lookups refuse before start, and dispose stops the proxy", async () => {
+  const proxy = new SapProxy();
+  await assert.rejects(proxy.fetchFromSystem("/sap/bc/adt/x"), /proxy not started/);
+  await assert.rejects(proxy.fetchClassState("ZCL_X"), /proxy not started/);
+  const system = await recordingSystem();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    assert.equal(proxy.isRunning, true);
+    const port = new URL(proxy.origin).port;
+    proxy.dispose();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(proxy.isRunning, false);
+    await assert.rejects(proxy.fetchFromSystem("/sap/bc/adt/x"), /proxy not started/);
+    // the port is closed with it, not merely forgotten
+    await assert.rejects(
+      new Promise((resolve, reject) =>
+        http.get(`http://127.0.0.1:${port}/`, resolve).on("error", reject)
+      )
+    );
+    assert.deepEqual(system.seen, []);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the class state is read off the ADT answer's root element", async () => {
+  const system = await scriptedSystem((req, res) => {
+    if (String(req.url).startsWith("/sap/bc/adt/oo/classes/zcl_missing")) {
+      res.writeHead(404).end();
+      return;
+    }
+    if (String(req.url).startsWith("/sap/bc/adt/oo/classes/zcl_bare")) {
+      res.writeHead(200, { "content-type": "application/xml" }).end("<class:abapClass/>");
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/xml" });
+    // the first occurrences are the root's; an include further down carries
+    // its own version and must not win
+    res.end(
+      '<class:abapClass adtcore:version="inactive" adtcore:changedAt="2026-07-29T23:28:37Z">' +
+        '<class:include adtcore:version="active" adtcore:changedAt="2020-01-01T00:00:00Z"/>' +
+        "</class:abapClass>"
+    );
+  });
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    assert.deepEqual(await proxy.fetchClassState("ZCL_APP", "100"), {
+      version: "inactive",
+      changedAt: "2026-07-29T23:28:37Z",
+    });
+    // ADT addresses the class in lower case, the client rides as a parameter
+    assert.equal(system.seen[0].path, "/sap/bc/adt/oo/classes/zcl_app?sap-client=100");
+    assert.deepEqual(await proxy.fetchClassState("ZCL_BARE"), {
+      version: undefined,
+      changedAt: undefined,
+    });
+    assert.equal(system.seen[1].path, "/sap/bc/adt/oo/classes/zcl_bare");
+    await assert.rejects(proxy.fetchClassState("ZCL_MISSING"), (err: unknown) => {
+      assert.ok(err instanceof AdtStatusError);
+      assert.equal(err.status, 404);
+      return true;
+    });
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a lookup whose answer dies mid-body rejects instead of resolving short", async () => {
+  const system = await scriptedSystem((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain", "content-length": "1000" });
+    res.write("partial");
+    setTimeout(() => res.socket?.destroy(), 20);
+  });
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    await assert.rejects(proxy.fetchFromSystem("/sap/bc/adt/x"));
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the Origin a POST carries is the system's own on the way out", async () => {
+  // the browser sends the proxy's origin; an origin-validating CSRF check
+  // on the system rejects that mismatch
+  const system = await scriptedSystem((_req, res) => res.end("ok"));
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const answer = await rawGet(proxy, `${tokenPath(proxy)}/sap/bc/z2ui5`, {
+      origin: "http://127.0.0.1:1",
+    });
+    assert.equal(answer.status, 200);
+    assert.equal(system.seen[0].headers.origin, system.origin);
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a redirect to the system itself is rebased onto the proxy", async () => {
+  const system = await scriptedSystem((req, res, origin) => {
+    if (req.url === "/start") {
+      res.writeHead(302, { location: `${origin}/sap/bc/z2ui5?app_start=zcl_x` }).end();
+      return;
+    }
+    res.writeHead(302, { location: "https://idp.example.com/login" }).end();
+  });
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const location = (path: string) =>
+      new Promise<string | undefined>((resolve, reject) => {
+        http
+          .get(`${proxy.origin}${path}`, (res) => {
+            res.resume();
+            resolve(res.headers.location);
+          })
+          .on("error", reject);
+      });
+    assert.equal(await location("/start"), `${proxy.origin}/sap/bc/z2ui5?app_start=zcl_x`);
+    // somewhere else entirely stays where it pointed
+    assert.equal(await location("/elsewhere"), "https://idp.example.com/login");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a CSP made of frame-ancestors alone is dropped, not sent empty", async () => {
+  const system = await scriptedSystem((_req, res) => {
+    res.setHeader("content-security-policy", "frame-ancestors 'self'");
+    res.setHeader("content-security-policy-report-only", "frame-ancestors 'none'; img-src 'self'");
+    res.end("ok");
+  });
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const headers = await new Promise<http.IncomingHttpHeaders>((resolve, reject) => {
+      http
+        .get(`${proxy.origin}/x`, (res) => {
+          res.resume();
+          resolve(res.headers);
+        })
+        .on("error", reject);
+    });
+    assert.equal("content-security-policy" in headers, false);
+    assert.equal(headers["content-security-policy-report-only"], "img-src 'self'");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("an HTML document too big to be the app page streams through untouched", async () => {
+  const big = "<html><head></head><body>" + "x".repeat(6 * 1024 * 1024) + "</body></html>";
+  const system = await scriptedSystem((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    // in pieces, so the cap is crossed with some of it already buffered
+    for (let i = 0; i < big.length; i += 1024 * 1024) {
+      res.write(big.slice(i, i + 1024 * 1024));
+    }
+    res.end();
+  });
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const answer = await throughProxyAsDocument(proxy, "/huge");
+    assert.equal(answer.status, 200);
+    assert.equal(answer.body.length, big.length, "nothing lost, nothing added");
+    assert.equal(answer.body, big);
+    assert.ok(!answer.body.includes("__abap2ui5Runtime"), "no hook in a passed-through body");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("a request the breaker answers is still logged as the 401 it got", async () => {
+  const system = await rejectingSystem();
+  const proxy = new SapProxy();
+  const entries: { status: number; path: string; bytes: number }[] = [];
+  proxy.onTraffic = (t) => entries.push({ status: t.status, path: t.path, bytes: t.bytes });
+  try {
+    await proxy.start(system.origin, "user", "wrong");
+    await throughProxy(proxy, "/sap/bc/z2ui5");
+    await throughProxy(proxy, "/sap/public/bc/ui5_ui5/x.js");
+    assert.deepEqual(system.seen, ["/sap/bc/z2ui5"]);
+    assert.deepEqual(entries.at(-1), { status: 401, path: "/sap/public/bc/ui5_ui5/x.js", bytes: 0 });
+    assert.equal(entries.length, 2, "one entry per request, the short-circuited one included");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("the bare token url and a spent one-shot's bare url both mean the root", async () => {
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    const bare = await rawGet(proxy, tokenPath(proxy));
+    assert.equal(bare.status, 200);
+    assert.equal(system.seen[0].path, "/");
+
+    const shot = proxy.singleUseUrl(`${proxy.origin}/sap/bc/z2ui5`);
+    const shotPath = new URL(shot).pathname;
+    const first = await rawGet(proxy, shotPath);
+    assert.equal(first.status, 200);
+    const cookie = first.setCookie
+      .find((c) => c.startsWith("__abap2ui5_proxy_"))!
+      .split(";")[0];
+    const prefix = shotPath.replace(/\/sap\/bc\/z2ui5$/, "");
+    const follow = await rawGet(proxy, prefix, { cookie });
+    assert.equal(follow.status, 200);
+    assert.equal(system.seen[2].path, "/");
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
+});
+
+test("minting more one-shot urls than are kept drops the oldest unused one", async () => {
+  const system = await recordingSystem();
+  const proxy = new SapProxy();
+  try {
+    await proxy.start(system.origin, "user", "pass");
+    // eight are kept (SINGLE_USE_MAX); the ninth pushes the first out
+    const shots = Array.from({ length: 9 }, (_, i) =>
+      new URL(proxy.singleUseUrl(`${proxy.origin}/shot/${i}`)).pathname
+    );
+    assert.equal(new Set(shots).size, 9, "every shot is its own token");
+    assert.equal((await rawGet(proxy, shots[0])).status, 404, "the oldest was not dropped");
+    assert.equal((await rawGet(proxy, shots[1])).status, 200);
+    assert.equal((await rawGet(proxy, shots[8])).status, 200);
+    assert.deepEqual(
+      system.seen.map((s) => s.path),
+      ["/shot/1", "/shot/8"]
+    );
+  } finally {
+    await proxy.stop();
+    system.close();
+  }
 });

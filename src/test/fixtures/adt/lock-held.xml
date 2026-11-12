@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shape: an ADT error answer - exc:exception with namespace, type, message, localizedMessage, properties - as
+     abap-adt-api src/AdtException.ts fromResponse reads it. The type id and the wording are illustrative (the library
+     has no recorded lock conflict); the client shows localizedMessage, whatever it says. Hand-written. -->
+<exc:exception xmlns:exc="http://www.sap.com/abapxml/types/communicationframework"><namespace id="com.sap.adt"/><type id="ExceptionResourceNoAccess"/><message lang="EN">User OTHERUSER is currently editing ZCL_DEMO_APP</message><localizedMessage lang="EN">User OTHERUSER is currently editing ZCL_DEMO_APP</localizedMessage><properties/></exc:exception>

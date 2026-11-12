@@ -32,6 +32,8 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/preview.ts` | The preview surfaces: panel view provider, editor tab, webview message handling, moving the app between tab and panel |
 | `src/launch.ts` | F9 (`runApp`), the Ctrl+F3 activate-and-reload command, the proxy-status watch, the connect-system flow, the connection check command |
 | `src/connectcheck.ts` | `vscode`-free: what the connection check's probes MEAN - launch-URL shape, DNS/TCP/TLS failure and HTTP-status classification, bootstrap-page detection - behind "Check System Connection" |
+| `src/certtrust.ts` | `vscode`-free: certificate trust per system - what a presented certificate means for its origin (`decideTrust`: `trusted` / `pinned-match` / `pinned-mismatch` / `unknown`), the pin map keyed by https origin (SHA-256 fingerprints, `readPins` / `withPin`), the refusal wording, and `probeCertificate`, the handshake-only look at a host's certificate that sends no request |
+| `src/certprompt.ts` | The plumbing around `certtrust.ts`: the pins in `globalState`, `ensureCertificateTrust` (the one modal that shows a certificate and asks, or the refusal for a flow without a UI), "Forget Trusted Certificates" |
 | `src/previewcore.ts` | `vscode`-free preview core: the `AppTarget`, the load/stale messages, reload-trigger resolution, model roots, the recent-apps list, and what an edited model document may push into the running app (`applyModelMessage`) |
 | `src/activationwatch.ts` | `vscode`-free activation watch: polls the class state on the server while the preview is stale and reloads on the observed activation |
 | `src/web/startup.ts` | `vscode`-free: the web activation's ORDER - the registrations first, the data reads after, and the `DataGate` that holds the checks until the reads are in (a gate run before them would memoise an empty icon registry in the linter for the session; completion and hover need no holding) - `webstartup.test.ts`, since the in-host smoke test cannot run everywhere |
@@ -48,10 +50,33 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/openlinkview.ts` | The URI handler itself: fetches or unpacks the class, opens it as an untitled `.clas.abap`, offers F9 |
 | `src/inspect.ts` | Inspect mode's matcher: runtime control chain -> outline node (the builder call to jump to) |
 | `src/modelview.ts` | The live-model document the preview's `{ }` button fills; "Apply the Model Document to the Running App" (registered in `extension.ts`) copies it for editing and pushes the edited JSON back through the pin's restore path |
-| `src/webview.ts` | HTML for the preview and the welcome screen (theme variables, CSP nonce, theme/language pickers, the open-mode-aware empty state) |
-| `src/proxy.ts` | Local reverse proxy that injects basic auth so the embedded iframe avoids a 401; authorized by the token in its own url |
+| `src/webview.ts` | The module every webview page is imported from: re-exports the four `webview*.ts` files below and holds no markup of its own |
+| `src/webviewshared.ts` | What the pages share: CSP nonce, HTML/script escaping, the theme / language / device-size lists, the inline icons, the base stylesheet (theme variables only) |
+| `src/webviewpreview.ts` | HTML for the running app's preview: toolbar, theme/language pickers, device sizes, loading overlay, the page script |
+| `src/webviewpanels.ts` | HTML for the pages that need no running app: the "Control Properties" form, the static view preview, the navigation map |
+| `src/webviewwelcome.ts` | HTML for the welcome screen (the open-mode-aware empty state) |
+| `src/proxy.ts` | Local reverse proxy that logs every request on with its `AuthStrategy` (basic auth, a client certificate, the session cookies of a browser logon) so the embedded iframe avoids a 401; authorized by the token in its own url. Holds `SapProxy` whole (the listener, the token gate, the certificate check per request, the roundtrip ring) and re-exports the free-standing helpers of the four `proxy*.ts` parts - the module everyone imports from; the parts never import it (`proxysplit.test.ts` pins both) |
+| `src/proxyadt.ts` | `vscode`-free: the ADT side of the proxy as pure parsing and types - `AdtStatusError`, `AdtClassState`, `AdtClassRef`, `parseAdtClassRefs` |
+| `src/proxyhtml.ts` | `vscode`-free: what the proxy does to an HTML document - `allowFraming`, `injectRuntimeHook` with the injected script, `RUNTIME_MESSAGE_MARKER`, the size limit for injection |
+| `src/proxybody.ts` | `vscode`-free: reading a response body in the proxy - `describeRejection` (redacted) and its sniff limit, `decodeBody`, `withUtf8Charset` |
+| `src/proxyheaders.ts` | `vscode`-free: the proxy's header-level rules, free of state - the token segment and `TOKEN_COOKIE`, the constant-time `tokensEqual`, `isLoopbackHost`, `rewriteSetCookie`, `rebasedReferer`, `requestHostname`, the hop-by-hop list |
+| `src/authstrategy.ts` | `vscode`-free: how the proxy logs a request on to the system - `AuthStrategy` (the headers for every outgoing request; optionally `prepare( )` awaited before each request, cookies merged into the client's `Cookie` header with `takeSetCookie` for a sliding session, TLS options for the handshake, `classifyAnswer` for a redirect to the IdP or a logon form; what a 401 means - `rejected` / `expired` / `ignore` - and the `texts` the breaker answers with) and its implementations `BasicAuthStrategy` (the old breaker sentences verbatim, `BASIC_TEXTS`) and `CertificateAuthStrategy` (no header, the client certificate in the TLS options); the secret sits in a `#private` field that neither serializes nor prints. `InteractiveLogonRequired` is a logon that needs the user |
+| `src/logon.ts` | `vscode`-free: `strategyFor(profile, origin, deps)` - the ONE place a profile's `auth` becomes a strategy, one `case` per mechanism, the secrets from injected `deps`; `secretKeysFor` (every mechanism's per-origin SecretStorage key, `session` reserved); the refusals for a flow without a UI (`certificateNeeded`, `oauthLogonNeeded`) |
+| `src/oauth.ts` | `vscode`-free: OAuth 2.0 with a service key (`auth: "oauth"`, SAP BTP ABAP Environment) as decisions without I/O - the service key shapes accepted (`parseServiceKey`: `url` + `uaa.url`/`clientid`/`clientsecret`, the `credentials` wrapper, `endpoints.abap`; https only) and `keyOriginMismatch`, the SecretStorage entry (`StoredOAuth`: the whole key and the refresh token), PKCE `S256`, `state` and the authorize URL, `readCallback` (the state compared in constant time), the token requests over an injected `TokenPost` and what each answer means (`parseTokenAnswer`: `refused` / `client` / `transient` / `malformed`), `refreshDueAt` (80 % of the lifetime, a minute before the end at the latest), and `OAuthStrategy` - the bearer, the single-flight renewal in `prepare( )`, `InteractiveLogonRequired` when the UAA refuses it, one renewal after a 401 and `rejected` after a second |
+| `src/oauthflow.ts` | `vscode`-free: the I/O of that logon - the loopback callback listener (`startCallbackListener`: `127.0.0.1`, a random port, a `randomBytes(16)` path, non-loopback `Host` refused, closed after the first callback on its path, timeout and abort), `postForm` (node `http`/`https`, capped, timed out) and `logOnInBrowser`, the authorization-code flow over an injected `openBrowser` |
+| `src/oauthprompt.ts` | Its plumbing: "Load Service Key" (file picker, the mismatch question, the key into `abap2ui5.oauth:<origin>`), `ensureOAuthLogon` for `strategyFor` (renewal with the stored refresh token, else the browser through `env.openExternal` with a cancellable notification, one per origin at a time; `mayAsk: false` never opens a browser and throws `oauthLogonNeeded`) |
+| `src/logonprompt.ts` | Its plumbing: `strategyForSystem` (basic via `ensureCredentials`, the certificate from `globalState` + SecretStorage + file, the OAuth logon from `ensureOAuthLogon`, the browser logon from `browserSessions` or a new logon with a cancellable progress notification - never for `mayAsk: false`), the file picker and passphrase prompt behind "Choose Client Certificate", "Log On in Browser", the executable pick (`abap2ui5.logon.browserExecutable`, else the render gate's Chromium via `findChromium`, else "Install Render Gate" / the setting), `reportLogonFailure` |
+| `src/browserlogon.ts` | `vscode`-free: the browser logon of `auth: "browser"` (docs/auth.md 3.1) - `runBrowserLogon` (a headed Chromium over `cdp.ts` with a throwaway `--user-data-dir` under the given root, deleted on every path - leftovers of a crash by `removeStaleProfiles`; the launch page navigated to over the protocol, never in argv; done when a top-level 200 of the system's origin is not the logon form (`isAppAnswer`, `looksLikeLogonPage` of `connectcheck.ts`) AND a session cookie exists (`Network.getCookies`, HttpOnly included); timeout, closed window and abort end it as `BrowserLogonError`), which cookies are kept (`sessionCookiesOf`: `MYSAPSSO2` and `SAP_SESSIONID_*` of the host, nothing else), `BrowserSession` / `browserSessions` (MEMORY ONLY, per origin, `#private`), `BrowserLogonStrategy` (cookies only, `takeSetCookie` for the sliding session, `expired` on a 401, a redirect off the origin or to `/sap/saml2/`, or an HTML answer where data was expected - `browserAnswerVerdict`), `logonUrlOf`, `pickExecutable`, `browserLogonNeeded` (the MCP refusal naming F9) |
+| `src/cdp.ts` | `vscode`-free: the minimal Chrome DevTools Protocol client over `--remote-debugging-pipe` (fd 3/4, NUL-framed JSON; no port): commands with ids, events, flattened target sessions, everything failed once the pipe closes; never logs a message (cookie values travel in them) |
+| `src/clientcert.ts` | `vscode`-free: the client certificate of `auth: "certificate"` as data - the remembered choice per origin (`choiceFor` / `withChoice`, a PATH, read tolerantly), `loadClientCertificate` (reads the files, checks passphrase, key match and expiry - `notAfter` of a PKCS#12 through the secure context - warns 14 days ahead), and `clientCertificateRefusal`, the sentence for a server's TLS alert about the client side of the handshake |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
-| `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics |
+| `src/systemprofile.ts` | `vscode`-free: what a `systems` entry may say beyond name and url - `role`, `minUi5`, `distribution`, `auth` (`AUTH_KINDS`: `basic`, `certificate`, `oauth`, `browser`) - parsed tolerantly (`profileFieldsOf`; what was ignored is `profileNotes`, logged once per change of the setting), `production` and a non-basic `auth` kept from the settings scopes a workspace's list shadows (`tightenRoles`, `tightenAuth`), the status bar's role text, and the detected UI5 version written back into an entry (`withDetectedUi5`) |
+| `src/checktarget.ts` | The settings half of a desktop check's options: the four `viewCheck` settings with the active system's profile laid over them (`checkSettings`, the precedence itself is `settingsForSystem` in `configcore.ts`), and the change notice / generation the view check and the inline annotations re-check on |
+| `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics. The module everyone imports from; itself it holds the per-document check (`checkDocument`, its debounce timers and run generations, `findingsNow`) and the registration, and re-exports what lives in the four `viewcheck*` modules below |
+| `src/viewcheckoptions.ts` | The view check's questions about a DOCUMENT (VS Code plumbing): `isCheckable` with its per-version memo, `hasOwnView`, `pickDocument`, the directory a repo config is discovered from, the options and the baseline root governing a file |
+| `src/viewcheckrender.ts` | The view check's call of the external render gate: `checkerCommand` (the ladder itself is `checkcore.ts`), `spawnEnv`, and one run over a scratch copy with timeout and abandonment (`runRenderGate`); the extension context and the log opener registration hands in live here (`setRenderGateHost`). WHETHER the gate runs - trust, `render: false`, a failed or busy install - stays in `viewcheck.ts` |
+| `src/viewcheckcaches.ts` | The view check's two result caches and the one rule that drops both (`dropCachesIfConfigChanged`): the per-document gate memo and the sweep's per-file cache, with the config and check-target generations they were filled under - assigned here only |
+| `src/viewchecksweep.ts` | The view check over the whole workspace: `sweepWorkspace` and the three commands made of it (Check Workspace, Fix Workspace, Update Baseline); owns the `sweeping` flag that keeps a sweep's own opens from scheduling checks (`isSweeping`) |
 | `src/compat.ts` | `vscode`-free: the bundled linter's compatibility record (`@abap2ui5/linter/compat`, copied next to the bundle by `esbuild.js` like the snapshot; null when the pin ships none) and what it says about a workspace's framework pin - the one parser of `abaplint.jsonc`'s `dependencies[].branch` (`scaffold.ts` uses it too), `compareRelease`, `compatVerdict`, the activation line |
 | `src/compatcheck.ts` | The framework-pin check's plumbing: a warning on the `branch` line of an open `abaplint.jsonc` pinned below what the bundled linter assumes, on open and save |
 | `src/checkschedule.ts` | The view check's `vscode`-free SCHEDULING, shared by `viewcheck.ts` and `webcheck.ts`: the per-document gate memo (`GateMemo` - one gate run per document version and config generation, seeded by whichever of `findingsNow` and `checkDocument` asks first; the lens/code-action refetch ~250 ms after a change used to gate, and the live check 400 ms after it gated the same text again), the order a re-check of every open document runs in (`recheckSchedule` - the visible editors at once, the rest `RECHECK_STAGGER_MS` apart; activation, a config change and a class-index change all re-check what is open) and the workspace sweep's loop (`sweepInBatches` - a batch's I/O staged together, the files gated in order, a turn for the host after every gated file), and what the sweep cache holds per file (`SweepEntry`, `sweepEntryOf`: the findings' ranges and a `textFingerprint`, never the text - it kept every red file's whole text until a config change) |
@@ -61,8 +86,14 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/lintconfig.ts` | Discovers and merges the repo's `abap2ui5lint.jsonc` with the VS Code settings; applies its `baseline` file (mtime-cached) |
 | `src/baselinefile.ts` | `vscode`-free: reading and writing the repository's baseline file - the linter's own keys, a baseline that does not parse never silently replaced, and every write confined to the workspace folder holding the config (`baselineWriteRefusal`, see Conventions) |
 | `src/quickfix.ts` | Code actions: the linter's own fixes, "fix all", the disable-directive waiver, "add to baseline", and the one correction composed here - the WHEN branch for `event-without-handler` |
-| `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE. The CASE region itself (`eventCaseRegion`, `ownLevel`) lives in `context.ts`, which restricts the event rename, highlights, lens and Go-to-Definition to the WHENs at its own level |
+| `src/handlerstub.ts` | `vscode`-free: where a `WHEN` branch for an unhandled event goes in the class's `CASE client->get_event( )` and what it says - before `WHEN OTHERS`, else before `ENDCASE`, in the neighbours' indentation, quote and keyword case; nothing without such a CASE. The CASE region itself (`eventCaseRegion`, `ownLevel`) lives in `contextevents.ts` (re-exported by `context.ts`), which restricts the event rename, highlights, lens and Go-to-Definition to the WHENs at its own level |
 | `src/language.ts` | The VS Code plumbing for completion/hover (`languagecore.ts` decides the offers); the chain formatter and method navigation |
+| `src/context.ts` | `vscode`-free: "what is being written here?" - the position analysis behind completion, hover, the outline, the property editor and the event wires. The module everybody imports from; it only re-exports the five below (`contextsplit.test.ts` pins that its exports are unchanged and that none of the five imports it back) |
+| `src/contextnames.ts` | `vscode`-free leaf: what both halves share - `WriteContext`, `DEFAULT_LIBRARY`, `splitName`, the library of a prefix |
+| `src/contextscan.ts` | `vscode`-free, internal to the `context*` modules: the ABAP call scan (which call and which literal the cursor is in, memoised) and the argument readers (named, positional, doubled quotes, commented-out lines blanked) |
+| `src/contextchain.ts` | `vscode`-free: the builder chain - `ContainerStack` (which control an `a( )` belongs to, handles included), `abapNsMap`, `abapContextAt`, `abapBindingContextAt`, `viewOutline`, `controlCallAt` |
+| `src/contextevents.ts` | `vscode`-free: events and bindings in an ABAP source - the `_event( )` calls, the `CASE client->get_event( )` regions and their WHEN branches, the event spans a rename replaces, the `_bind( )` argument and the bindable attributes |
+| `src/contextxml.ts` | `vscode`-free: raw view/fragment XML - the element tags with the namespaces in scope at each (`xmlScopedTags`, `xmlNsMapAt`, `xmlNsMap`) and `xmlContextAt` |
 | `src/languagecore.ts` | The `vscode`-free completion/hover core: combines `context.ts` (where the cursor is) with `metadata.ts` + `bindingpaths.ts` (what may go there) into plain offers |
 | `src/clientapi.ts` | The `z2ui5_if_client` method reference (signatures + docs) behind the `client->` hover and completion - `vscode`-free; read from `dist/client-api.json` beside the bundle on first use (the web entry hands the text in, like `snapshot.ts`) |
 | `src/chainformat.ts` | Format Document for builder chains: hands on the linter's own `chain-house-layout` fixes (never a second layout algorithm) |
@@ -74,7 +105,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/mockfile.ts` | "Generate Mock Data for This App": writes the skeleton beside the class (asking before it replaces one), or opens it untitled for an ADT document |
 | `src/xmlpreview.ts` | "Show Reconstructed XML View": virtual document + live refresh |
 | `src/xmlformat.ts` | Pretty-printer for the reconstructed view trees (`prepareAbap( ).nodes`) |
-| `src/renamewires.ts` | `vscode`-free: where a control id and a bound attribute are written - both ends of the strings an app is wired with, for F2 |
+| `src/renamewires.ts` | `vscode`-free: where a control id and a bound attribute are written - both ends of the strings an app is wired with, for F2; and the one answer to "what is under the cursor" and "which spans belong to it" (`renameTargetAt`, `renameSpans`) that F2 and Find All References (`wireReferences`) share |
 | `src/extractview.ts` | `vscode`-free: the edits that move a chain tail into a handle-taking method (where a chain may be cut) |
 | `src/examples.ts` | `vscode`-free: finds and ranks a control's uses in the sample catalogues |
 | `src/catalogue.ts` | `vscode`-free: parses the sample repositories' committed `catalogue.json` (three sibling shapes, pinned in `src/test/fixtures/catalogue-*.json`) and matches a control against the entries |
@@ -86,18 +117,33 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/findingsview.ts` | The "abap2UI5 Findings" tree in the Explorer: the published diagnostics grouped by rule |
 | `src/findingsbar.ts` | The view check's status-bar line: counts of the active file's findings, from the published diagnostics |
 | `src/codelens.ts` | Run / Activate & reload / Check views / Autofix / Run unit tests (when a `*.clas.testclasses.abap` sits beside the class) above the class definition |
-| `src/unitrunner.ts` | `vscode`-free: what "Run Unit Tests (No System)" decides - the runner (mcp-server's `scripts/ci-unit.mjs` from a checkout under `mcp.reposRoot`, else `npx -p @abap2ui5/mcp-server abap2ui5-unit`), its arguments (`src` or the class's folder, `--class`, `--home`), the shell-quoted terminal line, the banner |
-| `src/report2cloud.ts` | `vscode`-free: what "Migrate Classic Report to abap2UI5" decides - where abap-cloud-gui's report2cloud CLI is (`abap2ui5.report2cloud.path`, then `ABAP_CLOUD_GUI_HOME`, then a `cloudGui` directory under `mcp.reposRoot`; an explicit answer that does not hold is reported, never skipped), the program and class names the CLI derives, its arguments, what its exit code and output mean (0 converted, 2 refused with `file:row:col - reason` lines, 1 wrong call, a missing `npm ci`), and the range a refusal underlines |
-| `src/migratereport.ts` | The command's plumbing: report pick (explorer/editor uri, active `.prog.abap`, open dialog), class-name prompt, output folder, the overwrite question, the CLI through `childproc.run` with VS Code's own Node, refusals as diagnostics on the report, *Write Partial Result*, opening the class beside its migration report |
+| `src/unitrunner.ts` | `vscode`-free: what "Run Unit Tests (No System)" decides - the runner (mcp-server's `scripts/ci-unit.mjs` from a checkout under `mcp.reposRoot`, else `npx -p @abap2ui5/mcp-server abap2ui5-unit`), its arguments (`src` or the class's folder, `--class` per class, `--home`, `--json` for the Testing view), the shell-quoted terminal line, the banner |
+| `src/unitdiscovery.ts` | `vscode`-free: the test classes (`CLASS … FOR TESTING`) and test methods (`METHODS … FOR TESTING`) of a `*.clas.testclasses.abap` with the range each is declared at, plus the fixtures (`setup`, `class_setup`, …) - read off the blanked source, never the raw text |
+| `src/unitresults.ts` | `vscode`-free: the runner's `--json` report as one result per test method (`parseUnitReport` - a report that is empty, cut off or not the runner's is ONE error result, never an exception) and what it says about each known method (`outcomesFor` - a method the report does not name is "not run", never "passed": the runner stops at the first failure). The report carries NO source position |
+| `src/report2cloud.ts` | `vscode`-free: what "Migrate Classic Report to abap2UI5" decides - where abap-cloud-gui's converter CLI is - report2UI5's `tools/report2ui5/cli.mjs`, else 1.0.0's `tools/report2cloud/cli.mjs` (`cliIn`) - (`abap2ui5.report2cloud.path`, then `ABAP_CLOUD_GUI_HOME`, then a `cloudGui` directory under `mcp.reposRoot`, then the copy "Install Report Converter" installed - not handed in in Restricted Mode; an explicit answer that does not hold is reported, never skipped), the program and class names the CLI derives, its arguments, what its exit code and output mean (0 converted, 2 refused with `file:row:col - reason` lines, 1 wrong call, a missing `npm ci`), and the range a refusal underlines |
+| `src/report2ui5install.ts` | `vscode`-free: what "Install Report Converter" does - the plan out of the `src/data/report2ui5.json` pin (codeload's tarball of the pinned abap-cloud-gui commit, then each npm package of the parser's closure; root `<storage>/report2ui5/<commit>/` with `tools/...` and `node_modules/...`), the verification before anything is written (each pinned file's size and SHA-256 of its unpacked content - the tarball's own bytes are not pinned, GitHub does not promise byte-stable archives; npm's SRI `integrity` of each package before it is read), the reading of the archives through an injected `tar` `Parser` (only the pinned files of the source tarball, refusing `..`, absolute paths, backslashes, links at or above a pinned file, any link in a package, duplicates, missing files), and the atomic finish (a staging directory renamed into place, older commits removed after) |
+| `scripts/generate-report2ui5.mjs` | Regenerates `src/data/report2ui5.json` and package.json's `report2ui5Release` from abap-cloud-gui (a commit: `--ref`, a checkout's HEAD, or main's tip; its codeload tarball, or `--tarball <file>` - a `git archive` of the commit does as well): the CLI's import closure read by esbuild out of the archive, each file with its size and SHA-256, and the `@abaplint/core` closure out of the archive's own package-lock.json; `--check` fails when either file is stale |
+| `src/migratereport.ts` | The command's plumbing: report pick (explorer/editor uri, active `.prog.abap`, open dialog), the installed copy's root (none in Restricted Mode) for the ladder's last rung, *Install* before *Configure…* when nothing is configured, "Install Report Converter" itself (refused in Restricted Mode; `fetch` with progress, cancellation, a timeout and a size cap; `tar` from `dist/rendergate-tar.js` through `loadTar`), class-name prompt, output folder, the overwrite question, the CLI through `childproc.run` with VS Code's own Node, refusals as diagnostics on the report, *Write Partial Result*, opening the class beside its migration report |
+| `src/localbackend.ts` | `vscode`-free: what the "Local (transpiled)" system decides - the program (`resolveLocalHost`: an mcp-server checkout under `mcp.reposRoot`, else `npx --yes -p @abap2ui5/mcp-server@<localBackend.mcpServer> node <launcher>`), the folder it collects (`projectRootFor`, `sourceFolderFor`: `.abapgit.xml`'s STARTING_FOLDER, else `src`, else the project; a class outside it is built from its own folder), the node-runtime release (`runtimePinFor`, the `abaplint.jsonc` pin from 1.145.0 on), the launcher's environment, its one machine-readable stdout line (`parseLauncherLine`), the start with readiness, timeout and process-tree kill (`startLocalHost`), when F9 may reuse the running host (`sourceFingerprint`, `decideStart`), the proxy's `LocalBackendAuth` (the per-start token as an `AuthStrategy` header), and the honest note about `<class>.mock.json` (`mockNote`) |
+| `src/localbackendview.ts` | Its plumbing (desktop only): F9 on the local profile (`runLocal`: Restricted Mode refusal, the class's file, saving dirty documents of the folder, build + (re)start with progress, the proxy pointed at the host, the preview without an activation watch), `rebuildAndReload` for a save in the built folder and Ctrl+F3, stopping on a system switch and with the window, the "abap2UI5 Local Backend" output channel |
+| `src/localbackend-host.mjs` | The launcher the local profile starts - NOT bundled, copied to `dist/` (and `dist-test/`) by `esbuild.js`: imports mcp-server's `collectObjects`/`writeObjects` (`scripts/ci-unit.mjs`), `buildNpm` (`lib/npm-backend.mjs`) and `startHost` (`lib/npm-host.mjs`) from the pinned package, puts a constant-time token check in front of the host, prints `ABAP2UI5_LOCAL_READY {...}` or `ABAP2UI5_LOCAL_FAILED {...}`, and exits when its stdin closes |
 | `src/unittests.ts` | The command's plumbing: the one reused "abap2UI5 unit tests" terminal (recreated when cwd or the `*_HOME` env changed), the class from the tree node / lens / active editor, the Restricted Mode refusal |
+| `src/testexplorer.ts` | The same tests in the Testing view (desktop only): a `TestController` with items per include / test class / method and one *Run* profile, run through `childproc.run` with `unitTestArgs` plus `--json`. Lazy - the workspace is searched when the Testing view asks, an include is parsed when it is expanded, opened or run; follows the test includes through the one watcher in `codelens.ts` (`onDidChangeTestInclude`). A failure is shown at the method's declaration, because the runner names no line |
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
 | `src/mcprpc.ts` | Minimal MCP JSON-RPC dispatch (initialize, tools/list, tools/call) behind the system server |
+| `src/chattools.ts` | `vscode`-free: the three read-only language model tools the editor's chat gets (`abap2ui5_get_view_findings`, `abap2ui5_get_reconstructed_view`, `abap2ui5_get_running_app_model`) - only what the window knows and no MCP server offers, so nothing is offered twice and none acts on a system (hence no `prepareInvocation`). Each tool is one `McpTool` over an injected `ChatToolHost`; `CHAT_TOOLS` is what `contributes.languageModelTools` is held to (`manifestEntry`, with the `when` that follows `abap2ui5.chatTools` and keeps the model tool out of the web host), `invokeChatTool` the adapter to the language-model-tool shape, and every answer is capped at 50 KB (`capText`) and says when it was cut. Imports `mcprpc.ts` as types only - that module pulls node's `crypto`, and this one is in the web bundle |
+| `src/chattoolsview.ts` | The plumbing around it, shared by both entries: the findings out of the published diagnostics (never a check of its own), the view through `xmlpreview.ts`'s `reconstructedXmlOf`, the running app's model handed in by the desktop entry (`requestModelDump` in `preview.ts` - the `{ }` button's command, answered to the caller instead of a document), and the registration with `vscode.lm.registerTool` - feature-detected, and following `abap2ui5.chatTools` |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`, and the app tools below) |
 | `src/agent-client.ts` | The entry of the `dist/agent-client.js` bundle (the vendored client, snapshot and viewxml alone) `agentapps.ts` loads on the first app_* call - ~50 KB that stays out of the activation bundle, the way `rendergate-tar.ts` keeps `tar` out; the test build puts the same file in `dist-test/` so the real loader runs in `npm test` |
-| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the vendored client loaded through `createRequire` from `dist/agent-client.js` on first use (`agentClient( )`), the client's `transport` through the auth proxy (endpoint, method, cookies - the CSRF handshake and the `sap-contextid` per session are the vendored client's, the transport only carries their headers) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client |
+| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the vendored client loaded through `createRequire` from `dist/agent-client.js` on first use (`agentClient( )`), the client's `transport` through the auth proxy (endpoint, method, cookies - the CSRF handshake and the `sap-contextid` per session are the vendored client's, the transport only carries their headers) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client, and the confirmation of every acting step (`abap2ui5.agent.confirmActions`: an `app_act` event and the first `app_start` of a class wait for the injected `confirm` - the modal itself is `confirmAgentStep` in `mcpsystem.ts` - with a timeout, one question at a time, and the per-system-and-class *Allow for This Session* memory) |
 | `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
 | `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
+| `src/roundtrips.ts` | `vscode`-free: the last 20 roundtrips' request and response bodies (`RoundtripBuffer`, owned by the proxy; a body over 512 KB decoded is not kept and the entry says so; IN MEMORY ONLY, in `#private` fields that neither serialize nor print - never a file, an output channel or the bug report - and emptied when the proxy stops or the system changes), what counts as the model before and after a roundtrip (the previous answer's `MODEL` plus the request's own delta -> this answer's `MODEL`, unknown rather than guessed when the chain is not stored), the changed/added/removed paths (`diffModels`), the event and its arguments out of the abap2UI5 request body, and the replay (`replayRoundtrip`: refused in Restricted Mode and on a production system before anything is asked, a confirmation every time, sent to the proxy's own loopback origin) |
+| `src/roundtripview.ts` | "Show Roundtrip" / "Replay Roundtrip": the picker, the virtual documents both sides of the diff editor are served from (a map in memory, emptied with the ring), the modal confirmation |
+| `src/adtwrite.ts` | `vscode`-free: Push and Activate's ADT write client over an injected request function (the `SystemRequest` shape of `agentapps.ts`): the class must exist (a 404 is refused before any lock), the CSRF token and the stateful session, the parts compared with the server and only what differs written under `_action=LOCK`, a missing test include created, `corrNr` from the lock answer or asked for (never invented), `_action=UNLOCK` in a `finally` once the lock is held, the activation. Every path, parameter and header is checked against the open-source ADT client abap-adt-api (named per step in the module's header); the fixtures in `src/test/fixtures/adt/` say which of its files each shape follows. Not run against a real system |
+| `src/adtmessages.ts` | `vscode`-free: the activation answer (`chkl:messages`/`msg`, `ioc:inactiveObjects`) as `{ part, line, column, severity, text }` - the part from the href's path, the position from its `#start=line,col`, a message without one on line 1 of the main source - and the abapGit file of each part (`.clas.abap`, `.clas.locals_def.abap`, `.clas.locals_imp.abap`, `.clas.testclasses.abap`) |
+| `src/pushactivate.ts` | "Push and Activate" and Ctrl+F3 for a `file:` app class (`activateOrPush`; an `adt:` document keeps `launch.ts`'s delegation): Restricted Mode and a production profile on the origin refused first, the modal before the first push of a class per system and window, the conflict check (server `changedAt` against the last push or the F9 baseline, `shownChangedAt` in `activationwatch.ts`) with a server-vs-local diff, the transport prompt, the requests through the proxy's loopback origin, the activation messages in a diagnostic collection of their own (cleared for the class by the next successful activation), the reload |
 | `src/rendergate.ts` | "Install / Update Render Gate": downloads the linter release's checker bundle and Chromium into global storage, verifies it, and resolves the installed CLI (see Toolchain). `tar` is loaded on first use from `dist/rendergate-tar.js`, the bundle `esbuild.js` builds from `src/rendergate-tar.ts` - 86 KB that stays out of the activation bundle |
 | `src/report.ts` | `vscode`-free: the shape and the redaction of "Copy Diagnostics for a Bug Report" - the report this extension writes about itself (per open document: scheme, checkability, governing config) |
 | `src/diagnosticsreport.ts` | The command's plumbing: collects what `report.ts` formats from the window (extensions, settings, documents, log lines, systems) |
@@ -110,8 +156,9 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/apptemplatefile.ts` | Where that snapshot comes from at runtime, for both entries: `dist/app-template.json` next to the bundle (copied by `esbuild.js`), read through `workspace.fs` the first time "New Project from Template" or "Add Agent Setup to Workspace" runs - never at activation |
 | `src/agentsetup.ts` | `vscode`/`fs`/`path`-free: what "Add Agent Setup to Workspace" writes into an EXISTING project - app-template's `agentSetup` key executed over the snapshot, ported function by function from that repository's `create/agent-setup.mjs` (never overwrite, `package.json`/`.gitignore` only gain entries, the gates pointed at `.abapgit.xml`'s `STARTING_FOLDER`, nothing planned into the source folder), decided as a plan over a `WorkspaceProbe` before anything is written |
 | `src/agentsetupview.ts` | The command's plumbing, shared by both entries: the workspace folder, the modal confirmation listing what is written and skipped, a re-plan right before writing (a folder that changed under the dialog is refused), the writes through `workspace.fs`, the "abap2UI5 Agent Setup" output with the next steps |
+| `scripts/coverage.mjs` | `npm run test:coverage`: runs the suite with `NODE_V8_COVERAGE` over the build of `node esbuild.js --tests --coverage` and prints a per-module line table for `src/` (into `$GITHUB_STEP_SUMMARY` in CI); the arithmetic - source-map segments, V8 ranges, the table - is `scripts/lib/coverage.mjs`, pinned by `src/test/coverage.test.ts` |
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` (the template's `files.shared` and `files.named`, BOM stripped, plus its `template.json`) from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
-| `src/rendergate-tar.ts` | The entry of the `dist/rendergate-tar.js` bundle (`tar` alone) `rendergate.ts` loads on first use |
+| `src/rendergate-tar.ts` | The entry of the `dist/rendergate-tar.js` bundle (`tar` alone - `x`, and the `Parser` it unpacks with, which "Install Report Converter" reads its archives with) `rendergate.ts` loads on first use (`loadTar`, exported for `migratereport.ts`) |
 | `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot, and the `*_HOME` variable each checkout is handed to mcp-server as (`checkoutHomes`) |
 | `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/mcp-server's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
 | `scripts/generate-settings.mjs` | Regenerates the settings table in `README.md` from `contributes.configuration`; `--check` fails when it is stale (`src/test/settings.test.ts`) |
@@ -133,31 +180,34 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/settings.ts` | `CONFIG_SECTION` — the settings prefix, in one dependency-free module so the web build can read it without pulling in the session |
 | `src/linterrelease.ts` | `LINTER_RELEASE` — the linter version and release commit `esbuild.js` stamped (`LINTER_PIN`, `LINTER_COMMIT`), read there and nowhere else (`linterpin.test.ts` pins that) |
 | `src/text.ts` | `plural(count, noun)` — the one pluralizer behind every counted string users read (dependency-free) |
-| `src/abap.ts`, `src/urls.ts`, `src/context.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
+| `src/abap.ts`, `src/urls.ts`, `src/metadata.ts` | The `vscode`-free helpers — see below |
 | `src/test/` | `node --test` suite over exactly those modules |
+| `src/test/apifloor.test.ts` | Every `contributes` key classified with the VS Code release it is stable in: none above `engines.vscode`, and the newest ones behind a named runtime guard (ROADMAP T15) |
 | `src/test/desktop/` | The `@vscode/test-electron` smoke test: `suite.ts` runs inside a real VS Code, `runner.mjs` writes the throwaway workspace and launches it |
-| `scripts/lib/snapshot.mjs` | The one lifecycle the three snapshot generators share: upstream read (local checkout or GitHub raw), shape check, `--check` byte-compare, write |
+| `scripts/lib/snapshot.mjs` | The one lifecycle the snapshot generators share: upstream read (local checkout or GitHub raw), shape check, `--check` byte-compare, write |
 | `snippets/` | ABAP snippets contributed to the editor |
 | `media/` | Icons: `icon.svg` (panel), `icon-light/dark.svg` (preview tab), `icon.png` (gallery) |
 | `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js` (plus `src/rendergate-tar.ts` into `dist/rendergate-tar.js` and `src/agent-client.ts` into `dist/agent-client.js`, both loaded on first use), `src/web/extension.ts` into `dist/web/extension.js`, and `src/test/` into `dist-test/` (with its own `agent-client.js`); copies the linter's data files and the extension's own two runtime-read snapshots (`app-template.json`, `client-api.json`) next to the bundles |
-| `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the four weekly `bump-*.yml` callers share |
+| `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the six weekly `bump-*.yml` callers share |
 
 `dist/`, `dist-test/`, `node_modules/` and `*.vsix` are build output and are
 not committed.
 
 **The `vscode`-free boundary is load-bearing.** `abap.ts`, `urls.ts`,
-`context.ts`, `metadata.ts`, `lintconfig.ts`, `snapshot.ts`,
+`context.ts` (and the `contextnames.ts`, `contextscan.ts`, `contextchain.ts`,
+`contextevents.ts`, `contextxml.ts` it re-exports), `metadata.ts`, `lintconfig.ts`, `snapshot.ts`,
 `bindingpaths.ts`, `xmlformat.ts`, `gate.ts`, `template.ts`, `inspect.ts`,
 `clientapi.ts`, `chainformat.ts`, `renderloc.ts`, `traffic.ts`, `scaffold.ts`, `childproc.ts`,
-`colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `examples.ts`,
+`colors.ts`, `xmltoabap.ts`, `propedit.ts`, `navmap.ts`, `mcprpc.ts`, `chattools.ts`, `examples.ts`,
 `catalogue.ts`, `agentapps.ts` (and the vendored `src/vendor/agent/`),
 `abapscan.ts`, `appindex.ts`, `classindex.ts`, `classindexsync.ts`, `sharedscan.ts`, `sourcecache.ts`, `checkschedule.ts`, `settings.ts`, `linterrelease.ts`, `text.ts`,
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
-`abbreviation.ts`, `connectcheck.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `report2cloud.ts`, `report.ts`, `baselinefile.ts`, `repolayout.ts`, `web/linterdata.ts`, `web/startup.ts`,
-`proxy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
-`checkcore.ts`, `compat.ts` and `webview.ts` (HTML strings only — the state it renders is
+`abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
+`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `localbackend.ts`, `report2cloud.ts`, `report2ui5install.ts`, `report.ts`, `logon.ts`, `browserlogon.ts`, `cdp.ts`, `clientcert.ts`, `oauth.ts`, `oauthflow.ts`, `roundtrips.ts`, `adtwrite.ts`, `adtmessages.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
+`proxy.ts` with its parts `proxyadt.ts`, `proxyhtml.ts`, `proxybody.ts` and `proxyheaders.ts`, `authstrategy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
+`checkcore.ts`, `compat.ts` and `webview.ts` with its parts `webviewshared.ts`, `webviewpreview.ts`,
+`webviewpanels.ts` and `webviewwelcome.ts` (HTML strings only — the state they render is
 passed in) must not import `vscode`: the test suite bundles them for plain
 Node, and an accidental import turns a unit test into a module-not-found
 error. Put the interesting logic
@@ -236,6 +286,23 @@ skip into a failure so "it quietly stopped running" cannot become normal.
 cross-platform shell quoting and process-tree kill, and `checkcore.ts` /
 `scaffold.ts` build paths — all of it used to be proven on Ubuntu only.
 
+`npm run test:coverage` is a measurement, not a gate: the same suite with
+Node's coverage collection on (`NODE_V8_COVERAGE`, no dependency) and a table
+of line coverage per `src/` module, least covered first - CI's `build` job
+puts it into the job summary. There is no threshold. It reads the test
+build's source maps, and builds with `--coverage`, which only switches
+tree-shaking off: a function no test imports is otherwise in no bundle, and
+its module would look covered. `npm test` does not take the flag and runs the
+modules as shipped. A line counts when the bundler emitted code for it, so
+comments and types are not in the denominator - which is why the table is
+computed in `scripts/lib/coverage.mjs` rather than by
+`--experimental-test-coverage`, whose view through a source map counts them.
+`npm run test:coverage -- src/a.ts src/b.ts` also prints the lines of the
+named modules that have code and did not run (`uncoveredLines`).
+Source maps exist in the test build and the development build only; the
+`.vsix` carries none (`**/*.map` in `.vscodeignore`, and the production build
+writes none).
+
 ## Releasing
 
 The `.vsix` is not committed; users download it from the GitHub release.
@@ -286,7 +353,9 @@ identity (see Conventions).
   first gate or completion) all wait for the first ABAP document, the first
   check or the first ask. What activation still does: loads the bundle (0.62
   MB - the render gate's `tar` and the vendored agent client are bundles of
-  their own, loaded on first use), creates the session's channels and status item, reads the 1.5 KB
+  their own, loaded on first use), creates the session's channels and status item and the
+  (empty) test controller - `testexplorer.ts` searches for test includes only when the Testing
+  view asks -, reads the 1.5 KB
   `dist/compat.json`, registers the commands, providers and the four
   FileSystemWatchers (ABAP sources, test includes, lint configs, baselines),
   re-checks the checkable documents already open (the visible ones at once,
@@ -308,14 +377,35 @@ identity (see Conventions).
 - **Bump `version` and add a `CHANGELOG.md` entry** with every user-visible
   change. The changelog is written for users of the extension, not for
   reviewers of the diff.
-- **Webview markup lives in `src/webview.ts`,** styled only with `--vscode-*`
+- **Webview markup lives in the `src/webview*.ts` files** (`webviewshared.ts`,
+  `webviewpreview.ts`, `webviewpanels.ts`, `webviewwelcome.ts`; everything
+  else imports it through `src/webview.ts`, which only re-exports), styled only with `--vscode-*`
   theme variables so it works in light, dark and high-contrast themes. Inline
   `<style>`/`<script>` carry the CSP nonce - no `unsafe-inline`, and therefore
   no `style="..."` attributes in the markup either.
 - **Never log or persist credentials** anywhere but `context.secrets`. The
-  proxy holds them in memory only, as a prepared header. They are keyed by
-  origin (`abap2ui5.user:<origin>`); the unscoped pre-0.14 keys are migrated
-  on first use, so do not reuse those names for anything else.
+  proxy holds them in memory only, inside its `AuthStrategy`
+  (`authstrategy.ts`, `#private` fields). They are keyed by origin, one key
+  per mechanism (`secretKeysFor` in `logon.ts`: `abap2ui5.user:<origin>` /
+  `abap2ui5.pass:<origin>` for basic, `abap2ui5.cert:<origin>` for a client
+  certificate's passphrase, `abap2ui5.oauth:<origin>` for OAuth's service
+  key (it holds the client secret) and refresh token in one entry,
+  `abap2ui5.session:` reserved for the browser logon); "Clear Stored SAP
+  Credentials" deletes all of them. OAuth's access token lives in the
+  strategy only. A client certificate's FILE PATH is no secret and
+  lives in `globalState` per origin (`abap2ui5.clientCertificates`), never
+  in a setting a workspace could write; the file is read when the proxy
+  starts. Session cookies of a browser logon stay in memory only
+  (`browserSessions` in `browserlogon.ts`, per origin, emptied by "Clear
+  Stored SAP Credentials"; the browser's throwaway profile, which holds them
+  on disk while it runs, is deleted after every logon), and the proxy keeps
+  a cookie strategy's cookies and `MYSAPSSO2` out of the answers to the
+  preview (`withoutOwnCookies`). A flow without a UI never opens the browser
+  (`browserLogonNeeded`). Every new mechanism is one
+  more `case` in `strategyFor`, never a call site that builds a strategy
+  itself. `report.ts` redacts cookie values, bearer tokens, OAuth secrets
+  and passphrases. The unscoped pre-0.14 keys are migrated on first use, so
+  do not reuse those names for anything else.
 - **Every local listener carries a secret in its path.** Both the auth proxy
   (`proxy.ts`) and the system MCP server (`mcpsystem.ts`) forward or act with
   the system credentials, and a port on 127.0.0.1 is reachable by every
@@ -327,20 +417,47 @@ identity (see Conventions).
   to it. The one path that cannot inherit a prefix, an absolute bootstrap
   like `/sap/public/...`, is covered by the HttpOnly cookie the first
   authorized answer plants. Do not add a second listener without both.
+  The local backend's host (`localbackend-host.mjs`, the "Local
+  (transpiled)" system) is a listener the extension STARTS rather than
+  owns, and it runs the repository's code: it binds `127.0.0.1` only (never
+  `0.0.0.0`), keeps npm-host's loopback `Host`/`Origin` guard, and answers
+  404 to every request without the per-start `randomBytes(16)` token in
+  `x-abap2ui5-local-token` - a header rather than a path segment because the
+  app's frontend computes its URLs from the page, and only the auth proxy
+  sends it (`LocalBackendAuth`), so the webview reaches the host through the
+  proxy and its token alone. The token goes to the child in its environment
+  (argv is visible to every local user) and the launcher removes it from
+  there before anything else runs. It is never started in Restricted Mode.
+  The OAuth logon's callback listener (`startCallbackListener` in
+  `oauthflow.ts`, `auth: "oauth"`) is one more, and keeps both: it lives for one browser
+  logon only, binds `127.0.0.1` on a random port, its whole path is a
+  `randomBytes(16)` segment (the redirect URI the UAA sends the browser
+  back to), every other path is 404, a non-loopback `Host` is refused with
+  403, the `state` is checked (and the code is worth nothing without the
+  PKCE verifier, which never leaves the process), and it closes after
+  the first callback on its path, whatever that said. It never logs the
+  request URL, which carries the authorization code.
 - **A setting that names a program to start is `"scope": "machine"`.**
-  `viewCheck.command`, `mcp.command` and `mcp.reposRoot` decide which binary
+  `viewCheck.command`, `mcp.command`, `mcp.reposRoot` and
+  `logon.browserExecutable` (the browser a browser logon starts - it then
+  holds the session cookies) decide which binary
   the extension spawns; machine scope keeps a cloned repository's
   `.vscode/settings.json` out of that decision. They are listed under
   `capabilities.untrustedWorkspaces.restrictedConfigurations`, together with
-  `systems`, `launchUrlTemplate`, `agent.enableAppTools`, `report2cloud.path` (the
+  `systems`, `launchUrlTemplate`, `agent.enableAppTools`, `agent.confirmActions`, `report2cloud.path` (the
   abap-cloud-gui checkout whose report2cloud CLI the migrate command runs),
-  `viewCheck.render`, `viewCheck.rollingBundle` and `allowUnauthorizedCerts` -
-  ten settings a cloned repository must not be able to set. `agent.enableAppTools` is machine scope
+  `viewCheck.render`, `viewCheck.rollingBundle`, `allowUnauthorizedCerts` and
+  `logon.browserExecutable` - twelve settings a cloned repository must not
+  be able to set. `agent.enableAppTools` is machine scope
   too, for the same reason in another shape: it lets an agent act on the
   system AS THE USER, so only the user's own settings may turn it on
   (`agentapps.test.ts` pins its scope, default and restriction).
+  `agent.confirmActions` is its counterpart - on by default, it puts every
+  acting step of that agent to the user first, so only the user's own
+  settings may turn it OFF (pinned in the same test).
   `allowUnauthorizedCerts` is machine scope as well - it decides whether the
-  proxy that injects the credentials verifies the system's certificate - and
+  proxy that injects the credentials verifies the system's certificate (off
+  by default; the per-system answer is a pin, next bullet) - and
   so is `viewCheck.rollingBundle`, which decides which build of the render
   gate "Install Render Gate" downloads and runs. `SETTING_POLICY` in
   `manifest.test.ts` classifies EVERY setting (machine + restricted,
@@ -348,6 +465,36 @@ identity (see Conventions).
   the render gate does not run at all in Restricted Mode (`viewcheck.ts`
   asks `workspace.isTrusted`); its last-resort `npx` fallback is pinned to
   `LINTER_COMMIT` like the bundle download (`checkcore.test.ts` pins both).
+- **An unverifiable certificate is trusted per system, never by default.**
+  The proxy verifies every https system unless `allowUnauthorizedCerts` is
+  explicitly on (the blanket override) or the user pinned that origin's
+  certificate: SHA-256 fingerprints in `globalState`, keyed by origin, which
+  no workspace can write (`certtrust.ts`, `certprompt.ts`). A pinned origin
+  is connected to with verification off, so the comparison is the proxy's
+  own and happens on EVERY request before its first byte is written
+  (`whenTrusted` in `proxy.ts` holds back `end( )`/`pipe( )` until the
+  handshake has produced the peer certificate - the headers carry the
+  credentials). Only F9, "Check System Connection" and "Run an App from the
+  System" ask (`ensureCertificateTrust`, interactive); the MCP tools get a
+  refusal that names the first two. Do not add a path that accepts an
+  unverified certificate without a pin, and do not add a workspace-settable
+  switch that weakens verification.
+- **A system profile field may only tighten.** `abap2ui5.systems` can be set
+  by a (trusted) workspace, so nothing in a profile may switch a security
+  check off: `role: "production"` refuses things, `minUi5` / `distribution`
+  only choose what the view check compares against, `auth` only chooses the
+  mechanism (`AUTH_KINDS`; anything else ignored with a log line) - every
+  secret, file and endpoint behind it is the user's own, never the
+  profile's. Certificate trust is deliberately NOT a profile field. And
+  because a workspace's list replaces the user's whole array, `tightenRoles`
+  (`systemprofile.ts`) keeps `production` for every system on the origin of
+  a production profile in a shadowed scope, and `tightenAuth` keeps a
+  non-basic mechanism the same way - a repository cannot turn a certificate
+  host back into a password prompt. The precedence of `minUi5` and
+  `distribution` is decided in `configcore.ts` and nowhere else: repository
+  `abap2ui5lint.jsonc` > active system's profile (`settingsForSystem`) >
+  VS Code setting; the web build has no systems and never applies the
+  middle step.
 - **A file the repository's config names is confined before it is written.**
   The `baseline` of an `abap2ui5lint.jsonc` is replaced with JSON by "Add to
   Baseline" / "Update Baseline"; `baselinefile.ts` refuses every write whose
@@ -513,7 +660,7 @@ Facts an agent cannot see from the code but will trip over:
   linter's `generate-rules-page` emits one anchor per rule for. The rule ids
   themselves come from the linter's exported `RULES`, so an id that stops
   existing stops being linked rather than producing a dead link — but the page
-  URL is hard-coded in `viewcheck.ts` and moves with the linter's Pages
+  URL is hard-coded in `diagnostics.ts` (`RULES_PAGE`) and moves with the linter's Pages
   deployment.
 - **The snapshot's shape is a contract now.** `metadata.ts` reads
   `parent` / `members` / `properties` / `aggregations` / `associations` /
@@ -541,8 +688,8 @@ Facts an agent cannot see from the code but will trip over:
   A module that newly pulls `child_process`/`os`/`crypto` into the web graph
   breaks the web build, which is why the desktop-only plumbing stays behind
   `extension.ts` and the shared pieces live in `gate.ts`/`diagnostics.ts`/
-  `selector.ts`. `webview.ts` is web-safe in fact, not merely `vscode`-free:
-  its nonce comes from Web Crypto (`globalThis.crypto.getRandomValues`), not
+  `selector.ts`. `webview.ts` and its `webview*.ts` parts are web-safe in fact, not merely `vscode`-free:
+  the nonce (`webviewshared.ts`) comes from Web Crypto (`globalThis.crypto.getRandomValues`), not
   node's `crypto` module - that one import used to be what kept every webview
   out of the web host. Desktop-only commands are hidden from the web palette
   with `"when": "!isWeb"` entries under `menus.commandPalette`.
@@ -692,9 +839,55 @@ Facts an agent cannot see from the code but will trip over:
   tool). No `baseUrl`, no request rewriting, no message patching - a new
   local-backend assumption upstream belongs behind a new option there, not
   behind a wrapper here.
-- **The four weekly bump workflows share one implementation.**
+- **The local backend drives mcp-server's internals, pinned EXACTLY.**
+  mcp-server 1.0.0 has no `serve` entry point (docs/systemless-preview.md,
+  section 5), so `src/localbackend-host.mjs` imports `buildNpm`, `startHost`,
+  `collectObjects` and `writeObjects` by path. The version it drives is
+  `localBackend.mcpServer` in `package.json` - no range: `npx -p` installs
+  exactly that into npm's npx cache, and the launcher takes the package off
+  the `node_modules/.bin` npx puts on PATH only at that version. A checkout
+  under `mcp.reposRoot` is used as it is, like the unit runner's.
+  `bump-local-backend.yml` moves the pin weekly through `bump-snapshot.yml`;
+  its regenerate step also fills the npx cache, so the gate's `npm test`
+  runs the opt-in real test in `localbackend.test.ts` (app-template's
+  starter class transpiled, started and sent an event through `SapProxy`)
+  instead of skipping it. That test also runs locally whenever the npx
+  cache holds the pinned version or `ABAP2UI5_LOCAL_BACKEND_MCP` names a
+  checkout (it needs the network and git; `ABAP2UI5_LOCAL_BACKEND_WORKSPACE`
+  keeps the runtime install between runs). When mcp-server ships a `serve`
+  bin, switch to it and drop the deep imports.
+- **The report converter is installed from a PINNED COMMIT, never a branch.**
+  abap-cloud-gui publishes report2UI5 neither on npm nor as a release
+  bundle, so "Install Report Converter" downloads codeload's tarball of one
+  commit (`https://codeload.github.com/abap2UI5-addons/abap-cloud-gui/tar.gz/<sha>`)
+  and the npm closure of `@abaplint/core` as that commit's package-lock.json
+  resolves it. `src/data/report2ui5.json` records the commit, the CLI's
+  files with the size and SHA-256 of each one's unpacked content, and each
+  package's url and `integrity`; package.json's `report2ui5Release` repeats
+  the commit as the
+  record of which artefact a release installs (`report2ui5.test.ts` holds
+  the two together and runs the install's shape check over the snapshot).
+  `scripts/generate-report2ui5.mjs` writes both, `npm run report2ui5:check`
+  compares them with main (network), `bump-report2ui5.yml` moves the pin
+  weekly through a PR - the converter a user runs changes only with a
+  release of this extension. The generator needs `npm ci` (it reads the
+  archive with `tar` and the import graph with esbuild, executing nothing of
+  it) and so does that bump's regenerate step. Do NOT pin the tarball's
+  own bytes: GitHub does not promise byte-stable compression of its
+  archives, so a recorded archive checksum can stop matching codeload at
+  any time and every install would refuse. What is pinned is the CONTENT -
+  which is also why the snapshot can be generated offline from
+  `git archive --format=tar.gz <commit>` of a checkout (`--tarball`). The
+  install verifies each package before it reads it and each pinned file
+  before anything is written, unpacks only the pinned files, refuses links and traversal, and renames a complete staging
+  directory into `<globalStorage>/report2ui5/<commit>/`; it is the LAST rung
+  of the migrate command's resolution (setting > `ABAP_CLOUD_GUI_HOME` >
+  repos root > installed) and is neither downloaded nor run in Restricted
+  Mode. `tar` is not bundled twice: the install reads through the `Parser`
+  of `dist/rendergate-tar.js`.
+- **The weekly bump workflows share one implementation.**
   `.github/workflows/bump-snapshot.yml` holds the shape (regenerate → diff →
-  gate → open a pull request) and is called through `workflow_call`; the four
+  gate → open a pull request) and is called through `workflow_call`; the five
   named files are thin callers carrying only the schedule, what to regenerate
   and what to say in the PR. They open their pull requests with
   `BUMP_PR_TOKEN` when that repository secret is configured, and with the
@@ -722,4 +915,4 @@ Facts an agent cannot see from the code but will trip over:
 | [samples](https://github.com/abap2UI5/samples) | Sample applications |
 | [samples-controls](https://github.com/abap2UI5/samples-controls) | Ported demo-kit samples (formerly `abap2UI5-api`, before that `ai-demokit` — where this extension used to live, until 0.6.0) |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | The view checker behind `src/viewcheck.ts` (the npm release, pinned exactly) and `src/rendergate.ts` (runtime download of that release's bundle) |
-| [mcp-server](https://github.com/abap2UI5/mcp-server) | The MCP server `src/mcp.ts` registers for MCP clients in the window |
+| [mcp-server](https://github.com/abap2UI5/mcp-server) | The MCP server `src/mcp.ts` registers for MCP clients in the window; its npm backend is what the "Local (transpiled)" system builds and serves with (`src/localbackend-host.mjs`, pinned exactly) |

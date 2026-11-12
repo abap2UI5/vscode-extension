@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shape: the answer to POST <class>?_action=LOCK&accessMode=MODIFY - asx:abap/asx:values/DATA with the AdtLock fields
+     (LOCK_HANDLE, CORRNR, CORRUSER, CORRTEXT, IS_LOCAL, IS_LINK_UP, MODIFICATION_SUPPORT) after abap-adt-api
+     src/api/objectcontents.ts (lock, AdtLock). A $TMP object: IS_LOCAL X, no CORRNR. Hand-written, not recorded. -->
+<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA><LOCK_HANDLE>Q0xBU1pDTF9ERU1PX0FQUA==LOCK01</LOCK_HANDLE><CORRNR/><CORRUSER/><CORRTEXT/><IS_LOCAL>X</IS_LOCAL><IS_LINK_UP/><MODIFICATION_SUPPORT>NoModification</MODIFICATION_SUPPORT></DATA></asx:values></asx:abap>

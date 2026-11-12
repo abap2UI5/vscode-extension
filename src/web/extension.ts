@@ -10,6 +10,7 @@ import { registerConvert } from "../convert";
 import { registerNavMap } from "../navview";
 import { registerPropertyEditor } from "../propview";
 import { registerFindingsView } from "../findingsview";
+import { registerChatTools } from "../chattoolsview";
 import { seedLinterData } from "./linterdata";
 import { DataGate, startWeb } from "./startup";
 
@@ -112,6 +113,9 @@ export async function activate(
     registerNavMap(context, log);
     registerPropertyEditor(context, log);
     registerFindingsView(context, webFindingsNow);
+    // The chat's language model tools that need no preview: the published
+    // findings and the reconstructed view (where the host has the API).
+    registerChatTools(context, "web", log);
 
     context.subscriptions.push(
       vscode.commands.registerCommand("abap2ui5.openHomepage", () =>

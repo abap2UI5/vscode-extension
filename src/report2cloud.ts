@@ -17,15 +17,38 @@ import type { RunOutcome } from "./childproc";
  * itself (it only registers it for MCP clients), so delegating to that tool
  * would have meant a second MCP client here for one call.
  *
- * The CLI's contract (its README): `node tools/report2cloud/cli.mjs <file>
+ * The CLI's contract (its README): `node tools/report2ui5/cli.mjs <file>
  * [--class] [--out] [--partial]`; exit 0 converted, 2 refused (every refusal
  * on stderr as `file:row:col - reason`, the migration report written, no
  * class unless --partial), 1 wrong call. Everything here reads that
  * contract, and nothing else of the converter.
+ *
+ * After its 1.0.0 abap-cloud-gui renamed the converter to report2UI5 and
+ * moved it from tools/report2cloud to tools/report2ui5; the contract stayed,
+ * except that the summary line lost the count of objects to check for ABAP
+ * Cloud (the release check went). A checkout of either shape is accepted -
+ * the new path first - so a user who `git pull`s keeps a working command,
+ * and one pinned to 1.0.0 does too. The setting keeps its old name.
  */
 
-/** The CLI inside an abap-cloud-gui checkout. */
-export const CLI_PATH = path.join("tools", "report2cloud", "cli.mjs");
+/** The CLI inside an abap-cloud-gui checkout - report2UI5, the name since the
+ *  converter's rename. */
+export const CLI_PATH = path.join("tools", "report2ui5", "cli.mjs");
+
+/** Where abap-cloud-gui 1.0.0 and older checkouts keep the same CLI. */
+export const LEGACY_CLI_PATH = path.join("tools", "report2cloud", "cli.mjs");
+
+/** The CLI of a checkout, the current path before the old one - undefined
+ *  when the checkout has neither. Exported for the tests. */
+export function cliIn(root: string, exists: (file: string) => boolean): string | undefined {
+  for (const rel of [CLI_PATH, LEGACY_CLI_PATH]) {
+    const cli = path.join(root, rel);
+    if (exists(cli)) {
+      return cli;
+    }
+  }
+  return undefined;
+}
 
 /** What `npm ci` leaves behind that the converter cannot run without - the
  *  parser. Its absence is a setup step, not a converter error. */
@@ -50,10 +73,18 @@ export interface ResolveInput {
   /** The directory names an abap-cloud-gui checkout can carry
    *  (CLOUD_GUI_DIRS - empty while the repo-dirs snapshot has none). */
   dirs: readonly string[];
+  /** The copy "Install Report Converter" put into global storage for the
+   *  commit this build pins (`report2ui5install.ts`), whether or not it is
+   *  there - undefined where it must not run: Restricted Mode, or a host
+   *  without global storage. */
+  installed?: string;
+  /** The window is in Restricted Mode - said in the "not configured"
+   *  message, which then offers no install. */
+  restricted?: boolean;
   exists: (file: string) => boolean;
 }
 
-export type ConverterSource = "setting" | "environment" | "repos root";
+export type ConverterSource = "setting" | "environment" | "repos root" | "installed";
 
 export type Resolution =
   | { ok: true; root: string; cli: string; source: ConverterSource }
@@ -68,6 +99,7 @@ const NAMED: Record<ConverterSource, string> = {
   setting: PATH_SETTING,
   environment: HOME_VAR,
   "repos root": "abap2ui5.mcp.reposRoot",
+  installed: "Install Report Converter",
 };
 
 /** A configured path to the checkout - or to the tool's folder or its CLI,
@@ -77,12 +109,12 @@ export function rootOf(configured: string): string {
   return configured
     .trim()
     .replace(/[\\/]+$/, "")
-    .replace(/[\\/]tools[\\/]report2cloud(?:[\\/]cli\.mjs)?$/i, "");
+    .replace(/[\\/]tools[\\/]report2(?:cloud|ui5)(?:[\\/]cli\.mjs)?$/i, "");
 }
 
 function check(root: string, source: ConverterSource, exists: (f: string) => boolean): Resolution {
-  const cli = path.join(root, CLI_PATH);
-  if (!exists(cli)) {
+  const cli = cliIn(root, exists);
+  if (!cli) {
     return {
       ok: false,
       reason: "no-cli",
@@ -90,7 +122,7 @@ function check(root: string, source: ConverterSource, exists: (f: string) => boo
       source,
       message:
         `${root} (from ${NAMED[source]}) is not an abap-cloud-gui checkout with ` +
-        `report2cloud - ${CLI_PATH} is missing. Point ${PATH_SETTING} at a clone of ` +
+        `its converter - neither ${CLI_PATH} nor ${LEGACY_CLI_PATH} is there. Point ${PATH_SETTING} at a clone of ` +
         "https://github.com/abap2UI5-addons/abap-cloud-gui (git pull an older one).",
     };
   }
@@ -101,8 +133,10 @@ function check(root: string, source: ConverterSource, exists: (f: string) => boo
       root,
       source,
       message:
-        `report2cloud in ${root} cannot run yet - its parser (@abaplint/core) is not ` +
-        `installed. Run \`npm ci\` in ${root} once.`,
+        source === "installed"
+          ? `The installed report converter in ${root} lacks its parser (@abaplint/core) - run Install Report Converter again.`
+          : `report2cloud in ${root} cannot run yet - its parser (@abaplint/core) is not ` +
+            `installed. Run \`npm ci\` in ${root} once.`,
     };
   }
   return { ok: true, root, cli, source };
@@ -111,7 +145,9 @@ function check(root: string, source: ConverterSource, exists: (f: string) => boo
 /**
  * The converter, in the order mcp-server resolves the same checkout plus the
  * extension's own setting in front: the setting, then ABAP_CLOUD_GUI_HOME,
- * then an `abap-cloud-gui` checkout under the repos root. An EXPLICIT answer
+ * then an `abap-cloud-gui` checkout under the repos root, then the copy
+ * "Install Report Converter" downloaded - last, so a checkout somebody
+ * configured always wins over it. An EXPLICIT answer
  * that does not hold is reported as such - it never falls through to the
  * next rung, because a checkout somebody pointed at on purpose must be the
  * one that runs, or the reason it cannot.
@@ -129,18 +165,23 @@ export function resolveReport2cloud(input: ResolveInput): Resolution {
   if (reposRoot) {
     for (const dir of input.dirs) {
       const root = path.join(reposRoot, dir);
-      if (input.exists(path.join(root, CLI_PATH))) {
+      if (cliIn(root, input.exists)) {
         return check(root, "repos root", input.exists);
       }
     }
   }
+  if (input.installed && cliIn(input.installed, input.exists)) {
+    return check(input.installed, "installed", input.exists);
+  }
   return {
     ok: false,
     reason: "unconfigured",
-    message:
-      "report2cloud is not configured. It is not on npm: clone " +
-      "https://github.com/abap2UI5-addons/abap-cloud-gui, run `npm ci` there and " +
-      `point ${PATH_SETTING} at the checkout.`,
+    message: input.restricted
+      ? "report2cloud is not configured, and in Restricted Mode the extension neither installs nor runs " +
+        "its own copy - trust the workspace, or point ABAP_CLOUD_GUI_HOME at an abap-cloud-gui checkout."
+      : "report2cloud is not configured. Install it with one click (Install Report Converter), or clone " +
+        "https://github.com/abap2UI5-addons/abap-cloud-gui, run `npm ci` there and " +
+        `point ${PATH_SETTING} at the checkout.`,
   };
 }
 
@@ -297,8 +338,10 @@ export type MigrateResult =
       report: string;
       mapped: number;
       todos: number;
-      /** Objects to check for their release state on ABAP Cloud. */
-      release: number;
+      /** Objects to check for their release state on ABAP Cloud - only a
+       *  converter from before the rename (abap-cloud-gui 1.0.0) counts them;
+       *  undefined when the summary does not say. */
+      release?: number;
     }
   | {
       kind: "refused";
@@ -317,8 +360,11 @@ export type MigrateResult =
   /** Exit 1 or anything else that is not the contract. */
   | { kind: "failed"; message: string };
 
+/** The summary line of a conversion. report2UI5 ends it after the TODOs (or
+ *  with what it inlined and linted); 1.0.0's report2cloud appended the
+ *  objects to check for ABAP Cloud, read when it is there. */
 const SUMMARY_RE =
-  /^(\S+): (\d+) constructs? mapped, (\d+) TODO\(s\), (\d+) object\(s\) to check for ABAP Cloud/m;
+  /^(\S+): (\d+) constructs? mapped, (\d+) TODO\(s\)(?:[^\n]*?, (\d+) object\(s\) to check for ABAP Cloud)?/m;
 const REFUSED_RE = /^(\S+): refused - (\d+) statement\(s\) cannot be mapped.*; report: (.+)$/m;
 
 /** The first lines of a failure, enough for a notification. */
@@ -372,7 +418,7 @@ export function interpretRun(
       report,
       mapped: Number(summary?.[2] ?? 0),
       todos: Number(summary?.[3] ?? 0),
-      release: Number(summary?.[4] ?? 0),
+      ...(summary?.[4] !== undefined ? { release: Number(summary[4]) } : {}),
     };
   }
   if (code === 2) {

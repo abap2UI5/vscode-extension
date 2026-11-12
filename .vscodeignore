@@ -6,6 +6,7 @@ scripts/**
 AGENTS.md
 CLAUDE.md
 RELEASING.md
+docs/**
 CONTRIBUTING.md
 SECURITY.md
 package-lock.json
@@ -39,3 +40,7 @@ dist/web/test.js
 # copy of src/test/proxy.test.ts carries the fixture private key that vsce's
 # secret scan rightly refuses to ship.
 .claude/**
+
+# The README pictures. The Marketplace loads them by URL (vsce rewrites the
+# relative links from `repository`), so the .vsix does not need to carry them.
+media/readme/**

@@ -26,6 +26,7 @@ import { registerViewPreview } from "./viewpreview";
 import { registerFindingsBar } from "./findingsbar";
 import { registerExamples } from "./exampleview";
 import { registerFindingsView } from "./findingsview";
+import { registerChatTools } from "./chattoolsview";
 import { registerInlineAnnotations } from "./inlineview";
 import { registerAppView } from "./appview";
 import { registerDiagnosticsReport } from "./diagnosticsreport";
@@ -41,9 +42,19 @@ import { registerNavMap } from "./navview";
 import { registerPropertyEditor } from "./propview";
 import { takeScreenshot } from "./screenshot";
 import { formatTrafficLine, isRoundtrip } from "./traffic";
+import { registerRoundtripCommands } from "./roundtripview";
+import { activateOrPush, registerPushActivate } from "./pushactivate";
 import { MODEL_SCHEME, registerModelView } from "./modelview";
 import { registerMockFile } from "./mockfile";
 import { registerUnitTests } from "./unittests";
+import {
+  isInBuiltFolder,
+  isLocalTarget,
+  rebuildAndReload,
+  registerLocalBackend,
+  stopLocalBackend,
+} from "./localbackendview";
+import { registerTestExplorer } from "./testexplorer";
 import { registerMigrateReport } from "./migratereport";
 import { DEVICE_WIDTHS } from "./webview";
 import { applyModelMessage, staleMessage } from "./previewcore";
@@ -62,14 +73,18 @@ import {
   PreviewViewProvider,
   refreshPickers,
   reloadShownApp,
+  requestModelDump,
 } from "./preview";
 import {
-  activateAndReload,
   checkConnection,
   makeConnectSystem,
+  restartLogon,
   runApp,
   watchProxyStatus,
 } from "./launch";
+import { chooseClientCertificate, logOnInBrowser } from "./logonprompt";
+import { loadServiceKey } from "./oauthprompt";
+import { forgetTrustedCertificates } from "./certprompt";
 import {
   activeSystem,
   allSystems,
@@ -79,6 +94,8 @@ import {
   storeTemplate,
   activateTemplate,
 } from "./systems";
+import { profileNotes } from "./systemprofile";
+import { checkTargetChanged, setCheckTargetSource } from "./checktarget";
 
 /** Where the screenshot Save As dialog last saved to, per window. */
 const SHOT_DIR_STATE = "abap2ui5.screenshotSaveDir";
@@ -130,6 +147,17 @@ export function activate(context: vscode.ExtensionContext): void {
   const compat = readCompat();
   log(`compat: ${compatLine(compat)}`);
 
+  // The active system's profile may name the UI5 version and distribution
+  // the view check compares against (checktarget.ts), and what a `systems`
+  // entry says that nobody understands is named in the log rather than
+  // silently dropped.
+  setCheckTargetSource(() => activeSystem(context));
+  const logProfileNotes = () =>
+    profileNotes(
+      vscode.workspace.getConfiguration(CONFIG_SECTION).get<unknown>("systems", [])
+    ).forEach((note) => log(`systems: ${note}`));
+  logProfileNotes();
+
   // Every request the embedded app makes goes through the proxy - log it
   // with its full roundtrip time, and feed the toolbar's badge with the
   // POSTs (the app's backend roundtrips). The same lines feed a bounded
@@ -150,6 +178,10 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   watchProxyStatus(session);
+  // "Show Roundtrip" / "Replay Roundtrip": the last roundtrips' bodies, kept
+  // by the proxy in memory only.
+  registerRoundtripCommands(context, session);
+  registerPushActivate(context, session);
   session.modelView = registerModelView(context, log);
   session.updateStatusItem();
 
@@ -188,8 +220,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       reloadShownApp(session);
     }),
+    // a class file on disk is pushed through ADT, an ADT document keeps
+    // the delegation to the ABAP tooling (pushactivate.ts)
     vscode.commands.registerCommand("abap2ui5.activate", () =>
-      activateAndReload(session)
+      activateOrPush(session)
     ),
     vscode.commands.registerCommand("abap2ui5.previewInPanel", () =>
       movePreview(session, provider, "panel")
@@ -237,8 +271,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!system) {
         return;
       }
+      if (!system.local) {
+        stopLocalBackend("another system was selected");
+      }
       provider.refreshWelcome();
-      log(`system: now launching against ${system.name}`);
+      log(
+        `system: now launching against ${system.name}` +
+          (system.role ? ` (${system.role})` : "")
+      );
+      checkTargetChanged();
       if (session.currentTarget) {
         // Same app, other system - relaunch instead of reloading a URL that
         // no longer points where the user is looking.
@@ -253,7 +294,9 @@ export function activate(context: vscode.ExtensionContext): void {
       // Edit the ACTIVE system, wherever it is stored. Writing the single
       // `launchUrlTemplate` while a profile list is configured did not edit
       // anything - it grew an extra system next to the one on screen.
-      const active = activeSystem(context);
+      const selected = activeSystem(context);
+      // the built-in local profile has no launch URL to edit
+      const active = selected?.local ? undefined : selected;
       const current =
         active?.template ??
         vscode.workspace.getConfiguration(CONFIG_SECTION).get<string>(TEMPLATE_KEY, "");
@@ -275,6 +318,17 @@ export function activate(context: vscode.ExtensionContext): void {
         e.affectsConfiguration(`${CONFIG_SECTION}.${OPEN_MODE_KEY}`)
       ) {
         provider.refreshWelcome();
+      }
+      if (
+        e.affectsConfiguration(`${CONFIG_SECTION}.${TEMPLATE_KEY}`) ||
+        e.affectsConfiguration(`${CONFIG_SECTION}.systems`)
+      ) {
+        // a profile's role, minUi5 or distribution may have changed
+        if (e.affectsConfiguration(`${CONFIG_SECTION}.systems`)) {
+          logProfileNotes();
+        }
+        session.updateStatusItem();
+        checkTargetChanged();
       }
       // The pickers in a running preview were built from the lists at load
       // time - a theme added to the setting did not show up until the next F9.
@@ -302,6 +356,14 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const trigger = session.reloadTrigger();
       if (trigger === "never") {
+        return;
+      }
+      // The local backend has no activation: a save of any object it was
+      // built from is the new version - rebuild, restart, reload.
+      if (isLocalTarget(session.currentTarget)) {
+        if (doc.uri.scheme === "file" && isInBuiltFolder(doc.uri.fsPath)) {
+          void rebuildAndReload(session, "Rebuilt after save");
+        }
         return;
       }
       // The cheap name check first: it dismisses every save of another class
@@ -343,6 +405,27 @@ export function activate(context: vscode.ExtensionContext): void {
         "abap2UI5: stored SAP credentials deleted."
       );
     }),
+    // auth: "certificate" - which client certificate a host logs on with
+    vscode.commands.registerCommand("abap2ui5.chooseClientCertificate", () =>
+      chooseClientCertificate(session, async (system, origin) => {
+        await restartLogon(session, system, origin);
+      })
+    ),
+    // auth: "oauth" - which service key a host logs on with
+    vscode.commands.registerCommand("abap2ui5.loadServiceKey", () =>
+      loadServiceKey(session, async (system, origin) => {
+        await restartLogon(session, system, origin);
+      })
+    ),
+    // auth: "browser" - a fresh logon in the browser for the active system
+    vscode.commands.registerCommand("abap2ui5.logOnInBrowser", () =>
+      logOnInBrowser(session, async (system, origin) => {
+        await restartLogon(session, system, origin);
+      })
+    ),
+    vscode.commands.registerCommand("abap2ui5.forgetTrustedCertificates", () =>
+      forgetTrustedCertificates(session)
+    ),
     vscode.commands.registerCommand("abap2ui5.showTraffic", () => {
       session.trafficOutput.show(true);
     }),
@@ -605,13 +688,16 @@ export function activate(context: vscode.ExtensionContext): void {
         systems: allSystems().map((s) => ({
           name: s.name,
           host: shortUrl(s.template),
+          role: s.role,
         })),
       }),
-      connect: connectSystem,
+      // no certificate question from an agent's call: an untrusted
+      // certificate is a refusal that says where to answer it
+      connect: makeConnectSystem(session, { askAboutCertificates: false }),
       proxy: session.proxy,
       frameUrlFor: (className) => {
         const system = activeSystem(context);
-        if (!system || !session.proxy.isRunning) {
+        if (!system || system.local || !session.proxy.isRunning) {
           return undefined;
         }
         const externalUrl = session.urlFor(system, className);
@@ -637,9 +723,11 @@ export function activate(context: vscode.ExtensionContext): void {
       // of what the backend is told about its location
       activeSystem: () => {
         const system = activeSystem(context);
-        return system
+        // the local backend is not a system the agent tools may drive
+        return system && !system.local
           ? {
               name: system.name,
+              role: system.role,
               launchUrlFor: (className: string) =>
                 session.urlFor(system, className),
             }
@@ -718,6 +806,9 @@ export function activate(context: vscode.ExtensionContext): void {
   registerViewPreview(context, log);
   registerMockFile(context, log);
   registerUnitTests(context, log);
+  // the "Local (transpiled)" system: its host ends with the window
+  registerLocalBackend(context);
+  registerTestExplorer(context, log);
   registerMigrateReport(context, log);
   registerQuickFix(context, log);
   registerLanguageFeatures(context, log);
@@ -737,6 +828,22 @@ export function activate(context: vscode.ExtensionContext): void {
       ),
     clearBaselineCache,
     recheckOpenDocuments,
+  });
+  // The chat's language model tools: what only the window knows. The
+  // running app's model is the one that needs the preview.
+  registerChatTools(context, "desktop", log, async () => {
+    const className = session.currentTarget?.className;
+    if (!className) {
+      return {
+        unavailable:
+          "No app is running in the abap2UI5 preview. Run one first (F9 on an " +
+          "app class), then ask again.",
+      };
+    }
+    const reply = await requestModelDump(session);
+    return reply.error
+      ? { unavailable: `The model of ${className} could not be read: ${reply.error}.` }
+      : { className, text: reply.text ?? "" };
   });
   registerInlineAnnotations(context, log);
   registerAppView(context);

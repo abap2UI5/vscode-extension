@@ -2,6 +2,9 @@ import * as vscode from "vscode";
 import { SapProxy } from "./proxy";
 import { CONFIG_SECTION } from "./settings";
 import { snapshotUi5Version } from "./snapshot";
+import { settingsForSystem } from "./configcore";
+import { isListedSystem, withDetectedUi5 } from "./systemprofile";
+import type { SystemProfile } from "./systems";
 
 /*
  * "Which UI5 does this system actually run?" - answered by the system.
@@ -11,7 +14,10 @@ import { snapshotUi5Version } from "./snapshot";
  * distribution it serves ships `sap-ui-version.json`, and the proxy already
  * holds credentials for the host. So after the first launch against a system
  * the extension looks once, and when the answer disagrees with the settings
- * it offers - once per system and answer - to adopt it. Silence on every
+ * it offers - once per system and answer - to adopt it: into the profile of
+ * a system of `abap2ui5.systems` (`minUi5` / `distribution`, in effect while
+ * that system is active), into the two global settings for the single
+ * `launchUrlTemplate`. Silence on every
  * failure path: a system not serving the file simply keeps the settings.
  */
 
@@ -109,7 +115,10 @@ export async function suggestSystemUi5(
   proxy: SapProxy,
   origin: string,
   log: (m: string) => void,
-  sapClient?: string
+  sapClient?: string,
+  /** The system launched against - when it is an entry of `abap2ui5.systems`,
+   *  the answer is offered to its profile instead of the global settings. */
+  system?: SystemProfile
 ): Promise<void> {
   let info = detected.get(origin);
   for (const path of info ? [] : VERSION_PATHS) {
@@ -172,11 +181,33 @@ export async function suggestSystemUi5(
   }
 
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const setMin = cfg.get<string>("viewCheck.minUi5", "1.71");
-  // "" is the default now - "not decided", handed to the linter as null
-  const setDist = cfg.get<string>("viewCheck.distribution", "");
+  // A system of the `systems` setting has a profile the answer belongs in -
+  // it is a fact about THAT system. The single `launchUrlTemplate` has none:
+  // there the two global settings are what is compared and written, as ever.
+  const profile =
+    system && isListedSystem(cfg.get<unknown>("systems", []), system.template)
+      ? system
+      : undefined;
+  // what the check is compared against right now - the profile over the
+  // settings, by the one rule in configcore.ts
+  const inEffect = settingsForSystem(
+    {
+      minUi5: cfg.get<string>("viewCheck.minUi5", "1.71"),
+      // "" is the default now - "not decided", handed to the linter as null
+      distribution: cfg.get<string>("viewCheck.distribution", "") || null,
+      allow: [],
+    },
+    profile
+  );
+  const setMin = inEffect.minUi5;
+  const setDist = inEffect.distribution ?? "";
+  // a profile may carry a patch level ("1.120.3") - the same minor is no
+  // disagreement
+  const sameMinor = profile
+    ? /^\d+\.\d+/.exec(setMin)?.[0] === info.minor
+    : info.minor === setMin;
   const mismatches: string[] = [];
-  if (info.minor !== setMin) {
+  if (!sameMinor) {
     mismatches.push(`minUi5 ${setMin} → ${info.minor}`);
   }
   if (info.distribution && info.distribution !== setDist) {
@@ -186,24 +217,61 @@ export async function suggestSystemUi5(
     return;
   }
 
-  // One offer per system and answer - a decline is not asked again.
-  const stateKey = `abap2ui5.ui5detect:${origin}:${info.minor}:${info.distribution ?? "?"}`;
+  // One offer per system and answer - a decline is not asked again. The
+  // profile offer has a key of its own: declining to change the global
+  // settings was not an answer about the profile.
+  const stateKey =
+    `abap2ui5.ui5detect:${origin}:${info.minor}:${info.distribution ?? "?"}` +
+    (profile ? `:profile:${profile.name}` : "");
   if (context.globalState.get<boolean>(stateKey)) {
     return;
   }
+  const adopt = profile ? "Write to Profile" : "Adopt";
   const pick = await vscode.window.showInformationMessage(
-    `abap2UI5: this system serves UI5 ${info.minor}` +
+    (profile
+      ? `abap2UI5: ${profile.name} serves UI5 ${info.minor}`
+      : `abap2UI5: this system serves UI5 ${info.minor}`) +
       (info.distribution ? ` (${info.distribution})` : "") +
-      `, but the view check is set to ${setMin} (${setDist}). ` +
-      "Check against what the system runs?",
-    "Adopt",
+      `, but the view check is set to ${setMin} (${setDist || "distribution not set"}). ` +
+      (profile
+        ? `Write what the system runs into the profile of ${profile.name} ` +
+          "(abap2ui5.systems)? It then applies while that system is active."
+        : "Check against what the system runs?"),
+    adopt,
     "Keep Settings"
   );
   if (!pick) {
     return; // dismissed - ask again another session
   }
   await context.globalState.update(stateKey, true);
-  if (pick !== "Adopt") {
+  if (pick !== adopt) {
+    return;
+  }
+  if (profile) {
+    // written where the list lives: a workspace's list into the workspace
+    // settings, the user's into the user settings
+    const scopes = cfg.inspect<unknown>("systems");
+    const inWorkspace = scopes?.workspaceValue !== undefined;
+    const next = withDetectedUi5(
+      inWorkspace ? scopes?.workspaceValue : scopes?.globalValue,
+      profile.template,
+      { minUi5: info.minor, distribution: info.distribution }
+    );
+    if (!next) {
+      log(`ui5-detect: the profile of ${profile.name} was not found in the settings - nothing written`);
+      return;
+    }
+    await cfg.update(
+      "systems",
+      next,
+      inWorkspace
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global
+    );
+    log(
+      `ui5-detect: profile of ${profile.name} updated in the ` +
+        `${inWorkspace ? "workspace" : "user"} settings (${mismatches.join(", ")})`
+    );
     return;
   }
   if (info.minor !== setMin) {

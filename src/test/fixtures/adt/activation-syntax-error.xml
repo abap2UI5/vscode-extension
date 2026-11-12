@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shape: the answer to POST /sap/bc/adt/activation?method=activate&preauditRequested=true after abap-adt-api
+     src/api/activate.ts (activate, ActivationResultMessage, parseInactive): chkl:messages/msg with objDescr, type, line,
+     href, forceSupported and shortText/txt.
+     The #start=line,column fragment as abap-adt-api src/api/syntax.ts reads it. Hand-written, not recorded. -->
+<chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist">
+  <msg objDescr="Class ZCL_DEMO_APP, Method Z2UI5_IF_APP~MAIN" type="E" line="1" href="/sap/bc/adt/oo/classes/zcl_demo_app/source/main#start=14,8" forceSupported="true"><shortText><txt>Field "CLIENT_X" is unknown.</txt></shortText></msg>
+  <msg objDescr="Class ZCL_DEMO_APP, local implementations" type="W" line="1" href="/sap/bc/adt/oo/classes/zcl_demo_app/includes/implementations#start=3,2" forceSupported="true"><shortText><txt>The variable &quot;LV_UNUSED&quot; is not used.</txt></shortText></msg>
+  <msg objDescr="Class ZCL_DEMO_APP" type="E" line="0" href="" forceSupported="false"><shortText><txt>Class ZCL_DEMO_APP could not be activated</txt></shortText></msg>
+</chkl:messages>

@@ -80,7 +80,7 @@ export default tseslint.config(
     // .recommended` is the plain-JavaScript half of what `src/**/*.ts` gets,
     // and it is what turns the globals below into a real `no-undef` check
     // rather than documentation.
-    files: ["esbuild.js", "scripts/**/*.mjs", "src/test/desktop/*.mjs"],
+    files: ["esbuild.js", "scripts/**/*.mjs", "src/test/desktop/*.mjs", "src/localbackend-host.mjs"],
     languageOptions: {
       // Hand-maintained rather than the `globals` package: it is a short,
       // readable list of what these scripts are actually allowed to reach

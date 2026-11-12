@@ -6,10 +6,13 @@ import * as path from "path";
 import {
   configGeneration,
   applyBaselineTo,
+  clearBaselineCache,
   clearConfigCache,
   describeOptions,
+  findConfigFile,
   resolveOptions,
 } from "../lintconfig";
+import { settingsForSystem } from "../configcore";
 import type { PropertyFinding } from "@abap2ui5/linter/properties";
 
 const SETTINGS = { minUi5: "1.71", distribution: "sapui5", allow: ["sap.m.X.y"] };
@@ -183,4 +186,86 @@ test("an unset distribution is described as undecided, not as a distribution", (
     describeOptions({ minUi5: "1.71", distribution: null, allow: [] }),
     /target UI5 \(distribution not set\) 1\.71/
   );
+});
+
+test("the active system's profile fills in under a config and is named as a source", () => {
+  const system = { name: "DEV", minUi5: "1.120", distribution: "openui5" };
+  const settings = settingsForSystem(SETTINGS, system);
+  // no config: profile over settings
+  const none = resolveOptions(workspace(), settings);
+  assert.equal(none.minUi5, "1.120");
+  assert.equal(none.distribution, "openui5");
+  assert.match(describeOptions(none), /target OpenUI5 1\.120, from the profile of system 'DEV' and the VS Code settings/);
+  // a config that pins the floor: it wins, the profile keeps the distribution
+  const pinned = resolveOptions(workspace('{ "minUi5": "1.96" }'), settings);
+  assert.equal(pinned.minUi5, "1.96");
+  assert.equal(pinned.distribution, "openui5");
+  assert.match(describeOptions(pinned), /abap2ui5lint\.jsonc and the profile of system 'DEV'/);
+  // a config that pins both: the profile is not mentioned
+  const both = resolveOptions(workspace('{ "minUi5": "1.96", "distribution": "sapui5" }'), settings);
+  assert.equal(both.distribution, "sapui5");
+  assert.doesNotMatch(describeOptions(both), /profile/);
+  // an unreadable config falls back to profile + settings, and says so
+  const broken = resolveOptions(workspace("{ nope"), settings);
+  assert.equal(broken.minUi5, "1.120");
+  assert.match(describeOptions(broken), /unreadable.*using the profile of system 'DEV' and the VS Code settings/);
+});
+
+test("no directory means no config: the settings answer", () => {
+  assert.equal(findConfigFile(undefined), undefined);
+  const options = resolveOptions(undefined, SETTINGS);
+  assert.equal(options.minUi5, "1.71");
+  assert.equal(options.configFile, undefined);
+  assert.match(describeOptions(options), /from VS Code settings$/);
+});
+
+test("an extends base that does not exist is an error, and creating it is noticed", () => {
+  const dir = workspace('{ "extends": "./shared/base.jsonc" }');
+  const broken = resolveOptions(dir, SETTINGS);
+  assert.ok(broken.error, "a missing base is reported, as the CLI reports it");
+  assert.equal(broken.configFile, path.join(dir, "abap2ui5lint.jsonc"));
+  assert.equal(broken.minUi5, "1.71", "falls back to the settings");
+  // the base appears - no watcher sees a file under another name, so the
+  // chain's stamp (the missing file stamped as 0) is what has to notice
+  fs.mkdirSync(path.join(dir, "shared"));
+  fs.writeFileSync(path.join(dir, "shared", "base.jsonc"), '{ "ui5": "1.108" }');
+  const fixed = resolveOptions(dir, SETTINGS);
+  assert.equal(fixed.error, undefined);
+  assert.equal(fixed.minUi5, "1.108");
+});
+
+test("a baseline file that is not there suppresses nothing", () => {
+  const dir = workspace();
+  const findings: PropertyFinding[] = [{ type: "unknown-control", control: "sap.m.Buton" }];
+  assert.equal(
+    applyBaselineTo(findings, path.join(dir, "no-baseline.json"), path.join(dir, "zcl_app.clas.abap")),
+    0
+  );
+  assert.equal(findings.length, 1);
+});
+
+test("a baseline rewritten within the same mtime is read again once its memo is cleared", () => {
+  const dir = workspace();
+  const source = path.join(dir, "zcl_app.clas.abap");
+  const baseline = path.join(dir, "baseline.json");
+  const write = (key: string) => {
+    fs.writeFileSync(baseline, JSON.stringify({ findings: { [key]: 1 } }));
+    // the same stamp each time: what a one-second filesystem reports for a
+    // write right after the read
+    const stamp = new Date(2026, 0, 1);
+    fs.utimesSync(baseline, stamp, stamp);
+  };
+  const buton = (): PropertyFinding[] => [{ type: "unknown-control", control: "sap.m.Buton" }];
+  write("zcl_app.clas.abap|unknown-control|sap.m.Inptu||");
+  assert.equal(applyBaselineTo(buton(), baseline, source), 0);
+  // the waiver is written, the mtime does not move: the memo still answers
+  write("zcl_app.clas.abap|unknown-control|sap.m.Buton||");
+  assert.equal(applyBaselineTo(buton(), baseline, source), 0, "the memo was not consulted");
+  clearBaselineCache(baseline);
+  assert.equal(applyBaselineTo(buton(), baseline, source), 1);
+  // and clearing all of them does the same for every file
+  write("zcl_app.clas.abap|unknown-control|sap.m.Inptu||");
+  assert.equal(applyBaselineTo(buton(), baseline, source), 1, "still the memo");
+  clearBaselineCache();
+  assert.equal(applyBaselineTo(buton(), baseline, source), 0);
 });

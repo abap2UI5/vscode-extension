@@ -9,7 +9,10 @@ import {
   idLiterals,
   idSpans,
   renameNameError,
+  renameSpans,
   renameSpelling,
+  renameTargetAt,
+  wireReferences,
 } from "../renamewires";
 
 /*
@@ -692,4 +695,151 @@ test("the declaring n = `id` takes its value from v = right behind it", () => {
   assert.equal(idSpans(source, "value").length, 0);
   assert.equal(idSpans(source, "text").length, 0);
   assert.equal(idSpans(source, "TXT").length, 2);
+});
+
+// ---------------------------------------------------------------------------
+// Find All References: the spans F2 would edit, nothing else
+// ---------------------------------------------------------------------------
+
+const WIRED = `CLASS zcl_app DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES z2ui5_if_app.
+    DATA mv_title TYPE string.
+    DATA mv_mode TYPE string.
+ENDCLASS.
+
+CLASS zcl_app IMPLEMENTATION.
+  METHOD z2ui5_if_app~main.
+    " SAVE and TABLE and mv_title in a comment are no reference
+    CASE client->get_event( ).
+      WHEN 'SAVE'.
+        mv_title = \`Saved\`.
+        client->follow_up_action( client->_event_client(
+            action = z2ui5_if_client=>cs_event-set_focus
+            t_arg  = VALUE #( ( \`TABLE\` ) ) ) ).
+      WHEN 'CANCEL'.
+        client->message_toast_display( \`SAVE\` ).
+    ENDCASE.
+    DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).
+    view->ele( n = \`Page\` )->a( n = \`title\` v = client->_bind( mv_title )
+        )->ele( n = \`Table\` )->a( n = \`id\` v = \`TABLE\`
+        )->tag( n = \`Text\` )->a( n = \`text\` v = \`{/MV_TITLE}\`
+        )->tag( n = \`Button\` )->a( n = \`press\` v = client->_event( 'SAVE' )
+        )->tag( n = \`Button\` )->a( n = \`press\` v = client->_event( val = 'SAVE' )
+        )->tag( n = \`Button\` )->a( n = \`press\` v = client->_event( 'CANCEL' ) ).
+    client->popover_display( by_id = \`TABLE\` xml = view->stringify( ) ).
+  ENDMETHOD.
+ENDCLASS.`;
+
+/** The offset `into` characters into the `nth` occurrence of `needle`. */
+function offsetOf(needle: string, nth = 0, into = 1): number {
+  let at = -1;
+  for (let i = 0; i <= nth; i++) {
+    at = WIRED.indexOf(needle, at + 1);
+    assert.notEqual(at, -1, `occurrence ${nth} of ${needle}`);
+  }
+  return at + into;
+}
+
+/** What F2 would edit with the cursor at `offset`. */
+function renameSpansAt(offset: number) {
+  const target = renameTargetAt(WIRED, offset);
+  assert.ok(target, "a rename target under the cursor");
+  return { target, spans: renameSpans(WIRED, target) };
+}
+
+const lineOf = (start: number) =>
+  WIRED.slice(WIRED.lastIndexOf("\n", start) + 1, WIRED.indexOf("\n", start)).trim();
+
+test("references on an event equal the rename spans: the WHEN and every _event", () => {
+  const cursor = offsetOf("_event( 'SAVE' )", 0, 10);
+  const { target, spans } = renameSpansAt(cursor);
+  assert.equal(target.kind, "event");
+  const references = wireReferences(WIRED, cursor, true);
+  assert.deepEqual(references, spans);
+  assert.deepEqual(
+    references.map((span) => lineOf(span.start).slice(0, 4)),
+    ["WHEN", ")->t", ")->t"]
+  );
+  for (const span of references) {
+    assert.equal(WIRED.slice(span.start, span.end), "SAVE");
+  }
+  // the toast text and the comment spell the event and are not one
+  assert.ok(!references.some((span) => lineOf(span.start).includes("toast")));
+  // from the WHEN end the answer is the same list
+  assert.deepEqual(
+    wireReferences(WIRED, offsetOf("WHEN 'SAVE'", 0, 7), true),
+    spans
+  );
+});
+
+test("references on a control id equal the rename spans", () => {
+  const cursor = offsetOf("v = \`TABLE\`", 0, 6);
+  const { target, spans } = renameSpansAt(cursor);
+  assert.equal(target.kind, "id");
+  const references = wireReferences(WIRED, cursor, true);
+  assert.deepEqual(references, spans);
+  // the set_focus wire, the declaring a( n = `id` ), the popover anchor
+  assert.equal(references.length, 3);
+  assert.deepEqual(
+    wireReferences(WIRED, offsetOf("by_id = \`TABLE\`", 0, 10), true),
+    spans
+  );
+});
+
+test("references on a bound attribute equal the rename spans, either spelling", () => {
+  const cursor = offsetOf("mv_title = ");
+  const { target, spans } = renameSpansAt(cursor);
+  assert.equal(target.kind, "attribute");
+  const references = wireReferences(WIRED, cursor, true);
+  assert.deepEqual(references, spans);
+  // DATA, the assignment, the _bind( ) and the {/MV_TITLE} path
+  assert.deepEqual(
+    references.map((span) => span.kind),
+    ["identifier", "identifier", "identifier", "path"]
+  );
+  assert.deepEqual(
+    wireReferences(WIRED, offsetOf("{/MV_TITLE}", 0, 4), true),
+    spans
+  );
+});
+
+test("includeDeclaration decides whether the declaring span is listed", () => {
+  const without = (cursor: number) =>
+    wireReferences(WIRED, cursor, false).map((span) => lineOf(span.start));
+
+  // an event is declared by the WHEN that handles it
+  const event = without(offsetOf("_event( 'SAVE' )", 0, 10));
+  assert.equal(event.length, 2);
+  assert.ok(event.every((line) => line.includes("_event(")));
+
+  // an id by the a( n = `id` v = … ) on the control
+  const id = without(offsetOf("by_id = \`TABLE\`", 0, 10));
+  assert.equal(id.length, 2);
+  assert.ok(id.every((line) => !line.includes("n = `id`")));
+
+  // an attribute by its DATA statement
+  const attribute = without(offsetOf("{/MV_TITLE}", 0, 4));
+  assert.equal(attribute.length, 3);
+  assert.ok(attribute.every((line) => !line.startsWith("DATA mv_title")));
+});
+
+test("anything that F2 would not rename has no references here", () => {
+  const nothing = [
+    offsetOf("zcl_app"), // the class name
+    offsetOf("z2ui5_if_app~main", 0, 14), // a method name
+    offsetOf("get_event"), // a framework method
+    offsetOf("string"), // a type
+    offsetOf("\`Saved\`", 0, 3), // an ordinary literal
+    offsetOf("\`SAVE\` )", 0, 3), // a literal spelling an event, in a toast
+    offsetOf("\`Page\`", 0, 3), // a control name
+    offsetOf("SAVE and TABLE"), // a comment
+    offsetOf("view->ele"), // a local variable
+    offsetOf("CASE client"), // a keyword
+  ];
+  for (const offset of nothing) {
+    assert.equal(renameTargetAt(WIRED, offset), undefined, lineOf(offset));
+    assert.deepEqual(wireReferences(WIRED, offset, true), [], lineOf(offset));
+    assert.deepEqual(wireReferences(WIRED, offset, false), [], lineOf(offset));
+  }
 });

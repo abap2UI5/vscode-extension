@@ -18,6 +18,8 @@
  * password is worse than no report at all.
  */
 
+import { plural } from "./text";
+
 export interface ReportDocument {
   /** As `labelOf` names it - a file name, or the class for an ADT document. */
   label: string;
@@ -43,7 +45,19 @@ export interface ReportInput {
   /** The `abap2ui5.*` settings, already flattened to key -> value. */
   settings: Record<string, unknown>;
   renderGate: { installed: boolean; cli?: string; pin?: string };
-  systems: { configured: number; active?: string; proxyRunning: boolean };
+  systems: {
+    configured: number;
+    active?: string;
+    proxyRunning: boolean;
+    /** How many origins carry a pinned certificate - the COUNT only: which
+     *  hosts they are is nothing a public issue needs. */
+    pinnedCertificates?: number;
+    /** The logon mechanism of each configured system, by its name - the
+     *  KIND only (`basic`, `certificate`, `oauth`), never a secret or a file path. */
+    logon?: Array<{ name: string; auth: string }>;
+    /** The mechanism the running proxy logs on with. */
+    proxyLogon?: string;
+  };
   /** Other extensions that matter here - the ADT ones above all. */
   relatedExtensions: string[];
   /** Newest last. */
@@ -118,7 +132,69 @@ export function redact(text: string): string {
         (_all, header: string, sep: string, scheme?: string) =>
           `${header}${sep}${scheme ? `${scheme} ` : ""}<redacted>`
       )
+      // a bearer token after ANY header or key name (`x-token: Bearer …`,
+      // `"token": "Bearer …"`) - the authorization rule above covers its own
+      .replace(
+        /(\b[\w-]+"?\s*[:=]\s*"?)(bearer)\s+(?!<redacted>)[^\s",;]+/gi,
+        (_all, before: string, scheme: string) => `${before}${scheme} <redacted>`
+      )
+      // cookie headers, should a log line quote one: every value of the
+      // header goes (the SAP session, the logon ticket, the proxy's own token
+      // cookie), the names stay - they are the diagnostic part
+      .replace(
+        /\b(set-cookie|cookie)(\s*:\s*)([^\r\n]*)/gi,
+        (_all, header: string, sep: string, value: string) =>
+          `${header}${sep}${redactCookieValues(value, header.toLowerCase() === "set-cookie")}`
+      )
+      // the logon ticket and the ICF session anywhere else
+      .replace(/\b(MYSAPSSO2|SAP_SESSIONID_[A-Za-z0-9_]*)=(?!<redacted>)[^;\s,"']*/g, "$1=<redacted>")
+      // ...and as a cookie object of the DevTools protocol (the browser
+      // logon reads them with Network.getCookies): the value follows the name
+      .replace(
+        /("name"\s*:\s*"(?:MYSAPSSO2|SAP_SESSIONID_[A-Za-z0-9_]*)"\s*,\s*"value"\s*:\s*")(?!<redacted>)[^"]*/g,
+        "$1<redacted>"
+      )
+      // OAuth and certificate secrets in JSON or query strings
+      .replace(
+        /("?\b(?:access_token|refresh_token|id_token|client_secret|clientsecret|passphrase|password)"?\s*[:=]\s*"?)(?!<redacted>)[^"&\s,}]+/gi,
+        "$1<redacted>"
+      )
+      .replace(/([?&]code=)[^&\s"']+/g, "$1<redacted>")
+      // the OAuth logon (auth: "oauth"): the code, its PKCE verifier and the
+      // state in a form body or a query, the code and the stored refresh
+      // token in JSON, and the loopback callback's secret path segment -
+      // as it is and inside an encoded redirect_uri
+      .replace(
+        /((?:^|[?&\s])(?:code|code_verifier|state|redirect_uri)=)(?!<redacted>)[^&\s"']+/gim,
+        "$1<redacted>"
+      )
+      .replace(
+        /("(?:code|code_verifier|refreshToken|accessToken|clientSecret)"\s*:\s*")(?!<redacted>)[^"]+/g,
+        "$1<redacted>"
+      )
+      .replace(
+        /(\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\/)[0-9a-f]{32}\b/gi,
+        "$1<token>"
+      )
   );
+}
+
+/**
+ * The values of a `Cookie` header (`a=1; b=2`) or a `Set-Cookie` line
+ * (`a=1; Path=/; HttpOnly`) blanked, the names kept. In a `Set-Cookie` only
+ * the first pair is a cookie; the attributes after it stay as they are.
+ */
+function redactCookieValues(value: string, setCookie: boolean): string {
+  return value
+    .split(";")
+    .map((part, index) => {
+      if (setCookie && index > 0) {
+        return part;
+      }
+      const eq = part.indexOf("=");
+      return eq < 0 ? part : `${part.slice(0, eq)}=<redacted>`;
+    })
+    .join(";");
 }
 
 /**
@@ -203,9 +279,23 @@ export function buildReport(input: ReportInput): string {
       "systems",
       `${input.systems.configured} configured` +
         (input.systems.active ? `, active: ${input.systems.active}` : "") +
-        `, proxy ${input.systems.proxyRunning ? "running" : "stopped"}`,
+        `, proxy ${input.systems.proxyRunning ? "running" : "stopped"}` +
+        (input.systems.pinnedCertificates === undefined
+          ? ""
+          : `, ${plural(input.systems.pinnedCertificates, "certificate")} trusted per system`) +
+        (input.systems.proxyRunning && input.systems.proxyLogon
+          ? `, proxy logs on with ${input.systems.proxyLogon}`
+          : ""),
     ])
   );
+  if (input.systems.logon?.length) {
+    out.push(
+      row([
+        "logon per system",
+        input.systems.logon.map((system) => `${system.name}: ${system.auth}`).join(", "),
+      ])
+    );
+  }
   if (input.relatedExtensions.length) {
     out.push(row(["other extensions", input.relatedExtensions.join(", ")]));
   }

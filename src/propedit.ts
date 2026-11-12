@@ -110,7 +110,7 @@ export function removeAttributeEdit(
   const lineStart = source.lastIndexOf("\n", attr.aOpen) + 1;
   const lineEnd = source.indexOf("\n", lineStart);
   const line = source.slice(lineStart, lineEnd < 0 ? source.length : lineEnd);
-  const opener = /^\s*\)->\s*a\s*\(/.exec(line);
+  const opener = /^\s*\)->\s*a\s*\(/i.exec(line);
   if (!opener) {
     return undefined; // a line that does not start with an a-call - keep hands off
   }
@@ -125,7 +125,7 @@ export function removeAttributeEdit(
      * that the `)` opening the next line (or this call's own, when it closes
      * on the same line) takes over closing that one.
      */
-    const chained = /\)\s*->\s*a\s*\($/.exec(source.slice(lineStart, attr.aOpen + 1));
+    const chained = /\)\s*->\s*a\s*\($/i.exec(source.slice(lineStart, attr.aOpen + 1));
     if (!chained) {
       return undefined;
     }

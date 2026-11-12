@@ -10,6 +10,7 @@ import { renderGateCli } from "./rendergate";
 import { LINTER_RELEASE } from "./linterrelease";
 import { activeSystem, allSystems } from "./systems";
 import { Session } from "./session";
+import { certificatePins } from "./certprompt";
 import * as path from "path";
 
 /*
@@ -124,6 +125,13 @@ export function registerDiagnosticsReport(
           configured: allSystems().length,
           active: activeSystem(context)?.name,
           proxyRunning: session.proxy.isRunning,
+          pinnedCertificates: Object.keys(certificatePins(context)).length,
+          // the mechanism per system - the kind only, never a secret or path
+          logon: allSystems().map((system) => ({
+            name: system.name,
+            auth: system.auth ?? "basic",
+          })),
+          proxyLogon: session.proxy.authKind,
         },
         relatedExtensions: relatedExtensions(),
         recentLog: session.recentLog(),

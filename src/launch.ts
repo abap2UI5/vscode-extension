@@ -4,12 +4,18 @@ import { isAppSource } from "./appclasses";
 import { originOf, proxiedUrl, sapClientOf, shortUrl, withParams } from "./urls";
 import { suggestSystemUi5 } from "./ui5detect";
 import {
+  activeSystem,
+  allSystems,
   clearCredentials,
-  ensureCredentials,
   ensureSystem,
   SystemProfile,
 } from "./systems";
+import type { AuthStrategy } from "./authstrategy";
+import { reportLogonFailure, strategyForSystem } from "./logonprompt";
 import { FOCUS_BOUNCE_MS, PreviewSurface, Session } from "./session";
+import { isLocalTarget, rebuildAndReload, runLocal } from "./localbackendview";
+import { ensureCertificateTrust, reportTrustRefusal } from "./certprompt";
+import { CertificateTrustError } from "./certtrust";
 import { postToShownApp, reloadShownApp, showInTab } from "./preview";
 import { staleMessage } from "./previewcore";
 import { describeRejection } from "./proxy";
@@ -24,6 +30,7 @@ import {
   firstFailure,
   pathAndQueryOf,
   reachedStep,
+  relogonOffer,
   renderReport,
 } from "./connectcheck";
 
@@ -50,6 +57,63 @@ function reportBadLaunchUrl(system: SystemProfile): void {
         void vscode.commands.executeCommand("abap2ui5.setLaunchUrl");
       }
     });
+}
+
+/**
+ * The strategy `system` logs on to `origin` with (`logon.ts`) - asking for
+ * what is missing when `mayAsk`. Every flow here that starts the proxy goes
+ * through this, so none of them assumes a password. Undefined when the user
+ * cancelled or the logon cannot be prepared (already reported, unless
+ * `rethrow`: the MCP flow hands the reason to the agent).
+ */
+async function logonFor(
+  session: Session,
+  system: SystemProfile,
+  origin: string,
+  options: { mayAsk: boolean; rethrow?: boolean }
+): Promise<AuthStrategy | undefined> {
+  try {
+    return await strategyForSystem(session.ctx, system, origin, {
+      mayAsk: options.mayAsk,
+      log: (m) => session.log(m),
+    });
+  } catch (err) {
+    if (options.rethrow) {
+      throw err;
+    }
+    reportLogonFailure(err, (m) => session.log(m));
+    return undefined;
+  }
+}
+
+/** The profile a proxy origin belongs to - the active system when it is on
+ *  that origin, else the first configured one that is. */
+function systemForOrigin(session: Session, origin: string): SystemProfile | undefined {
+  const active = activeSystem(session.ctx);
+  const on = (system: SystemProfile) => originOf(session.urlFor(system, "PROBE")) === origin;
+  return active && on(active) ? active : allSystems().find(on);
+}
+
+/**
+ * Logs on again and restarts the proxy with the new logon - the re-logon
+ * offer and "Choose Client Certificate" end here. False when the user
+ * cancelled.
+ */
+export async function restartLogon(
+  session: Session,
+  system: SystemProfile,
+  origin: string
+): Promise<boolean> {
+  const auth = await logonFor(session, system, origin, { mayAsk: true });
+  if (!auth) {
+    return false;
+  }
+  await session.proxy.start(origin, auth);
+  session.lastAuthPrompt = 0;
+  // same server state as before the logon failed - an activation watch that
+  // was waiting keeps waiting
+  reloadShownApp(session, "Reloaded with the new logon", { keepWatch: true });
+  return true;
 }
 
 /**
@@ -81,6 +145,11 @@ export async function runApp(
   if (!system) {
     return;
   }
+  if (system.local) {
+    // no URL, no certificate, no credentials: build, serve, load
+    await runLocal(session, provider, system, className, editor);
+    return;
+  }
 
   const externalUrl = session.urlFor(system, className);
   const origin = originOf(externalUrl);
@@ -101,8 +170,16 @@ export async function runApp(
   }
 
   // tab / panel: load through the auth proxy so the login takes effect.
-  const creds = await ensureCredentials(session.ctx, origin);
-  if (!creds) {
+  // The certificate first: a system that cannot be verified is asked about
+  // before a password is typed for it, and before anything is sent.
+  const trust = await ensureCertificateTrust(session, origin, { interactive: true });
+  if (!trust.trusted) {
+    session.log(`run: ${className} not started - ${trust.message}`);
+    reportTrustRefusal(trust);
+    return;
+  }
+  const auth = await logonFor(session, system, origin, { mayAsk: true });
+  if (!auth) {
     return;
   }
 
@@ -113,7 +190,7 @@ export async function runApp(
         location: vscode.ProgressLocation.Window,
         title: `abap2UI5: starting ${className}`,
       },
-      () => session.proxy.start(origin, creds.user, creds.pass)
+      () => session.proxy.start(origin, auth)
     );
     frameUrl = proxiedUrl(externalUrl, session.proxy.origin) ?? externalUrl;
   } catch (err) {
@@ -137,7 +214,8 @@ export async function runApp(
     session.proxy,
     origin,
     (m) => session.log(m),
-    sapClientOf(externalUrl)
+    sapClientOf(externalUrl),
+    system
   );
 
   // Remember the cursor position; open the window in which focus stolen by
@@ -201,6 +279,11 @@ async function findAbapActivateCommand(): Promise<string | undefined> {
  * and not a plain save - is what the preview reloads on.
  */
 export async function activateAndReload(session: Session): Promise<void> {
+  if (isLocalTarget(session.currentTarget)) {
+    // the local backend has no activation: the file on disk is the version
+    await rebuildAndReload(session, "Rebuilt and reloaded");
+    return;
+  }
   const editor = vscode.window.activeTextEditor;
   const isAbap = editor?.document.languageId === "abap";
   const activateCommand = await findAbapActivateCommand();
@@ -293,6 +376,24 @@ export async function activateAndReload(session: Session): Promise<void> {
  *  that was merely warming up. */
 const CHECK_TIMEOUT_MS = 30_000;
 
+/**
+ * The check's certificate question: asks about an unverifiable certificate
+ * (this is one of the two places that do), and turns a refusal into the
+ * failing step of the report. True when the probes may go ahead.
+ */
+async function certificateStep(
+  session: Session,
+  origin: string,
+  steps: CheckStep[]
+): Promise<boolean> {
+  const trust = await ensureCertificateTrust(session, origin, { interactive: true });
+  if (trust.trusted) {
+    return true;
+  }
+  steps.push(describeConnectFailure({ code: trust.code, message: trust.message }));
+  return false;
+}
+
 /** The proxy could not start - told apart from a probe failure, which is
  *  the system's. */
 class ProxyStartError extends Error {
@@ -316,6 +417,12 @@ class ProxyStartError extends Error {
 export async function checkConnection(session: Session): Promise<void> {
   const system = await ensureSystem(session.ctx);
   if (!system) {
+    return;
+  }
+  if (system.local) {
+    vscode.window.showInformationMessage(
+      `abap2UI5: ${system.name} is no system to check - F9 builds and starts it; its log is the "abap2UI5 Local Backend" output.`
+    );
     return;
   }
 
@@ -348,129 +455,149 @@ export async function checkConnection(session: Session): Promise<void> {
         detail: "the expanded launch URL does not parse as a URL",
         fix: 'Check the template with "abap2UI5: Set Launch URL".',
       });
+    } else if (!(await certificateStep(session, origin, steps))) {
+      // reported below, as the step it is
     } else {
-      const creds = await ensureCredentials(session.ctx, origin);
-      if (!creds) {
-        return;
+      let auth: AuthStrategy | undefined;
+      try {
+        auth = await strategyForSystem(session.ctx, system, origin, {
+          mayAsk: true,
+          log: (m) => session.log(m),
+        });
+      } catch (err) {
+        // a certificate that cannot be used is the check's finding, not a toast
+        steps.push({
+          label: "Logon",
+          ok: false,
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      if (!auth && steps[steps.length - 1]?.label !== "Logon") {
+        return; // the user cancelled a prompt
       }
       // A notification with a Cancel button rather than a silent window
       // spinner: against a host that hangs, the check is the one command
       // that deliberately keeps waiting (CHECK_TIMEOUT_MS).
       let cancelled = false;
-      try {
-        await vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: `abap2UI5: checking ${system.name}`,
-            cancellable: true,
-          },
-          async (_progress, token) => {
-            const aborter = new AbortController();
-            token.onCancellationRequested(() => {
-              cancelled = true;
-              aborter.abort(new Error("connection check cancelled"));
-            });
-            // The same start( ) a launch goes through: it clears a previous
-            // rejection and holds the credentials the fetch injects. Its
-            // failure is the proxy's (a loopback port in use, a refused
-            // listen), not the system's - reported as such rather than
-            // falling into the probe's catch, which would call the host
-            // unreachable.
-            try {
-              await session.proxy.start(origin, creds.user, creds.pass);
-            } catch (err) {
-              throw new ProxyStartError(err);
-            }
-            // `background`: the check owns its own messaging. Everything it
-            // needs - status, WWW-Authenticate, body - comes back in the
-            // answer, so letting this probe run through `onResponse` bought
-            // nothing and cost two side effects: a second, differently
-            // worded logon toast next to the check's own report, and a
-            // tripped `authRejected`, which flips a running preview to the
-            // local 401 page as a side effect of a diagnosis.
-            const answer = await session.proxy.fetchFromSystem(
-              probePath,
-              "text/html, */*",
-              {
-                background: true,
-                signal: aborter.signal,
-                timeoutMs: CHECK_TIMEOUT_MS,
+      // a logon that could not be prepared is the Logon step already
+      if (auth) {
+        try {
+          await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: `abap2UI5: checking ${system.name}`,
+              cancellable: true,
+            },
+            async (_progress, token) => {
+              const aborter = new AbortController();
+              token.onCancellationRequested(() => {
+                cancelled = true;
+                aborter.abort(new Error("connection check cancelled"));
+              });
+              // The same start( ) a launch goes through: it clears a previous
+              // rejection and holds the credentials the fetch injects. Its
+              // failure is the proxy's (a loopback port in use, a refused
+              // listen), not the system's - reported as such rather than
+              // falling into the probe's catch, which would call the host
+              // unreachable.
+              try {
+                await session.proxy.start(origin, auth);
+              } catch (err) {
+                throw new ProxyStartError(err);
               }
-            );
-            steps.push(reachedStep(origin));
-            const statusStep = classifyStatus({
-              status: answer.status,
-              path: probePath.split("?")[0] || "/",
-              authenticate: answer.authenticate,
-              reason:
-                answer.status >= 400
-                  ? describeRejection(answer.body)
-                  : undefined,
-            });
-            steps.push(statusStep);
-            if (statusStep.ok) {
-              steps.push(classifyBody(answer.body));
-            }
-            // When the launch URL names a sap-client, ask the same path
-            // WITHOUT it: credentials live per client, so the two answers
-            // disagreeing is a real state worth a step ("valid in 100,
-            // rejected in the default client" - or the other way round,
-            // which points at a wrong sap-client in the URL). A background
-            // fetch so this best-effort probe cannot trip the 401 breaker.
-            const sapClient = sapClientOf(externalUrl);
-            if (sapClient) {
-              const strippedPath = pathAndQueryOf(
-                withParams(externalUrl, { "sap-client": undefined })
+              // `background`: the check owns its own messaging. Everything it
+              // needs - status, WWW-Authenticate, body - comes back in the
+              // answer, so letting this probe run through `onResponse` bought
+              // nothing and cost two side effects: a second, differently
+              // worded logon toast next to the check's own report, and a
+              // tripped `authRejected`, which flips a running preview to the
+              // local 401 page as a side effect of a diagnosis.
+              const answer = await session.proxy.fetchFromSystem(
+                probePath,
+                "text/html, */*",
+                {
+                  background: true,
+                  signal: aborter.signal,
+                  timeoutMs: CHECK_TIMEOUT_MS,
+                }
               );
-              if (strippedPath) {
-                try {
-                  const withoutClient = await session.proxy.fetchFromSystem(
-                    strippedPath,
-                    "text/html, */*",
-                    { background: true, signal: aborter.signal }
-                  );
-                  const clientStep = classifyClientProbe({
-                    sapClient,
-                    withClient: answer.status,
-                    withoutClient: withoutClient.status,
-                  });
-                  if (clientStep) {
-                    steps.push(clientStep);
+              steps.push(reachedStep(origin));
+              const statusStep = classifyStatus({
+                status: answer.status,
+                path: probePath.split("?")[0] || "/",
+                authenticate: answer.authenticate,
+                reason:
+                  answer.status >= 400
+                    ? describeRejection(answer.body)
+                    : undefined,
+                auth: system.auth,
+              });
+              steps.push(statusStep);
+              if (statusStep.ok) {
+                steps.push(classifyBody(answer.body, system.auth));
+              }
+              // When the launch URL names a sap-client, ask the same path
+              // WITHOUT it: credentials live per client, so the two answers
+              // disagreeing is a real state worth a step ("valid in 100,
+              // rejected in the default client" - or the other way round,
+              // which points at a wrong sap-client in the URL). A background
+              // fetch so this best-effort probe cannot trip the 401 breaker.
+              const sapClient = sapClientOf(externalUrl);
+              if (sapClient) {
+                const strippedPath = pathAndQueryOf(
+                  withParams(externalUrl, { "sap-client": undefined })
+                );
+                if (strippedPath) {
+                  try {
+                    const withoutClient = await session.proxy.fetchFromSystem(
+                      strippedPath,
+                      "text/html, */*",
+                      { background: true, signal: aborter.signal }
+                    );
+                    const clientStep = classifyClientProbe({
+                      sapClient,
+                      withClient: answer.status,
+                      withoutClient: withoutClient.status,
+                    });
+                    if (clientStep) {
+                      steps.push(clientStep);
+                    }
+                  } catch {
+                    // best-effort probe - the check already reported the
+                    // answer the launch itself would get
                   }
-                } catch {
-                  // best-effort probe - the check already reported the
-                  // answer the launch itself would get
                 }
               }
             }
-          }
-        );
-      } catch (err) {
-        if (cancelled) {
-          session.log(`connection check: cancelled (${system.name})`);
-          return;
-        }
-        if (err instanceof ProxyStartError) {
-          steps.push({
-            label: "Local auth proxy",
-            ok: false,
-            detail: `could not start the proxy - ${err.message}`,
-            fix:
-              "The proxy listens on a loopback port VS Code's Node picks; " +
-              "another process may hold it, or a policy refuses the listen. " +
-              'Retry, or set abap2ui5.openMode to "external" to run without it.',
-          });
-        } else {
-          const failure = err as { code?: unknown; message?: unknown };
-          steps.push(
-            describeConnectFailure({
-              code: typeof failure?.code === "string" ? failure.code : undefined,
-              message:
-                typeof failure?.message === "string"
-                  ? failure.message
-                  : String(err),
-            })
           );
+        } catch (err) {
+          if (cancelled) {
+            session.log(`connection check: cancelled (${system.name})`);
+            return;
+          }
+          if (err instanceof ProxyStartError) {
+            steps.push({
+              label: "Local auth proxy",
+              ok: false,
+              detail: `could not start the proxy - ${err.message}`,
+              fix:
+                "The proxy listens on a loopback port VS Code's Node picks; " +
+                "another process may hold it, or a policy refuses the listen. " +
+                'Retry, or set abap2ui5.openMode to "external" to run without it.',
+            });
+          } else {
+            const failure = err as { code?: unknown; message?: unknown };
+            steps.push(
+              describeConnectFailure({
+                code: typeof failure?.code === "string" ? failure.code : undefined,
+                message:
+                  typeof failure?.message === "string"
+                    ? failure.message
+                    : String(err),
+                auth: system.auth,
+              })
+            );
+          }
         }
       }
     }
@@ -513,11 +640,13 @@ export async function checkConnection(session: Session): Promise<void> {
  * them, with the retry that follows.
  */
 export function watchProxyStatus(session: Session): void {
-  session.proxy.onResponse = ({ status, path, authenticate, reason }) => {
+  session.proxy.onResponse = ({ status, path, authenticate, reason, expired }) => {
     // A launch URL may carry sap-user/sap-password, and the path is logged
     // verbatim below - the same rule the traffic log applies (report.ts).
     const safePath = redactQueryCredentials(path);
-    if (status !== 401 && status !== 403) {
+    // an answer the strategy read as an expired logon (a redirect to the
+    // identity provider, a logon form) is offered like a 401
+    if (status !== 401 && status !== 403 && !expired) {
       if (status >= 500) {
         session.log(`proxy: the system answered ${status} for ${safePath}`);
       }
@@ -557,31 +686,36 @@ export function watchProxyStatus(session: Session): void {
       (session.currentTarget
         ? originOf(session.currentTarget.externalUrl)
         : undefined);
+    const system = origin ? systemForOrigin(session, origin) : undefined;
+    const kind = session.proxy.authKind ?? system?.auth ?? "basic";
+    // the system's own words when it gave any - "user is locked" is a
+    // different afternoon than "wrong password", and only it knows
+    const said = reason ? `: ${reason}` : "";
+    const offer = relogonOffer(kind, status, said, !!expired, /\bbasic\b/i.test(authenticate ?? ""));
     void vscode.window
-      .showWarningMessage(
-        `abap2UI5: the system rejected the logon (HTTP ${status})` +
-          // the system's own words when it gave any - "user is locked" is a
-          // different afternoon than "wrong password", and only it knows
-          (reason ? `: ${reason}` : "") +
-          ". The stored user or password may be wrong, or this system does " +
-          'not accept basic auth - in which case set abap2ui5.openMode to "external".',
-        "Re-enter Credentials"
-      )
+      .showWarningMessage(offer.message, offer.button)
       .then(async (pick) => {
-        if (pick !== "Re-enter Credentials" || !origin) {
+        if (pick !== offer.button || !origin) {
+          return;
+        }
+        if (offer.button === "Load Service Key") {
+          // the command restarts a proxy on this origin itself
+          void vscode.commands.executeCommand("abap2ui5.loadServiceKey");
+          return;
+        }
+        if (offer.button === "Choose Client Certificate") {
+          // the command restarts a proxy on this origin itself
+          void vscode.commands.executeCommand("abap2ui5.chooseClientCertificate");
+          return;
+        }
+        if (!system) {
           return;
         }
         try {
-          await clearCredentials(session.ctx, origin);
-          const creds = await ensureCredentials(session.ctx, origin);
-          if (!creds) {
-            return;
+          if (offer.button === "Re-enter Credentials") {
+            await clearCredentials(session.ctx, origin);
           }
-          await session.proxy.start(origin, creds.user, creds.pass);
-          session.lastAuthPrompt = 0;
-          // same server state as before the logon failed - an activation
-          // watch that was waiting keeps waiting
-          reloadShownApp(session, "Reloaded with new credentials", { keepWatch: true });
+          await restartLogon(session, system, origin);
         } catch (err) {
           // the same start( ) F9 reports on - a rejection here had nowhere
           // to land, so a system that refused the reconnect said nothing
@@ -599,11 +733,31 @@ export function watchProxyStatus(session: Session): void {
  * shared by "Run an App from the System" and the system MCP tools.
  */
 export function makeConnectSystem(
-  session: Session
+  session: Session,
+  options: {
+    /**
+     * Whether this flow may ask about a certificate that cannot be verified.
+     * A caller the user is not looking at (the MCP tools) passes false: an
+     * untrusted certificate then THROWS the refusal that names "Check System
+     * Connection" and F9 - never a prompt out of nowhere, never a silent
+     * accept.
+     */
+    askAboutCertificates: boolean;
+  } = { askAboutCertificates: true }
 ): () => Promise<{ sapClient?: string } | undefined> {
   return async () => {
     const system = await ensureSystem(session.ctx);
     if (!system) {
+      return undefined;
+    }
+    if (system.local) {
+      // no ADT and no logon there - and the host must not be started from
+      // a flow the user is not looking at
+      const message = `${system.name} offers no system tools - select a system with "abap2UI5: Select System"`;
+      if (!options.askAboutCertificates) {
+        throw new Error(message);
+      }
+      vscode.window.showInformationMessage(`abap2UI5: ${message}.`);
       return undefined;
     }
     const expanded = session.urlFor(system, "PROBE");
@@ -612,11 +766,26 @@ export function makeConnectSystem(
       reportBadLaunchUrl(system);
       return undefined;
     }
-    const creds = await ensureCredentials(session.ctx, origin);
-    if (!creds) {
+    const trust = await ensureCertificateTrust(session, origin, {
+      interactive: options.askAboutCertificates,
+    });
+    if (!trust.trusted) {
+      if (!options.askAboutCertificates) {
+        throw new CertificateTrustError(trust.code, trust.message);
+      }
+      reportTrustRefusal(trust);
       return undefined;
     }
-    await session.proxy.start(origin, creds.user, creds.pass);
+    // the MCP flow never opens a certificate picker: a certificate nobody
+    // chose yet is a refusal naming F9 (`logon.ts`), handed to the agent
+    const auth = await logonFor(session, system, origin, {
+      mayAsk: options.askAboutCertificates,
+      rethrow: !options.askAboutCertificates,
+    });
+    if (!auth) {
+      return undefined;
+    }
+    await session.proxy.start(origin, auth);
     return { sapClient: sapClientOf(expanded) };
   };
 }

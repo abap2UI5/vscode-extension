@@ -5,6 +5,8 @@ const path = require("path");
 const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
 const tests = process.argv.includes("--tests");
+// with --tests: the build `npm run test:coverage` measures (see buildTests)
+const coverage = process.argv.includes("--coverage");
 const webTests = process.argv.includes("--webtest");
 const desktopTests = process.argv.includes("--desktoptest");
 
@@ -68,11 +70,20 @@ function copySnapshot() {
  *  by every window that activated the extension. The test build gets the
  *  same copies: `clientapi.ts` resolves its file next to its own bundle. */
 const OWN_DATA_FILES = ["app-template.json", "client-api.json"];
+const LOCAL_BACKEND_LAUNCHER = "localbackend-host.mjs";
 function copyOwnData(outDir) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const file of OWN_DATA_FILES) {
     fs.copyFileSync(path.join("src", "data", file), path.join(outDir, file));
   }
+  /* The local backend's launcher (src/localbackend.ts starts it with node,
+   * or through npx with the pinned mcp-server on PATH): a plain ES module
+   * that imports mcp-server's own library at run time, so it is copied, never
+   * bundled. The test build gets it too - localbackend.test.ts starts it. */
+  fs.copyFileSync(
+    path.join("src", LOCAL_BACKEND_LAUNCHER),
+    path.join(outDir, LOCAL_BACKEND_LAUNCHER)
+  );
 }
 
 /** Copies a data file the bundled linter release may not ship yet; removes a
@@ -211,7 +222,14 @@ async function buildTests() {
     platform: "node",
     outdir: "dist-test",
     outExtension: { ".js": ".cjs" },
+    // Also what `npm run test:coverage` reads the `src/` lines off - the
+    // test build is the only one whose maps leave the build machine
+    // (.vscodeignore drops every `*.map`, the production build writes none).
     sourcemap: true,
+    // Coverage alone keeps what the bundler would drop: a function no test
+    // imports is otherwise in no bundle at all, and a table that cannot see
+    // it calls its module covered. `npm test` runs the modules as shipped.
+    ...(coverage ? { treeShaking: false } : {}),
     external: ["vscode", "node:test", "node:assert"],
     logLevel: "info",
     ...ESM_IN_CJS,

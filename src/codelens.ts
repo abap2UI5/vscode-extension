@@ -238,6 +238,19 @@ function whenLenses(doc: vscode.TextDocument, text: string): vscode.CodeLens[] {
   return lenses;
 }
 
+/** What the test-include watcher saw. */
+export interface TestIncludeEvent {
+  kind: "create" | "change" | "delete";
+  uri: vscode.Uri;
+}
+
+const testIncludeEvents = new vscode.EventEmitter<TestIncludeEvent>();
+
+/** The ONE watcher over `*.clas.testclasses.abap`, for whoever else follows
+ *  the test includes (the Testing view, testexplorer.ts) - a second watcher
+ *  over the same glob would be a second recursive watch of the workspace. */
+export const onDidChangeTestInclude = testIncludeEvents.event;
+
 export function registerCodeLens(context: vscode.ExtensionContext): void {
   const provider = new AppCodeLens();
   // Over the test includes alone - the shared ABAP watcher's glob does not
@@ -245,7 +258,8 @@ export function registerCodeLens(context: vscode.ExtensionContext): void {
   const includeWatcher = vscode.workspace.createFileSystemWatcher(
     "**/*.clas.testclasses.abap"
   );
-  const includeChanged = (include: vscode.Uri): void => {
+  const includeChanged = (include: vscode.Uri, kind: "create" | "delete"): void => {
+    testIncludeEvents.fire({ kind, uri: include });
     const cls = classUriOfInclude(include);
     if (cls) {
       testIncludes.delete(cls.toString());
@@ -303,8 +317,10 @@ export function registerCodeLens(context: vscode.ExtensionContext): void {
     }),
     // the "Run unit tests" lens follows the test include beside the class
     includeWatcher,
-    includeWatcher.onDidCreate(includeChanged),
-    includeWatcher.onDidDelete(includeChanged),
+    includeWatcher.onDidCreate((uri) => includeChanged(uri, "create")),
+    includeWatcher.onDidDelete((uri) => includeChanged(uri, "delete")),
+    // the lens does not care what an include says - the Testing view does
+    includeWatcher.onDidChange((uri) => testIncludeEvents.fire({ kind: "change", uri })),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       testIncludes.clear();
       provider.refresh();

@@ -11,10 +11,12 @@ import {
 import { OpenMode } from "./webview";
 import { expandTemplate, sapClientOf, withParams } from "./urls";
 import { allSystems, SystemProfile } from "./systems";
+import { roleLine, statusText } from "./systemprofile";
 import { ModelView } from "./modelview";
 
 import { CONFIG_SECTION } from "./settings";
 import { redactQueryCredentials } from "./report";
+import { pinFor, PINS_STATE_KEY, readPins } from "./certtrust";
 
 export { CONFIG_SECTION };
 
@@ -26,8 +28,9 @@ export const OPEN_MODE_KEY = "openMode";
 const RELOAD_KEY = "reloadOn";
 /** Replaced by `reloadOn` in 0.9.0, still honoured while it is set. */
 const LEGACY_RELOAD_KEY = "reloadOnSave";
-/** Whether the proxy may talk to systems whose TLS certificate cannot be
- *  verified (self-signed dev systems). */
+/** The blanket override: whether the proxy may talk to ANY system whose TLS
+ *  certificate cannot be verified, unasked. Off by default - an unverifiable
+ *  certificate is otherwise trusted per system (certprompt.ts). */
 export const ALLOW_UNAUTHORIZED_KEY = "allowUnauthorizedCerts";
 
 /** Preview parameters and the recently launched apps live in the window's
@@ -102,6 +105,13 @@ export class Session implements vscode.Disposable {
   /** So a page made of fifty requests does not produce fifty notifications. */
   lastAuthPrompt = 0;
 
+  /** https origins whose certificate the trust store verified in this
+   *  session - they are not probed again before every launch. */
+  readonly verifiedOrigins = new Set<string>();
+
+  /** So a page made of fifty refused requests logs the refusal once. */
+  private lastTrustRefusal = "";
+
   constructor(readonly ctx: vscode.ExtensionContext) {
     this.output = vscode.window.createOutputChannel("abap2UI5");
     this.trafficOutput = vscode.window.createOutputChannel("abap2UI5 Traffic");
@@ -113,6 +123,15 @@ export class Session implements vscode.Disposable {
     this.statusItem.name = "abap2UI5";
     this.statusItem.command = "abap2ui5.previewMenu";
     this.applyProxySettings();
+    // the pins certprompt.ts writes, read by the proxy on every request
+    this.proxy.pinFor = (origin) =>
+      pinFor(readPins(this.ctx.globalState.get<unknown>(PINS_STATE_KEY)), origin);
+    this.proxy.onTrustRefused = (message) => {
+      if (message !== this.lastTrustRefusal) {
+        this.lastTrustRefusal = message;
+        this.log(`proxy: ${message}`);
+      }
+    };
     this.watch = new ActivationWatch({
       source: this.proxy,
       current: () =>
@@ -217,7 +236,7 @@ export class Session implements vscode.Disposable {
   applyProxySettings(): void {
     this.proxy.allowUnauthorized = vscode.workspace
       .getConfiguration(CONFIG_SECTION)
-      .get<boolean>(ALLOW_UNAUTHORIZED_KEY, true);
+      .get<boolean>(ALLOW_UNAUTHORIZED_KEY, false);
   }
 
   recentApps(): string[] {
@@ -260,9 +279,18 @@ export class Session implements vscode.Disposable {
       this.statusItem.hide();
       return;
     }
-    this.statusItem.text = `$(play-circle) ${this.currentTarget.className}`;
+    // the role of the system the app runs on, when its profile names one -
+    // looked up by name: the target only records which system it came from
+    const shownOn = this.currentTarget.system;
+    const role = allSystems().find((system) => system.name === shownOn)?.role;
+    this.statusItem.text = statusText(this.currentTarget.className, role);
+    this.statusItem.backgroundColor =
+      role === "production"
+        ? new vscode.ThemeColor("statusBarItem.warningBackground")
+        : undefined;
     this.statusItem.tooltip = new vscode.MarkdownString(
       `**abap2UI5 preview** — ${this.currentTarget.system}\n\n` +
+        (role ? `${roleLine(role)}\n\n` : "") +
         `${redactQueryCredentials(this.currentTarget.externalUrl)}\n\nClick for preview actions.`
     );
     this.statusItem.show();

@@ -48,7 +48,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "The view check, the MCP server and the report converter can be told which program to start, one setting allows AI agents to operate apps on the system as you, one lets the auth proxy accept an unverified TLS certificate and one decides which build of the render gate is downloaded. Those settings are read from your user settings only, so a repository cannot point them at something else. The launch settings, which decide the host F9 and the credential prompt talk to, and the switch that turns the render gate on are ignored from the workspace in Restricted Mode; a trusted workspace can set them, so a team can share its systems in the repository - and the render gate does not run in Restricted Mode at all. The MCP server, the unit-test runner and the report converter do start processes (the runner does not start at all in Restricted Mode: the tests are the repository's code), which is why this is limited rather than unconditional.",
+      "description": "The view check, the MCP server, the report converter and the browser logon can be told which program to start, one setting allows AI agents to operate apps on the system as you and one decides whether each of their steps is put to you first, one lets the auth proxy accept every unverified TLS certificate and one decides which build of the render gate is downloaded. Those settings are read from your user settings only, so a repository cannot point them at something else. The launch settings, which decide the host F9 and the credential prompt talk to, and the switch that turns the render gate on are ignored from the workspace in Restricted Mode; a trusted workspace can set them, so a team can share its systems in the repository - and the render gate does not run in Restricted Mode at all. The MCP server, the unit-test runner and the report converter do start processes (the runner does not start at all in Restricted Mode: the tests are the repository's code), which is why this is limited rather than unconditional.",
       "restrictedConfigurations": [
         "abap2ui5.viewCheck.command",
         "abap2ui5.mcp.command",
@@ -56,10 +56,12 @@
         "abap2ui5.systems",
         "abap2ui5.launchUrlTemplate",
         "abap2ui5.agent.enableAppTools",
+        "abap2ui5.agent.confirmActions",
         "abap2ui5.report2cloud.path",
         "abap2ui5.viewCheck.render",
         "abap2ui5.viewCheck.rollingBundle",
-        "abap2ui5.allowUnauthorizedCerts"
+        "abap2ui5.allowUnauthorizedCerts",
+        "abap2ui5.logon.browserExecutable"
       ]
     }
   },
@@ -82,6 +84,12 @@
         "category": "abap2UI5",
         "title": "Activate and Reload Preview (Ctrl+F3)",
         "icon": "$(zap)"
+      },
+      {
+        "command": "abap2ui5.pushActivate",
+        "category": "abap2UI5",
+        "title": "Push and Activate",
+        "icon": "$(cloud-upload)"
       },
       {
         "command": "abap2ui5.runRecent",
@@ -137,6 +145,26 @@
         "title": "Clear Stored SAP Credentials"
       },
       {
+        "command": "abap2ui5.chooseClientCertificate",
+        "category": "abap2UI5",
+        "title": "Choose Client Certificate"
+      },
+      {
+        "command": "abap2ui5.loadServiceKey",
+        "category": "abap2UI5",
+        "title": "Load Service Key"
+      },
+      {
+        "command": "abap2ui5.logOnInBrowser",
+        "category": "abap2UI5",
+        "title": "Log On in Browser"
+      },
+      {
+        "command": "abap2ui5.forgetTrustedCertificates",
+        "category": "abap2UI5",
+        "title": "Forget Trusted Certificates"
+      },
+      {
         "command": "abap2ui5.newApp",
         "category": "abap2UI5",
         "title": "New App from Template"
@@ -162,6 +190,18 @@
         "category": "abap2UI5",
         "title": "Show Traffic Log",
         "icon": "$(pulse)"
+      },
+      {
+        "command": "abap2ui5.showRoundtrip",
+        "category": "abap2UI5",
+        "title": "Show Roundtrip",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "abap2ui5.replayRoundtrip",
+        "category": "abap2UI5",
+        "title": "Replay Roundtrip",
+        "icon": "$(debug-rerun)"
       },
       {
         "command": "abap2ui5.convertXml",
@@ -262,6 +302,11 @@
         "icon": "$(arrow-swap)"
       },
       {
+        "command": "abap2ui5.installReportConverter",
+        "category": "abap2UI5",
+        "title": "Install Report Converter"
+      },
+      {
         "command": "abap2ui5.fixAll",
         "category": "abap2UI5",
         "title": "Fix All View Findings in This File"
@@ -346,6 +391,60 @@
         "label": "abap2UI5 MCP Server"
       }
     ],
+    "languageModelTools": [
+      {
+        "name": "abap2ui5_get_view_findings",
+        "displayName": "abap2UI5 View Findings",
+        "toolReferenceName": "abap2ui5Findings",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(checklist)",
+        "userDescription": "The abap2UI5 view check's findings for the active file, as the Problems panel shows them.",
+        "modelDescription": "Returns the abap2UI5 view check's findings for one document - an abap2UI5 app class (*.clas.abap) or an XML view - exactly as the editor's Problems panel shows them: rule id, severity, 1-based line and message per finding. Defaults to the active editor; pass `uri` for another document. It reads what the editor has already published and does not run a check: a file that is neither open nor covered by the last \"Check All Views in the Workspace\" has no findings to report. Read-only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string",
+              "description": "The document's URI (file:///..., or the URI of a class opened from a system), or an absolute file path. Omit it for the active editor."
+            }
+          }
+        },
+        "when": "config.abap2ui5.chatTools"
+      },
+      {
+        "name": "abap2ui5_get_reconstructed_view",
+        "displayName": "abap2UI5 Reconstructed XML View",
+        "toolReferenceName": "abap2ui5View",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(code)",
+        "userDescription": "The XML view an abap2UI5 app class builds, reconstructed from its builder chain.",
+        "modelDescription": "Returns the XML view(s) an abap2UI5 app class builds with z2ui5_cl_ui5_view_builder, reconstructed statically from the class source - the same document \"Show Reconstructed XML View\" opens. Use it to see the control tree, properties and bindings a builder chain produces without running the app. Defaults to the active editor; pass `uri` for another class. Read-only; no system is contacted.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string",
+              "description": "The document's URI (file:///..., or the URI of a class opened from a system), or an absolute file path. Omit it for the active editor."
+            }
+          }
+        },
+        "when": "config.abap2ui5.chatTools"
+      },
+      {
+        "name": "abap2ui5_get_running_app_model",
+        "displayName": "abap2UI5 Running App Model",
+        "toolReferenceName": "abap2ui5Model",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(json)",
+        "userDescription": "The live JSON model of the app shown in the abap2UI5 preview.",
+        "modelDescription": "Returns the live JSON model of the abap2UI5 app currently shown in the editor's embedded preview - the values the running app actually holds, as the preview's { } button shows them. Use it to answer why a bound control is empty or shows an unexpected value. Takes no input. Answers with a plain sentence when no app is running in the preview. A large model is cut at 50 KB and the answer says so. Read-only: it asks the page already loaded and sends nothing to the system.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "when": "config.abap2ui5.chatTools && !isWeb"
+      }
+    ],
     "menus": {
       "commandPalette": [
         {
@@ -358,6 +457,10 @@
         },
         {
           "command": "abap2ui5.activate",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.pushActivate",
           "when": "!isWeb"
         },
         {
@@ -397,6 +500,22 @@
           "when": "!isWeb"
         },
         {
+          "command": "abap2ui5.chooseClientCertificate",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.loadServiceKey",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.logOnInBrowser",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.forgetTrustedCertificates",
+          "when": "!isWeb"
+        },
+        {
           "command": "abap2ui5.installRenderGate",
           "when": "!isWeb"
         },
@@ -422,6 +541,10 @@
         },
         {
           "command": "abap2ui5.migrateReport",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.installReportConverter",
           "when": "!isWeb"
         },
         {
@@ -465,6 +588,14 @@
           "when": "!isWeb"
         },
         {
+          "command": "abap2ui5.showRoundtrip",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.replayRoundtrip",
+          "when": "!isWeb"
+        },
+        {
           "command": "abap2ui5.openRuleDocs",
           "when": "false"
         },
@@ -505,7 +636,7 @@
         },
         {
           "command": "abap2ui5.activate",
-          "when": "resourceLangId == abap && resourceScheme == adt && !isWeb",
+          "when": "resourceLangId == abap && !isWeb && (resourceScheme == adt || resourceScheme == file && resourceFilename =~ /\\.clas\\.(locals_def\\.|locals_imp\\.|testclasses\\.)?abap$/i)",
           "group": "navigation@2"
         }
       ],
@@ -672,7 +803,7 @@
         "command": "abap2ui5.activate",
         "key": "ctrl+f3",
         "mac": "cmd+f3",
-        "when": "editorTextFocus && editorLangId == abap && resourceScheme == adt && !isWeb"
+        "when": "editorTextFocus && editorLangId == abap && !isWeb && (resourceScheme == adt || resourceScheme == file && resourceFilename =~ /\\.clas\\.(locals_def\\.|locals_imp\\.|testclasses\\.)?abap$/i)"
       }
     ],
     "viewsContainers": {
@@ -739,17 +870,60 @@
               "url": {
                 "type": "string",
                 "description": "Launch URL template with the {class} placeholder."
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "development",
+                  "production"
+                ],
+                "description": "What the system is used for. On a production system the agent app tools refuse app_start and app_act, and the status bar shows the role. Optional."
+              },
+              "minUi5": {
+                "type": "string",
+                "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+                "description": "The UI5 version this system serves, e.g. 1.120. While the system is active it replaces abap2ui5.viewCheck.minUi5; a repository's abap2ui5lint.jsonc still wins. Optional."
+              },
+              "distribution": {
+                "type": "string",
+                "enum": [
+                  "sapui5",
+                  "openui5"
+                ],
+                "description": "The UI5 distribution this system serves. While the system is active it replaces abap2ui5.viewCheck.distribution; a repository's abap2ui5lint.jsonc still wins. Optional."
+              },
+              "auth": {
+                "type": "string",
+                "enum": [
+                  "basic",
+                  "certificate",
+                  "oauth",
+                  "browser"
+                ],
+                "enumDescriptions": [
+                  "User and password, asked for once per host and kept in the VS Code SecretStorage (the default).",
+                  "An X.509 client certificate (.pfx/.p12, or PEM certificate and key) you choose per host with \"abap2UI5: Choose Client Certificate\"; the system maps it to your user. Only the file path (machine-local) and the passphrase (SecretStorage) are stored.",
+                  "OAuth 2.0 with a service key (SAP BTP ABAP Environment): load the instance's service key per host with \"abap2UI5: Load Service Key\", then log on in your browser. The key and the refresh token are kept in the VS Code SecretStorage, the access token in memory only.",
+                  "A logon in a browser window the extension opens (the render gate's Chromium, or abap2ui5.logon.browserExecutable): whatever the system asks for - SAML 2.0 single sign-on, Kerberos, a certificate from the OS store, the logon form - happens there, and the session cookies are kept in memory for this VS Code window only. Nothing is stored."
+                ],
+                "description": "How the auth proxy logs on to this system. A host you set to \"certificate\", \"oauth\" or \"browser\" in your user settings keeps it when a workspace lists the same host without it."
               }
             },
             "additionalProperties": false
           },
-          "markdownDescription": "The systems F9 can launch against. The active one is picked with the command **\"abap2UI5: Select System\"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again.\n\n```json\n[\n  { \"name\": \"DEV\", \"url\": \"https://dev:44300/sap/bc/z2ui5?app_start={class}&sap-client=100\" },\n  { \"name\": \"Sandbox\", \"url\": \"https://box:44300/sap/bc/z2ui5?app_start={class}\" }\n]\n```"
+          "markdownDescription": "The systems F9 can launch against. The active one is picked with the command **\"abap2UI5: Select System\"** and is remembered per window, so two windows can work against two systems at once. Credentials are stored per host, so switching does not ask again. An entry may also name the UI5 version and distribution its system serves (`minUi5`, `distribution` - used by the view check while that system is active) and its `role` (`\"production\"`: the agent app tools refuse to act there).\n\n```json\n[\n  { \"name\": \"DEV\", \"url\": \"https://dev:44300/sap/bc/z2ui5?app_start={class}&sap-client=100\", \"minUi5\": \"1.120\", \"distribution\": \"sapui5\" },\n  { \"name\": \"Sandbox\", \"url\": \"https://box:44300/sap/bc/z2ui5?app_start={class}\" },\n  { \"name\": \"PRD\", \"url\": \"https://prd:44300/sap/bc/z2ui5?app_start={class}\", \"role\": \"production\" }\n]\n```\n\nOptional per system: `minUi5` and `distribution` - what that system serves; while it is the active system they replace `#abap2ui5.viewCheck.minUi5#` and `#abap2ui5.viewCheck.distribution#` (a repository's `abap2ui5lint.jsonc` wins over both). `role`: `\"development\"` or `\"production\"` - on a production system the agent app tools refuse to start or operate apps, and the status bar shows the role; a system you marked as production in your user settings stays production when a workspace lists the same host without the mark. `auth`: `\"basic\"` (user and password, the default) or `\"certificate\"` (an X.509 client certificate you choose per host with **\"abap2UI5: Choose Client Certificate\"**) - a mechanism other than basic that your user settings name for a host stays in effect when a workspace lists the same host without it. A field with a value the extension does not understand is ignored and named in the *abap2UI5* output."
         },
         "abap2ui5.allowUnauthorizedCerts": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "scope": "machine",
-          "markdownDescription": "Allow the embedded preview's local auth proxy to talk to systems whose **TLS certificate cannot be verified** - self-signed certificates, private CAs not in the OS trust store, hostname mismatches. SAP development systems typically serve self-signed certificates, which is why this is on by default.\n\n**Security tradeoff:** while this is enabled, the connection to the system is encrypted but not authenticated - a machine-in-the-middle could present its own certificate and read the traffic, including the SAP credentials the proxy injects. If your system has a properly trusted certificate, turn this off to get full TLS verification.\n\nThis setting is read from your user settings only - a cloned repository cannot switch certificate verification off for you."
+          "markdownDescription": "Accept **every** TLS certificate that cannot be verified - self-signed certificates, private CAs not in the OS trust store, hostname mismatches - on **every** system, without asking. Off by default.\n\nYou normally do not need this: when a system's certificate cannot be verified, F9 and **\"abap2UI5: Check System Connection\"** show the certificate (subject, issuer, validity, SHA-256 fingerprint) and ask once whether to trust it. A trusted certificate is accepted for that system only, and the connection is refused if the system ever presents a different one. **\"abap2UI5: Forget Trusted Certificates\"** drops those answers. A system with a certificate from a public CA is never asked about.\n\n**Security tradeoff:** while this is enabled, the connection to the system is encrypted but not authenticated - a machine-in-the-middle could present its own certificate and read the traffic, including the SAP credentials the local auth proxy injects.\n\nThis setting is read from your user settings only - a cloned repository cannot switch certificate verification off for you."
+        },
+        "abap2ui5.logon.browserExecutable": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "The browser a system with `\"auth\": \"browser\"` logs on in - the full path of a Chrome, Edge or Chromium executable. Empty (the default): the Chromium **\"abap2UI5: Install Render Gate\"** downloads. The browser is started with a fresh, temporary profile that is deleted after the logon, controlled over a pipe (no network port); the session cookies it hands over are kept in memory for this VS Code window only.\n\nThis setting is read from your user settings only - a cloned repository cannot choose which program is started."
         },
         "abap2ui5.codeLens": {
           "type": "boolean",
@@ -992,11 +1166,22 @@
           "default": true,
           "markdownDescription": "Also offer the **abap2UI5 System** MCP server: real-system tools hosted by the extension itself - list the configured systems, search classes on the system (ADT quick search), run an app through the auth proxy with a headless screenshot, and - only with `#abap2ui5.agent.enableAppTools#` - operate an app through its JSON protocol. Uses the same credentials the preview stores; the run tool needs the render gate's Chromium."
         },
+        "abap2ui5.chatTools": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer the editor's chat three read-only tools for what only this window knows: the view check's findings of a document as the Problems panel shows them (`#abap2ui5Findings`), the XML view reconstructed from an app class (`#abap2ui5View`) and the live JSON model of the app shown in the preview (`#abap2ui5Model`, desktop only). None of them contacts or changes a system - the tools that do stay with the MCP servers (`#abap2ui5.mcp.system#`)."
+        },
         "abap2ui5.agent.enableAppTools": {
           "type": "boolean",
           "default": false,
           "scope": "machine",
           "markdownDescription": "Allow the **abap2UI5 System** MCP server's app tools (`app_list`, `app_start`, `app_describe`, `app_act`) to operate abap2UI5 apps on the **real** active system: an AI agent fills fields and fires events through the abap2UI5 JSON protocol, **as the configured user** - an event runs for real and may save, post or delete data. Off by default; while it is off the tools stay listed and answer with how to allow them, sending nothing. User settings only: a workspace cannot turn it on."
+        },
+        "abap2ui5.agent.confirmActions": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Ask before every acting step of the **abap2UI5 System** MCP server's app tools (see `#abap2ui5.agent.enableAppTools#`): each event an AI agent fires with `app_act`, and the first `app_start` of a class, opens a dialog naming the system, the class, the event, its arguments and the values sent with it - **Allow**, **Allow for This Session** (that class on that system, until the window closes) or **Deny**. Deny, or no answer within two minutes, tells the agent that you declined, and nothing is sent. On by default. User settings only: a workspace cannot turn it off."
         },
         "abap2ui5.mcp.command": {
           "type": "string",
@@ -1014,7 +1199,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose `tools/report2cloud` converter *\"abap2UI5: Migrate Classic Report to abap2UI5\"* runs - report2cloud is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose.\n\nIt decides which program is started, so it is read from your user settings only."
+          "markdownDescription": "Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose converter *\"abap2UI5: Migrate Classic Report to abap2UI5\"* runs - report2UI5 in `tools/report2ui5`, or report2cloud in `tools/report2cloud` in a checkout of the addon's 1.0.0; it is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose, or else the copy *\"abap2UI5: Install Report Converter\"* downloaded.\n\nIt decides which program is started, so it is read from your user settings only."
         }
       }
     },
@@ -1147,6 +1332,7 @@
     "vsix": "vsce package",
     "lint": "tsc --noEmit && eslint .",
     "test": "node esbuild.js --tests && node --test dist-test/*.test.cjs",
+    "test:coverage": "node esbuild.js --tests --coverage && node scripts/coverage.mjs",
     "test:grep": "node esbuild.js --tests && node --test --test-name-pattern",
     "test:web": "node esbuild.js && node esbuild.js --webtest && vscode-test-web --browserType=chromium --headless --extensionDevelopmentPath=. --extensionTestsPath=dist/web/test.js",
     "test:desktop": "node esbuild.js && node esbuild.js --desktoptest && node src/test/desktop/runner.mjs",
@@ -1156,6 +1342,8 @@
     "app-template:check": "node scripts/generate-app-template.mjs --check",
     "repo-dirs": "node scripts/generate-repo-dirs.mjs",
     "repo-dirs:check": "node scripts/generate-repo-dirs.mjs --check",
+    "report2ui5": "node scripts/generate-report2ui5.mjs",
+    "report2ui5:check": "node scripts/generate-report2ui5.mjs --check",
     "agent-vendor": "node scripts/vendor-agent.mjs",
     "agent-vendor:check": "node scripts/vendor-agent.mjs --check",
     "settings": "node scripts/generate-settings.mjs",
@@ -1180,5 +1368,11 @@
   "linterRelease": {
     "version": "0.9.0",
     "commit": "369f4afdd19932df8ba8fb8ee7df227c51029ba8"
+  },
+  "localBackend": {
+    "mcpServer": "1.0.0"
+  },
+  "report2ui5Release": {
+    "commit": "78358275fdaf1452d3948d38eef9103586bbf058"
   }
 }

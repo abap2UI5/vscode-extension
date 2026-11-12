@@ -91,6 +91,40 @@ function activeSourceDoc(): vscode.TextDocument | undefined {
   );
 }
 
+/** The reconstruction of a class and the name it goes by - the one read the
+ *  preview and the chat tool (`reconstructedXmlOf`) share. */
+function reconstructionOf(source: vscode.TextDocument): {
+  nodes: NonNullable<ReturnType<typeof preparedAbapOf>>["nodes"];
+  className: string;
+} {
+  return {
+    nodes: preparedAbapOf(source)?.nodes ?? [],
+    className:
+      classNameOf(source.getText(), source.fileName).toUpperCase() || "this class",
+  };
+}
+
+/** Can a view be reconstructed from this document at all? */
+export function buildsViews(doc: vscode.TextDocument): boolean {
+  return isFollowable(doc);
+}
+
+/**
+ * The reconstructed XML of a class as text - what the preview document
+ * shows, without opening it or moving what it follows. Empty `xml` when
+ * nothing came out of the builder chain.
+ */
+export function reconstructedXmlOf(source: vscode.TextDocument): {
+  className: string;
+  xml: string;
+} {
+  const { nodes, className } = reconstructionOf(source);
+  return {
+    className,
+    xml: nodes.length ? formatDocument(nodes, className).text : "",
+  };
+}
+
 const SEVERITY = {
   error: vscode.DiagnosticSeverity.Error,
   warning: vscode.DiagnosticSeverity.Warning,
@@ -165,11 +199,7 @@ export function registerXmlPreview(
     // document version, shared with completion, the annotations and the
     // gate) - this used to reconstruct a second time on every refresh. An
     // unparsable buffer answers undefined there, which is "no view" here.
-    const text = source.getText();
-    const nodes = preparedAbapOf(source)?.nodes ?? [];
-    const className =
-      classNameOf(text, source.fileName).toUpperCase() ||
-      "this class";
+    const { nodes, className } = reconstructionOf(source);
     if (!nodes.length) {
       const empty =
         `<!-- ${className}: no view could be reconstructed - the class calls ` +

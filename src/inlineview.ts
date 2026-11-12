@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { mockFileFor } from "./viewpreview";
 import { CONFIG_SECTION } from "./settings";
+import { checkSettings, onDidChangeCheckTarget } from "./checktarget";
 import { DIAG_SOURCE } from "./diagnostics";
 
 import * as fs from "fs";
@@ -158,7 +159,8 @@ export function registerInlineAnnotations(
     if (!data || !(showDeprecated || showSince)) {
       return [];
     }
-    const floor = config().get<string>("viewCheck.minUi5", "1.71");
+    // the active system's profile over the setting, as the check reads it
+    const floor = checkSettings().minUi5;
     const out: Annotation[] = [];
     // deprecations first - where a line carries both, the deprecation is
     // the one worth the line's single annotation
@@ -353,7 +355,9 @@ export function registerInlineAnnotations(
       ) {
         paintAll();
       }
-    })
+    }),
+    // another active system may serve another UI5 - the `@since` floor
+    onDidChangeCheckTarget(() => paintAll())
   );
   paintAll();
   log("inline annotations: findings, @since and roundtrip cost registered");

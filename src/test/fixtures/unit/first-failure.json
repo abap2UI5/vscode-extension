@@ -1,0 +1,31 @@
+{
+  "ok": false,
+  "framework": "1.148.0",
+  "backend": "npm",
+  "runtime": "@abap2ui5/node-runtime@1.148.0",
+  "mode": "npm",
+  "results": [
+    {
+      "cls": "zcl_demo",
+      "testclasses": true,
+      "tests": [
+        {
+          "object": "ZCL_DEMO",
+          "localClass": "ltcl_one",
+          "method": "adds"
+        },
+        {
+          "object": "ZCL_DEMO",
+          "localClass": "ltcl_one",
+          "method": "fails"
+        }
+      ],
+      "failed": {
+        "object": "ZCL_DEMO",
+        "localClass": "ltcl_one",
+        "method": "fails",
+        "error": "<ref *1> kernel_cx_assert [Error]\n    at cl_abap_unit_assert.assert_equals (file:///home/dev/.abap2ui5-mcp/runtime/1.148.0/node_modules/@abap2ui5/node-runtime/output/open-abap-core/cl_abap_unit_assert.clas.mjs:418:31)\n    at async #fails (file:///home/dev/.abap2ui5-mcp/runtime/1.148.0/apps-unit-7071-8zuYNf/zcl_demo.clas.testclasses.mjs:35:5)\n    at async run (file:///home/dev/.abap2ui5-mcp/runtime/1.148.0/apps-unit-7071-8zuYNf/index-mcp-zcl_demo-7071-1.mjs:41:9) {\n  me: ABAPObject {\n    value: [Circular *1],\n    qualifiedName: undefined,\n    RTTIName: undefined\n  },\n  INTERNAL_ID: 226,\n  FRIENDS_ACCESS_INSTANCE: <ref *2> { SUPER: [Circular *2] },\n  previous: ABAPObject {\n    value: undefined,\n    qualifiedName: 'CX_ROOT',\n    RTTIName: '\\\\CLASS=CX_ROOT'\n  },\n  textid: Character {\n    value: '                                ',\n    constant: false,\n    numeric: undefined,\n    length: 32,\n    extra: {}\n  },\n  kernel_errid: Character {\n    value: '                              ',\n    constant: false,\n    numeric: undefined,\n    length: 30,\n    extra: { qualifiedName: 'CHAR30', ddicName: 'CHAR30', description: '' }\n  },\n  get_longtext: [AsyncFunction: if_message$get_longtext],\n  get_text: [AsyncFunction: if_message$get_text],\n  actual: String { value: '3', qualifiedName: 'STRING' },\n  expected: String { value: '4', qualifiedName: 'STRING' },\n  msg: String { value: 'wrong sum', qualifiedName: 'STRING' },\n  EXTRA_CX: {\n    INTERNAL_FILENAME: 'cl_abap_unit_assert.clas.abap',\n    INTERNAL_LINE: 467\n  }\n}"
+      }
+    }
+  ]
+}

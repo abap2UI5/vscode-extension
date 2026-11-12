@@ -184,7 +184,7 @@ async function addAgentSetup(context: vscode.ExtensionContext, arg: unknown): Pr
 
 export function registerAgentSetup(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
-    vscode.commands.registerCommand("abap2ui5.addAgentSetup", (arg: unknown) =>
+    vscode.commands.registerCommand("abap2ui5.addAgentSetup", (arg?: unknown) =>
       addAgentSetup(context, arg)
     ),
     {
