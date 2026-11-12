@@ -43,6 +43,10 @@ const PIN = (JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")
   localBackend?: { mcpServer?: string };
 }).localBackend?.mcpServer ?? "";
 
+/** Windows keeps a folder busy for a moment after the process that ran in it
+ *  exited (EBUSY on rmdir); Node retries exactly that with maxRetries. */
+const RM_OPTIONS: fs.RmOptions = { recursive: true, force: true, maxRetries: 10, retryDelay: 100 };
+
 function scratch(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "a2ui5-local-"));
 }
@@ -241,7 +245,7 @@ test("the fingerprint moves with the object files and ignores everything else", 
     write(path.join(dir, "zcl_a.clas.abap"), "CLASS zcl_a. \" changed");
     assert.notEqual(sourceFingerprint(dir), second);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, RM_OPTIONS);
   }
 });
 
@@ -282,7 +286,7 @@ test("a launcher that prints its ready line is up; stop() ends it", async () => 
     await host.exited;
     assert.equal(host.alive, false);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, RM_OPTIONS);
   }
 });
 
@@ -309,7 +313,7 @@ test("a failed line, an early exit and a timeout are each a LocalBackendError", 
       (e: Error) => e instanceof LocalBackendError && /could not start/.test(e.message)
     );
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, RM_OPTIONS);
   }
 });
 
@@ -433,7 +437,7 @@ test("the launcher: token required, loopback only, reached through the proxy", a
   } finally {
     host?.stop();
     await proxy.stop();
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, RM_OPTIONS);
   }
 });
 
@@ -461,7 +465,7 @@ test("the launcher refuses an mcp-server without the library, and a run without 
       (e: Error) => /no request token/.test(e.message)
     );
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, RM_OPTIONS);
   }
 });
 
@@ -567,6 +571,6 @@ test("real local backend: app-template's starter app starts, and an event reache
   } finally {
     host?.stop();
     await proxy.stop();
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, RM_OPTIONS);
   }
 });
