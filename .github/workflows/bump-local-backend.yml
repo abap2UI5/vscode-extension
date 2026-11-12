@@ -1,0 +1,72 @@
+# The "Local (transpiled)" system drives @abap2ui5/mcp-server's library by
+# path (src/localbackend-host.mjs imports lib/npm-backend.mjs,
+# lib/npm-host.mjs and scripts/ci-unit.mjs), because mcp-server has no
+# `serve` entry point yet. That is coupling to internals, so the version is
+# pinned EXACTLY in package.json (`localBackend.mcpServer`) and only moves
+# through a pull request whose gate drove the new version end to end.
+#
+# The regenerate step therefore does two things: it writes the latest
+# published version into package.json, and it lets npx install that version
+# into npm's npx cache. `src/test/localbackend.test.ts` finds the pinned
+# package there, so the gate's `npm test` runs its opt-in "real local
+# backend" test - app-template's starter class transpiled, served, started
+# and sent an event through the auth proxy - instead of skipping it. A
+# release that moved or renamed one of the imported functions fails here,
+# not in a user's F9.
+#
+# The mechanics live in bump-snapshot.yml, shared with the other bumps.
+
+name: Bump local backend
+
+on:
+  schedule:
+    # Mondays 07:23 UTC - after the repo-dirs bump (07:05), off the
+    # full-hour spikes.
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [bump-local-backend]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    uses: ./.github/workflows/bump-snapshot.yml
+    secrets: inherit
+    with:
+      label: the mcp-server version the local backend drives
+      timeout-minutes: 45
+      paths: package.json
+      regenerate: |
+        set -euo pipefail
+        VERSION=$(npm view @abap2ui5/mcp-server version)
+        [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        VERSION="$VERSION" node - <<'JS'
+          const fs = require("fs");
+          const t = fs.readFileSync("package.json", "utf8");
+          const out = t.replace(
+            /("localBackend": \{\s*"mcpServer": ")[^"]*(")/,
+            `$1${process.env.VERSION}$2`
+          );
+          if (out === t && !t.includes(`"mcpServer": "${process.env.VERSION}"`)) {
+            throw new Error("package.json has no localBackend.mcpServer to update");
+          }
+          fs.writeFileSync("package.json", out);
+        JS
+        # into npm's npx cache, where the real local-backend test finds it
+        npx --yes -p "@abap2ui5/mcp-server@$VERSION" node -e 0
+      branch: bump-local-backend
+      title: "chore: bump the local backend's mcp-server pin"
+      body: |
+        Weekly bump of `localBackend.mcpServer` in `package.json` - the
+        `@abap2ui5/mcp-server` release the "Local (transpiled)" system
+        imports its build and host from (`src/localbackend-host.mjs`).
+
+        The gate's `npm test` ran the real local-backend test against the
+        new version (the regenerate step put it into npm's npx cache): the
+        starter app transpiled, started and answered an event through the
+        proxy. Read mcp-server's changelog for `buildNpm`, `startHost`,
+        `collectObjects` and `writeObjects` before merging - they are not a
+        published contract until mcp-server ships a `serve` entry point.

@@ -23,6 +23,16 @@ The bundled linter moves to v0.9.0.
   belongs to (`.clas.abap`, `.clas.locals_def.abap`, `.clas.locals_imp.abap`,
   `.clas.testclasses.abap`); a message without a position sits on line 1 of
   the class. They disappear with the next successful activation.
+- **Run an app without a system.** *Select System* offers a built-in
+  *Local (transpiled)* profile, and F9 offers it when no system is
+  configured. F9 on it transpiles the workspace's classes (the
+  `.abapgit.xml` starting folder, else `src/`) with mcp-server's npm
+  backend, serves them on 127.0.0.1 and shows the app in the usual preview,
+  so events reach the class and the inspector, live model and traffic log
+  work. A save in that folder and Ctrl+F3 rebuild and reload. The first run
+  installs the runtime (needs Node.js 22, npm, git and the network); the log
+  is in the "abap2UI5 Local Backend" output. Not in Restricted Mode,
+  desktop only; `<class>.mock.json` is not applied yet - see the README.
 - **Control Properties removes an attribute of an upper-case chain.** In a
   chain written `)->A( n = ...`, the view added attributes but refused to
   remove one, calling the layout unusual. ABAP does not care about case,

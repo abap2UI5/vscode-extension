@@ -114,6 +114,9 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/unitresults.ts` | `vscode`-free: the runner's `--json` report as one result per test method (`parseUnitReport` - a report that is empty, cut off or not the runner's is ONE error result, never an exception) and what it says about each known method (`outcomesFor` - a method the report does not name is "not run", never "passed": the runner stops at the first failure). The report carries NO source position |
 | `src/report2cloud.ts` | `vscode`-free: what "Migrate Classic Report to abap2UI5" decides - where abap-cloud-gui's converter CLI is - report2UI5's `tools/report2ui5/cli.mjs`, else 1.0.0's `tools/report2cloud/cli.mjs` (`cliIn`) - (`abap2ui5.report2cloud.path`, then `ABAP_CLOUD_GUI_HOME`, then a `cloudGui` directory under `mcp.reposRoot`; an explicit answer that does not hold is reported, never skipped), the program and class names the CLI derives, its arguments, what its exit code and output mean (0 converted, 2 refused with `file:row:col - reason` lines, 1 wrong call, a missing `npm ci`), and the range a refusal underlines |
 | `src/migratereport.ts` | The command's plumbing: report pick (explorer/editor uri, active `.prog.abap`, open dialog), class-name prompt, output folder, the overwrite question, the CLI through `childproc.run` with VS Code's own Node, refusals as diagnostics on the report, *Write Partial Result*, opening the class beside its migration report |
+| `src/localbackend.ts` | `vscode`-free: what the "Local (transpiled)" system decides - the program (`resolveLocalHost`: an mcp-server checkout under `mcp.reposRoot`, else `npx --yes -p @abap2ui5/mcp-server@<localBackend.mcpServer> node <launcher>`), the folder it collects (`projectRootFor`, `sourceFolderFor`: `.abapgit.xml`'s STARTING_FOLDER, else `src`, else the project; a class outside it is built from its own folder), the node-runtime release (`runtimePinFor`, the `abaplint.jsonc` pin from 1.145.0 on), the launcher's environment, its one machine-readable stdout line (`parseLauncherLine`), the start with readiness, timeout and process-tree kill (`startLocalHost`), when F9 may reuse the running host (`sourceFingerprint`, `decideStart`), the proxy's `LocalBackendAuth` (the per-start token as an `AuthStrategy` header), and the honest note about `<class>.mock.json` (`mockNote`) |
+| `src/localbackendview.ts` | Its plumbing (desktop only): F9 on the local profile (`runLocal`: Restricted Mode refusal, the class's file, saving dirty documents of the folder, build + (re)start with progress, the proxy pointed at the host, the preview without an activation watch), `rebuildAndReload` for a save in the built folder and Ctrl+F3, stopping on a system switch and with the window, the "abap2UI5 Local Backend" output channel |
+| `src/localbackend-host.mjs` | The launcher the local profile starts - NOT bundled, copied to `dist/` (and `dist-test/`) by `esbuild.js`: imports mcp-server's `collectObjects`/`writeObjects` (`scripts/ci-unit.mjs`), `buildNpm` (`lib/npm-backend.mjs`) and `startHost` (`lib/npm-host.mjs`) from the pinned package, puts a constant-time token check in front of the host, prints `ABAP2UI5_LOCAL_READY {...}` or `ABAP2UI5_LOCAL_FAILED {...}`, and exits when its stdin closes |
 | `src/unittests.ts` | The command's plumbing: the one reused "abap2UI5 unit tests" terminal (recreated when cwd or the `*_HOME` env changed), the class from the tree node / lens / active editor, the Restricted Mode refusal |
 | `src/testexplorer.ts` | The same tests in the Testing view (desktop only): a `TestController` with items per include / test class / method and one *Run* profile, run through `childproc.run` with `unitTestArgs` plus `--json`. Lazy - the workspace is searched when the Testing view asks, an include is parsed when it is expanded, opened or run; follows the test includes through the one watcher in `codelens.ts` (`onDidChangeTestInclude`). A failure is shown at the method's declaration, because the runner names no line |
 | `src/mcp.ts` | Registers the abap2UI5 MCP server (mcp-server) and the in-extension system server for MCP clients in the window; `checkoutEnv()` is the `*_HOME` set the unit-test runner shares |
@@ -175,7 +178,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `snippets/` | ABAP snippets contributed to the editor |
 | `media/` | Icons: `icon.svg` (panel), `icon-light/dark.svg` (preview tab), `icon.png` (gallery) |
 | `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js` (plus `src/rendergate-tar.ts` into `dist/rendergate-tar.js` and `src/agent-client.ts` into `dist/agent-client.js`, both loaded on first use), `src/web/extension.ts` into `dist/web/extension.js`, and `src/test/` into `dist-test/` (with its own `agent-client.js`); copies the linter's data files and the extension's own two runtime-read snapshots (`app-template.json`, `client-api.json`) next to the bundles |
-| `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the four weekly `bump-*.yml` callers share |
+| `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the five weekly `bump-*.yml` callers share |
 
 `dist/`, `dist-test/`, `node_modules/` and `*.vsix` are build output and are
 not committed.
@@ -191,7 +194,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `report2cloud.ts`, `report.ts`, `roundtrips.ts`, `adtwrite.ts`, `adtmessages.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
+`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `localbackend.ts`, `report2cloud.ts`, `report.ts`, `roundtrips.ts`, `adtwrite.ts`, `adtmessages.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts` with its parts `proxyadt.ts`, `proxyhtml.ts`, `proxybody.ts` and `proxyheaders.ts`, `authstrategy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` with its parts `webviewshared.ts`, `webviewpreview.ts`,
 `webviewpanels.ts` and `webviewwelcome.ts` (HTML strings only — the state they render is
@@ -386,6 +389,17 @@ identity (see Conventions).
   to it. The one path that cannot inherit a prefix, an absolute bootstrap
   like `/sap/public/...`, is covered by the HttpOnly cookie the first
   authorized answer plants. Do not add a second listener without both.
+  The local backend's host (`localbackend-host.mjs`, the "Local
+  (transpiled)" system) is a listener the extension STARTS rather than
+  owns, and it runs the repository's code: it binds `127.0.0.1` only (never
+  `0.0.0.0`), keeps npm-host's loopback `Host`/`Origin` guard, and answers
+  404 to every request without the per-start `randomBytes(16)` token in
+  `x-abap2ui5-local-token` - a header rather than a path segment because the
+  app's frontend computes its URLs from the page, and only the auth proxy
+  sends it (`LocalBackendAuth`), so the webview reaches the host through the
+  proxy and its token alone. The token goes to the child in its environment
+  (argv is visible to every local user) and the launcher removes it from
+  there before anything else runs. It is never started in Restricted Mode.
 - **A setting that names a program to start is `"scope": "machine"`.**
   `viewCheck.command`, `mcp.command` and `mcp.reposRoot` decide which binary
   the extension spawns; machine scope keeps a cloned repository's
@@ -782,9 +796,26 @@ Facts an agent cannot see from the code but will trip over:
   tool). No `baseUrl`, no request rewriting, no message patching - a new
   local-backend assumption upstream belongs behind a new option there, not
   behind a wrapper here.
-- **The four weekly bump workflows share one implementation.**
+- **The local backend drives mcp-server's internals, pinned EXACTLY.**
+  mcp-server 1.0.0 has no `serve` entry point (docs/systemless-preview.md,
+  section 5), so `src/localbackend-host.mjs` imports `buildNpm`, `startHost`,
+  `collectObjects` and `writeObjects` by path. The version it drives is
+  `localBackend.mcpServer` in `package.json` - no range: `npx -p` installs
+  exactly that into npm's npx cache, and the launcher takes the package off
+  the `node_modules/.bin` npx puts on PATH only at that version. A checkout
+  under `mcp.reposRoot` is used as it is, like the unit runner's.
+  `bump-local-backend.yml` moves the pin weekly through `bump-snapshot.yml`;
+  its regenerate step also fills the npx cache, so the gate's `npm test`
+  runs the opt-in real test in `localbackend.test.ts` (app-template's
+  starter class transpiled, started and sent an event through `SapProxy`)
+  instead of skipping it. That test also runs locally whenever the npx
+  cache holds the pinned version or `ABAP2UI5_LOCAL_BACKEND_MCP` names a
+  checkout (it needs the network and git; `ABAP2UI5_LOCAL_BACKEND_WORKSPACE`
+  keeps the runtime install between runs). When mcp-server ships a `serve`
+  bin, switch to it and drop the deep imports.
+- **The weekly bump workflows share one implementation.**
   `.github/workflows/bump-snapshot.yml` holds the shape (regenerate → diff →
-  gate → open a pull request) and is called through `workflow_call`; the four
+  gate → open a pull request) and is called through `workflow_call`; the five
   named files are thin callers carrying only the schedule, what to regenerate
   and what to say in the PR. They open their pull requests with
   `BUMP_PR_TOKEN` when that repository secret is configured, and with the
@@ -812,4 +843,4 @@ Facts an agent cannot see from the code but will trip over:
 | [samples](https://github.com/abap2UI5/samples) | Sample applications |
 | [samples-controls](https://github.com/abap2UI5/samples-controls) | Ported demo-kit samples (formerly `abap2UI5-api`, before that `ai-demokit` — where this extension used to live, until 0.6.0) |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | The view checker behind `src/viewcheck.ts` (the npm release, pinned exactly) and `src/rendergate.ts` (runtime download of that release's bundle) |
-| [mcp-server](https://github.com/abap2UI5/mcp-server) | The MCP server `src/mcp.ts` registers for MCP clients in the window |
+| [mcp-server](https://github.com/abap2UI5/mcp-server) | The MCP server `src/mcp.ts` registers for MCP clients in the window; its npm backend is what the "Local (transpiled)" system builds and serves with (`src/localbackend-host.mjs`, pinned exactly) |

@@ -89,6 +89,11 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   the class builds, with a device matrix and a compare-with-HEAD mode.
 
   ![Preview View (No System) beside the class source: the same view rendered by the render gate at 390x844 and at 1280x900, with the SAP Horizon theme and a model derived from the class](media/readme/preview-device-matrix.png)
+- **Run the app without a system** — pick *Local (transpiled)* in *Select
+  System* and F9 transpiles the workspace's classes and runs them on this
+  machine, in the same preview: events, the inspector, the live model and
+  the traffic log work as against a system
+  ([details](#running-an-app-without-a-system)).
 - **Test without a system** — *Run Unit Tests (No System)* runs the app's
   ABAP Unit tests in the transpiled abap2UI5 backend through
   [mcp-server](https://github.com/abap2UI5/mcp-server)'s `abap2ui5-unit`, in
@@ -229,6 +234,61 @@ one the command says so and offers *Configure…*; a checkout without its
 A namespaced class name (`/ns/cl_x`) is not offered here: the converter does
 not turn such a name into abapGit's file names (`#ns#cl_x.clas.abap`) for
 the class it writes.
+
+## Running an app without a system
+
+*abap2UI5: Select System* offers a built-in profile, **Local (transpiled)**,
+next to the configured systems - and F9 offers it when no system is
+configured at all. On that profile F9:
+
+1. saves the open ABAP documents of the project and collects every class,
+   interface, table and data element of the folder the class lives in -
+   `.abapgit.xml`'s `STARTING_FOLDER`, else `src/`, else the project folder
+   (a class outside it is built from its own folder);
+2. transpiles them against `@abap2ui5/node-runtime` - the release the
+   project's `abaplint.jsonc` pins (from 1.145.0 on), else the latest - with
+   [mcp-server](https://github.com/abap2UI5/mcp-server)'s npm backend, the
+   build `abap2ui5-unit` uses;
+3. serves them on `127.0.0.1` and loads `/?app_start=<CLASS>` through the
+   extension's auth proxy into the usual preview. UI5 itself comes from
+   `sdk.openui5.org`.
+
+The build log is in the **abap2UI5 Local Backend** output. The first start
+installs the runtime (about 60 MB, into the extension's global storage) and
+fetches open-abap-core with `git`, so it needs Node.js 22, npm, git and the
+network and takes a minute; a rebuild takes seconds. A **save** of an object
+in the built folder (unless `abap2ui5.reloadOn` is `never`) and
+**Ctrl+F3** rebuild, restart and reload - there is no activation, the file on
+disk is the version. F9 with nothing changed only reloads.
+
+The program is mcp-server, pinned to one exact version
+(`localBackend.mcpServer` in the extension's `package.json`): a checkout
+under `abap2ui5.mcp.reposRoot` when there is one, else
+`npx --yes -p @abap2ui5/mcp-server@<version>`, which npm caches after the
+first run. mcp-server has no `serve` command yet, so the extension ships a
+small launcher (`dist/localbackend-host.mjs`) that calls its build and host
+functions.
+
+What to know:
+
+- **It runs the repository's code** - transpiled, on your machine. It is
+  never started in Restricted Mode, and it stops with the window, when
+  another system is selected and when it is rebuilt.
+- **Nothing is reachable from outside.** The server listens on `127.0.0.1`
+  only, refuses a request not addressed to loopback, and answers 404 to
+  every request without a random per-start token that only the auth proxy
+  holds; the preview talks to the proxy alone. With `openMode` `external`
+  the app opens in the tab instead - a browser could not reach it.
+- **Only what the folder holds exists.** A class that reads a database
+  table the folder does not define, or calls a class it does not contain,
+  fails in the transpiled runtime - as it would in `abap2ui5-unit`.
+- **`<class>.mock.json` is not applied.** The backend has no way yet to
+  preset an app's attributes before its first `main( )`; the app starts with
+  what its own code initialises, and the output says so when a mock file is
+  there.
+- No ADT behind it: *Check System Connection*, *Run an App from the System*
+  and the agent app tools do not work on this profile.
+- Desktop only.
 
 ## Commands
 

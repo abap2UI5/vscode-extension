@@ -1314,5 +1314,8 @@
   "linterRelease": {
     "version": "0.9.0",
     "commit": "369f4afdd19932df8ba8fb8ee7df227c51029ba8"
+  },
+  "localBackend": {
+    "mcpServer": "1.0.0"
   }
 }
