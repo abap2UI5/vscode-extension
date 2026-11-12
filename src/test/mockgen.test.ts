@@ -95,6 +95,19 @@ test("a root the class does not declare is written empty and reported", () => {
   assert.deepEqual(unknownRoots, ["MS_DDIC"]);
 });
 
+/* An open row: `INCLUDE TYPE zddic_row.` plus `selected TYPE abap_bool`.
+ * The linter marks it `__unknownShape` (non-enumerable) and still lists the
+ * own field. Built by hand: the linter release bundled here (0.9.0) does not
+ * mark open structures yet; later releases do. */
+test("an open row keeps its own fields and is reported once, not per row", () => {
+  const row = Object.defineProperty({ SELECTED: false }, "__unknownShape", {
+    value: true,
+  });
+  const { data, unknownRoots } = mockSkeleton({ MT_ROWS: [row] });
+  assert.deepEqual(data.MT_ROWS, [{ SELECTED: false }, { SELECTED: false }]);
+  assert.deepEqual(unknownRoots, ["MT_ROWS"]);
+});
+
 test("the JSON is what the linter's mock reader parses, with a final newline", () => {
   const text = mockJson(shape());
   assert.ok(text.endsWith("}\n"));

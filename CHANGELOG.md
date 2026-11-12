@@ -4,6 +4,14 @@
 
 The bundled linter moves to v0.9.0.
 
+- **The screenshot finds Playwright 1.64's browser on macOS.** It installs
+  Chrome for Testing (`chrome-mac-arm64` / `chrome-mac-x64`, `Google Chrome
+  for Testing.app`) where it used to install `Chromium.app`; both layouts are
+  looked for now.
+- **Generate Mock Data fills a table row that includes a DDIC type.** A row
+  of `INCLUDE TYPE zddic_row` plus fields of its own became `{}` in every
+  mock row, and the table was reported once per row. The row's own fields
+  are filled now, and the table is reported once.
 - **A local backend that fails to start is gone before the failure is
   shown.** On Windows the launcher was still being killed when the error
   arrived, so an immediate retry could find the old one in its folder.

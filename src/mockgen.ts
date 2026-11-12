@@ -13,7 +13,9 @@
  * table two example rows of its row shape. A root typed by something the
  * class does not declare (a DDIC structure, marked `__unknownShape`) has no
  * fields to invent and is written as an empty object with its name in the
- * report, so the author knows where to fill in by hand.
+ * report, so the author knows where to fill in by hand. An "open" structure
+ * (`INCLUDE TYPE` of such a type plus fields of its own) is reported the
+ * same way, once, with the fields it does declare filled in.
  *
  * `vscode`-free: shape in, JSON text out.
  */
@@ -50,7 +52,8 @@ export function sampleText(field: string, row?: number): string {
 export interface MockSkeleton {
   /** The data, ready for `JSON.stringify`. */
   data: Record<string, unknown>;
-  /** Roots whose shape the class does not declare - written as `{}`. */
+  /** Paths whose shape the class does not (fully) declare - written as `{}`,
+   *  or with only the fields it does declare. */
   unknownRoots: string[];
 }
 
@@ -77,9 +80,11 @@ function sample(
     return rows;
   }
   if (node !== null && typeof node === "object") {
-    if (isUnknown(node)) {
+    /* Unknown, or OPEN: a structure that includes a type the class does
+     * not declare still lists its own fields. Those are filled, the path is
+     * reported once - not once per mock row of the table it belongs to. */
+    if (isUnknown(node) && !unknown.includes(path)) {
       unknown.push(path);
-      return {};
     }
     const out: Record<string, unknown> = {};
     for (const key of Object.keys(node as Record<string, unknown>)) {

@@ -41,6 +41,9 @@ export function findChromium(browsersDir: string): string | undefined {
     ["chrome-win64", "chrome.exe"],
     ["chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"],
     ["chrome-mac-arm64", "Chromium.app", "Contents", "MacOS", "Chromium"],
+    // Playwright 1.64 on macOS installs Chrome for Testing in place of Chromium.app
+    ["chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"],
+    ["chrome-mac-x64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"],
   ];
   for (const build of builds) {
     for (const layout of layouts) {
