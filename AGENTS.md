@@ -112,8 +112,10 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/unitrunner.ts` | `vscode`-free: what "Run Unit Tests (No System)" decides - the runner (mcp-server's `scripts/ci-unit.mjs` from a checkout under `mcp.reposRoot`, else `npx -p @abap2ui5/mcp-server abap2ui5-unit`), its arguments (`src` or the class's folder, `--class` per class, `--home`, `--json` for the Testing view), the shell-quoted terminal line, the banner |
 | `src/unitdiscovery.ts` | `vscode`-free: the test classes (`CLASS … FOR TESTING`) and test methods (`METHODS … FOR TESTING`) of a `*.clas.testclasses.abap` with the range each is declared at, plus the fixtures (`setup`, `class_setup`, …) - read off the blanked source, never the raw text |
 | `src/unitresults.ts` | `vscode`-free: the runner's `--json` report as one result per test method (`parseUnitReport` - a report that is empty, cut off or not the runner's is ONE error result, never an exception) and what it says about each known method (`outcomesFor` - a method the report does not name is "not run", never "passed": the runner stops at the first failure). The report carries NO source position |
-| `src/report2cloud.ts` | `vscode`-free: what "Migrate Classic Report to abap2UI5" decides - where abap-cloud-gui's converter CLI is - report2UI5's `tools/report2ui5/cli.mjs`, else 1.0.0's `tools/report2cloud/cli.mjs` (`cliIn`) - (`abap2ui5.report2cloud.path`, then `ABAP_CLOUD_GUI_HOME`, then a `cloudGui` directory under `mcp.reposRoot`; an explicit answer that does not hold is reported, never skipped), the program and class names the CLI derives, its arguments, what its exit code and output mean (0 converted, 2 refused with `file:row:col - reason` lines, 1 wrong call, a missing `npm ci`), and the range a refusal underlines |
-| `src/migratereport.ts` | The command's plumbing: report pick (explorer/editor uri, active `.prog.abap`, open dialog), class-name prompt, output folder, the overwrite question, the CLI through `childproc.run` with VS Code's own Node, refusals as diagnostics on the report, *Write Partial Result*, opening the class beside its migration report |
+| `src/report2cloud.ts` | `vscode`-free: what "Migrate Classic Report to abap2UI5" decides - where abap-cloud-gui's converter CLI is - report2UI5's `tools/report2ui5/cli.mjs`, else 1.0.0's `tools/report2cloud/cli.mjs` (`cliIn`) - (`abap2ui5.report2cloud.path`, then `ABAP_CLOUD_GUI_HOME`, then a `cloudGui` directory under `mcp.reposRoot`, then the copy "Install Report Converter" installed - not handed in in Restricted Mode; an explicit answer that does not hold is reported, never skipped), the program and class names the CLI derives, its arguments, what its exit code and output mean (0 converted, 2 refused with `file:row:col - reason` lines, 1 wrong call, a missing `npm ci`), and the range a refusal underlines |
+| `src/report2ui5install.ts` | `vscode`-free: what "Install Report Converter" does - the plan out of the `src/data/report2ui5.json` pin (codeload's tarball of the pinned abap-cloud-gui commit, then each npm package of the parser's closure; root `<storage>/report2ui5/<commit>/` with `tools/...` and `node_modules/...`), the verification before anything is written (each pinned file's size and SHA-256 of its unpacked content - the tarball's own bytes are not pinned, GitHub does not promise byte-stable archives; npm's SRI `integrity` of each package before it is read), the reading of the archives through an injected `tar` `Parser` (only the pinned files of the source tarball, refusing `..`, absolute paths, backslashes, links at or above a pinned file, any link in a package, duplicates, missing files), and the atomic finish (a staging directory renamed into place, older commits removed after) |
+| `scripts/generate-report2ui5.mjs` | Regenerates `src/data/report2ui5.json` and package.json's `report2ui5Release` from abap-cloud-gui (a commit: `--ref`, a checkout's HEAD, or main's tip; its codeload tarball, or `--tarball <file>` - a `git archive` of the commit does as well): the CLI's import closure read by esbuild out of the archive, each file with its size and SHA-256, and the `@abaplint/core` closure out of the archive's own package-lock.json; `--check` fails when either file is stale |
+| `src/migratereport.ts` | The command's plumbing: report pick (explorer/editor uri, active `.prog.abap`, open dialog), the installed copy's root (none in Restricted Mode) for the ladder's last rung, *Install* before *Configure…* when nothing is configured, "Install Report Converter" itself (refused in Restricted Mode; `fetch` with progress, cancellation, a timeout and a size cap; `tar` from `dist/rendergate-tar.js` through `loadTar`), class-name prompt, output folder, the overwrite question, the CLI through `childproc.run` with VS Code's own Node, refusals as diagnostics on the report, *Write Partial Result*, opening the class beside its migration report |
 | `src/localbackend.ts` | `vscode`-free: what the "Local (transpiled)" system decides - the program (`resolveLocalHost`: an mcp-server checkout under `mcp.reposRoot`, else `npx --yes -p @abap2ui5/mcp-server@<localBackend.mcpServer> node <launcher>`), the folder it collects (`projectRootFor`, `sourceFolderFor`: `.abapgit.xml`'s STARTING_FOLDER, else `src`, else the project; a class outside it is built from its own folder), the node-runtime release (`runtimePinFor`, the `abaplint.jsonc` pin from 1.145.0 on), the launcher's environment, its one machine-readable stdout line (`parseLauncherLine`), the start with readiness, timeout and process-tree kill (`startLocalHost`), when F9 may reuse the running host (`sourceFingerprint`, `decideStart`), the proxy's `LocalBackendAuth` (the per-start token as an `AuthStrategy` header), and the honest note about `<class>.mock.json` (`mockNote`) |
 | `src/localbackendview.ts` | Its plumbing (desktop only): F9 on the local profile (`runLocal`: Restricted Mode refusal, the class's file, saving dirty documents of the folder, build + (re)start with progress, the proxy pointed at the host, the preview without an activation watch), `rebuildAndReload` for a save in the built folder and Ctrl+F3, stopping on a system switch and with the window, the "abap2UI5 Local Backend" output channel |
 | `src/localbackend-host.mjs` | The launcher the local profile starts - NOT bundled, copied to `dist/` (and `dist-test/`) by `esbuild.js`: imports mcp-server's `collectObjects`/`writeObjects` (`scripts/ci-unit.mjs`), `buildNpm` (`lib/npm-backend.mjs`) and `startHost` (`lib/npm-host.mjs`) from the pinned package, puts a constant-time token check in front of the host, prints `ABAP2UI5_LOCAL_READY {...}` or `ABAP2UI5_LOCAL_FAILED {...}`, and exits when its stdin closes |
@@ -148,7 +150,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/agentsetupview.ts` | The command's plumbing, shared by both entries: the workspace folder, the modal confirmation listing what is written and skipped, a re-plan right before writing (a folder that changed under the dialog is refused), the writes through `workspace.fs`, the "abap2UI5 Agent Setup" output with the next steps |
 | `scripts/coverage.mjs` | `npm run test:coverage`: runs the suite with `NODE_V8_COVERAGE` over the build of `node esbuild.js --tests --coverage` and prints a per-module line table for `src/` (into `$GITHUB_STEP_SUMMARY` in CI); the arithmetic - source-map segments, V8 ranges, the table - is `scripts/lib/coverage.mjs`, pinned by `src/test/coverage.test.ts` |
 | `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` (the template's `files.shared` and `files.named`, BOM stripped, plus its `template.json`) from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
-| `src/rendergate-tar.ts` | The entry of the `dist/rendergate-tar.js` bundle (`tar` alone) `rendergate.ts` loads on first use |
+| `src/rendergate-tar.ts` | The entry of the `dist/rendergate-tar.js` bundle (`tar` alone - `x`, and the `Parser` it unpacks with, which "Install Report Converter" reads its archives with) `rendergate.ts` loads on first use (`loadTar`, exported for `migratereport.ts`) |
 | `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot, and the `*_HOME` variable each checkout is handed to mcp-server as (`checkoutHomes`) |
 | `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/mcp-server's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
 | `scripts/generate-settings.mjs` | Regenerates the settings table in `README.md` from `contributes.configuration`; `--check` fails when it is stale (`src/test/settings.test.ts`) |
@@ -174,11 +176,11 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/test/` | `node --test` suite over exactly those modules |
 | `src/test/apifloor.test.ts` | Every `contributes` key classified with the VS Code release it is stable in: none above `engines.vscode`, and the newest ones behind a named runtime guard (ROADMAP T15) |
 | `src/test/desktop/` | The `@vscode/test-electron` smoke test: `suite.ts` runs inside a real VS Code, `runner.mjs` writes the throwaway workspace and launches it |
-| `scripts/lib/snapshot.mjs` | The one lifecycle the three snapshot generators share: upstream read (local checkout or GitHub raw), shape check, `--check` byte-compare, write |
+| `scripts/lib/snapshot.mjs` | The one lifecycle the snapshot generators share: upstream read (local checkout or GitHub raw), shape check, `--check` byte-compare, write |
 | `snippets/` | ABAP snippets contributed to the editor |
 | `media/` | Icons: `icon.svg` (panel), `icon-light/dark.svg` (preview tab), `icon.png` (gallery) |
 | `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js` (plus `src/rendergate-tar.ts` into `dist/rendergate-tar.js` and `src/agent-client.ts` into `dist/agent-client.js`, both loaded on first use), `src/web/extension.ts` into `dist/web/extension.js`, and `src/test/` into `dist-test/` (with its own `agent-client.js`); copies the linter's data files and the extension's own two runtime-read snapshots (`app-template.json`, `client-api.json`) next to the bundles |
-| `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the five weekly `bump-*.yml` callers share |
+| `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the six weekly `bump-*.yml` callers share |
 
 `dist/`, `dist-test/`, `node_modules/` and `*.vsix` are build output and are
 not committed.
@@ -194,7 +196,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `localbackend.ts`, `report2cloud.ts`, `report.ts`, `roundtrips.ts`, `adtwrite.ts`, `adtmessages.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
+`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `localbackend.ts`, `report2cloud.ts`, `report2ui5install.ts`, `report.ts`, `roundtrips.ts`, `adtwrite.ts`, `adtmessages.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts` with its parts `proxyadt.ts`, `proxyhtml.ts`, `proxybody.ts` and `proxyheaders.ts`, `authstrategy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` with its parts `webviewshared.ts`, `webviewpreview.ts`,
 `webviewpanels.ts` and `webviewwelcome.ts` (HTML strings only — the state they render is
@@ -813,6 +815,35 @@ Facts an agent cannot see from the code but will trip over:
   checkout (it needs the network and git; `ABAP2UI5_LOCAL_BACKEND_WORKSPACE`
   keeps the runtime install between runs). When mcp-server ships a `serve`
   bin, switch to it and drop the deep imports.
+- **The report converter is installed from a PINNED COMMIT, never a branch.**
+  abap-cloud-gui publishes report2UI5 neither on npm nor as a release
+  bundle, so "Install Report Converter" downloads codeload's tarball of one
+  commit (`https://codeload.github.com/abap2UI5-addons/abap-cloud-gui/tar.gz/<sha>`)
+  and the npm closure of `@abaplint/core` as that commit's package-lock.json
+  resolves it. `src/data/report2ui5.json` records the commit, the CLI's
+  files with the size and SHA-256 of each one's unpacked content, and each
+  package's url and `integrity`; package.json's `report2ui5Release` repeats
+  the commit as the
+  record of which artefact a release installs (`report2ui5.test.ts` holds
+  the two together and runs the install's shape check over the snapshot).
+  `scripts/generate-report2ui5.mjs` writes both, `npm run report2ui5:check`
+  compares them with main (network), `bump-report2ui5.yml` moves the pin
+  weekly through a PR - the converter a user runs changes only with a
+  release of this extension. The generator needs `npm ci` (it reads the
+  archive with `tar` and the import graph with esbuild, executing nothing of
+  it) and so does that bump's regenerate step. Do NOT pin the tarball's
+  own bytes: GitHub does not promise byte-stable compression of its
+  archives, so a recorded archive checksum can stop matching codeload at
+  any time and every install would refuse. What is pinned is the CONTENT -
+  which is also why the snapshot can be generated offline from
+  `git archive --format=tar.gz <commit>` of a checkout (`--tarball`). The
+  install verifies each package before it reads it and each pinned file
+  before anything is written, unpacks only the pinned files, refuses links and traversal, and renames a complete staging
+  directory into `<globalStorage>/report2ui5/<commit>/`; it is the LAST rung
+  of the migrate command's resolution (setting > `ABAP_CLOUD_GUI_HOME` >
+  repos root > installed) and is neither downloaded nor run in Restricted
+  Mode. `tar` is not bundled twice: the install reads through the `Parser`
+  of `dist/rendergate-tar.js`.
 - **The weekly bump workflows share one implementation.**
   `.github/workflows/bump-snapshot.yml` holds the shape (regenerate → diff →
   gate → open a pull request) and is called through `workflow_call`; the five

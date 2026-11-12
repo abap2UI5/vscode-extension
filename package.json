@@ -286,6 +286,11 @@
         "icon": "$(arrow-swap)"
       },
       {
+        "command": "abap2ui5.installReportConverter",
+        "category": "abap2UI5",
+        "title": "Install Report Converter"
+      },
+      {
         "command": "abap2ui5.fixAll",
         "category": "abap2UI5",
         "title": "Fix All View Findings in This File"
@@ -508,6 +513,10 @@
         },
         {
           "command": "abap2ui5.migrateReport",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.installReportConverter",
           "when": "!isWeb"
         },
         {
@@ -1147,7 +1156,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose converter *\"abap2UI5: Migrate Classic Report to abap2UI5\"* runs - report2UI5 in `tools/report2ui5`, or report2cloud in `tools/report2cloud` in a checkout of the addon's 1.0.0; it is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose.\n\nIt decides which program is started, so it is read from your user settings only."
+          "markdownDescription": "Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose converter *\"abap2UI5: Migrate Classic Report to abap2UI5\"* runs - report2UI5 in `tools/report2ui5`, or report2cloud in `tools/report2cloud` in a checkout of the addon's 1.0.0; it is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose, or else the copy *\"abap2UI5: Install Report Converter\"* downloaded.\n\nIt decides which program is started, so it is read from your user settings only."
         }
       }
     },
@@ -1290,6 +1299,8 @@
     "app-template:check": "node scripts/generate-app-template.mjs --check",
     "repo-dirs": "node scripts/generate-repo-dirs.mjs",
     "repo-dirs:check": "node scripts/generate-repo-dirs.mjs --check",
+    "report2ui5": "node scripts/generate-report2ui5.mjs",
+    "report2ui5:check": "node scripts/generate-report2ui5.mjs --check",
     "agent-vendor": "node scripts/vendor-agent.mjs",
     "agent-vendor:check": "node scripts/vendor-agent.mjs --check",
     "settings": "node scripts/generate-settings.mjs",
@@ -1317,5 +1328,8 @@
   },
   "localBackend": {
     "mcpServer": "1.0.0"
+  },
+  "report2ui5Release": {
+    "commit": "78358275fdaf1452d3948d38eef9103586bbf058"
   }
 }

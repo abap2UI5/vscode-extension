@@ -37,6 +37,16 @@ The bundled linter moves to v0.9.0.
   chain written `)->A( n = ...`, the view added attributes but refused to
   remove one, calling the layout unusual. ABAP does not care about case,
   and neither does the removal now.
+- **Migrate Classic Report without a checkout.** The converter used to
+  need a `git clone` of abap-cloud-gui, an `npm ci` and a setting before the
+  first run. *Install Report Converter* - offered by the migrate command
+  when nothing is configured - now downloads it in one click: the addon at a
+  commit this release pins, of which only the converter's own files are
+  unpacked, each checked against its recorded size and SHA-256, with the
+  exact parser packages the addon's own lockfile names, each checked
+  against its integrity, into the extension's storage. A checkout you configured still wins, and one that
+  does not hold is still reported rather than skipped. Restricted Mode
+  neither downloads nor runs the installed copy.
 - **Migrate Classic Report works with a current abap-cloud-gui checkout.**
   The addon renamed its converter from report2cloud to report2UI5 after its
   1.0.0 and moved it to `tools/report2ui5`; the command looked only for

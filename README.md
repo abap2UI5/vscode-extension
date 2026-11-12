@@ -196,17 +196,31 @@ methods, `write( )`, `alv( )` and `message( )` as calls. The converter is the
 addon's own report2UI5 (`tools/report2ui5` in that repository - called
 report2cloud, in `tools/report2cloud`, up to the addon's 1.0.0; a checkout of
 either shape works), the converter behind the MCP server's `migrate_report`
-tool. It is not on npm, so the command runs it from a checkout of the addon:
+tool. It is not on npm - and it needs no checkout either: the first time,
+the command offers *Install* (or run *Install Report Converter* yourself),
+one click that downloads the converter at the abap-cloud-gui commit this
+extension release pins, unpacks only the converter's own files from it -
+each checked against the size and SHA-256 recorded for it - and every npm
+package of its parser, each checked against its lockfile integrity, into
+the extension's storage (about 2 MB downloaded, 8 MB on disk). The
+pinned commit moves with extension releases, never with the addon's branch.
+Nothing is downloaded or run from there in Restricted Mode.
+
+A checkout of your own still wins over the installed copy, in this order:
+`abap2ui5.report2cloud.path`, then the `ABAP_CLOUD_GUI_HOME` environment
+variable the MCP server reads, then an abap-cloud-gui folder under
+`abap2ui5.mcp.reposRoot`, and only then the installed copy. A checkout you
+named that does not hold the converter is reported as such - the command
+does not quietly use the installed copy instead. A checkout of your own is
+made with:
 
 ```sh
 git clone https://github.com/abap2UI5-addons/abap-cloud-gui
 cd abap-cloud-gui && npm ci
 ```
 
-and `abap2ui5.report2cloud.path` pointing at that folder (or the
-`ABAP_CLOUD_GUI_HOME` environment variable the MCP server reads). Without
-one the command says so and offers *Configure…*; a checkout without its
-`npm ci` gets *Run npm ci*. It runs with VS Code's own Node.js.
+A checkout without its `npm ci` gets *Run npm ci*. The converter runs with
+VS Code's own Node.js.
 
 1. It asks for the class name - the converter's default, `zcl_` + the report
    name, is preselected - and whether to write next to the report or into
@@ -338,6 +352,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Generate Mock Data for This App | `abap2ui5.generateMock` |  |
 | Run Unit Tests (No System) | `abap2ui5.runUnitTests` |  |
 | Migrate Classic Report to abap2UI5 | `abap2ui5.migrateReport` |  |
+| Install Report Converter | `abap2ui5.installReportConverter` |  |
 | Fix All View Findings in This File | `abap2ui5.fixAll` |  |
 | Install Render Gate | `abap2ui5.installRenderGate` |  |
 | Refresh the App List | `abap2ui5.refreshApps` |  |
@@ -396,7 +411,7 @@ when the two drift apart.
 | `abap2ui5.agent.confirmActions` | `true` | Ask before every acting step of the **abap2UI5 System** MCP server's app tools (see `abap2ui5.agent.enableAppTools`): each event an AI agent fires with `app_act`, and the first `app_start` of a class, opens a dialog naming the system, the class, the event, its arguments and the values sent with it - **Allow**, **Allow for This Session** (that class on that system, until the window closes) or **Deny**. Deny, or no answer within two minutes, tells the agent that you declined, and nothing is sent. On by default. User settings only: a workspace cannot turn it off. |
 | `abap2ui5.mcp.command` | `""` | Command that starts the MCP server. Leave empty for the default: a local checkout under `abap2ui5.mcp.reposRoot` when present, otherwise `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp`. |
 | `abap2ui5.mcp.reposRoot` | `""` | Folder containing the checkouts the MCP server orchestrates (`abap2UI5`, `samples-controls`, `samples`, `samples-stack`, and optionally `linter`, `mcp-server`, `abap-cloud-gui`). The matching `A2UI5_HOME` / `SAMPLES_CONTROLS_HOME` / `SAMPLES_HOME` / `SAMPLES_STACK_HOME` / `AI_VIEW_CHECK_HOME` / `ABAP_CLOUD_GUI_HOME` environment variables are passed to the server, and local `mcp-server` / `linter` checkouts found here are preferred over downloading via npx. |
-| `abap2ui5.report2cloud.path` | `""` | Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose converter *"abap2UI5: Migrate Classic Report to abap2UI5"* runs - report2UI5 in `tools/report2ui5`, or report2cloud in `tools/report2cloud` in a checkout of the addon's 1.0.0; it is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose. |
+| `abap2ui5.report2cloud.path` | `""` | Folder of an [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) checkout (with `npm ci` done) whose converter *"abap2UI5: Migrate Classic Report to abap2UI5"* runs - report2UI5 in `tools/report2ui5`, or report2cloud in `tools/report2cloud` in a checkout of the addon's 1.0.0; it is not on npm. Leave empty to use the checkout `ABAP_CLOUD_GUI_HOME` names, the variable the MCP server's `migrate_report` reads for the same purpose, or else the copy *"abap2UI5: Install Report Converter"* downloaded. |
 <!-- END GENERATED SETTINGS -->
 
 ## Development
