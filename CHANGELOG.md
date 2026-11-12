@@ -4,6 +4,15 @@
 
 The bundled linter moves to v0.9.0.
 
+- **Log on to SAP BTP ABAP Environment with a service key.** A system whose
+  profile says `"auth": "oauth"` logs on with OAuth 2.0: run *Load Service
+  Key* once and pick the instance's service key, and F9 opens your browser
+  at the instance's logon page. The preview, the inspector, the traffic log
+  and the MCP tools then work through the extension's proxy with the token,
+  which is renewed before it runs out. When it cannot be renewed any more,
+  the preview says so and *Log On Again* opens the browser again. The key
+  and the refresh token are kept in VS Code's secret storage only. Not yet
+  tried against a real ABAP Environment - please report how it goes.
 - **Push and Activate a class that lives on disk.** Ctrl+F3 in an app class
   of an abapGit checkout used to do nothing useful - only ADT documents could
   be activated, through another extension. It now writes the class and its

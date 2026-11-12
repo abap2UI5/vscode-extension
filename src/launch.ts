@@ -696,6 +696,11 @@ export function watchProxyStatus(session: Session): void {
         if (pick !== offer.button || !origin) {
           return;
         }
+        if (offer.button === "Load Service Key") {
+          // the command restarts a proxy on this origin itself
+          void vscode.commands.executeCommand("abap2ui5.loadServiceKey");
+          return;
+        }
         if (offer.button === "Choose Client Certificate") {
           // the command restarts a proxy on this origin itself
           void vscode.commands.executeCommand("abap2ui5.chooseClientCertificate");

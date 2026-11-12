@@ -399,6 +399,14 @@ test("strategyFor: the profile's auth picks the case, a missing auth is basic, a
       asked.push(`cert ${origin}`);
       return { cert: "c", key: "k" };
     },
+    oauthLogon: async (origin: string) => {
+      asked.push(`oauth ${origin}`);
+      return {
+        key: { systemUrl: origin, uaaUrl: "https://uaa", clientId: "c", clientSecret: "s" },
+        refreshToken: "r",
+        post: async () => ({ status: 500, body: "" }),
+      };
+    },
   };
   const basic = await strategyFor({}, "https://a", deps);
   assert.ok(basic instanceof BasicAuthStrategy);
@@ -411,9 +419,11 @@ test("strategyFor: the profile's auth picks the case, a missing auth is basic, a
   const cancelled = {
     basicCredentials: async () => undefined,
     clientCertificate: async () => undefined,
+    oauthLogon: async () => undefined,
   };
   assert.equal(await strategyFor({}, "https://a", cancelled), undefined);
   assert.equal(await strategyFor({ auth: "certificate" }, "https://a", cancelled), undefined);
+  assert.equal(await strategyFor({ auth: "oauth" }, "https://a", cancelled), undefined);
   // every kind a profile may name has a case
   for (const kind of AUTH_KINDS) {
     assert.ok(await strategyFor({ auth: kind }, "https://a", deps), kind);
