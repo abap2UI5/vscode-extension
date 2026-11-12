@@ -149,6 +149,11 @@
         "title": "Choose Client Certificate"
       },
       {
+        "command": "abap2ui5.loadServiceKey",
+        "category": "abap2UI5",
+        "title": "Load Service Key"
+      },
+      {
         "command": "abap2ui5.forgetTrustedCertificates",
         "category": "abap2UI5",
         "title": "Forget Trusted Certificates"
@@ -490,6 +495,10 @@
         },
         {
           "command": "abap2ui5.chooseClientCertificate",
+          "when": "!isWeb"
+        },
+        {
+          "command": "abap2ui5.loadServiceKey",
           "when": "!isWeb"
         },
         {
@@ -877,13 +886,15 @@
                 "type": "string",
                 "enum": [
                   "basic",
-                  "certificate"
+                  "certificate",
+                  "oauth"
                 ],
                 "enumDescriptions": [
                   "User and password, asked for once per host and kept in the VS Code SecretStorage (the default).",
-                  "An X.509 client certificate (.pfx/.p12, or PEM certificate and key) you choose per host with \"abap2UI5: Choose Client Certificate\"; the system maps it to your user. Only the file path (machine-local) and the passphrase (SecretStorage) are stored."
+                  "An X.509 client certificate (.pfx/.p12, or PEM certificate and key) you choose per host with \"abap2UI5: Choose Client Certificate\"; the system maps it to your user. Only the file path (machine-local) and the passphrase (SecretStorage) are stored.",
+                  "OAuth 2.0 with a service key (SAP BTP ABAP Environment): load the instance's service key per host with \"abap2UI5: Load Service Key\", then log on in your browser. The key and the refresh token are kept in the VS Code SecretStorage, the access token in memory only."
                 ],
-                "description": "How the auth proxy logs on to this system. A host you set to \"certificate\" in your user settings keeps it when a workspace lists the same host without it."
+                "description": "How the auth proxy logs on to this system. A host you set to \"certificate\" or \"oauth\" in your user settings keeps it when a workspace lists the same host without it."
               }
             },
             "additionalProperties": false

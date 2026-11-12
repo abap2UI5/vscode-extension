@@ -1,6 +1,7 @@
 # Logon beyond basic authentication - design note (T06a)
 
-Status: **decided** (section 6); T06c started with the interface and the certificate. It
+Status: **decided** (section 6); T06c started with the interface and the certificate;
+OAuth with a service key (3.3) is implemented too. It
 answers T06a in `ROADMAP.md`: which mechanisms, in which order, how each gets,
 stores, renews and sends its secret, and what `AuthStrategy` (T06b) must gain
 for T06c. No SAP system was available: every unconfirmed statement about the
@@ -199,6 +200,11 @@ cookie it buys is stored as in 3.1.
 
 ### 3.3 OAuth 2.0 with a service key - BTP ABAP Environment (`auth: "oauth"`)
 
+**Implemented** (see "What was built for OAuth" at the end of this section).
+Everything marked *(verify)* below is still unverified: no ABAP Environment
+was available, the flow is proven against a local fake UAA and a fake
+system only.
+
 **SAP side.** A service key of the ABAP Environment instance contains the
 system URL (`url`) and a `uaa` block (`url`, `clientid`, `clientsecret`).
 Tools authorize with the authorization-code grant against
@@ -258,6 +264,58 @@ and must never be logged. A malicious workspace must not be able to point
 the logon at its own UAA: the UAA URL comes only from the key the user
 imported, never from `abap2ui5.systems`. The client secret grants a logon
 flow, not a session - still secret-store only.
+
+**What was built for OAuth.** `oauth.ts` (decisions, the strategy),
+`oauthflow.ts` (listener, token POST, the flow) and `oauthprompt.ts`
+(plumbing); one `case "oauth"` in `strategyFor`. Where it differs from the
+plan above, or decides what the plan left open:
+
+- The command is *"abap2UI5: Load Service Key"* (file picker only, no paste
+  box). Accepted shapes: the key itself (`url`, `uaa.url`, `uaa.clientid`,
+  `uaa.clientsecret`), the same wrapped in `credentials` as the Cloud
+  Foundry CLI prints it *(verify)*, and `endpoints.abap` as the system URL
+  when `url` is missing *(verify)*; https only; anything else is refused
+  with a sentence that quotes no value. A key for another host than the
+  launch URL is used only after a modal question.
+- Stored: ONE entry `abap2ui5.oauth:<origin>` holding the whole key as
+  loaded and the refresh token (no new key name; *Clear Stored SAP
+  Credentials* deletes it with the others). Loading a key drops the old
+  refresh token.
+- The redirect URI is `http://127.0.0.1:<random port>/<randomBytes(16) hex>`.
+  Whether XSUAA accepts it for the instance's client is still *(verify)*;
+  the port is not configurable, because nothing in this note shows a fixed
+  one is needed - if a real UAA insists on one, a machine-scoped setting is
+  the follow-up. On a Remote host the URI goes through `env.asExternalUri`
+  *(verify)*; a forwarded URI that is not loopback is refused by the
+  listener's Host check, i.e. unsupported.
+- Client authentication at the token endpoint is HTTP basic with client id
+  and secret unencoded, as the existing tools do; strict RFC 6749 2.3.1
+  form-encoding before base64 was not taken *(verify for a secret with
+  reserved characters)*.
+- Renewal: at 80 % of `expires_in`, a minute before expiry at the latest,
+  single-flight in `prepare( )`. A refusal by the UAA (`invalid_grant`,
+  `invalid_client`) rejects with `InteractiveLogonRequired` and forgets the
+  stored refresh token, so *Log On Again* opens the browser; a network
+  failure or a 5xx keeps a still-valid token, and with an expired one fails
+  that request (502) without stopping the proxy. A 401 from the system
+  triggers one renewal (`ignore`); a 401 to the renewed token before the
+  system accepted it once is `rejected` (*Load Service Key*); without a
+  refresh token a 401 is `expired`.
+- F9 and the connection check renew silently with the stored refresh token
+  and open the browser only without one; the MCP path never does and gets
+  `oauthLogonNeeded` (naming F9, or *Load Service Key* when no key is
+  loaded).
+- `report.ts` additionally redacts `code`, `code_verifier`, `state` and
+  `redirect_uri` in query strings and form bodies, `code` and the
+  camel-case stored names in JSON, and the callback's path segment.
+- Not done: a *Logon* step with the token's age in the connection check
+  (the log line says the lifetime); `classifyAnswer` for a redirect to the
+  UAA (a 3xx is handed on as the system sent it).
+
+Still unverified: which host of the instance serves `/sap/bc/http/...`
+and whether it accepts the bearer token (the token is sent to the launch
+URL's origin); XSUAA's lifetimes for the ABAP Environment; whether
+`openExternal` keeps the authorize URL's encoding on every platform.
 
 ### 3.4 X.509 client certificate (`auth: "certificate"`)
 

@@ -61,11 +61,14 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/proxybody.ts` | `vscode`-free: reading a response body in the proxy - `describeRejection` (redacted) and its sniff limit, `decodeBody`, `withUtf8Charset` |
 | `src/proxyheaders.ts` | `vscode`-free: the proxy's header-level rules, free of state - the token segment and `TOKEN_COOKIE`, the constant-time `tokensEqual`, `isLoopbackHost`, `rewriteSetCookie`, `rebasedReferer`, `requestHostname`, the hop-by-hop list |
 | `src/authstrategy.ts` | `vscode`-free: how the proxy logs a request on to the system - `AuthStrategy` (the headers for every outgoing request; optionally `prepare( )` awaited before each request, cookies merged into the client's `Cookie` header with `takeSetCookie` for a sliding session, TLS options for the handshake, `classifyAnswer` for a redirect to the IdP or a logon form; what a 401 means - `rejected` / `expired` / `ignore` - and the `texts` the breaker answers with) and its implementations `BasicAuthStrategy` (the old breaker sentences verbatim, `BASIC_TEXTS`) and `CertificateAuthStrategy` (no header, the client certificate in the TLS options); the secret sits in a `#private` field that neither serializes nor prints. `InteractiveLogonRequired` is a logon that needs the user |
-| `src/logon.ts` | `vscode`-free: `strategyFor(profile, origin, deps)` - the ONE place a profile's `auth` becomes a strategy, one `case` per mechanism, the secrets from injected `deps`; `secretKeysFor` (every mechanism's per-origin SecretStorage key, `session`/`oauth` reserved); the refusal for a flow without a UI (`certificateNeeded`) |
+| `src/logon.ts` | `vscode`-free: `strategyFor(profile, origin, deps)` - the ONE place a profile's `auth` becomes a strategy, one `case` per mechanism, the secrets from injected `deps`; `secretKeysFor` (every mechanism's per-origin SecretStorage key, `session` reserved); the refusals for a flow without a UI (`certificateNeeded`, `oauthLogonNeeded`) |
+| `src/oauth.ts` | `vscode`-free: OAuth 2.0 with a service key (`auth: "oauth"`, SAP BTP ABAP Environment) as decisions without I/O - the service key shapes accepted (`parseServiceKey`: `url` + `uaa.url`/`clientid`/`clientsecret`, the `credentials` wrapper, `endpoints.abap`; https only) and `keyOriginMismatch`, the SecretStorage entry (`StoredOAuth`: the whole key and the refresh token), PKCE `S256`, `state` and the authorize URL, `readCallback` (the state compared in constant time), the token requests over an injected `TokenPost` and what each answer means (`parseTokenAnswer`: `refused` / `client` / `transient` / `malformed`), `refreshDueAt` (80 % of the lifetime, a minute before the end at the latest), and `OAuthStrategy` - the bearer, the single-flight renewal in `prepare( )`, `InteractiveLogonRequired` when the UAA refuses it, one renewal after a 401 and `rejected` after a second |
+| `src/oauthflow.ts` | `vscode`-free: the I/O of that logon - the loopback callback listener (`startCallbackListener`: `127.0.0.1`, a random port, a `randomBytes(16)` path, non-loopback `Host` refused, closed after the first callback on its path, timeout and abort), `postForm` (node `http`/`https`, capped, timed out) and `logOnInBrowser`, the authorization-code flow over an injected `openBrowser` |
+| `src/oauthprompt.ts` | Its plumbing: "Load Service Key" (file picker, the mismatch question, the key into `abap2ui5.oauth:<origin>`), `ensureOAuthLogon` for `strategyFor` (renewal with the stored refresh token, else the browser through `env.openExternal` with a cancellable notification, one per origin at a time; `mayAsk: false` never opens a browser and throws `oauthLogonNeeded`) |
 | `src/logonprompt.ts` | Its plumbing: `strategyForSystem` (basic via `ensureCredentials`, the certificate from `globalState` + SecretStorage + file), the file picker and passphrase prompt behind "Choose Client Certificate", `reportLogonFailure` |
 | `src/clientcert.ts` | `vscode`-free: the client certificate of `auth: "certificate"` as data - the remembered choice per origin (`choiceFor` / `withChoice`, a PATH, read tolerantly), `loadClientCertificate` (reads the files, checks passphrase, key match and expiry - `notAfter` of a PKCS#12 through the secure context - warns 14 days ahead), and `clientCertificateRefusal`, the sentence for a server's TLS alert about the client side of the handshake |
 | `src/systems.ts` | Named launch profiles, the active-system state, credentials per host |
-| `src/systemprofile.ts` | `vscode`-free: what a `systems` entry may say beyond name and url - `role`, `minUi5`, `distribution`, `auth` (`AUTH_KINDS`: `basic`, `certificate`) - parsed tolerantly (`profileFieldsOf`; what was ignored is `profileNotes`, logged once per change of the setting), `production` and a non-basic `auth` kept from the settings scopes a workspace's list shadows (`tightenRoles`, `tightenAuth`), the status bar's role text, and the detected UI5 version written back into an entry (`withDetectedUi5`) |
+| `src/systemprofile.ts` | `vscode`-free: what a `systems` entry may say beyond name and url - `role`, `minUi5`, `distribution`, `auth` (`AUTH_KINDS`: `basic`, `certificate`, `oauth`) - parsed tolerantly (`profileFieldsOf`; what was ignored is `profileNotes`, logged once per change of the setting), `production` and a non-basic `auth` kept from the settings scopes a workspace's list shadows (`tightenRoles`, `tightenAuth`), the status bar's role text, and the detected UI5 version written back into an entry (`withDetectedUi5`) |
 | `src/checktarget.ts` | The settings half of a desktop check's options: the four `viewCheck` settings with the active system's profile laid over them (`checkSettings`, the precedence itself is `settingsForSystem` in `configcore.ts`), and the change notice / generation the view check and the inline annotations re-check on |
 | `src/viewcheck.ts` | Static view checks via abap2UI5-linter: live + on-save + on-demand + workspace, findings as diagnostics. The module everyone imports from; itself it holds the per-document check (`checkDocument`, its debounce timers and run generations, `findingsNow`) and the registration, and re-exports what lives in the four `viewcheck*` modules below |
 | `src/viewcheckoptions.ts` | The view check's questions about a DOCUMENT (VS Code plumbing): `isCheckable` with its per-version memo, `hasOwnView`, `pickDocument`, the directory a repo config is discovered from, the options and the baseline root governing a file |
@@ -199,7 +202,7 @@ not committed.
 `configcore.ts` (which must stay free of `path` too - the web bundle's shim
 does not implement it), `renamewires.ts`, `extractview.ts`, `annotations.ts`, `openlink.ts`,
 `abbreviation.ts`, `connectcheck.ts`, `certtrust.ts`, `handlerstub.ts`, `mockgen.ts`, `agentsetup.ts`,
-`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `localbackend.ts`, `report2cloud.ts`, `report2ui5install.ts`, `report.ts`, `logon.ts`, `clientcert.ts`, `roundtrips.ts`, `adtwrite.ts`, `adtmessages.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
+`unitrunner.ts`, `unitdiscovery.ts`, `unitresults.ts`, `localbackend.ts`, `report2cloud.ts`, `report2ui5install.ts`, `report.ts`, `logon.ts`, `clientcert.ts`, `oauth.ts`, `oauthflow.ts`, `roundtrips.ts`, `adtwrite.ts`, `adtmessages.ts`, `baselinefile.ts`, `repolayout.ts`, `systemprofile.ts`, `web/linterdata.ts`, `web/startup.ts`,
 `proxy.ts` with its parts `proxyadt.ts`, `proxyhtml.ts`, `proxybody.ts` and `proxyheaders.ts`, `authstrategy.ts`, `previewcore.ts`, `activationwatch.ts`, `languagecore.ts`,
 `checkcore.ts`, `compat.ts` and `webview.ts` with its parts `webviewshared.ts`, `webviewpreview.ts`,
 `webviewpanels.ts` and `webviewwelcome.ts` (HTML strings only — the state they render is
@@ -383,9 +386,11 @@ identity (see Conventions).
   (`authstrategy.ts`, `#private` fields). They are keyed by origin, one key
   per mechanism (`secretKeysFor` in `logon.ts`: `abap2ui5.user:<origin>` /
   `abap2ui5.pass:<origin>` for basic, `abap2ui5.cert:<origin>` for a client
-  certificate's passphrase, `abap2ui5.session:` and `abap2ui5.oauth:`
-  reserved for the browser logon and OAuth); "Clear Stored SAP Credentials"
-  deletes all of them. A client certificate's FILE PATH is no secret and
+  certificate's passphrase, `abap2ui5.oauth:<origin>` for OAuth's service
+  key (it holds the client secret) and refresh token in one entry,
+  `abap2ui5.session:` reserved for the browser logon); "Clear Stored SAP
+  Credentials" deletes all of them. OAuth's access token lives in the
+  strategy only. A client certificate's FILE PATH is no secret and
   lives in `globalState` per origin (`abap2ui5.clientCertificates`), never
   in a setting a workspace could write; the file is read when the proxy
   starts. Session cookies of a browser logon stay in memory only, and the
@@ -417,6 +422,15 @@ identity (see Conventions).
   proxy and its token alone. The token goes to the child in its environment
   (argv is visible to every local user) and the launcher removes it from
   there before anything else runs. It is never started in Restricted Mode.
+  The OAuth logon's callback listener (`startCallbackListener` in
+  `oauthflow.ts`, `auth: "oauth"`) is one more, and keeps both: it lives for one browser
+  logon only, binds `127.0.0.1` on a random port, its whole path is a
+  `randomBytes(16)` segment (the redirect URI the UAA sends the browser
+  back to), every other path is 404, a non-loopback `Host` is refused with
+  403, the `state` is checked (and the code is worth nothing without the
+  PKCE verifier, which never leaves the process), and it closes after
+  the first callback on its path, whatever that said. It never logs the
+  request URL, which carries the authorization code.
 - **A setting that names a program to start is `"scope": "machine"`.**
   `viewCheck.command`, `mcp.command` and `mcp.reposRoot` decide which binary
   the extension spawns; machine scope keeps a cloned repository's

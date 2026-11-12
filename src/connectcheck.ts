@@ -518,6 +518,15 @@ export function relogonOffer(
       button: "Log On Again",
     };
   }
+  if (kind === "oauth") {
+    return {
+      message:
+        `abap2UI5: the system did not accept the OAuth token (HTTP ${status})${said}. ` +
+        "The extension renews the token once; if the answer repeats, the service key may " +
+        "belong to another system or your user may not use this service.",
+      button: "Load Service Key",
+    };
+  }
   if (kind === "certificate") {
     return {
       message:

@@ -6,6 +6,7 @@ import {
   InteractiveLogonRequired,
 } from "./authstrategy";
 import type { AuthKind } from "./systemprofile";
+import { OAuthMaterial, OAuthStrategy } from "./oauth";
 
 /*
  * logon - which `AuthStrategy` a system profile logs on with.
@@ -28,6 +29,10 @@ export interface LogonDeps {
   /** The client certificate chosen for `origin`, read and checked
    *  (certificate) - asking for one when none is chosen yet. */
   clientCertificate(origin: string): Promise<ClientCertificateMaterial | undefined>;
+  /** The OAuth logon for `origin` (oauth): the loaded service key and the
+   *  tokens - renewed with the stored refresh token, or obtained in the
+   *  browser when the flow may ask. */
+  oauthLogon(origin: string): Promise<OAuthMaterial | undefined>;
 }
 
 /** The profile fields the factory reads. */
@@ -51,6 +56,10 @@ export async function strategyFor(
       const material = await deps.clientCertificate(origin);
       return material ? new CertificateAuthStrategy(material) : undefined;
     }
+    case "oauth": {
+      const material = await deps.oauthLogon(origin);
+      return material ? new OAuthStrategy(material) : undefined;
+    }
     case "basic": {
       const creds = await deps.basicCredentials(origin);
       return creds ? new BasicAuthStrategy(creds.user, creds.pass) : undefined;
@@ -73,8 +82,9 @@ export function authKindOf(profile: LogonProfile): AuthKind {
  * Every per-origin SecretStorage key of every mechanism - what "Clear Stored
  * SAP Credentials" deletes for an origin. `user`/`pass` are basic auth's
  * (their shape is a contract, see `keysFor` in `systems.ts`); `cert` holds a
- * client certificate's passphrase; `session` and `oauth` are reserved for the
- * browser logon and OAuth (docs/auth.md, section 4).
+ * client certificate's passphrase; `oauth` holds the loaded service key and
+ * the refresh token of OAuth (`StoredOAuth` in `oauth.ts`); `session` is
+ * reserved for the browser logon (docs/auth.md, section 4).
  */
 export function secretKeysFor(origin: string): {
   user: string;
@@ -98,5 +108,17 @@ export function certificateNeeded(host: string): InteractiveLogonRequired {
   return new InteractiveLogonRequired(
     `no client certificate is chosen for ${host} - press F9 in VS Code or run ` +
       '"abap2UI5: Choose Client Certificate" first'
+  );
+}
+
+/** The refusal of a flow without a UI (the MCP tools) for an OAuth system
+ *  with no usable logon - no service key loaded, or no refresh token that
+ *  still works. It never opens a browser; it names the places that can. */
+export function oauthLogonNeeded(host: string, keyLoaded: boolean): InteractiveLogonRequired {
+  return new InteractiveLogonRequired(
+    keyLoaded
+      ? `no valid OAuth logon for ${host} - press F9 in VS Code to log on in the browser first`
+      : `no service key is loaded for ${host} - run "abap2UI5: Load Service Key" in VS Code, ` +
+          "then press F9 to log on in the browser"
   );
 }

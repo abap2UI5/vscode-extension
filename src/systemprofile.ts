@@ -21,7 +21,7 @@ import { originOf } from "./urls";
 
 /** The logon mechanisms a profile may name (docs/auth.md). Each one is a
  *  case of `strategyFor` (`logon.ts`). */
-export const AUTH_KINDS = ["basic", "certificate"] as const;
+export const AUTH_KINDS = ["basic", "certificate", "oauth"] as const;
 export type AuthKind = (typeof AUTH_KINDS)[number];
 
 export type SystemRole = "development" | "production";
@@ -38,8 +38,9 @@ export interface ProfileFields {
    *  `viewCheck.distribution` while the system is active. */
   distribution?: "sapui5" | "openui5";
   /** How the proxy logs on to the system: `"basic"` (user and password,
-   *  the default) or `"certificate"` (an X.509 client certificate the user
-   *  chooses per host). */
+   *  the default), `"certificate"` (an X.509 client certificate the user
+   *  chooses per host) or `"oauth"` (OAuth 2.0 with a service key the user
+   *  loads per host - SAP BTP ABAP Environment). */
   auth?: AuthKind;
 }
 

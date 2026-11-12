@@ -12,6 +12,7 @@ import {
   withChoice,
 } from "./clientcert";
 import { certificateNeeded, secretKeysFor, strategyFor } from "./logon";
+import { ensureOAuthLogon } from "./oauthprompt";
 import { ensureCredentials, ensureSystem, rememberOrigin, SystemProfile } from "./systems";
 import { originOf } from "./urls";
 import type { Session } from "./session";
@@ -52,6 +53,7 @@ export async function strategyForSystem(
   return strategyFor(system, origin, {
     basicCredentials: (o) => ensureCredentials(context, o),
     clientCertificate: (o) => ensureClientCertificate(context, o, options),
+    oauthLogon: (o) => ensureOAuthLogon(context, o, options),
   });
 }
 

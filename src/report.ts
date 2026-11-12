@@ -53,7 +53,7 @@ export interface ReportInput {
      *  hosts they are is nothing a public issue needs. */
     pinnedCertificates?: number;
     /** The logon mechanism of each configured system, by its name - the
-     *  KIND only (`basic`, `certificate`), never a secret or a file path. */
+     *  KIND only (`basic`, `certificate`, `oauth`), never a secret or a file path. */
     logon?: Array<{ name: string; auth: string }>;
     /** The mechanism the running proxy logs on with. */
     proxyLogon?: string;
@@ -154,6 +154,22 @@ export function redact(text: string): string {
         "$1<redacted>"
       )
       .replace(/([?&]code=)[^&\s"']+/g, "$1<redacted>")
+      // the OAuth logon (auth: "oauth"): the code, its PKCE verifier and the
+      // state in a form body or a query, the code and the stored refresh
+      // token in JSON, and the loopback callback's secret path segment -
+      // as it is and inside an encoded redirect_uri
+      .replace(
+        /((?:^|[?&\s])(?:code|code_verifier|state|redirect_uri)=)(?!<redacted>)[^&\s"']+/gim,
+        "$1<redacted>"
+      )
+      .replace(
+        /("(?:code|code_verifier|refreshToken|accessToken|clientSecret)"\s*:\s*")(?!<redacted>)[^"]+/g,
+        "$1<redacted>"
+      )
+      .replace(
+        /(\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\/)[0-9a-f]{32}\b/gi,
+        "$1<token>"
+      )
   );
 }
 

@@ -145,6 +145,7 @@ that proxy logs on, in its `auth` field:
 | --- | --- | --- |
 | `"basic"` (default) | user and password, asked for once per host | both in the VS Code SecretStorage |
 | `"certificate"` | an X.509 client certificate the system maps to your user - a `.pfx`/`.p12` file, or a PEM certificate and its key | the file PATH in VS Code's machine-local state, the passphrase in the SecretStorage; the file is read each time the proxy starts |
+| `"oauth"` | OAuth 2.0 with the service key of an SAP BTP ABAP Environment instance: you log on in your default browser | the whole service key (it holds the client secret) and the refresh token in the SecretStorage; the access token in memory only |
 
 ```json
 "abap2ui5.systems": [
@@ -161,7 +162,28 @@ be used this way. A self-signed server certificate is trusted per system as
 before (*Trust This Certificate*), and both work together. A mechanism other
 than basic that your user settings name for a host stays in effect when a
 workspace lists the same host without it. **Clear Stored SAP Credentials**
-forgets passwords, passphrases and certificate choices alike.
+forgets passwords, passphrases, certificate choices and service keys alike.
+
+For an `"oauth"` system, run **abap2UI5: Load Service Key** and pick the
+instance's service key (the JSON file from the BTP cockpit or `cf
+service-key`; it needs `url` and a `uaa` block with `url`, `clientid` and
+`clientsecret`, and both URLs must be https). A key issued for another host
+than the system's launch URL is asked about before it is used. F9 then opens
+your browser at the instance's UAA; after you log on there, the browser is
+sent back to a one-time listener on `127.0.0.1` (a random port and a random
+path, checked with `state` and PKCE), and the extension keeps the refresh
+token. The access token is renewed before it runs out, silently; when the UAA
+refuses the renewal, the preview says the logon has expired and **Log On
+Again** opens the browser once more. The MCP tools and the agent app tools
+never open a browser: they work while a refresh token is valid, and are
+refused with a sentence naming F9 otherwise.
+
+Not yet verified against a real ABAP Environment: whether its UAA accepts a
+redirect to `http://127.0.0.1` on a random port (no setting fixes the port
+yet - if your instance needs a fixed redirect URI, please open an issue),
+whether the host that serves the abap2UI5 HTTP service accepts the bearer
+token directly, and the logon from a Remote window (the callback goes through
+VS Code's port forwarding).
 
 **Check System Connection** reports a missing or refused client certificate
 as its own step, and for a system that answers without offering basic auth
@@ -362,6 +384,7 @@ reference is generated from `package.json` with `npm run commands`, and
 | Check System Connection | `abap2ui5.checkConnection` |  |
 | Clear Stored SAP Credentials | `abap2ui5.resetCredentials` |  |
 | Choose Client Certificate | `abap2ui5.chooseClientCertificate` |  |
+| Load Service Key | `abap2ui5.loadServiceKey` |  |
 | Forget Trusted Certificates | `abap2ui5.forgetTrustedCertificates` |  |
 | New App from Template | `abap2ui5.newApp` |  |
 | New Project from Template | `abap2ui5.newProject` |  |
