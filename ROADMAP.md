@@ -46,7 +46,10 @@ the PR description lists what was verified by hand and what was not.
 What is on this branch, and what a task still lacks. "Unit tests" means
 `npm test`; "desktop smoke" means `npm run test:desktop` passed in a real
 VS Code; `npm run test:web` passed too (with this environment's Chromium
-mapped in). Nothing here was exercised against a real SAP system.
+mapped in). The states below record what this repository's own tests prove;
+they are not the extension's only verification: it has been run against many
+real SAP systems and is in use for app development. Where a row still names
+something as unverified against a real system, it means that one case.
 
 | Task | State | Still open |
 | --- | --- | --- |
