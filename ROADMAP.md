@@ -77,12 +77,15 @@ extension writes source to a system (T07), logon order browser > OAuth >
 certificate with all three built (T06), LM tools as a complement to MCP
 (T10), the floor stays at 1.101 (T15), T12 is no-go.
 
-**Release blocker found on the way (not caused by this branch):** the bundled
-linter 0.9.0 (already on `main`) records release commit `369f4afdd199`, and
+**Release blocker found on the way, resolved by the linter bump:** the
+bundled linter 0.9.0 recorded release commit `369f4afdd199`, and
 `render-gate-bundle-369f4afdd199` does not exist on the linter's releases
-(HTTP 404), so *Install Render Gate* fails for a build of this tree. The
-linter has to publish that bundle (its `bundle.yml`), or the pin has to move
-to a release that has one; the rolling bundle is deliberately no fallback.
+(HTTP 404, still so on 2026-11-16), so *Install Render Gate* failed for a
+build of that tree. The pin has moved to 0.10.0, published from
+`a3768c90d136`, and `render-gate-bundle-a3768c90d136/view-check-bundle.tgz`
+answers (checked by a ranged GET, the way `bump-linter.yml` does). The
+download and install themselves were not run against it here; the rolling
+bundle is deliberately no fallback.
 
 Also fixed on the way: *Migrate Classic Report* after abap-cloud-gui's rename
 of report2cloud to report2UI5, and removing an attribute of an upper-case

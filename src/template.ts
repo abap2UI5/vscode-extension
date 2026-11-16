@@ -319,8 +319,9 @@ CLASS zcl_my_app IMPLEMENTATION.
     CASE client->get_event( ).
       WHEN \`OPEN\`.
         popup_open( ).
-      WHEN \`POPUP_CLOSE\`.
+      WHEN \`CONFIRM\`.
         client->popup_destroy( ).
+        client->message_toast_display( \`Confirmed\` ).
     ENDCASE.
 
   ENDMETHOD.
@@ -338,8 +339,11 @@ CLASS zcl_my_app IMPLEMENTATION.
         )->end(
         )->ele( \`buttons\`
             )->tag( \`Button\`
-                )->a( n = \`text\`  v = \`Close\`
-                )->a( n = \`press\` v = client->_event( \`POPUP_CLOSE\` ) ).
+                )->a( n = \`text\`  v = \`OK\`
+                )->a( n = \`press\` v = client->_event( \`CONFIRM\` )
+            )->tag( \`Button\`
+                )->a( n = \`text\`  v = \`Cancel\`
+                )->a( n = \`press\` v = client->follow_up_action( val = client->cs_event-popup_close ) ).
 
     client->popup_display( popup->stringify( ) ).
 
@@ -375,7 +379,7 @@ export const APP_TEMPLATES: AppTemplate[] = [
   {
     id: "popup",
     label: "Popup",
-    description: "A button that opens a dialog, close handled in the CASE",
+    description: "A button that opens a dialog - OK handled in the CASE, Cancel closed in the browser",
     source: POPUP,
   },
 ];
