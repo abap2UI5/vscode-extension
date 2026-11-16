@@ -154,24 +154,46 @@ test("the shim carries the posix/win32/default aliases a bundler may reach for",
   assert.equal(typeof shim.default.resolve, "function");
 });
 
-/** Every `path.<member>` / `process.<member>` the bundled linter names. */
-function membersUsedBy(global: string): Set<string> {
+/** Every `path.<member>` / `process.<member>` the bundled linter names.
+ *  A module's file name is no member access: `./rules/unknown-binding-path.mjs`
+ *  (the linter keeps a rule per file from 0.10.0 on) read as `path.mjs`, so a
+ *  name that continues one behind a `-` or a `/` is left out. */
+function membersUsedBy(global: string, needsImport = false): Set<string> {
   const found = new Set<string>();
-  const pattern = new RegExp(`\\b${global}\\.([a-zA-Z]+)`, "g");
-  for (const entry of fs.readdirSync(LINTER_LIB)) {
-    if (!entry.endsWith(".mjs")) {
-      continue;
+  // `process` is a global; `path` is the node module only in a file that
+  // imports it under that name - a rule's local `path` (a binding's path
+  // argument, `path.value`) is not.
+  const imports = new RegExp(`\\bimport\\s+${global}\\s+from\\s+['"](?:node:)?${global}['"]`);
+  const pattern = new RegExp(`(?<![-/])\\b${global}\\.([a-zA-Z]+)`, "g");
+  // Recursive since 0.10.0 moved the rules into `lib/rules/` - a flat listing
+  // of `lib/` would no longer see any of them. `lib/cli/` is the command
+  // line's own half, which the web entry never pulls in.
+  const walk = (dir: string, top: boolean): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!(top && entry.name === "cli")) {
+          walk(nodePath.join(dir, entry.name), false);
+        }
+        continue;
+      }
+      if (!entry.name.endsWith(".mjs")) {
+        continue;
+      }
+      const text = fs.readFileSync(nodePath.join(dir, entry.name), "utf8");
+      if (needsImport && !imports.test(text)) {
+        continue;
+      }
+      for (const m of text.matchAll(pattern)) {
+        found.add(m[1]);
+      }
     }
-    const text = fs.readFileSync(nodePath.join(LINTER_LIB, entry), "utf8");
-    for (const m of text.matchAll(pattern)) {
-      found.add(m[1]);
-    }
-  }
+  };
+  walk(LINTER_LIB, true);
   return found;
 }
 
 test("the path shim covers every member the pinned linter calls", () => {
-  const used = membersUsedBy("path");
+  const used = membersUsedBy("path", true);
   assert.ok(used.size >= 4, `only found ${used.size} path members - scan broke`);
   const missing = [...used].filter((name) => shim[name] === undefined);
   assert.deepEqual(

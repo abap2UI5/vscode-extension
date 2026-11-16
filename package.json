@@ -1352,7 +1352,7 @@
     "commands:check": "node scripts/generate-commands.mjs --check"
   },
   "devDependencies": {
-    "@abap2ui5/linter": "0.9.0",
+    "@abap2ui5/linter": "0.10.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.20.5",
     "@types/vscode": "1.101.0",
@@ -1366,8 +1366,8 @@
     "typescript-eslint": "^8.72.1"
   },
   "linterRelease": {
-    "version": "0.9.0",
-    "commit": "369f4afdd19932df8ba8fb8ee7df227c51029ba8"
+    "version": "0.10.0",
+    "commit": "a3768c90d1369e695ffdf46d755f099c9547099e"
   },
   "localBackend": {
     "mcpServer": "1.0.0"

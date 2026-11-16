@@ -4,13 +4,17 @@
  *
  * The linter reconstructs the XML a class builds; this module goes the other
  * way, so a sample from the UI5 demo kit (or any existing view) can be pasted
- * and comes out as the builder chain a port writes by hand. The emitted style
- * is the canonical corpus style the chain formatter enforces - a converted
- * view round-trips Format Document unchanged, which the test suite pins down.
+ * and comes out as the builder chain a port writes by hand. The chain is
+ * written by the linter's chain writer (`@abap2ui5/linter/chain-write`) - the
+ * layout `chain-house-layout` checks, so a converted view round-trips Format
+ * Document unchanged, which the test suite pins down. This module is the
+ * forgiving XML parser in front of it and the wiring of handlers to events.
  *
  * `vscode`-free: XML text in, ABAP text out - covered by the test suite.
  */
 
+import { abapLiteral, writeChain } from "@abap2ui5/linter/chain-write";
+import type { ChainAttribute, ChainNode } from "@abap2ui5/linter/chain-write";
 import { splitName } from "./context";
 
 // ---------------------------------------------------------------------------
@@ -208,21 +212,11 @@ export function parseXml(text: string): ParsedXml {
 }
 
 // ---------------------------------------------------------------------------
-// The emitter - canonical corpus style, chain-formatter clean
+// The emitter - the linter's chain writer
 // ---------------------------------------------------------------------------
-
-/** 4 spaces per level, the step the chain formatter enforces. */
-const STEP = "    ";
 
 /** ABAP's hard line limit - a longer line fails abapGit import/activation. */
 const MAX_LINE = 255;
-
-/** An ABAP backtick literal: the backtick escapes by doubling. */
-function lit(value: string): string {
-  // a line break that reached here was written as a character reference
-  // (`&#10;`, `&#13;`) - a literal cannot hold one, so it is a blank
-  return "`" + value.replace(/`/g, "``").replace(/\r\n|[\r\n]/g, " ") + "`";
-}
 
 /** Attribute names that are events on the controls people paste, for the
  *  case where the handler value is a bare identifier (`press="onPress"`) -
@@ -260,94 +254,41 @@ function eventNameFor(value: string): string {
   return local.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
 }
 
-interface Op {
-  verb: "ele" | "tag" | "a" | "end";
-  args: string;
-  level: number;
-  /** For an `a` op with a plain literal value - what 255-char splitting
-   *  needs to rebuild the call across lines. */
-  attr?: { name: string; value: string };
-}
-
-/** The call arguments of an ele/tag: positional when only the name is
- *  needed (a lone `n =` trips abaplint's omit_parameter_name), named when a
- *  namespace prefix rides along. */
-function elementArgs(name: string): string {
-  const { prefix, local } = splitName(name);
-  return prefix ? `n = ${lit(local)} ns = ${lit(prefix)}` : lit(name);
-}
-
-function emitElement(
-  el: XmlElement,
-  level: number,
-  out: Op[],
-  warnings: string[]
-): void {
-  if (el.children.length === 0) {
-    out.push({ verb: "tag", args: elementArgs(el.name), level });
-  } else {
-    out.push({ verb: "ele", args: elementArgs(el.name), level });
-  }
+/**
+ * The parsed view as the tree the linter's chain writer takes
+ * (`@abap2ui5/linter/chain-write`). What is this module's own is the reading
+ * of a pasted view: a handler reference becomes the abap2UI5 event it is
+ * wired to (and a warning saying so), everything else is the literal it was.
+ * The layout - one call per line, the levels, the `v =` column, the blank
+ * lines, a literal too long for its line cut into `&&` pieces - is the
+ * writer's, the one the playground and the layout editor write with too.
+ */
+function chainTree(el: XmlElement, warnings: string[]): ChainNode {
+  const { prefix, local } = splitName(el.name);
+  const attrs: ChainAttribute[] = [];
   for (const [name, value] of el.attrs) {
     const isEvent =
       HANDLER_VALUE.test(value) ||
       (EVENT_ATTRS.has(name.toLowerCase()) && /^[A-Za-z_]\w*$/.test(value));
     if (isEvent) {
       const event = eventNameFor(value);
-      out.push({
-        verb: "a",
-        args: `n = ${lit(name)} v = client->_event( ${lit(event)} )`,
-        level: level + 1,
-      });
+      attrs.push({ name, raw: `client->_event( ${abapLiteral(event)} )` });
       warnings.push(
         `event '${name}' (was: ${value}) is wired to ` +
           `client->_event( \`${event}\` ) - handle it in a WHEN branch`
       );
       continue;
     }
-    out.push({
-      verb: "a",
-      args: `n = ${lit(name)} v = ${lit(value)}`,
-      level: level + 1,
-      attr: { name, value },
-    });
+    // a line break that reached here was written as a character reference
+    // (`&#10;`, `&#13;`) - a literal cannot hold one, so it is a blank
+    attrs.push({ name, value: value.replace(/\r\n|[\r\n]/g, " ") });
   }
-  for (const child of el.children) {
-    emitElement(child, level + 1, out, warnings);
-  }
-  if (el.children.length) {
-    out.push({ verb: "end", args: "", level });
-  }
-}
-
-/** `value` in chunks whose emitted literals keep each line within the given
- *  widths - escaped length is the measure, a backtick costs two. Undefined
- *  when the widths leave no room to make progress. */
-function chunkValue(
-  value: string,
-  firstAvail: number,
-  restAvail: number
-): string[] | undefined {
-  if (firstAvail < 8 || restAvail < 8) {
-    return undefined;
-  }
-  const chunks: string[] = [];
-  let current = "";
-  let used = 0;
-  let avail = firstAvail;
-  for (const ch of value) {
-    const cost = ch === "`" ? 2 : 1;
-    if (used + cost > avail && current) {
-      chunks.push(current);
-      current = "";
-      used = 0;
-      avail = restAvail;
-    }
-    current += ch;
-    used += cost;
-  }
-  chunks.push(current);
-  return chunks;
+  return {
+    name: prefix ? local : el.name,
+    ns: prefix ?? "",
+    attrs,
+    children: el.children.map((child) => chainTree(child, warnings)),
+  };
 }
 
 export interface ConvertedXml {
@@ -407,61 +348,23 @@ export function xmlToAbap(
     );
   }
 
-  const ops: Op[] = [];
-  emitElement(roots[0], 0, ops, warnings);
-  // Trailing ends only walk the cursor back to the root - the render closes
-  // every still-open tag structurally, so the corpus leaves them off.
-  while (
-    !options.keepTrailingEnds &&
-    ops.length &&
-    ops[ops.length - 1].verb === "end"
-  ) {
-    ops.pop();
-  }
-
-  const lines: string[] = [];
-  lines.push(`${baseIndent}DATA(view) = z2ui5_cl_ui5_view_builder=>factory( ).`);
-  ops.forEach((op, ix) => {
-    const first = ix === 0;
-    const last = ix === ops.length - 1;
-    const indent = baseIndent + STEP.repeat(op.level);
-    // The corpus breathing rhythm, coarse-grained: a blank line before every
-    // end, and before an ele that starts a new sibling block after another
-    // element's attributes - never between a control and its own a( ) lines.
-    const prev = ops[ix - 1];
-    const blankBefore =
-      (op.verb === "end" && prev?.verb !== "end") ||
-      (op.verb === "ele" && (prev?.verb === "a" || prev?.verb === "end")) ||
-      (op.verb === "tag" && prev?.verb === "end");
-    if (!first && blankBefore) {
-      lines.push("");
-    }
-    const head = first
-      ? `${baseIndent}view->${op.verb}(`
-      : `${indent})->${op.verb}(`;
-    const body = op.args ? ` ${op.args}` : "";
-    const tail = last ? " )." : "";
-    const line = `${head}${body}${tail}`;
-    if (line.length > MAX_LINE && op.attr) {
-      // a value too long for one line is split into `&&`-joined literals
-      const contIndent = indent + STEP;
-      const firstHead = `${head} n = ${lit(op.attr.name)} v = `;
-      const chunks = chunkValue(
-        op.attr.value,
-        MAX_LINE - firstHead.length - 2,
-        MAX_LINE - contIndent.length - 5 - tail.length
-      );
-      if (chunks && chunks.length > 1) {
-        lines.push(`${firstHead}${lit(chunks[0])}`);
-        chunks.slice(1).forEach((chunk, cx) => {
-          const end = cx === chunks.length - 2 ? tail : "";
-          lines.push(`${contIndent}&& ${lit(chunk)}${end}`);
-        });
-        return;
-      }
-    }
-    lines.push(line);
+  // `factory( ).` as a statement of its own and the chain off the variable:
+  // the shape a 1:1 port of one XML file is written in. The trailing ends
+  // only walk the cursor back to the root - the render closes every
+  // still-open tag structurally, so the writer leaves them off unless asked.
+  const { lines } = writeChain(chainTree(roots[0], warnings), {
+    indent: baseIndent.length,
+    factory: "detached",
+    keepTrailingEnds: options.keepTrailingEnds === true,
   });
+  if (baseIndent.trim() !== "" || baseIndent.includes("\t")) {
+    // an indent that is not blanks (a tab) is the caller's, character for
+    // character - the writer counted its width
+    const blanks = " ".repeat(baseIndent.length);
+    lines.forEach((line, ix) => {
+      lines[ix] = line.startsWith(blanks) ? baseIndent + line.slice(blanks.length) : line;
+    });
+  }
   lines.push("");
   /* A Dialog is not a view: the corpus (and the POPUP template) hands it to
    * popup_display, and a converted dialog sent through view_display renders

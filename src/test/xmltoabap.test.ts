@@ -69,8 +69,11 @@ test("xmlToAbap emits the corpus chain style", () => {
   assert.deepEqual(warnings, []);
   assert.match(abap, /DATA\(view\) = z2ui5_cl_ui5_view_builder=>factory\( \)\./);
   assert.match(abap, /view->ele\( n = `View` ns = `mvc`/);
-  // namespace declarations become plain attributes
-  assert.match(abap, /\)->a\( n = `xmlns:f` v = `sap\.f`/);
+  // namespace declarations become plain attributes - the `v =` column
+  // aligned across the control's block (rule 5 of the house layout, which
+  // the linter's chain writer keeps)
+  assert.match(abap, /\)->a\( n = `xmlns` {5}v = `sap\.m`/);
+  assert.match(abap, /\)->a\( n = `xmlns:f` {3}v = `sap\.f`/);
   // decoded entity survives into the literal
   assert.match(abap, /\)->a\( n = `title` v = `Products & Prices`/);
   // an aggregation without a namespace is positional
@@ -224,7 +227,7 @@ test("an event-handler attribute is wired, not literalised", () => {
     `<Button text="Go" press=".onPress"/>`
   );
   assert.match(abap, /\)->a\( n = `press` v = client->_event\( `ON_PRESS` \)/);
-  assert.match(abap, /\)->a\( n = `text` v = `Go`/);
+  assert.match(abap, /\)->a\( n = `text` {2}v = `Go`/);
   assert.ok(warnings.some((w) => w.includes("ON_PRESS") && w.includes("WHEN")));
 });
 

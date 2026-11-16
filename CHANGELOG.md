@@ -2,8 +2,37 @@
 
 ## Unreleased
 
-The bundled linter moves to v0.9.0.
+The bundled linter moves to v0.10.0.
 
+- **New findings from linter 0.10.0.** The view check knows abap2UI5's newer
+  names (the new `cs_event` constants, `HTMLFrame`) and gains seven rules:
+  the errors `unknown-builder-method` (a method the view builder does not
+  have) and `abap2ui5-api-too-new` (only with `abap2ui5` set in the
+  repository's `abap2ui5lint.jsonc`), the warnings
+  `enum-bound-to-conditional-field`, `enum-cond-without-else`,
+  `escape-handler-as-string` and `nav-target-never-displays`, and the opt-in
+  hint `xml-indentation`. `unknown-binding-path` and `unknown-model` now read
+  every path of a composite value and of `parts: [...]`, and `malformed-xml`
+  reports a bare `&`, an undeclared entity, an unquoted attribute value and a
+  raw `<` in one. A config can start from a preset (`"extends":
+  "abap2ui5:recommended"`).
+- **The Popup template closes its dialog without a roundtrip.** The dialog
+  has *OK*, handled in the `CASE` (it closes the popup and shows a toast),
+  and *Cancel*, wired to `client->follow_up_action( val =
+  client->cs_event-popup_close )`, which closes it in the browser. The old
+  *Close* button went to the backend only to call `popup_destroy( )`, which
+  the linter's `close-only-roundtrip` reports.
+- **Install Render Gate works again for a build of this tree.** The linter
+  published no checker bundle for the commit of its 0.9.0 release, so the
+  download answered 404; the one for 0.10.0 is there.
+- **Convert XML View to Builder Chain and the abbreviations write the house
+  layout in full.** The chain is written by the linter's own chain writer
+  now (`@abap2ui5/linter/chain-write`), the one the playground and the layout
+  editor use: the `v =` column is aligned across a control's attributes, a
+  blank line opens the content of a control that has attributes and a run of
+  `tag( )`s (none after an `end( )` any more), and a value too long for one
+  line hangs its `&&` pieces under the first. The calls and their arguments
+  are what they were.
 - **The screenshot finds Playwright 1.64's browser on macOS.** It installs
   Chrome for Testing (`chrome-mac-arm64` / `chrome-mac-x64`, `Google Chrome
   for Testing.app`) where it used to install `Chromium.app`; both layouts are
