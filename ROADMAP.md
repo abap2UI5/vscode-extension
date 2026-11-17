@@ -83,9 +83,11 @@ bundled linter 0.9.0 recorded release commit `369f4afdd199`, and
 (HTTP 404, still so on 2026-11-16), so *Install Render Gate* failed for a
 build of that tree. The pin has moved to 0.10.0, published from
 `a3768c90d136`, and `render-gate-bundle-a3768c90d136/view-check-bundle.tgz`
-answers (checked by a ranged GET, the way `bump-linter.yml` does). The
-download and install themselves were not run against it here; the rolling
-bundle is deliberately no fallback.
+answers (checked by a ranged GET, the way `bump-linter.yml` does). It has
+since moved to 0.11.0, published from `d771ca39fcd6`, whose
+`render-gate-bundle-d771ca39fcd6/view-check-bundle.tgz` answers the same
+ranged GET (2026-11-17). The download and install themselves were not run
+against either here; the rolling bundle is deliberately no fallback.
 
 Also fixed on the way: *Migrate Classic Report* after abap-cloud-gui's rename
 of report2cloud to report2UI5, and removing an attribute of an upper-case
