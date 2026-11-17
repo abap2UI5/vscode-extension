@@ -2,8 +2,17 @@
 
 ## Unreleased
 
-The bundled linter moves to v0.10.0.
+The bundled linter moves to v0.11.0 (by way of v0.10.0).
 
+- **Linter 0.11.0: the same findings, a lighter checker.** The release moves
+  each rule's description card out of the module that checks views, so the
+  checks themselves, every rule id, finding, quick fix and config key are as
+  in 0.10.0. *Install Render Gate* downloads the checker bundle of 0.11.0's
+  release commit (`d771ca39fcd6`), which is published.
+- **The local backend drives mcp-server 1.2.0.** *Local (transpiled)* runs
+  on `@abap2ui5/mcp-server@1.2.0` (was 1.1.0), the release that admits the
+  linter's 0.11 line as its peer; app-template's starter app still starts
+  and takes an event end to end.
 - **New findings from linter 0.10.0.** The view check knows abap2UI5's newer
   names (the new `cs_event` constants, `HTMLFrame`) and gains seven rules:
   the errors `unknown-builder-method` (a method the view builder does not
