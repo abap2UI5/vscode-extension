@@ -9,6 +9,11 @@ The bundled linter moves to v0.11.0 (by way of v0.10.0).
   checks themselves, every rule id, finding, quick fix and config key are as
   in 0.10.0. *Install Render Gate* downloads the checker bundle of 0.11.0's
   release commit (`d771ca39fcd6`), which is published.
+- **The agent app tools send a table edit behind a data reference as a row
+  delta.** The vendored agent client (mcp-server `332a0b0`) now puts the edit
+  of a cell bound through a data reference (`/MR_TAB/*/<row>/<field>`) on the
+  `*` node as a `__delta`, as abap2UI5's frontend does since abap2UI5 #3026;
+  shipped whole, a windowed table's edit was dropped by the backend.
 - **The local backend drives mcp-server 1.2.0.** *Local (transpiled)* runs
   on `@abap2ui5/mcp-server@1.2.0` (was 1.1.0), the release that admits the
   linter's 0.11 line as its peer; app-template's starter app still starts

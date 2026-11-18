@@ -1,6 +1,6 @@
 /*
  * VENDORED - do not edit. abap2UI5/mcp-server lib/appclient.mjs
- * at commit 185baed6e16709ee4f45323422dd58becbae23ff,
+ * at commit 332a0b0551b27acc6f6f711c45ec8ae3d0504070,
  * copied by scripts/vendor-agent.mjs (`npm run agent-vendor`); the only
  * change is the sibling imports ending in .js. `npm run agent-vendor:check`
  * fails when this copy drifts from that commit. Change it upstream, then
@@ -38,6 +38,7 @@
  */
 import {
   applyResponse, analyzeScreen, emptyState, getAt, setAt, rebuiltModels, writablePath, DEFAULT_MAX_ROWS,
+  windowStateOf, nextWindowCount, WINDOW_EVENT,
 } from './snapshot.js';
 import { parseBinding, evalExpression } from './viewxml.js';
 
@@ -55,22 +56,52 @@ const LIST_MAX = 30;
  * The model delta, as the frontend builds it (core/Lib.js
  * buildDeltaFromPaths): a scalar or structure edit ships the whole top-level
  * attribute, a table cell edit ships { TAB: { __delta: { <row>: { COL: v } } } }
- * (recursively for nested tables).
+ * (recursively for nested tables). A table behind a data reference (an
+ * attribute TYPE REF TO data, bound dereferenced) is the model node
+ * <attr>/*, so its cell path is that node's path plus /<row>/<field>, and
+ * the delta goes on that node, where the backend looks for it:
+ * { ATTR: { '*': { __delta: { <row>: { COL: v } } } } }. Shipped whole, the
+ * edit of a windowed table (window_bind_tab) is dropped. A whole attribute
+ * queued by another path still wins, and a structure or a value behind a
+ * reference ships whole.
  */
 export function buildDelta(paths, data) {
   const delta = {};
+  // the objects created here to hold a delta below a data reference -
+  // anything else under `delta` is a whole value of the model
+  const nests = new WeakSet();
   for (const p of paths) {
     const parts = String(p).replace(/^\//, '').split('/');
     const attr = parts[0];
-    const steps = deltaSteps(parts.slice(1));
+    let depth = 1;
+    while (parts[depth] === '*') depth += 1;
+    const steps = deltaSteps(parts.slice(depth));
     if (!steps) {
       delta[attr] = data[attr];
       continue;
     }
-    if (attr in delta && !(delta[attr] && delta[attr].__delta)) continue;
-    if (!(delta[attr] && delta[attr].__delta)) delta[attr] = { __delta: {} };
-    let node = delta[attr];
-    let model = data[attr];
+    // a whole attribute queued by another path already carries every cell
+    const keys = parts.slice(0, depth);
+    let holder = delta;
+    let model = data;
+    let whole = false;
+    for (const key of keys.slice(0, -1)) {
+      if (!(key in holder)) {
+        holder[key] = {};
+        nests.add(holder[key]);
+      } else if (!nests.has(holder[key])) {
+        whole = true;
+        break;
+      }
+      holder = holder[key];
+      model = model ? model[key] : undefined;
+    }
+    if (whole) continue;
+    const tableKey = keys[keys.length - 1];
+    if (tableKey in holder && !(holder[tableKey] && holder[tableKey].__delta)) continue;
+    if (!(holder[tableKey] && holder[tableKey].__delta)) holder[tableKey] = { __delta: {} };
+    let node = holder[tableKey];
+    model = model ? model[tableKey] : undefined;
     for (const { row, field, leaf } of steps) {
       const rows = node.__delta;
       if (!rows[row]) rows[row] = {};
@@ -432,12 +463,15 @@ export function createAppClient({
 
   function analyze(session, maxRows) {
     const pending = Object.values(session.pending).flatMap((m) => [...m.keys()]);
-    return analyzeScreen({
+    const res = analyzeScreen({
       state: session.state,
       maxRows: maxRows ?? session.maxRows,
       metadata: metadata(),
       pending,
     });
+    // the columns of every windowed table, while it holds rows to read them from
+    for (const entry of res.index.tables.values()) if (entry.window) windowColumns(session, entry);
+    return res;
   }
 
   function find(sessionId) {
@@ -892,6 +926,237 @@ export function createAppClient({
     });
   }
 
+  // ---------------------------------------------------------- windows ----
+
+  /*
+   * A windowed table (window_bind_tab, protocol spec/windowed-tables.md) holds
+   * the first rows of a list the backend keeps: `app_act { window }` sends the
+   * window request the UI5 frontend's list binding sends (core/WindowModel.js
+   * _z2ui5Send) - `[path, count]` for more rows, `[path, count, sort]` for a
+   * new sort, `[path, count, "", filter]` for a new filter - and adopts the
+   * answer like any roundtrip's (a new draft id, the full model). A part that
+   * is not named is kept by the backend; `[]` clears it.
+   */
+  const WINDOW_KEYS = ['table', 'count', 'sort', 'filter'];
+  const COUNT_MAX = 999_999_999; // the backend reads nine digits at most
+  /* sap.ui.model.FilterOperator - the operators the backend compares
+   * (z2ui5_if_client=>ty_s_bind_tab_filter) and the frontend's BINDING_CALL
+   * whitelist (core/actions/BindingCall.js FILTER_OPERATORS) */
+  const FILTER_OPERATORS = ['EQ', 'NE', 'LT', 'LE', 'GT', 'GE', 'BT', 'NB', 'Contains', 'NotContains', 'StartsWith', 'NotStartsWith', 'EndsWith', 'NotEndsWith'];
+  const RANGE_OPERATORS = new Set(['BT', 'NB']);
+  const isScalar = (v) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
+
+  /* The columns of a windowed table's rows: every key a held row has with a
+   * scalar value, and every column the template binds - remembered per table
+   * across roundtrips, so a filter that let no row through does not make the
+   * columns unknown. */
+  function windowColumns(session, entry) {
+    if (!session.columns) session.columns = new Map();
+    const key = `${entry.modelKey}:${entry.path}`;
+    const known = session.columns.get(key) || new Set();
+    const rows = getAt(session.state.models[entry.modelKey]?.data, entry.path);
+    for (const r of (Array.isArray(rows) ? rows : [])) {
+      if (!r || typeof r !== 'object') continue;
+      for (const [c, v] of Object.entries(r)) if (isScalar(v) && writablePath(c)) known.add(c);
+    }
+    for (const cs of entry.cellSpecs.values()) {
+      const b = cs.binding;
+      if (b && b.kind === 'path' && b.relative && !b.model && /^[A-Za-z_][\w-]*$/.test(b.path)) known.add(b.path);
+    }
+    session.columns.set(key, known);
+    return [...known];
+  }
+
+  function windowHelp(snapshot) {
+    const windowed = snapshot.tables.filter((t) => t.window);
+    return (windowed.length
+      ? `windowed tables on this screen: ${listOf(windowed.map((t) => `${t.id} (${t.path}, ${t.rowCount} of ${t.total} rows held)`))}`
+      : 'this screen has no windowed table (one bound with window_bind_tab)') + layerNote(snapshot);
+  }
+
+  function countArgument(count) {
+    const n = typeof count === 'number' ? count
+      : (typeof count === 'string' && /^[0-9]+$/.test(count.trim()) ? Number(count) : NaN);
+    if (!Number.isInteger(n) || n < 1 || n > COUNT_MAX) {
+      throw new AgentError(`window.count is the number of rows wanted, counted from the first row (not an offset) - an integer from 1 to ${COUNT_MAX}, not ${JSON.stringify(count)}`);
+    }
+    return n;
+  }
+
+  function columnOf(name, columns, table, where) {
+    if (typeof name !== 'string' || !name) throw new AgentError(`${where} names a column of table ${table.id} - one of: ${listOf(columns)}`);
+    const hit = columns.find((c) => c === name) || columns.find((c) => c.toUpperCase() === name.toUpperCase());
+    if (!hit) {
+      throw new AgentError(`${where}: '${echo(name)}' is no column of table ${table.id} (${table.path}) - `
+        + (columns.length ? `its columns: ${listOf(columns)}` : 'it holds no row and binds no column, so none is known'));
+    }
+    return hit;
+  }
+
+  function onlyKeys(obj, keys, where) {
+    const unknown = Object.keys(obj).filter((k) => !keys.includes(k));
+    if (unknown.length) throw new AgentError(`${where} has no key ${unknown.map((k) => `'${echo(k)}'`).join(', ')} - its keys: ${keys.join(', ')}`);
+  }
+
+  /* window.sort -> the sorters the backend takes (WindowModel sortWire):
+   * [{ PATH, DESCENDING }], the first that tells two rows apart decides */
+  function windowSort(input, table, columns) {
+    const shape = '{ column: "<COLUMN>", descending?: true|false }';
+    let list = input;
+    if (!Array.isArray(list)) {
+      if (!list || typeof list !== 'object') throw new AgentError(`window.sort is a list of sorters ${shape} - [] clears the sort`);
+      list = [list];
+    }
+    return list.map((x, i) => {
+      const where = `window.sort[${i}]`;
+      if (!x || typeof x !== 'object' || Array.isArray(x)) throw new AgentError(`${where} is a sorter ${shape}`);
+      onlyKeys(x, ['column', 'descending'], where);
+      if (x.descending !== undefined && x.descending !== null && typeof x.descending !== 'boolean') {
+        throw new AgentError(`${where}.descending is true or false, not ${JSON.stringify(x.descending)?.slice(0, 40)}`);
+      }
+      return { PATH: columnOf(x.column, columns, table, where), DESCENDING: x.descending === true };
+    });
+  }
+
+  /* One condition, as an array [column, operator, value, value2?] (the wire's
+   * shape) or an object { column, operator, value, value2? }. */
+  function windowCondition(c, table, columns, where) {
+    let column;
+    let operator;
+    let value;
+    let value2;
+    if (Array.isArray(c)) {
+      if (c.length < 3 || c.length > 4) throw new AgentError(`${where} is ["<COLUMN>", "<OPERATOR>", value, value2?] - ${c.length} element(s) given`);
+      [column, operator, value, value2] = c;
+    } else {
+      onlyKeys(c, ['column', 'operator', 'value', 'value2'], where);
+      ({ column, operator, value, value2 } = c);
+    }
+    const col = columnOf(column, columns, table, where);
+    const op = FILTER_OPERATORS.find((o) => o.toUpperCase() === String(operator ?? '').toUpperCase());
+    if (!op) throw new AgentError(`${where}: '${echo(operator)}' is no filter operator - one of: ${FILTER_OPERATORS.join(', ')}`);
+    if (value === undefined || value === null || !isScalar(value)) throw new AgentError(`${where}: the value to compare ${col} with is a string, a number or a boolean`);
+    if (RANGE_OPERATORS.has(op)) {
+      if (value2 === undefined || value2 === null || !isScalar(value2)) throw new AgentError(`${where}: ${op} needs value2, the upper bound`);
+    } else if (value2 !== undefined && value2 !== null) {
+      throw new AgentError(`${where}: value2 is the upper bound of BT and NB only - ${op} takes one value`);
+    }
+    return [col, op, value, RANGE_OPERATORS.has(op) ? value2 : null];
+  }
+
+  /* window.filter -> the filter groups the backend takes (WindowModel
+   * filterGroups): the groups ANDed, the conditions of one group ORed. An
+   * item of the list is a condition (a group of its own) or a non-empty
+   * list of conditions (one group, ORed). */
+  function windowFilter(input, table, columns) {
+    const shape = 'a list whose items are conditions ["<COLUMN>", "<OPERATOR>", value, value2?] (each ANDed) or lists of conditions (ORed within)';
+    if (!Array.isArray(input)) throw new AgentError(`window.filter is ${shape} - [] clears the filter`);
+    const isCondition = (x) => (Array.isArray(x) && typeof x[0] === 'string') || (x !== null && typeof x === 'object' && !Array.isArray(x));
+    return input.map((item, i) => {
+      if (isCondition(item)) return [windowCondition(item, table, columns, `window.filter[${i}]`)];
+      if (Array.isArray(item) && item.length && item.every(isCondition)) {
+        return item.map((c, j) => windowCondition(c, table, columns, `window.filter[${i}][${j}]`));
+      }
+      throw new AgentError(`window.filter[${i}] is neither a condition nor a non-empty list of them - window.filter is ${shape}`);
+    });
+  }
+
+  /* app_act { window }: validated against the snapshot on display, before
+   * anything changes - the request's T_EVENT_ARG and the model it carries
+   * the delta of. */
+  function windowPlan(session, spec, snapshot, index) {
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+      throw new AgentError('`window` is an object: { table: "<table id or path>", count?, sort?, filter? }');
+    }
+    onlyKeys(spec, WINDOW_KEYS, '`window`');
+    if (spec.table === undefined || spec.table === null || spec.table === '') throw new AgentError(`window.table names the table (its id or path) - ${windowHelp(snapshot)}`);
+    const k = String(spec.table);
+    const t = snapshot.tables.find((x) => x.id === k) || snapshot.tables.find((x) => x.path === k || x.path === `/${k}`)
+      || snapshot.tables.find((x) => x.name.toUpperCase() === k.toUpperCase());
+    if (!t) throw new AgentError(`no table '${echo(k)}' on this screen - ${windowHelp(snapshot)}`);
+    const entry = index.tables.get(t.id);
+    if (!t.window || !entry.window) {
+      throw new AgentError(`table ${t.id} (${t.path}) is no windowed table - the model carries all its ${t.rowCount} row(s); ${windowHelp(snapshot)}`);
+    }
+    const st = entry.window;
+    const sortSaid = spec.sort !== undefined && spec.sort !== null;
+    const filterSaid = spec.filter !== undefined && spec.filter !== null;
+    const columns = windowColumns(session, entry);
+    const sort = sortSaid ? windowSort(spec.sort, t, columns) : null;
+    const filter = filterSaid ? windowFilter(spec.filter, t, columns) : null;
+    let count;
+    if (spec.count !== undefined && spec.count !== null) {
+      count = countArgument(spec.count);
+    } else if (sortSaid || filterSaid) {
+      count = st.size; // a new order: its first window (WindowModel _z2ui5Restart)
+    } else {
+      if (t.rowCount >= st.total) {
+        throw new AgentError(`table ${t.id} holds all ${st.total} row(s) its filter lets through - nothing more to load; `
+          + 'window.sort and window.filter ask for another order, window.count for a number of rows');
+      }
+      count = nextWindowCount(t.rowCount, st);
+    }
+    const args = [entry.path, String(count)];
+    if (sortSaid) args[2] = JSON.stringify(sort);
+    if (filterSaid) {
+      args[2] = args[2] ?? '';
+      args[3] = JSON.stringify(filter);
+    }
+    return { modelKey: entry.modelKey, args, sig: `window:${entry.modelKey}:${entry.path}` };
+  }
+
+  /*
+   * A BINDING_CALL sort or filter on a windowed list (the @BINDING_CALL
+   * action): what the UI5 frontend does with it - core/actions/BindingCall.js
+   * builds the Sorter or Filter, the list binding sends a window request for
+   * one window naming that part alone (WindowModel sort/filter). A wire the
+   * browser would only log is refused, since it sends nothing there either.
+   */
+  function bindingCallPlan(entry, given, row, session) {
+    const { action } = entry;
+    const all = eventArgs(entry, given, row, session); // [id, aggregation, method, ...params]
+    const params = all.slice(3);
+    const { path, method } = entry.bindingCall;
+    const modelKey = entry.modelKey || 'MAIN';
+    const st = windowStateOf(session.state.models[modelKey]?.data || {}, path);
+    if (!st) throw new AgentError(`action ${action.id} sorts or filters ${path}, which is no windowed table any more - nothing sent`);
+    const nothing = (why) => new AgentError(`action ${action.id} (${action.label}): ${why} - the browser only logs it and sends nothing, so nothing was sent`);
+    const out = [path, String(st.size)];
+    if (method === 'sort') {
+      const [col, descending] = params;
+      out[2] = JSON.stringify(typeof col === 'string' && col
+        ? [{ PATH: col, DESCENDING: descending === true || descending === 'true' || descending === 'X' }] : []);
+      return { modelKey, args: out };
+    }
+    const [col, operator, value1, value2] = params;
+    const empty = (v) => v === undefined || v === null || v === '';
+    const rowOf = (r) => {
+      const [p, o, a, b] = Array.isArray(r) ? r : [];
+      if (typeof p !== 'string' || !FILTER_OPERATORS.includes(o)) throw nothing(`a filter row with path '${echo(p)}' and operator '${echo(o)}'`);
+      return [p, o, a ?? null, b ?? null];
+    };
+    let groups;
+    if (params.length === 1 && (Array.isArray(col) || (typeof col === 'string' && col.trimStart().startsWith('[')))) {
+      let parsed = col;
+      if (typeof col === 'string') {
+        try {
+          parsed = JSON.parse(col);
+        } catch {
+          throw nothing('malformed filter groups JSON');
+        }
+      }
+      if (!Array.isArray(parsed)) throw nothing('filter groups that are no array');
+      groups = parsed.filter((g) => Array.isArray(g) && g.length).map((g) => g.map(rowOf));
+    } else if (empty(value1) && empty(value2)) {
+      groups = []; // no value: the filter is cleared
+    } else {
+      groups = [[rowOf([col, operator, value1, value2])]];
+    }
+    out[2] = '';
+    out[3] = JSON.stringify(groups);
+    return { modelKey, args: out };
+  }
+
   // ------------------------------------------------------------ act ----
 
   /* What makes an action the same action across two analyses of one screen:
@@ -915,9 +1180,12 @@ export function createAppClient({
 
   /* What an act names on the screen on display: its action (by signature)
    * and the model path of every value - validated as actNow validates it. */
-  function intentOf(session, { values, event, row: rowGiven, maxRows } = {}) {
+  function intentOf(session, { values, event, window: win, row: rowGiven, maxRows } = {}) {
     const row = rowArgument(rowGiven);
     const res = analyze(session, maxRows);
+    if (win !== undefined && win !== null && (event === undefined || event === null || event === '')) {
+      return { id: session.state.id, sig: windowPlan(session, win, res.snapshot, res.index).sig, paths: targetPaths(values, res.snapshot, res.index) };
+    }
     const entry = findAction(event, row, res.snapshot, res.index);
     return { id: session.state.id, sig: actionSignature(entry.action), paths: targetPaths(values, res.snapshot, res.index) };
   }
@@ -932,13 +1200,28 @@ export function createAppClient({
     return out;
   }
 
-  async function actNow(session, { values, event, args, row: rowGiven, maxRows, signal } = {}, expect = null) {
+  async function actNow(session, { values, event, window: win, args, row: rowGiven, maxRows, signal } = {}, expect = null) {
     const row = rowArgument(rowGiven);
     let res = analyze(session, maxRows);
     session.lastIndex = res.index;
     // validate everything before anything changes
     let entry = null;
-    if (event !== undefined && event !== null && event !== '') {
+    let plan = null;
+    const hasEvent = event !== undefined && event !== null && event !== '';
+    if (win !== undefined && win !== null) {
+      // a window request is a roundtrip of its own: no event, no row, no args
+      if (hasEvent) throw new AgentError('`window` is a request of its own (the framework\'s window event) - pass `event` or `window`, not both');
+      if (row !== undefined) throw new AgentError('`row` belongs to a row action - a window request takes none');
+      if (args !== undefined && args !== null) throw new AgentError('`args` belong to an event - a window request takes `window.count`, `window.sort` and `window.filter`');
+      plan = windowPlan(session, win, res.snapshot, res.index);
+      if (expect) {
+        const paths = targetPaths(values, res.snapshot, res.index);
+        if (plan.sig !== expect.sig || Object.keys(expect.paths).some((k) => paths[k] !== expect.paths[k])) {
+          throw new AgentError('the screen changed while an earlier act was in flight - the window request names another table or other fields on the new screen; '
+            + `nothing was sent - continue from the new snapshot (session '${session.state.id}')`);
+        }
+      }
+    } else if (hasEvent) {
       entry = findAction(event, row, res.snapshot, res.index);
       if (expect) {
         const paths = targetPaths(values, res.snapshot, res.index);
@@ -961,63 +1244,83 @@ export function createAppClient({
     let modelKey;
     try {
       applyValues(session, values, res.snapshot, res.index);
-      if (!entry) {
+      if (plan) {
+        // the window request carries the delta of the table's model, as the
+        // slot's eB does (core/actions/Slots.js _z2ui5WindowSend): an edit
+        // travels with it and lands in the row it was made in
+        modelKey = plan.modelKey;
+        sent = new Map(session.pending[modelKey] || []);
+        body = { S_FRONT: { ID: session.state.id, EVENT: WINDOW_EVENT, T_EVENT_ARG: plan.args } };
+        if (sent.size && session.state.models[modelKey]) body.MODEL = buildDelta([...sent.keys()], session.state.models[modelKey].data);
+      }
+      if (!entry && !plan) {
         res = analyze(session, maxRows);
         session.lastIndex = res.index;
         return res.snapshot;
       }
-      // the values may have changed what the args read: re-analyse first
-      res = analyze(session, maxRows);
-      session.lastIndex = res.index;
-      /* Ids follow the document order, so a value that shows or hides a
-       * control renumbers them: the same id can name ANOTHER action now, and
-       * firing it would send an event that was never asked for or checked.
-       * The re-read must be the action validated above - under its id, or
-       * the one action of the new screen that is the same; anything else is
-       * refused (as the abap2UI5 agent addon refuses it). An id the values
-       * left with nothing behind it (they hid the action) is looked for the
-       * same way: the old snapshot's entry was fired, a control the screen
-       * no longer shows. And the re-read action must still be enabled - a
-       * value can disable it (enabled="{/OPEN}"), and the browser cannot
-       * press it then. All before anything is sent; the catch below takes
-       * the values back. */
-      const sig = actionSignature(entry.action);
-      let again = res.index.actions.get(entry.action.id);
-      if (!again || actionSignature(again.action) !== sig) {
-        const same = [...res.index.actions.values()].filter((x) => actionSignature(x.action) === sig);
-        if (same.length !== 1) {
-          throw new AgentError(`the values change the screen - action ${entry.action.id} `
-            + `${again ? `is no longer ${entry.action.event}` : `(${entry.action.event}) is no longer on it`}; `
-            + 'fill the values without an event first, then fire it from the next snapshot');
+      if (entry) {
+        // the values may have changed what the args read: re-analyse first
+        res = analyze(session, maxRows);
+        session.lastIndex = res.index;
+        /* Ids follow the document order, so a value that shows or hides a
+         * control renumbers them: the same id can name ANOTHER action now, and
+         * firing it would send an event that was never asked for or checked.
+         * The re-read must be the action validated above - under its id, or
+         * the one action of the new screen that is the same; anything else is
+         * refused (as the abap2UI5 agent addon refuses it). An id the values
+         * left with nothing behind it (they hid the action) is looked for the
+         * same way: the old snapshot's entry was fired, a control the screen
+         * no longer shows. And the re-read action must still be enabled - a
+         * value can disable it (enabled="{/OPEN}"), and the browser cannot
+         * press it then. All before anything is sent; the catch below takes
+         * the values back. */
+        const sig = actionSignature(entry.action);
+        let again = res.index.actions.get(entry.action.id);
+        if (!again || actionSignature(again.action) !== sig) {
+          const same = [...res.index.actions.values()].filter((x) => actionSignature(x.action) === sig);
+          if (same.length !== 1) {
+            throw new AgentError(`the values change the screen - action ${entry.action.id} `
+              + `${again ? `is no longer ${entry.action.event}` : `(${entry.action.event}) is no longer on it`}; `
+              + 'fill the values without an event first, then fire it from the next snapshot');
+          }
+          again = same[0];
         }
-        again = same[0];
+        if (!again.action.enabled) {
+          throw new AgentError(`action ${again.action.id} (${again.action.label}) is disabled once the values are filled - ${actionHelp(res.snapshot)}`);
+        }
+        entry = again;
+        if (entry.frontend) {
+          // performed here, as the browser performs it: the slot closes, its
+          // unsent edits go with it, no roundtrip
+          const slot = entry.frontend;
+          const nextState = { ...session.state, slots: { ...session.state.slots }, models: { ...session.state.models }, custom: [] };
+          delete nextState.slots[slot];
+          delete nextState.models[slot];
+          session.state = nextState;
+          session.pending[slot] = new Map();
+          res = analyze(session, maxRows);
+          session.lastIndex = res.index;
+          return res.snapshot;
+        }
+        if (entry.bindingCall) {
+          // a sort or filter of a windowed list: the window request the list
+          // binding sends for it, with the delta of the list's model
+          const call = bindingCallPlan(entry, args, row, session);
+          modelKey = call.modelKey;
+          sent = new Map(session.pending[modelKey] || []);
+          body = { S_FRONT: { ID: session.state.id, EVENT: WINDOW_EVENT, T_EVENT_ARG: call.args } };
+        } else {
+          const picked = entry.pick ? applyPick(entry, row, session) : null;
+          const tArgs = eventArgs(entry, args, row, session, picked);
+          modelKey = entry.modelKey || 'MAIN';
+          // what goes out: the edits pending NOW - the ones made while the
+          // roundtrip is in flight are not part of it
+          sent = new Map(session.pending[modelKey] || []);
+          body = { S_FRONT: { ID: session.state.id, EVENT: entry.action.event } };
+          if (tArgs.length) body.S_FRONT.T_EVENT_ARG = tArgs;
+        }
+        if (sent.size && session.state.models[modelKey]) body.MODEL = buildDelta([...sent.keys()], session.state.models[modelKey].data);
       }
-      if (!again.action.enabled) {
-        throw new AgentError(`action ${again.action.id} (${again.action.label}) is disabled once the values are filled - ${actionHelp(res.snapshot)}`);
-      }
-      entry = again;
-      if (entry.frontend) {
-        // performed here, as the browser performs it: the slot closes, its
-        // unsent edits go with it, no roundtrip
-        const slot = entry.frontend;
-        const nextState = { ...session.state, slots: { ...session.state.slots }, models: { ...session.state.models }, custom: [] };
-        delete nextState.slots[slot];
-        delete nextState.models[slot];
-        session.state = nextState;
-        session.pending[slot] = new Map();
-        res = analyze(session, maxRows);
-        session.lastIndex = res.index;
-        return res.snapshot;
-      }
-      const picked = entry.pick ? applyPick(entry, row, session) : null;
-      const tArgs = eventArgs(entry, args, row, session, picked);
-      modelKey = entry.modelKey || 'MAIN';
-      // what goes out: the edits pending NOW - the ones made while the
-      // roundtrip is in flight are not part of it
-      sent = new Map(session.pending[modelKey] || []);
-      body = { S_FRONT: { ID: session.state.id, EVENT: entry.action.event } };
-      if (tArgs.length) body.S_FRONT.T_EVENT_ARG = tArgs;
-      if (sent.size && session.state.models[modelKey]) body.MODEL = buildDelta([...sent.keys()], session.state.models[modelKey].data);
     } catch (e) {
       // a refused act changes nothing: neither the pending edits nor the
       // models (nothing ran in between - this part does not wait)
@@ -1137,8 +1440,9 @@ export function createAppClient({
      */
     async act(sessionId, opts = {}) {
       const session = find(sessionId);
-      const { event } = opts;
-      if (event === undefined || event === null || event === '') return actNow(session, opts);
+      const { event, window: win } = opts;
+      // values alone start no roundtrip; an event or a window request does
+      if ((event === undefined || event === null || event === '') && (win === undefined || win === null)) return actNow(session, opts);
       /* Queued behind a roundtrip in flight, the act runs on the screen that
        * one answers - but its ids were read from the screen on display now.
        * Two app_act { event: "a1" } at once fired NEXT and then whatever a1

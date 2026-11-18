@@ -278,11 +278,12 @@ test("a selection dialog is a table and its confirm is the pick, row-valued para
   assert.equal(dialog.control, "sap.m.TableSelectDialog");
   assert.equal(dialog.selectionMode, "Single");
   assert.equal(dialog.selectionField, "ZZSELKZ");
-  // selectedContexts[0]/sPath is undefined in UI5's JSONModel - sent as null
-  assert.deepEqual(f4.sent[4].S_FRONT.T_EVENT_ARG, [null]);
-  assert.deepEqual(f4.sent[4].MODEL, {
-    MR_TAB_POPUP: { "*": [{ NAME: "Berlin", WERKS: "3000", ZZSELKZ: true }] },
-  });
+  // ${$parameters>/selectedItem}.getBindingContext().getPath() of the picked row
+  assert.deepEqual(f4.sent[4].S_FRONT.T_EVENT_ARG, ["/MR_VIEW/*/0"]);
+  // the '*' node of a data reference carries the __delta (abap2UI5 #3026,
+  // mcp-server #73) - shipped whole, a windowed table's edit is dropped
+  assert.deepEqual(f4.sent[4].MODEL, { MR_VIEW: { "*": { __delta: { 0: { ZZSELKZ: true } } } } });
+  assert.equal(f4.snaps[4].fields.find((f: { name: string }) => f.name === "P_PLANT")?.value, "3000");
 });
 
 test("MessagePopover and MessageView items are messages with their own source", () => {
