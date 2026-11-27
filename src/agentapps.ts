@@ -588,8 +588,9 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
    * (a timeout, a dropped connection, a cancel). The vendored client refuses
    * the session's next event itself, sending nothing; this copy of its
    * reason only refuses it BEFORE the question, so the user is not asked
-   * about a step that would not be sent. A successful app_describe clears
-   * both - it is the resync the client's refusal names.
+   * about a step that would not be sent. app_describe clears both - it is
+   * the resync the client's refusal names; the client clears its flag
+   * when describe( ) is called, whatever the outcome, and so does this.
    */
   const outOfSync = new Map<string, string>();
   let nobody: AppClient | undefined;
@@ -1108,13 +1109,17 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
           min: 0,
           max: 200,
         });
-        const answer = await snapshotAnswer(() =>
-          clientOfSession(args.session).describe(args.session, { maxRows })
-        );
-        if (!answer.isError) {
+        // the vendored client clears its own out-of-sync flag as soon as
+        // describe( ) is called, before it analyzes the screen - so this
+        // copy goes whatever the outcome: kept after a describe( ) that
+        // failed, it would refuse an event the client would send
+        try {
+          return await snapshotAnswer(() =>
+            clientOfSession(args.session).describe(args.session, { maxRows })
+          );
+        } finally {
           outOfSync.delete(String(args.session ?? ""));
         }
-        return answer;
       },
     },
     {

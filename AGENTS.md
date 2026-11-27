@@ -940,7 +940,11 @@ Facts an agent cannot see from the code but will trip over:
   it the secret is invisible in the called workflow and every bump silently
   falls back to the default token. Never `secrets: inherit`: that hands a job
   which runs a caller's regenerate script and an npm install every secret of
-  the repository, `VSCE_PAT` and `OVSX_PAT` included.
+  the repository, `VSCE_PAT` and `OVSX_PAT` included. The regenerate script,
+  npm and the gate run in the `bump` job with `contents: read` and no
+  secret; the change goes as a patch artifact to the `pr` job, the only one
+  with write permissions and `BUMP_PR_TOKEN`, which applies it and opens
+  the pull request - and runs no npm.
 - **The `.vsix` size is a gate, not just a number.** `ci.yml` prints the
   package size and its file list and fails above `MAX_VSIX_MB`. 0.25.1 packages
   to ~457 KB, so the 5 MB limit is an order of magnitude of headroom for the
