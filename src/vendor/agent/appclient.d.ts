@@ -10,6 +10,11 @@ import type { AgentSnapshot } from "./snapshot";
 /** A refusal: what was wrong and what is allowed. Becomes an isError result. */
 export class AgentError extends Error {
   constructor(message: string);
+  /** Set on a refusal of a request that reached (`did`) or may have reached
+   *  (`may`) the backend: its answer was not adopted, so the event may have
+   *  run. An act refused that way leaves the session out of sync - its next
+   *  event is refused, nothing sent, until `describe` resyncs it. */
+  sent?: "did" | "may";
 }
 
 /** The slice of a fetch Response the client reads. */
@@ -18,7 +23,9 @@ export interface FetchLikeResponse {
   ok?: boolean;
   status: number;
   /** Copied into the transport answer when present. */
-  headers?: { entries(): Iterable<[string, string]> };
+  headers?: { entries(): Iterable<[string, string]>; get?(name: string): string | null };
+  /** Read in chunks up to the cap when present (a fetch body stream). */
+  body?: AsyncIterable<Uint8Array> & { cancel?(): Promise<void> };
   text(): Promise<string>;
 }
 
@@ -92,9 +99,16 @@ export function validContextId(id: unknown): id is string;
 export function buildDelta(paths: string[], data: unknown): Record<string, unknown>;
 /** The error body as a refusal shows it: verbatim, only shortened. */
 export function errorText(status: number, body: string): string;
+/** The largest answer the default transport reads (32 MB). */
+export const RESPONSE_MAX_BYTES: number;
 /** The default transport: one `fetch` of `baseUrl` - the POST of the body,
- *  or the token fetch's HEAD. */
-export function fetchTransport(options: { baseUrl: string; fetchImpl?: FetchLike }): AppTransport;
+ *  or the token fetch's HEAD; the answer read up to `maxBytes`
+ *  (RESPONSE_MAX_BYTES), a larger one refused with `sent: "did"`. */
+export function fetchTransport(options: {
+  baseUrl: string;
+  fetchImpl?: FetchLike;
+  maxBytes?: number;
+}): AppTransport;
 
 export interface AppClientOptions {
   /** The local backend's root: where the default transport POSTs and what
@@ -126,10 +140,18 @@ export interface ActOptions {
   args?: unknown;
   row?: number;
   maxRows?: number;
+  /** The caller's cancel: ends the roundtrip like the timeout. */
+  signal?: AbortSignal;
 }
 
 export interface AppClient {
-  start(app: string, options?: { values?: unknown; maxRows?: number }): Promise<AgentSnapshot>;
+  /** `query`: start parameters (`&name=value`...) appended to the
+   *  location's SEARCH. */
+  start(
+    app: string,
+    options?: { values?: unknown; maxRows?: number; signal?: AbortSignal; query?: string }
+  ): Promise<AgentSnapshot>;
+  /** From memory; also the resync of a session that is out of sync. */
   describe(session: unknown, options?: { maxRows?: number }): AgentSnapshot;
   act(session: unknown, options?: ActOptions): Promise<AgentSnapshot>;
   sessions(): Array<{ session: string; app: string }>;

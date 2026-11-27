@@ -699,8 +699,11 @@ test("argument checks are mcp-server's: class name, max_rows", async () => {
 
 test("a system that cannot be reached is said in the extension's words", async () => {
   const h = harness({
+    // as node's http raises it: the code says the connection was never made
     request: async () => {
-      throw new Error("connect ECONNREFUSED 127.0.0.1:50123");
+      throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:50123"), {
+        code: "ECONNREFUSED",
+      });
     },
   });
   const r = await h.call("app_start", { app: "zcl_app" });

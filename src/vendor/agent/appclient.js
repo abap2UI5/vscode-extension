@@ -1,6 +1,6 @@
 /*
  * VENDORED - do not edit. abap2UI5/mcp-server lib/appclient.mjs
- * at commit 8a95a6a61560d785a4a0b6688f1faa6b27e8fc49,
+ * at commit 53555b020baf4f95e3fde0f3edc9afcee4a3c5e1,
  * copied by scripts/vendor-agent.mjs (`npm run agent-vendor`); the only
  * change is the sibling imports ending in .js. `npm run agent-vendor:check`
  * fails when this copy drifts from that commit. Change it upstream, then
@@ -58,6 +58,10 @@ export class AgentError extends Error {
 }
 
 const LIST_MAX = 30;
+/* The longest `$parameters` expression a row event argument is evaluated
+ * from; a longer one is asked for in `args`, as any shape this client does
+ * not model. Real views write well under 200 characters. */
+const PARAM_EXPR_MAX = 4096;
 
 /*
  * The model delta, as the frontend builds it (core/Lib.js
@@ -223,19 +227,78 @@ export function headerOf(headers, name) {
   return '';
 }
 
+/* A transport failure that proves the request never left: the connection
+ * was not made (refused, no such host, no route). Read from the error's
+ * `code`, its `cause` (fetch's "fetch failed"), an AggregateError's members
+ * (fetch tries every address of a host) or a message that starts with the
+ * code. Anything else after the request was handed over may have reached
+ * the backend. */
+const NOT_CONNECTED = /^(ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|UND_ERR_CONNECT_TIMEOUT)\b/;
+function neverConnected(e, depth = 0) {
+  if (!e || typeof e !== 'object' || depth > 3) return false;
+  if (NOT_CONNECTED.test(String(e.code || '')) || NOT_CONNECTED.test(String(e.message || ''))) return true;
+  if (Array.isArray(e.errors) && e.errors.length && e.errors.every((x) => neverConnected(x, depth + 1))) return true;
+  return neverConnected(e.cause, depth + 1);
+}
+
 /** The frontend's rule for a stateful session id (core/Lib.js
  *  isValidContextId): never empty, never the text `undefined`. */
 export const validContextId = (id) => typeof id === 'string' && id !== '' && id !== 'undefined';
 
+/*
+ * The largest answer the default transport reads. A screen is a few views
+ * and the models behind them - the recorded sessions answer well under 1 MB,
+ * a table of 10,000 rows a few MB - and the body was read whole with
+ * res.text(), so a backend (or a proxy in front of it) that streamed without
+ * end held the server's memory until the timeout. Read in chunks, stopped at
+ * the cap.
+ */
+export const RESPONSE_MAX_BYTES = 32 * 1024 * 1024;
+
+/** A fetch response's body as text, at most `maxBytes` of it: one that
+ *  declares more is refused unread, one that streams more is cancelled at
+ *  the cap. The answer came, so the request ran: the refusal says so
+ *  (`sent`). */
+async function cappedText(res, maxBytes) {
+  const tooLarge = () => {
+    const size = maxBytes >= 1048576 ? `${Math.round(maxBytes / 1048576)} MB` : `${maxBytes} bytes`;
+    const e = new AgentError(`the backend answered more than ${size} - stopped reading it, nothing of it was adopted `
+      + '(no screen is that large: a model of runaway size, or something in between answering with something else?)');
+    e.sent = 'did';
+    return e;
+  };
+  const declared = Number(res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-length') ?? NaN : NaN);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    if (res.body && typeof res.body.cancel === 'function') await res.body.cancel().catch(() => {});
+    throw tooLarge();
+  }
+  if (res.body && typeof res.body[Symbol.asyncIterator] === 'function') {
+    const decoder = new TextDecoder();
+    let text = '';
+    let got = 0;
+    // leaving the loop by the throw cancels the stream (its iterator's return)
+    for await (const chunk of res.body) {
+      got += chunk.length;
+      if (got > maxBytes) throw tooLarge();
+      text += decoder.decode(chunk, { stream: true });
+    }
+    return text + decoder.decode();
+  }
+  const text = await res.text();
+  if (new TextEncoder().encode(text).length > maxBytes) throw tooLarge();
+  return text;
+}
+
 /** The transport over `fetch`: one POST of `body` to `baseUrl` - or, for the
- *  CSRF token fetch, one HEAD without a body. */
-export function fetchTransport({ baseUrl, fetchImpl = globalThis.fetch }) {
+ *  CSRF token fetch, one HEAD without a body. The answer is read up to
+ *  `maxBytes` (RESPONSE_MAX_BYTES). */
+export function fetchTransport({ baseUrl, fetchImpl = globalThis.fetch, maxBytes = RESPONSE_MAX_BYTES }) {
   return async ({ method = 'POST', body, headers, signal }) => {
     const res = await fetchImpl(baseUrl, method === 'HEAD' ? { method, headers, signal } : { method, headers, body, signal });
     return {
       status: res.status,
       headers: res.headers && typeof res.headers.entries === 'function' ? Object.fromEntries(res.headers.entries()) : {},
-      body: method === 'HEAD' ? '' : await res.text(),
+      body: method === 'HEAD' ? '' : await cappedText(res, maxBytes),
     };
   };
 }
@@ -358,19 +421,39 @@ export function createAppClient({
     /* the timeout, and the caller's own signal when it passed one (an MCP
      * request the client cancelled): either ends the roundtrip */
     const signal = cancel ? AbortSignal.any([AbortSignal.timeout(timeoutMs), cancel]) : AbortSignal.timeout(timeoutMs);
-    const send = () => roundtrip({ method: 'POST', body: serialized, headers: requestHeaders(session), signal, draftId });
+    /* Whether the POST may have reached the backend: from the moment it is
+     * handed to the transport, until an answer says otherwise (a token
+     * layer's 403 ran nothing). A request that may have run is said as such
+     * (`sent` on the refusal) - "nothing adopted" alone read as "nothing
+     * happened", and the agent sent a non-idempotent event a second time. */
+    let posted = false;
+    const send = () => {
+      posted = true;
+      return roundtrip({ method: 'POST', body: serialized, headers: requestHeaders(session), signal, draftId });
+    };
     let res;
     try {
       res = await send();
-      if (csrfRequired(res) && await fetchCsrfToken(session, signal, draftId)) res = await send();
+      if (csrfRequired(res)) {
+        posted = false;
+        if (await fetchCsrfToken(session, signal, draftId)) res = await send();
+      }
     } catch (e) {
       // the transport's own refusal (the system mode's breaker) is the
       // answer as it stands, not a network problem
       if (e instanceof AgentError) throw e;
-      cancelled(cancel);
-      throw new AgentError(`the backend did not answer (${(e && e.message) || e})${backendHint ? ` - ${backendHint}` : ''}`);
+      const sent = posted && !neverConnected(e) ? 'may' : null;
+      if (cancel && cancel.aborted) {
+        if (sent) throw sentError('cancelled by the caller after the request had been sent - nothing of this roundtrip was adopted', sent);
+        cancelled(cancel);
+      }
+      throw sentError(`the backend did not answer (${(e && e.message) || e})${sent ? ' after the request had been sent' : ''}${backendHint ? ` - ${backendHint}` : ''}`, sent);
     }
-    cancelled(cancel);
+    // an answer arrived: the backend ran the request, adopted or not
+    if (cancel && cancel.aborted) {
+      if (posted) throw sentError('cancelled by the caller after the backend had answered - nothing of the answer was adopted', 'did');
+      cancelled(cancel);
+    }
     const text = String(res.body ?? '');
     if (!(res.status >= 200 && res.status < 300)) throw new AgentError(`the backend refused the roundtrip - ${errorText(res.status, text)}`);
     let json;
@@ -415,6 +498,14 @@ export function createAppClient({
     }
     const contextId = headerOf(res.headers, 'sap-contextid');
     return { json, contextId: validContextId(contextId) ? contextId : null };
+  }
+
+  /* A refusal of a request that reached (`did`) or may have reached
+   * (`may`) the backend - the caller decides what that means for a session. */
+  function sentError(message, sent) {
+    const e = new AgentError(message);
+    if (sent) e.sent = sent;
+    return e;
   }
 
   function remember(session) {
@@ -794,6 +885,40 @@ export function createAppClient({
   }
 
   /*
+   * `${$parameters>/P} ? <then> : <literal>` split in one linear pass, or
+   * null: the head, then `?`, then the LAST colon outside a quoted string,
+   * whose right side has to be a literal. (A regex with a lazy middle and
+   * `\s*:\s*` around it backtracked cubically on a run of blanks - 6.6 s
+   * of a blocked event loop for 3000 of them in a wire the backend wrote.)
+   */
+  function splitTernary(src) {
+    const head = /^\$\{\$parameters>[^{}]*\}/.exec(src);
+    if (!head) return null;
+    let i = head[0].length;
+    while (i < src.length && /\s/.test(src[i])) i += 1;
+    if (src[i] !== '?') return null;
+    i += 1;
+    let colon = -1;
+    let quote = null;
+    for (let k = i; k < src.length; k += 1) {
+      const c = src[k];
+      if (quote) {
+        if (c === '\\') k += 1;
+        else if (c === quote) quote = null;
+      } else if (c === "'" || c === '"') {
+        quote = c;
+      } else if (c === ':') {
+        colon = k;
+      }
+    }
+    if (colon < 0) return null;
+    const then = src.slice(i, colon).trim();
+    const lit = src.slice(colon + 1).trim();
+    if (!then || !/^(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|null|-?\d+(?:\.\d+)?)$/.test(lit)) return null;
+    return [src, head[0], then, lit];
+  }
+
+  /*
    * The browser-computed argument shapes of a row event, the ones views
    * actually write:
    *   ${$parameters>/P}                                (walkParams)
@@ -807,7 +932,11 @@ export function createAppClient({
    */
   function paramExpr(raw, params, t, data) {
     const src = String(raw).trim();
-    const tern = /^(\$\{\$parameters>[^{}]*\})\s*\?\s*([\s\S]+?)\s*:\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|null|-?\d+(?:\.\d+)?)\s*$/.exec(src);
+    // the argument is written by the backend: a length no real view writes
+    // is not parsed at all (every step below is linear, the cap bounds the
+    // nesting of a ternary inside a ternary)
+    if (src.length > PARAM_EXPR_MAX) return UNKNOWN;
+    const tern = splitTernary(src);
     if (tern) {
       // the condition is the parameter itself - an item is truthy
       const cond = headOf(/^\$\{\$parameters>\/?([^{}]*)\}$/.exec(tern[1])[1], params);
@@ -1388,7 +1517,7 @@ export function createAppClient({
           // performed here, as the browser performs it: the slot closes, its
           // unsent edits go with it, no roundtrip
           const slot = entry.frontend;
-          const nextState = { ...session.state, slots: { ...session.state.slots }, models: { ...session.state.models }, custom: [] };
+          const nextState = { ...session.state, slots: { ...session.state.slots }, models: { ...session.state.models }, custom: [], timer: session.state.timer || null };
           delete nextState.slots[slot];
           delete nextState.models[slot];
           session.state = nextState;
@@ -1435,6 +1564,7 @@ export function createAppClient({
       response = await post(body, session, signal);
     } catch (e) {
       rollBack(session, edits, savedPending, JSON.parse(savedModels));
+      if (e instanceof AgentError && e.sent) throw outOfSync(session, body.S_FRONT.EVENT, e);
       throw e;
     }
     // only what the roundtrip carried is done with: an edit made while it
@@ -1448,9 +1578,36 @@ export function createAppClient({
       if (!session.orders) session.orders = new Map();
       session.orders.set(order.key, { sort: order.sort, filter: order.filter });
     }
-    res = analyze(session, maxRows);
+    res = analyzeAdopted(session, maxRows);
     session.lastIndex = res.index;
     return res.snapshot;
+  }
+
+  /* The analysis right after a response was adopted: the app has moved on
+   * whether the snapshot can be built or not, so a failure here names the
+   * session it is now at - never a bare error that leaves the agent without
+   * the id (or retrying an event that already ran). */
+  function analyzeAdopted(session, maxRows) {
+    try {
+      return analyze(session, maxRows);
+    } catch (e) {
+      if (e instanceof AgentError) throw e;
+      throw new AgentError(`the backend answered and the app is at session ${session.state.id}, but its screen could not be described: ${e && e.message ? e.message : String(e)}`);
+    }
+  }
+
+  /* An event that reached (or may have reached) the backend without its
+   * answer being adopted: the backend may be a draft further than this
+   * client, and firing again from here would run the event a second time on
+   * the earlier state. The session takes no further event until the agent
+   * has looked again (app_describe) or started afresh. */
+  function outOfSync(session, event, e) {
+    const id = session.state.id;
+    const what = event === WINDOW_EVENT ? 'the window request' : `event ${event}`;
+    session.outOfSync = `session '${id}' is out of sync: ${what} ${e.sent === 'did' ? 'ran' : 'may have run'} on the backend and its answer was not adopted - `
+      + `do not repeat it blindly. app_describe { session: "${id}" } resyncs the session to the last screen this client knows (an event fired from there runs on that earlier state again), `
+      + `app_start ${session.state.app || 'the app'} starts afresh`;
+    return new AgentError(`${e.message}. ${session.outOfSync}`);
   }
 
   /* The edits this act made (its values, its pick): every pending path that
@@ -1485,11 +1642,14 @@ export function createAppClient({
 
   return {
     /** app_start: POST the app start, adopt the answer, apply `values` as pending. */
-    async start(app, { values, maxRows, signal } = {}) {
+    async start(app, { values, maxRows, signal, query = '' } = {}) {
       const cls = String(app || '').trim();
       if (!cls) throw new AgentError('pass `app` - the class to start, e.g. z2ui5_cl_smp_app_009 (app_list names the built ones)');
       const where = await locate(cls);
-      const response = await post({ S_FRONT: { ORIGIN: where.origin, PATHNAME: where.pathname, SEARCH: where.search } }, null, signal);
+      /* the start parameters (args.mjs startParams: `&name=value`...) after
+       * the location's own query - the app reads them from SEARCH with
+       * get_start_param( ), as from the URL of a real launch */
+      const response = await post({ S_FRONT: { ORIGIN: where.origin, PATHNAME: where.pathname, SEARCH: where.search + query } }, null, signal);
       const session = {
         state: emptyState(), ids: new Set(), pending: { MAIN: new Map(), POPUP: new Map(), POPOVER: new Map() },
         generation: currentGeneration(), maxRows: maxRows ?? DEFAULT_MAX_ROWS, lastIndex: null,
@@ -1497,7 +1657,7 @@ export function createAppClient({
       };
       adopt(session, response);
       remember(session);
-      let res = analyze(session, maxRows);
+      let res = analyzeAdopted(session, maxRows);
       session.lastIndex = res.index;
       if (values && Object.keys(values).length) {
         /* the app runs whether its values are taken or not: a refusal names
@@ -1518,6 +1678,8 @@ export function createAppClient({
     /** app_describe: the current state, from memory. */
     describe(sessionId, { maxRows } = {}) {
       const session = find(sessionId);
+      // looking again is the resync an event that may have run asks for
+      session.outOfSync = null;
       const res = analyze(session, maxRows);
       session.lastIndex = res.index;
       return res.snapshot;
@@ -1549,6 +1711,7 @@ export function createAppClient({
       const { event, window: win } = opts;
       // values alone start no roundtrip; an event or a window request does
       if ((event === undefined || event === null || event === '') && (win === undefined || win === null)) return actNow(session, opts);
+      if (session.outOfSync) throw new AgentError(`nothing was sent - ${session.outOfSync}`);
       /* Queued behind a roundtrip in flight, the act runs on the screen that
        * one answers - but its ids were read from the screen on display now.
        * Two app_act { event: "a1" } at once fired NEXT and then whatever a1
@@ -1560,6 +1723,8 @@ export function createAppClient({
         if (generation && session.generation !== generation()) {
           throw new AgentError(`session '${sessionId}' was started on a backend that has since stopped or restarted - its drafts are gone; app_start ${session.state.app || 'the app'} again`);
         }
+        // the act this one queued behind may have left the session out of sync
+        if (session.outOfSync) throw new AgentError(`nothing was sent - ${session.outOfSync}`);
         return actNow(session, opts, expect && expect.id !== session.state.id ? expect : null);
       }).finally(() => {
         session.busy -= 1;

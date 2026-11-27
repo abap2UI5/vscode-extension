@@ -1,6 +1,6 @@
 /*
  * VENDORED - do not edit. abap2UI5/mcp-server lib/snapshot.mjs
- * at commit 8a95a6a61560d785a4a0b6688f1faa6b27e8fc49,
+ * at commit 53555b020baf4f95e3fde0f3edc9afcee4a3c5e1,
  * copied by scripts/vendor-agent.mjs (`npm run agent-vendor`); the only
  * change is the sibling imports ending in .js. `npm run agent-vendor:check`
  * fails when this copy drifts from that commit. Change it upstream, then
@@ -50,6 +50,12 @@ const MAX_TEXTS = 30;
 const MAX_UNSUPPORTED = 30;
 const MAX_VALUES = 100;
 const MAX_ITEM_MESSAGES = 50;
+/* The deepest element of a view the walker descends to (aggregations count
+ * as levels). The walk is recursive - a few frames per level - and a view
+ * nested 2000 levels deep overflowed the stack AFTER the client had adopted
+ * the response, which left the session unreadable for good. Real views stay
+ * well under 100; what lies deeper is cut and named in `unsupported`. */
+export const MAX_VIEW_DEPTH = 256;
 const TEXT_MAX_LEN = 200;
 
 /* The two frontend-only wires the client performs itself: closing the popup
@@ -64,8 +70,13 @@ export const BINDING_CALL_EVENT = '@BINDING_CALL';
 
 // ------------------------------------------------------------ the state ----
 
+/** An ABAP boolean as the frontend casts one: `X` (or true) is true. */
+function isAbapTrue(v) {
+  return v === true || v === 'X' || v === 'true';
+}
+
 export function emptyState() {
-  return { app: '', id: '', slots: {}, models: {}, custom: [] };
+  return { app: '', id: '', slots: {}, models: {}, custom: [], timer: null };
 }
 
 const MODEL_OWNING = ['MAIN', 'POPUP', 'POPOVER'];
@@ -184,8 +195,11 @@ export function followUpActions(response) {
  */
 export function applyResponse(state, response) {
   const prev = state || emptyState();
-  const next = { app: prev.app, id: prev.id, slots: { ...prev.slots }, models: { ...prev.models }, custom: [] };
+  const next = { app: prev.app, id: prev.id, slots: { ...prev.slots }, models: { ...prev.models }, custom: [], timer: prev.timer || null };
   const front = (response && response.S_FRONT) || {};
+  // a repeating START_TIMER belongs to the app that armed it: the frontend
+  // drops it when a response names another app (View1, state.timerRepeat)
+  if (front.APP && prev.app && front.APP !== prev.app) next.timer = null;
   if (protocolOf(response) < 3 && front.APP && prev.app && front.APP !== prev.app) {
     destroySlot(next, 'POPUP');
     destroySlot(next, 'POPOVER');
@@ -217,6 +231,18 @@ export function applyResponse(state, response) {
     const b = a[0] === 'CONTROL_GLOBAL' ? a.slice(1) : a;
     if (b[0] === 'VIEW_SLOTS' && b[1] === 'destroy') {
       destroySlot(next, b[2]);
+      continue;
+    }
+    // the one timer slot of the frontend (actions/ViewOps evStartTimer): every
+    // START_TIMER decides anew whether it repeats - b[4], an ABAP boolean -
+    // and STOP_TIMER ends it. A repeating one is armed again after every
+    // response, so it stays an action of every later snapshot.
+    if (b[0] === 'START_TIMER') {
+      next.timer = isAbapTrue(b[4]) && typeof b[1] === 'string' && b[1]
+        ? { event: b[1], delay: Number(b[2]) || 0 }
+        : null;
+    } else if (b[0] === 'STOP_TIMER') {
+      next.timer = null;
       continue;
     }
     next.custom.push(a);
@@ -360,7 +386,15 @@ const FIELD_SPECS = {
   'sap.m.MultiComboBox': { props: ['selectedKeys'], kind: 'multichoice', items: 'key' },
   'sap.m.SegmentedButton': { props: ['selectedKey'], kind: 'choice', items: 'key' },
   'sap.m.RadioButtonGroup': { props: ['selectedIndex'], kind: 'choice', items: 'index' },
+  // controls of abap2UI5-addons/custom-controls that are input fields:
+  // ScanInput extends sap.m.Input (app/webapp/cc/ScanInput.js), the value is
+  // its `value`, written by z2ui5_cl_cci_scan_input
+  'z2ui5_cci.cc.ScanInput': { props: ['value'], kind: 'text' },
 };
+
+/* The custom controls of addons the snapshot describes like the UI5 control
+ * they extend - every other custom control stays "not described". */
+const ADDON_FIELDS = new Set(['z2ui5_cci.cc.ScanInput']);
 
 function inputKind(type) {
   switch (String(type || '')) {
@@ -502,6 +536,8 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
     const key = modelKeyOf(slot);
     const model = st.models[key] || { data: {} };
     const root = parseViewXml(st.slots[slot].xml);
+    const cut = cutDeeperThan(root, MAX_VIEW_DEPTH);
+    if (cut) note(`${slot} view nested deeper than ${MAX_VIEW_DEPTH} levels (${layer}) - ${cut} subtree(s) below that depth not described`);
     const labelFor = collectLabelFor(root, model.data);
     const ctx = { layer, slot, modelKey: key, data: model.data || {}, row: null, label: null, where: [], labelFor, byId: collectIds(root) };
     walkChildren(root.children, ctx);
@@ -537,10 +573,17 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
           { wire: { args: [{ static: false, kind: 'action', describe: '$action' }] }, choices });
       }
     } else if (target === 'START_TIMER' && typeof method === 'string' && method) {
-      pushAction({ event: method, args: [], label: `timer (${Number(text) || 0} ms)`, control: 'timer', trigger: 'timer', enabled: true, scope: 'screen', layer: topmost }, { wire: { args: [] } });
+      if (!(st.timer && st.timer.event === method)) {
+        pushAction({ event: method, args: [], label: `timer (${Number(text) || 0} ms)`, control: 'timer', trigger: 'timer', enabled: true, scope: 'screen', layer: topmost }, { wire: { args: [] } });
+      }
     } else if (!BENIGN_CUSTOM.has(target)) {
       note(`frontend action ${clip(a.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(' '), 120)} (runs in the browser only, not performed)`);
     }
+  }
+
+  // a repeating timer an earlier response armed ticks on in the browser
+  if (st.timer) {
+    pushAction({ event: st.timer.event, args: [], label: `timer (${st.timer.delay} ms, repeating)`, control: 'timer', trigger: 'timer', enabled: true, scope: 'screen', layer: topmost }, { wire: { args: [] } });
   }
 
   const title = out.titles[topmost] || out.titles.main || '';
@@ -669,10 +712,12 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
         messageManager(node, c);
         return;
       }
-      note(`custom control ${name} (${ctx.layer}: ${where.slice(-3).join(' > ')}) - not described`);
-      wires(node, c, name);
-      walkChildren(node.children, c);
-      return;
+      if (!ADDON_FIELDS.has(name)) {
+        note(`custom control ${name} (${ctx.layer}: ${where.slice(-3).join(' > ')}) - not described`);
+        wires(node, c, name);
+        walkChildren(node.children, c);
+        return;
+      }
     }
     if (name === 'sap.ui.core.HTML') {
       note(`raw HTML (sap.ui.core.HTML, ${ctx.layer}: ${where.slice(-3).join(' > ')}) - not described`);
@@ -1251,6 +1296,25 @@ export function analyzeScreen({ state, response, app, session, maxRows = DEFAULT
     }
     return null;
   }
+}
+
+/* Cuts the children of every element `max` levels below the root, without
+ * recursing (the tree is as deep as the backend wrote it); answers how many
+ * subtrees were cut. Every recursive walk of the tree runs after this. */
+function cutDeeperThan(root, max) {
+  let cut = 0;
+  const stack = [[root, 0]];
+  while (stack.length) {
+    const [node, depth] = stack.pop();
+    if (!node.children || !node.children.length) continue;
+    if (depth >= max) {
+      cut += 1;
+      node.children = [];
+      continue;
+    }
+    for (const ch of node.children) stack.push([ch, depth + 1]);
+  }
+  return cut;
 }
 
 /* The controls of a view by their id - what a BINDING_CALL wire names. */

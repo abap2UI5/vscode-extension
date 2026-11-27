@@ -1,7 +1,7 @@
 {
   "note": "What scripts/vendor-agent.mjs copied from abap2UI5/mcp-server, at which commit, and the sha256 of every file it wrote. Generated - do not edit; src/test/agentvendor.test.ts holds the copies to these hashes.",
   "repository": "abap2UI5/mcp-server",
-  "commit": "8a95a6a61560d785a4a0b6688f1faa6b27e8fc49",
+  "commit": "53555b020baf4f95e3fde0f3edc9afcee4a3c5e1",
   "files": {
     "src/test/fixtures/agent/agent-p3.json": {
       "from": "test/fixtures/agent/agent-p3.json",
@@ -77,15 +77,15 @@
     },
     "src/vendor/agent/appclient.js": {
       "from": "lib/appclient.mjs",
-      "sha256": "6953c72857c1acaf4de298213d4d7ba1edc0a7e371599ac755495b474a15b863"
+      "sha256": "c2528551d8e9f14b519f23cf16a06f8f37fc92a3d4886b6bee9eeadde8dabce3"
     },
     "src/vendor/agent/snapshot.js": {
       "from": "lib/snapshot.mjs",
-      "sha256": "a70fa378d0dabb7b11b4b102813c987021eb30ce1a96b20e73782341f5d1c9ac"
+      "sha256": "a2132ececf19218afbee1dfb4ac6bcaff7f391408289df6f19f459a2b60eee5c"
     },
     "src/vendor/agent/viewxml.js": {
       "from": "lib/viewxml.mjs",
-      "sha256": "6e82c158b5d5d9ff9e519af0a9faaab756716e467ae8f0352392ccb8fead20d1"
+      "sha256": "69b5ddf88db4c385ca31c1b0fbe6b397dfa83df2bc84427a064100c7784cefc5"
     }
   }
 }

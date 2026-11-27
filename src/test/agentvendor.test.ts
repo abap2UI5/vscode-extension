@@ -9,8 +9,10 @@ import {
   createAppClient,
   errorText,
   headerOf,
+  fetchTransport,
   PROTOCOL,
   PROTOCOLS,
+  RESPONSE_MAX_BYTES,
   validContextId,
   type FetchLike,
 } from "../vendor/agent/appclient";
@@ -19,6 +21,7 @@ import {
   buildSnapshot,
   emptyState,
   followUpActions,
+  MAX_VIEW_DEPTH,
   nameOfPath,
   protocolOf,
   SLOT_ORDER,
@@ -380,4 +383,111 @@ test("refusals name what is allowed, and nothing goes over the wire", async () =
   await rejects(client.act(s, { row: 1 }), /`row` belongs to an event/);
   assert.equal(r.sent.length, 1, "only the start");
   assert.throws(() => client.describe("nope"), /unknown session 'nope'/);
+});
+
+test("an event whose answer was lost leaves the session out of sync until describe resyncs it", async () => {
+  const view =
+    '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Page title="T"><Button text="Go" press=".eB([\'GO\'])"/></Page></mvc:View>';
+  const events: unknown[] = [];
+  let drop = true;
+  const client = createAppClient({
+    baseUrl: BASE,
+    backendHint: "",
+    fetchImpl: async (_url, init) => {
+      const front = JSON.parse(init.body ?? "{}").value.S_FRONT;
+      events.push(front.EVENT);
+      if (front.EVENT && drop) {
+        // the connection was made and lost: the event may have run
+        throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+      }
+      const text = JSON.stringify({
+        S_FRONT: {
+          ID: `D${events.length}`,
+          APP: "ZCL_APP",
+          PROTOCOL: 2,
+          ...(front.EVENT ? {} : { S_ACTION: { T_SYSTEM: [["VIEW_SLOTS", "display", "MAIN", view]] } }),
+        },
+      });
+      return { ok: true, status: 200, text: async () => text };
+    },
+  });
+  const s = (await client.start("zcl_app")).session;
+  await assert.rejects(
+    client.act(s, { event: "GO" }),
+    (e: unknown) =>
+      e instanceof AgentError &&
+      /after the request had been sent/.test(e.message) &&
+      new RegExp(`session '${s}' is out of sync: event GO may have run`).test(e.message)
+  );
+  drop = false;
+  await assert.rejects(
+    client.act(s, { event: "GO" }),
+    (e: unknown) => e instanceof AgentError && /^nothing was sent - session '.*' is out of sync/.test(e.message)
+  );
+  assert.equal(events.length, 2, "the refused event was not sent");
+  // an act without an event is a read: it does not resync
+  assert.equal((await client.act(s, {})).session, s);
+  await assert.rejects(client.act(s, { event: "GO" }), /nothing was sent/);
+  assert.equal(client.describe(s).session, s);
+  assert.equal((await client.act(s, { event: "GO" })).session, "D3");
+});
+
+test("a refused connection is said as one: nothing reached the backend, nothing is out of sync", async () => {
+  const client = createAppClient({
+    baseUrl: BASE,
+    backendHint: "",
+    fetchImpl: async () => {
+      throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), { code: "ECONNREFUSED" });
+    },
+  });
+  await assert.rejects(
+    client.start("zcl_app"),
+    (e: unknown) =>
+      e instanceof AgentError &&
+      e.sent === undefined &&
+      e.message === "the backend did not answer (connect ECONNREFUSED 127.0.0.1:1)"
+  );
+});
+
+test("the default transport stops reading at its cap", async () => {
+  assert.equal(RESPONSE_MAX_BYTES, 32 * 1024 * 1024);
+  const chunk = new Uint8Array(1024).fill(0x20);
+  const transport = fetchTransport({
+    baseUrl: BASE,
+    maxBytes: 4096,
+    fetchImpl: async () => ({
+      status: 200,
+      body: (async function* () {
+        for (;;) yield chunk;
+      })(),
+      text: async () => assert.fail("not read whole"),
+    }),
+  });
+  await assert.rejects(
+    transport({ method: "POST", body: "{}", headers: {}, signal: AbortSignal.timeout(5000), draftId: null }),
+    (e: unknown) =>
+      e instanceof AgentError && e.sent === "did" && /answered more than 4096 bytes/.test(e.message)
+  );
+});
+
+test("a view nested deeper than MAX_VIEW_DEPTH is cut and named, not walked", () => {
+  const depth = MAX_VIEW_DEPTH + 50;
+  const xml =
+    '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">' +
+    "<VBox>".repeat(depth) +
+    "<Input value=\"{/X}\"/>" +
+    "</VBox>".repeat(depth) +
+    "</mvc:View>";
+  const state = applyResponse(emptyState(), {
+    S_FRONT: { ID: "D1", APP: "ZCL_APP", PROTOCOL: 3, VIEWS: { MAIN: { XML: xml } } },
+    MODEL: { X: "a" },
+  });
+  assert.equal(emptyState().timer, null);
+  assert.equal(state.timer, null);
+  const snap = buildSnapshot({ state });
+  assert.deepEqual(snap.fields, [], "the input lies below the cut");
+  assert.ok(
+    snap.unsupported.some((u) => u.includes(`nested deeper than ${MAX_VIEW_DEPTH} levels`)),
+    snap.unsupported.join("\n")
+  );
 });
