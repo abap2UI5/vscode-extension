@@ -11,7 +11,10 @@
   a fresh `app_start`); the next event is refused before the confirmation
   question, so the user is not asked about a step that would not be sent. A
   connection that was never made (refused, no such host) still says nothing
-  reached the system.
+  reached the system. An `app_describe` that fails still ends the hold: the
+  agent client lets the event through again as soon as `app_describe` is
+  called, and the extension no longer refuses it on its own after a failed
+  one.
 - The agent client is re-vendored from abap2UI5/mcp-server
   ([53555b0](https://github.com/abap2UI5/mcp-server/commit/53555b020baf4f95e3fde0f3edc9afcee4a3c5e1)):
   besides the above, a row event's `$parameters` ternary is parsed in one
@@ -27,7 +30,10 @@
   branch fails before anything is built or tagged. The seven weekly bump
   workflows pass the shared one `BUMP_PR_TOKEN` by name instead of
   `secrets: inherit`, which handed a job that runs npm every secret of the
-  repository.
+  repository. npm, the tests and the regeneration of a bump now run in a
+  job with a read-only token; the change travels as a patch to a second job,
+  the only one with write permissions and `BUMP_PR_TOKEN`, which opens the
+  pull request and runs no npm.
 - `@azure/identity` 4.14.1 and `@azure/msal-node` 7.2.3 in the lockfile
   (development only, through `@vscode/vsce`), past the high advisory of
   msal-node 6.x (GHSA-xcx6-jx8p-x3h5). msal-node 7 needs identity 4.14.1,

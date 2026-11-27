@@ -35,6 +35,15 @@
 #
 # The PR body is generated from what actually happened, so it can no longer
 # claim a CI run that does not exist.
+#
+# Two jobs, for the callers' write permissions: `bump` regenerates and runs
+# the gate - the caller's regenerate script, `npm ci`, the tests and a VS
+# Code download, hundreds of packages and their install scripts - with a
+# read-only token, no credential in .git/config and no secret; what it
+# changed travels to `pr` as a patch artifact. `pr` is the only job with
+# `contents: write` and `pull-requests: write` and the only one that reads
+# BUMP_PR_TOKEN, and it runs no npm and no code of the bump: a fresh
+# checkout of the same commit, the patch applied, the pull request.
 # ---------------------------------------------------------------------------
 
 name: Bump a generated snapshot
@@ -98,16 +107,17 @@ jobs:
   bump:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    # read only: the callers grant write for the `pr` job below
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The callers run with `contents: write` and `pull-requests: write`
-          # because create-pull-request needs both - but the gate between here
-          # and there is `npm ci`, the tests and a VS Code download, hundreds
-          # of packages and their install scripts that need neither. Left to
-          # its default, checkout persists that token into .git/config for all
-          # of them to find. Keep it out; the one step that pushes gets its
-          # token through its `token:` input below and configures git itself.
+          # Left to its default, checkout persists the job's token into
+          # .git/config for every package install script below to find. This
+          # job pushes nothing; keep it out.
           persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -124,14 +134,16 @@ jobs:
         env:
           PATHS: ${{ inputs.paths }}
         run: |
-          # shellcheck disable=SC2086
-          files=$(echo "$PATHS" | tr '\n' ' ')
-          if git diff --quiet -- $files; then
+          set -euo pipefail
+          mapfile -t files < <(printf '%s\n' "$PATHS" | sed '/^[[:space:]]*$/d')
+          # new files count too: a re-vendor may add one
+          git add -A -- "${files[@]}"
+          if git diff --cached --quiet -- "${files[@]}"; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::$files is unchanged - nothing to open a PR for"
+            echo "::notice::${files[*]} is unchanged - nothing to open a PR for"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            git --no-pager diff --stat -- $files
+            git --no-pager diff --cached --stat -- "${files[@]}"
           fi
 
       # ---------------------------------------------------------------
@@ -156,8 +168,53 @@ jobs:
       - if: steps.diff.outputs.changed == 'true'
         run: npm run test:web
 
-      - name: Work out what this PR can honestly claim
+      # The change as a patch of the staged paths only - additions and
+      # deletions included, whatever the gate left behind elsewhere
+      - name: Write the change as a patch
         if: steps.diff.outputs.changed == 'true'
+        env:
+          PATHS: ${{ inputs.paths }}
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(printf '%s\n' "$PATHS" | sed '/^[[:space:]]*$/d')
+          git diff --cached --binary -- "${files[@]}" > "$RUNNER_TEMP/bump.patch"
+          test -s "$RUNNER_TEMP/bump.patch"
+
+      - name: Hand the change over
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.branch }}
+          path: ${{ runner.temp }}/bump.patch
+          if-no-files-found: error
+          retention-days: 1
+
+  # The only job with a write token and the only one that reads
+  # BUMP_PR_TOKEN - and it runs no npm and no code of the bump: the same
+  # commit checked out, the patch applied, the pull request opened.
+  # create-pull-request authenticates with its own token input.
+  pr:
+    needs: bump
+    if: needs.bump.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.branch }}
+          path: ${{ runner.temp }}/bump
+
+      - name: Apply the change
+        run: git apply --binary "$RUNNER_TEMP/bump/bump.patch"
+
+      - name: Work out what this PR can honestly claim
         id: claim
         env:
           HAVE_TOKEN: ${{ secrets.BUMP_PR_TOKEN != '' }}
@@ -168,8 +225,7 @@ jobs:
             echo "ci=**CI does not run on this PR.** It was opened with the default \`GITHUB_TOKEN\`, and GitHub does not fire \`pull_request\` workflows for those - configure the \`BUMP_PR_TOKEN\` secret (see \`.github/workflows/bump-snapshot.yml\`) to change that. The gate above is therefore the only verification this change has had." >> "$GITHUB_OUTPUT"
           fi
 
-      - if: steps.diff.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           # Falls back to the default token when the secret is absent, so the
           # weekly automation degrades to "a PR nothing runs on" rather than
