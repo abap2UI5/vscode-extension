@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.32.3
+
+- **An event whose answer was lost is no longer fired a second time
+  unseen.** When an `app_act` event reached the system but its answer never
+  arrived (a timeout, a dropped connection), the refusal read "nothing of
+  this roundtrip was adopted", and agents sent the event again - on a draft
+  that may already have run it. The refusal now says the event may have run,
+  and the session takes no further event until `app_describe` resyncs it (or
+  a fresh `app_start`); the next event is refused before the confirmation
+  question, so the user is not asked about a step that would not be sent. A
+  connection that was never made (refused, no such host) still says nothing
+  reached the system.
+- The agent client is re-vendored from abap2UI5/mcp-server
+  ([53555b0](https://github.com/abap2UI5/mcp-server/commit/53555b020baf4f95e3fde0f3edc9afcee4a3c5e1)):
+  besides the above, a row event's `$parameters` ternary is parsed in one
+  linear pass (a long argument the system wrote blocked the extension host
+  for seconds) and one over 4096 characters is asked for in `args`; a view
+  nested deeper than 256 levels is cut and named under `unsupported` instead
+  of overflowing the stack; a repeating `START_TIMER` stays an action of
+  every later snapshot until `STOP_TIMER`; and abap2UI5-addons'
+  `ScanInput` is described as the input field it is.
+
 ## 0.32.2
 
 - **An agent can load the next rows of a windowed table on a real system.**
