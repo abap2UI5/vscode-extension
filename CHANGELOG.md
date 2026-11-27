@@ -21,6 +21,17 @@
   of overflowing the stack; a repeating `START_TIMER` stays an action of
   every later snapshot until `STOP_TIMER`; and abap2UI5-addons'
   `ScanInput` is described as the input field it is.
+- **Release and bump workflows hold fewer secrets.** The publish job runs in
+  the GitHub environment `release`, where `VSCE_PAT` and `OVSX_PAT` belong,
+  and a release runs only from `main` or a `v*` tag - a dispatch from another
+  branch fails before anything is built or tagged. The seven weekly bump
+  workflows pass the shared one `BUMP_PR_TOKEN` by name instead of
+  `secrets: inherit`, which handed a job that runs npm every secret of the
+  repository.
+- `@azure/identity` 4.14.1 and `@azure/msal-node` 7.2.3 in the lockfile
+  (development only, through `@vscode/vsce`), past the high advisory of
+  msal-node 6.x (GHSA-xcx6-jx8p-x3h5). msal-node 7 needs identity 4.14.1,
+  so both move.
 
 ## 0.32.2
 

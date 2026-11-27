@@ -319,9 +319,15 @@ using that version's changelog section as the release notes. **The changelog hea
 notes are extracted by matching that line, and a mismatch silently produces an
 empty release body (the workflow falls back to a placeholder).
 
+A release runs only from `main` (the manual run) or a `v*` tag: the `build`
+job's first step fails on any other ref, before anything is built or tagged.
+
 After the GitHub release, the same `.vsix` is published to the **VS Code
-Marketplace** (as `abap2ui5.abap2ui5`) and to **Open VSX**. Each publish step
-runs only when its token is configured as a repository secret and is skipped
+Marketplace** (as `abap2ui5.abap2ui5`) and to **Open VSX**. The `publish` job
+runs in the GitHub environment `release` (deployment rule: branch `main` and
+tags `v*`), and the two tokens are secrets of that environment, not of the
+repository - no other job or workflow can read them. Each publish step
+runs only when its token is configured and is skipped
 with a notice otherwise: `VSCE_PAT` is an Azure DevOps personal access token
 with the "Marketplace → Manage" scope for the `abap2ui5` publisher,
 `OVSX_PAT` a token from open-vsx.org for the `abap2ui5` namespace. Do not
@@ -928,9 +934,13 @@ Facts an agent cannot see from the code but will trip over:
   `ci.yml` never runs on a bump PR**, and the generated PR body says so
   outright instead of claiming a check that did not happen. Because of that the
   workflow itself runs the same four commands `ci.yml` runs (`lint`, `test`,
-  `vsix`, `test:web`) before opening the PR. `secrets: inherit` on each caller
-  is load-bearing: without it the secret is invisible in the called workflow and
-  every bump silently falls back to the default token.
+  `vsix`, `test:web`) before opening the PR. Each caller passes the secret
+  by name (`secrets: BUMP_PR_TOKEN: ${{ secrets.BUMP_PR_TOKEN }}`), declared
+  under `workflow_call.secrets` in `bump-snapshot.yml` — load-bearing: without
+  it the secret is invisible in the called workflow and every bump silently
+  falls back to the default token. Never `secrets: inherit`: that hands a job
+  which runs a caller's regenerate script and an npm install every secret of
+  the repository, `VSCE_PAT` and `OVSX_PAT` included.
 - **The `.vsix` size is a gate, not just a number.** `ci.yml` prints the
   package size and its file list and fails above `MAX_VSIX_MB`. 0.25.1 packages
   to ~457 KB, so the 5 MB limit is an order of magnitude of headroom for the
