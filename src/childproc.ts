@@ -50,8 +50,41 @@ export type RunOutcome =
   | { kind: "spawn-failed"; error: Error }
   /** Killed by `timeoutMs`. */
   | { kind: "timeout"; stdout: string; stderr: string }
-  /** Killed because `abandoned()` said so. */
+  /** Killed because `abandoned()` said so - or because the extension went
+   *  away (`killAllRunning`). */
   | { kind: "abandoned" };
+
+/**
+ * Every child `run` started that has not ended yet, as the function that
+ * kills its tree and settles its run as abandoned.
+ *
+ * The children are started `detached` - their own process group, so
+ * `killTree` reaches the grandchildren - and a detached child does not die
+ * with the extension host. A window reload while the render gate or the
+ * view preview was rendering left npx, node and a Chromium running with
+ * nothing holding them, until they ended on their own or never did (a
+ * timeout is a timer in the host that is gone). So the extension kills
+ * them on its way out (`killAllRunning`, from a disposable in
+ * `context.subscriptions` and from `deactivate`).
+ */
+const running = new Set<() => void>();
+
+/** How many children `run` started are still running - for the tests. */
+export function runningCount(): number {
+  return running.size;
+}
+
+/**
+ * Kills every child `run` started that is still running, each with its
+ * whole tree (`killTree`), and settles their runs as `abandoned`: whoever
+ * still awaits one is told nobody needs its answer. Safe to call more than
+ * once, and from `deactivate` after the disposables ran.
+ */
+export function killAllRunning(): void {
+  for (const stop of [...running]) {
+    stop();
+  }
+}
 
 /**
  * Kills a child and everything it started.
@@ -155,10 +188,16 @@ export function run(
         return;
       }
       settled = true;
+      running.delete(stop);
       clearTimeout(limit);
       clearInterval(poll);
       resolve(outcome);
     };
+    const stop = (): void => {
+      killTree(child, platform);
+      finish({ kind: "abandoned" });
+    };
+    running.add(stop);
 
     const limit = options.timeoutMs
       ? setTimeout(() => {

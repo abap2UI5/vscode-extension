@@ -49,6 +49,11 @@ export interface SnapshotTable {
   editableCells: string[];
   layer: Layer;
   selectionField?: string;
+  /** A windowed table (window_bind_tab): the rows the backend holds in all. */
+  total?: number;
+  /** A windowed table: its window size, and - while rows are left - how
+   *  `app_act { session, window: { table } }` loads them. */
+  window?: { size: number; more?: string };
 }
 
 export interface SnapshotMessage {

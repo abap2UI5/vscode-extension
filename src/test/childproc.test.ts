@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { killTree, run, shellSafe } from "../childproc";
+import * as fs from "fs";
+import * as path from "path";
+import {
+  killAllRunning,
+  killTree,
+  run,
+  runningCount,
+  shellSafe,
+  type RunOutcome,
+} from "../childproc";
 
 /*
  * The one spawn.
@@ -132,6 +141,67 @@ test("killing the child kills its grandchildren too", { skip: process.platform =
     }
   }
   assert.equal(alive, false, `grandchild ${grandchild} survived the kill`);
+});
+
+test("killAllRunning kills every running child with its tree, and settles each run as abandoned", { skip: process.platform === "win32" }, async () => {
+  // a window reload while a check rendered left the detached npx/node/
+  // Chromium tree running: the extension kills it on its way out. The child
+  // names its grandchild on stderr, so the test knows it before the kill.
+  const parent =
+    'const cp = require("child_process");' +
+    'const c = cp.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);' +
+    "console.error(c.pid);" +
+    "setInterval(() => {}, 1000);";
+  const outcomes: Array<Promise<RunOutcome>> = [];
+  let grandchild = 0;
+  const said = new Promise<void>((resolve) => {
+    const first = run(process.execPath, ["-e", parent], {
+      timeoutMs: 20000,
+      onStderr: (chunk) => {
+        grandchild = Number(chunk.trim());
+        resolve();
+      },
+    });
+    outcomes.push(first);
+  });
+  outcomes.push(run(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeoutMs: 20000 }));
+  await said;
+  assert.ok(Number.isInteger(grandchild) && grandchild > 0);
+  assert.equal(runningCount(), 2);
+  killAllRunning();
+  assert.equal(runningCount(), 0);
+  for (const outcome of await Promise.all(outcomes)) {
+    assert.deepEqual(outcome, { kind: "abandoned" });
+  }
+  const deadline = Date.now() + 3000;
+  let alive = true;
+  while (alive && Date.now() < deadline) {
+    try {
+      process.kill(grandchild, 0);
+      await new Promise((r) => setTimeout(r, 100));
+    } catch {
+      alive = false;
+    }
+  }
+  assert.equal(alive, false, `grandchild ${grandchild} survived killAllRunning`);
+  // a second call (deactivate after the disposable) is a no-op
+  killAllRunning();
+});
+
+test("a run that ended is no longer among the running ones", async () => {
+  const before = runningCount();
+  const outcome = await run(process.execPath, ["-e", "1"]);
+  assert.equal(outcome.kind, "closed");
+  assert.equal(runningCount(), before);
+  const failed = await run("abap2ui5-no-such-program-xyz", []);
+  assert.equal(failed.kind, "spawn-failed");
+  assert.equal(runningCount(), before);
+});
+
+test("the extension kills the running children from a disposable and from deactivate", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "extension.ts"), "utf8");
+  assert.match(src, /context\.subscriptions\.push\(\{ dispose: killAllRunning \}\)/);
+  assert.match(src, /export function deactivate\(\): void \{[^}]*killAllRunning\(\);\s*\}/);
 });
 
 test("multibyte output is decoded whole, not per 64 KiB chunk", async () => {
