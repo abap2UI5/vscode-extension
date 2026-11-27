@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.32.3
+
+- **An event whose answer was lost is no longer fired a second time
+  unseen.** When an `app_act` event reached the system but its answer never
+  arrived (a timeout, a dropped connection), the refusal read "nothing of
+  this roundtrip was adopted", and agents sent the event again - on a draft
+  that may already have run it. The refusal now says the event may have run,
+  and the session takes no further event until `app_describe` resyncs it (or
+  a fresh `app_start`); the next event is refused before the confirmation
+  question, so the user is not asked about a step that would not be sent. A
+  connection that was never made (refused, no such host) still says nothing
+  reached the system.
+- The agent client is re-vendored from abap2UI5/mcp-server
+  ([53555b0](https://github.com/abap2UI5/mcp-server/commit/53555b020baf4f95e3fde0f3edc9afcee4a3c5e1)):
+  besides the above, a row event's `$parameters` ternary is parsed in one
+  linear pass (a long argument the system wrote blocked the extension host
+  for seconds) and one over 4096 characters is asked for in `args`; a view
+  nested deeper than 256 levels is cut and named under `unsupported` instead
+  of overflowing the stack; a repeating `START_TIMER` stays an action of
+  every later snapshot until `STOP_TIMER`; and abap2UI5-addons'
+  `ScanInput` is described as the input field it is.
+- **Release and bump workflows hold fewer secrets.** The publish job runs in
+  the GitHub environment `release`, where `VSCE_PAT` and `OVSX_PAT` belong,
+  and a release runs only from `main` or a `v*` tag - a dispatch from another
+  branch fails before anything is built or tagged. The seven weekly bump
+  workflows pass the shared one `BUMP_PR_TOKEN` by name instead of
+  `secrets: inherit`, which handed a job that runs npm every secret of the
+  repository.
+- `@azure/identity` 4.14.1 and `@azure/msal-node` 7.2.3 in the lockfile
+  (development only, through `@vscode/vsce`), past the high advisory of
+  msal-node 6.x (GHSA-xcx6-jx8p-x3h5). msal-node 7 needs identity 4.14.1,
+  so both move.
+
 ## 0.32.2
 
 - **An agent can load the next rows of a windowed table on a real system.**

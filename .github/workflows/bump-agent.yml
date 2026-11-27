@@ -43,7 +43,8 @@ permissions:
 jobs:
   bump:
     uses: ./.github/workflows/bump-snapshot.yml
-    secrets: inherit
+    secrets:
+      BUMP_PR_TOKEN: ${{ secrets.BUMP_PR_TOKEN }}
     with:
       label: the vendored agent client (src/vendor/agent/)
       timeout-minutes: 30

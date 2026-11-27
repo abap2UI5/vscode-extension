@@ -135,7 +135,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/chattoolsview.ts` | The plumbing around it, shared by both entries: the findings out of the published diagnostics (never a check of its own), the view through `xmlpreview.ts`'s `reconstructedXmlOf`, the running app's model handed in by the desktop entry (`requestModelDump` in `preview.ts` - the `{ }` button's command, answered to the caller instead of a document), and the registration with `vscode.lm.registerTool` - feature-detected, and following `abap2ui5.chatTools` |
 | `src/mcpsystem.ts` | The abap2UI5 System MCP server: HTTP host + the real-system tools (`list_systems`, `search_apps`, `run_app_on_system`, and the app tools below) |
 | `src/agent-client.ts` | The entry of the `dist/agent-client.js` bundle (the vendored client, snapshot and viewxml alone) `agentapps.ts` loads on the first app_* call - ~50 KB that stays out of the activation bundle, the way `rendergate-tar.ts` keeps `tar` out; the test build puts the same file in `dist-test/` so the real loader runs in `npm test` |
-| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the vendored client loaded through `createRequire` from `dist/agent-client.js` on first use (`agentClient( )`), the client's `transport` through the auth proxy (endpoint, method, cookies - the CSRF handshake and the `sap-contextid` per session are the vendored client's, the transport only carries their headers) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client, and the confirmation of every acting step (`abap2ui5.agent.confirmActions`: an `app_act` event or `window` request and the first `app_start` of a class wait for the injected `confirm` - the modal itself is `confirmAgentStep` in `mcpsystem.ts` - with a timeout, one question at a time, and the per-system-and-class *Allow for This Session* memory) |
+| `src/agentapps.ts` | `vscode`-free: the agent app tools on a real system (`app_list`, `app_start`, `app_describe`, `app_act`) - the vendored client loaded through `createRequire` from `dist/agent-client.js` on first use (`agentClient( )`), the client's `transport` through the auth proxy (endpoint, method, cookies - the CSRF handshake and the `sap-contextid` per session are the vendored client's, the transport only carries their headers) and its `location` (the system's launch URL), the system selection and the `abap2ui5.agent.enableAppTools` gate around mcp-server's vendored client, and the confirmation of every acting step (`abap2ui5.agent.confirmActions`: an `app_act` event or `window` request and the first `app_start` of a class wait for the injected `confirm` - the modal itself is `confirmAgentStep` in `mcpsystem.ts` - with a timeout, one question at a time, and the per-system-and-class *Allow for This Session* memory), and a session the client left out of sync (an event that may have run, its answer lost) refused BEFORE that question - the screen the question shows is read with an event-less `act`, never `describe`, which is the client's resync |
 | `src/vendor/agent/` | VENDORED from abap2UI5/mcp-server (`lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs` as `.js`) at the commit `source.json` records - never edited here; the `.d.ts` beside each copy are this repository's own typings |
 | `scripts/vendor-agent.mjs` | Copies those modules and mcp-server's `test/fixtures/agent/*.json` (into `src/test/fixtures/agent/`) at a commit, writes the header and `source.json`; `--check` fails when a copy drifts from the recorded commit |
 | `src/traffic.ts` | Formatting for the proxy's traffic log (the "abap2UI5 Traffic" channel and the roundtrip badge) |
@@ -319,9 +319,15 @@ using that version's changelog section as the release notes. **The changelog hea
 notes are extracted by matching that line, and a mismatch silently produces an
 empty release body (the workflow falls back to a placeholder).
 
+A release runs only from `main` (the manual run) or a `v*` tag: the `build`
+job's first step fails on any other ref, before anything is built or tagged.
+
 After the GitHub release, the same `.vsix` is published to the **VS Code
-Marketplace** (as `abap2ui5.abap2ui5`) and to **Open VSX**. Each publish step
-runs only when its token is configured as a repository secret and is skipped
+Marketplace** (as `abap2ui5.abap2ui5`) and to **Open VSX**. The `publish` job
+runs in the GitHub environment `release` (deployment rule: branch `main` and
+tags `v*`), and the two tokens are secrets of that environment, not of the
+repository - no other job or workflow can read them. Each publish step
+runs only when its token is configured and is skipped
 with a notice otherwise: `VSCE_PAT` is an Azure DevOps personal access token
 with the "Marketplace → Manage" scope for the `abap2ui5` publisher,
 `OVSX_PAT` a token from open-vsx.org for the `abap2ui5` namespace. Do not
@@ -928,9 +934,13 @@ Facts an agent cannot see from the code but will trip over:
   `ci.yml` never runs on a bump PR**, and the generated PR body says so
   outright instead of claiming a check that did not happen. Because of that the
   workflow itself runs the same four commands `ci.yml` runs (`lint`, `test`,
-  `vsix`, `test:web`) before opening the PR. `secrets: inherit` on each caller
-  is load-bearing: without it the secret is invisible in the called workflow and
-  every bump silently falls back to the default token.
+  `vsix`, `test:web`) before opening the PR. Each caller passes the secret
+  by name (`secrets: BUMP_PR_TOKEN: ${{ secrets.BUMP_PR_TOKEN }}`), declared
+  under `workflow_call.secrets` in `bump-snapshot.yml` — load-bearing: without
+  it the secret is invisible in the called workflow and every bump silently
+  falls back to the default token. Never `secrets: inherit`: that hands a job
+  which runs a caller's regenerate script and an npm install every secret of
+  the repository, `VSCE_PAT` and `OVSX_PAT` included.
 - **The `.vsix` size is a gate, not just a number.** `ci.yml` prints the
   package size and its file list and fails above `MAX_VSIX_MB`. 0.25.1 packages
   to ~457 KB, so the 5 MB limit is an order of magnitude of headroom for the

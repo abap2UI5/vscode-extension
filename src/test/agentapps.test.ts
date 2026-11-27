@@ -368,12 +368,20 @@ test("no answer within the timeout is a refusal too - and a late Allow sends not
   const sys = buttonSystem();
   let answerLate: ((a: ConfirmAnswer) => void) | undefined;
   const signals: AbortSignal[] = [];
+  const questions: Promise<ConfirmAnswer>[] = [];
+  let askedAgain: () => void = () => undefined;
+  const secondQuestion = new Promise<void>((resolve) => (askedAgain = resolve));
   const h = harness({
     request: sys.request,
     confirmTimeoutMs: 20,
     confirm: (request) => {
       signals.push(request.signal);
-      return new Promise<ConfirmAnswer>((resolve) => (answerLate = resolve));
+      if (signals.length === 2) {
+        askedAgain();
+      }
+      const question = new Promise<ConfirmAnswer>((resolve) => (answerLate = resolve));
+      questions.push(question);
+      return question;
     },
   });
   const r = await h.call("app_start", { app: "zcl_a" });
@@ -385,16 +393,19 @@ test("no answer within the timeout is a refusal too - and a late Allow sends not
       "Do not retry it unless the user asks for it."
   );
   assert.equal(signals[0].aborted, true, "the plumbing can tell that the answer no longer counts");
+  // No sleeps: each wait below ends on a definite signal - the late answer
+  // having arrived, the second question being put (or the second start
+  // answering without one, which the assertion after it then fails on).
   answerLate!("allow-session");
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await questions[0];
   assert.equal(sys.sent.length, 0, "nothing sent after the fact");
   // and the late 'for this session' was not remembered: the next start asks again
   const again = h.call("app_start", { app: "zcl_a" });
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  assert.equal(signals.length, 2);
+  await Promise.race([secondQuestion, again]);
+  assert.equal(signals.length, 2, "the next start asked again");
   answerLate!("allow");
   snapOf(await again);
-  assert.equal(sys.sent.length, 1);
+  assert.equal(sys.sent.length, 1, "only the allowed start was sent - the late Allow sent nothing, before or after");
   assert.equal(CONFIRM_TIMEOUT_MS, 120_000);
 });
 
@@ -699,8 +710,11 @@ test("argument checks are mcp-server's: class name, max_rows", async () => {
 
 test("a system that cannot be reached is said in the extension's words", async () => {
   const h = harness({
+    // as node's http raises it: the code says the connection was never made
     request: async () => {
-      throw new Error("connect ECONNREFUSED 127.0.0.1:50123");
+      throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:50123"), {
+        code: "ECONNREFUSED",
+      });
     },
   });
   const r = await h.call("app_start", { app: "zcl_app" });
@@ -711,6 +725,43 @@ test("a system that cannot be reached is said in the extension's words", async (
   );
   assert.doesNotMatch(textOf(r), /backend \{ action/);
   assert.equal(SYSTEM_HINT, 'is the system reachable? "abap2UI5: Check System Connection" says');
+});
+
+test("an event whose answer was lost is not asked about again until app_describe resyncs the session", async () => {
+  const sys = buttonSystem();
+  let drop = false;
+  const h = harness({
+    request: async (url, init) => {
+      if (drop) {
+        drop = false;
+        // the connection was made and lost: the event may have run
+        throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+      }
+      return sys.request(url, init);
+    },
+  });
+  const start = snapOf(await h.call("app_start", { app: "zcl_a" }));
+  drop = true;
+  const lost = await h.call("app_act", { session: start.session, event: "GO" });
+  assert.equal(lost.isError, true);
+  assert.match(textOf(lost), /the backend did not answer \(socket hang up\) after the request had been sent/);
+  assert.match(textOf(lost), new RegExp(`session '${start.session}' is out of sync: event GO may have run`));
+  assert.equal(h.asked.length, 2, "the start and the lost event");
+  // the next event is refused before the question - and nothing is sent
+  const again = await h.call("app_act", { session: start.session, event: "GO" });
+  assert.equal(again.isError, true);
+  assert.match(textOf(again), /^nothing was sent - session '.*' is out of sync: event GO may have run/);
+  assert.match(textOf(again), /app_describe \{ session: /);
+  assert.equal(h.asked.length, 2, "not asked about a step that would not be sent");
+  assert.equal(sys.sent.length, 1, "only the start reached the system");
+  // values alone are no event: still taken
+  snapOf(await h.call("app_act", { session: start.session }));
+  // app_describe resyncs: the event is asked about and sent again
+  snapOf(await h.call("app_describe", { session: start.session }));
+  const fired = snapOf(await h.call("app_act", { session: start.session, event: "GO" }));
+  assert.equal(h.asked.length, 3);
+  assert.deepEqual(sys.sent.map((x) => x.event), [undefined, "GO"]);
+  assert.equal(fired.session, "D2");
 });
 
 test("a backend error is the refusal, with the backend's text verbatim", async () => {

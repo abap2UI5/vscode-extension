@@ -90,11 +90,16 @@ export interface ScreenState {
   slots: Record<string, { xml: string; app: string; options: unknown }>;
   models: Record<string, { app: string; data: unknown }>;
   custom: unknown[];
+  /** The repeating START_TIMER an earlier response armed, or null. */
+  timer: { event: string; delay: number } | null;
 }
 
 export const SNAPSHOT_VERSION: 1;
 export const DEFAULT_MAX_ROWS: number;
 export const MAX_ROWS_LIMIT: number;
+/** The deepest view element the snapshot walk descends to; deeper subtrees
+ *  are cut and named in `unsupported`. */
+export const MAX_VIEW_DEPTH: number;
 export const FRONTEND_EVENTS: { POPUP: string; POPOVER: string };
 
 /** One change a response makes to the view slots, in the order the

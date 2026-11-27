@@ -34,7 +34,8 @@ permissions:
 jobs:
   bump:
     uses: ./.github/workflows/bump-snapshot.yml
-    secrets: inherit
+    secrets:
+      BUMP_PR_TOKEN: ${{ secrets.BUMP_PR_TOKEN }}
     with:
       label: src/data/report2ui5.json
       timeout-minutes: 30
