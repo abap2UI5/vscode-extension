@@ -33,10 +33,12 @@ permissions:
 jobs:
   bump:
     uses: ./.github/workflows/bump-snapshot.yml
-    # BUMP_PR_TOKEN is read by the reusable workflow; without `inherit` it
-    # would not be visible there and every PR would silently fall back to the
-    # default token.
-    secrets: inherit
+    # BUMP_PR_TOKEN is the one secret the reusable workflow reads, passed by
+    # name - not `inherit`, which would hand it every secret of the
+    # repository. Without it every PR would silently fall back to the default
+    # token.
+    secrets:
+      BUMP_PR_TOKEN: ${{ secrets.BUMP_PR_TOKEN }}
     with:
       label: the bundled abap2UI5-linter release
       # `npm install` below has already populated node_modules with the newly

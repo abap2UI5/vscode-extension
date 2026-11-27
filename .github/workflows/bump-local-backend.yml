@@ -34,7 +34,8 @@ permissions:
 jobs:
   bump:
     uses: ./.github/workflows/bump-snapshot.yml
-    secrets: inherit
+    secrets:
+      BUMP_PR_TOKEN: ${{ secrets.BUMP_PR_TOKEN }}
     with:
       label: the mcp-server version the local backend drives
       timeout-minutes: 45

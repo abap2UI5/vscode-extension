@@ -82,6 +82,17 @@ on:
         required: false
         default: 30
         type: number
+    # The one secret this workflow reads. The callers pass it by name rather
+    # than with `secrets: inherit`, which handed the bump job - a job that
+    # runs a regenerate script from its caller and npm installs - every
+    # secret of the repository (VSCE_PAT and OVSX_PAT included).
+    secrets:
+      BUMP_PR_TOKEN:
+        description: >-
+          Fine-grained token (contents and pull-requests write on this
+          repository) the PR is opened with, so ci.yml runs on it. Optional:
+          without it the PR is opened with github.token and says so.
+        required: false
 
 jobs:
   bump:

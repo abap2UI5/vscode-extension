@@ -589,7 +589,22 @@ test("generator: the npm scripts exist and the weekly bump calls the shared work
   assert.equal(pkg.scripts["report2ui5:check"], "node scripts/generate-report2ui5.mjs --check");
   const wf = fs.readFileSync(path.join(ROOT, ".github", "workflows", "bump-report2ui5.yml"), "utf8");
   assert.match(wf, /uses: \.\/\.github\/workflows\/bump-snapshot\.yml/);
-  assert.match(wf, /secrets: inherit/);
+  assert.match(wf, /secrets:\n\s+BUMP_PR_TOKEN: \$\{\{ secrets\.BUMP_PR_TOKEN \}\}/);
   assert.match(wf, /src\/data\/report2ui5\.json/);
   assert.match(wf, /node scripts\/generate-report2ui5\.mjs/);
+});
+
+test("every bump workflow hands the shared one BUMP_PR_TOKEN by name - never every secret", () => {
+  const dir = path.join(ROOT, ".github", "workflows");
+  const shared = fs.readFileSync(path.join(dir, "bump-snapshot.yml"), "utf8");
+  // declared, so a caller can pass it, and optional: without it the PR falls back to github.token
+  assert.match(shared, /workflow_call:[\s\S]*\n    secrets:\n      BUMP_PR_TOKEN:\n[\s\S]*?required: false/);
+  const callers = fs.readdirSync(dir).filter((f) => /^bump-.+\.yml$/.test(f) && f !== "bump-snapshot.yml");
+  assert.ok(callers.length >= 7, callers.join(", "));
+  for (const f of callers) {
+    const wf = fs.readFileSync(path.join(dir, f), "utf8");
+    assert.match(wf, /uses: \.\/\.github\/workflows\/bump-snapshot\.yml/, f);
+    assert.doesNotMatch(wf, /^\s*secrets: inherit/m, `${f}: secrets: inherit hands the bump job every secret, VSCE_PAT and OVSX_PAT included`);
+    assert.match(wf, /\n    secrets:\n      BUMP_PR_TOKEN: \$\{\{ secrets\.BUMP_PR_TOKEN \}\}\n/, f);
+  }
 });
