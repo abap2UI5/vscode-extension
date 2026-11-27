@@ -34,6 +34,14 @@ name: Release
 #           OVSX_PAT=<token> npx --yes ovsx@<OVSX_VERSION> create-namespace abap2ui5
 #     3. Store the token as the repository secret OVSX_PAT.
 #
+# Both tokens belong in the GitHub environment `release` (Settings ->
+# Environments), not in the repository's secrets: the `publish` job is the
+# only one that runs in that environment, so no other workflow and no other
+# job can read them, and the environment's deployment rule (branch `main`
+# and tags `v*`) refuses a run from any other ref before the job starts.
+# The `build` job refuses such a run too, first thing - a dispatch from a
+# feature branch would otherwise tag and release that branch's commit.
+#
 # Each publish is skipped while its secret is unset, so a release without
 # either account still produces a tagged GitHub release with the .vsix
 # attached - and a release that reached only ONE marketplace is finished by
@@ -72,6 +80,18 @@ jobs:
       tagged: ${{ steps.meta.outputs.tagged }}
       vsix: ${{ steps.meta.outputs.vsix }}
     steps:
+      # A release is cut from main (a manual run) or from a v* tag (a push),
+      # never from another branch: a dispatch from a feature branch would tag
+      # its commit and publish it to both marketplaces.
+      - name: Run only from main or a v* tag
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          case "$REF" in
+            refs/heads/main|refs/tags/v*) echo "releasing from $REF" ;;
+            *) echo "::error::A release runs from main or a v* tag, not from $REF"; exit 1 ;;
+          esac
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Nothing in this job pushes, so no token in .git/config for
@@ -339,6 +359,9 @@ jobs:
     needs: [build, release]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # VSCE_PAT and OVSX_PAT live in this environment; its deployment rule
+    # admits main and v* tags only (see the header).
+    environment: release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
