@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.32.2
+
+- **An agent can load the next rows of a windowed table on a real system.**
+  The snapshot tells the agent to call `app_act { session, window: { table } }`
+  for more rows, but the system's `app_act` did not take `window`: the call
+  went out as a values-only act, nothing was loaded, and the agent asked
+  again and again. `app_act` now takes `window` (`table`, and optionally
+  `count`, `sort`, `filter`) and sends the window request. Since it runs the
+  app's own event, it is asked about like an event (while
+  `abap2ui5.agent.confirmActions` is on) and refused on a production system.
+- **A window reload no longer leaves checker processes running.** The render
+  gate and the view preview start npx, node and a headless Chromium in a
+  process group of their own; a reload or a closed window while one was
+  running left that tree behind. The extension now kills every such child,
+  with everything it started, when it is deactivated.
+
 ## 0.32.1
 
 - **The agent app tools work against abap2UI5 1.151.0 and later again.**

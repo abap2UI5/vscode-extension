@@ -120,6 +120,9 @@ export interface AppClientOptions {
 export interface ActOptions {
   values?: unknown;
   event?: unknown;
+  /** a windowed table's window request instead of an event:
+   *  `{ table, count?, sort?, filter? }` (snapshot table.window.more) */
+  window?: unknown;
   args?: unknown;
   row?: number;
   maxRows?: number;

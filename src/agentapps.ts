@@ -107,7 +107,9 @@ export type ConfirmAnswer = "allow" | "allow-session" | "deny";
 
 /** One acting step, as it is put to the user. */
 export interface ConfirmRequest {
-  /** `start`: app_start runs the class; `event`: app_act fires an event. */
+  /** `start`: app_start runs the class; `event`: app_act fires an event or
+   *  sends a window request (`window` set) - a roundtrip that runs the app's
+   *  own event under protocol 3 and carries the pending edits either way. */
   kind: "start" | "event";
   /** The system the step runs on. */
   system: string;
@@ -121,6 +123,9 @@ export interface ConfirmRequest {
   args?: unknown[];
   /** The row of a row action. */
   row?: number;
+  /** The window request of `app_act { window }` as the agent passed it:
+   *  `{ table, count?, sort?, filter? }`. */
+  window?: Record<string, unknown>;
   /** What goes out with the step: the edits already pending in the session
    *  and the values of this call, by field id, model path or name. */
   values: Record<string, unknown>;
@@ -141,10 +146,29 @@ const shown = (value: unknown): string => {
   return text.length > CONFIRM_VALUE_MAX ? `${text.slice(0, CONFIRM_VALUE_MAX)}...` : text;
 };
 
+/** The `window` of an `app_act` call, as the question shows it - undefined
+ *  when the call has none. A malformed one is still a request the client
+ *  refuses in its own words, so it is shown as given rather than dropped. */
+export function windowOf(args: Record<string, unknown>): Record<string, unknown> | undefined {
+  const win = args.window;
+  if (win === undefined || win === null) {
+    return undefined;
+  }
+  return typeof win === "object" && !Array.isArray(win)
+    ? { ...(win as Record<string, unknown>) }
+    : { table: win };
+}
+
 /** The step in one line - the question's headline, and what a refusal names. */
 export function confirmSummary(request: Omit<ConfirmRequest, "signal">): string {
   if (request.kind === "start") {
     return `start ${request.className} on system '${request.system}'`;
+  }
+  if (request.window) {
+    return (
+      `request rows of table ${String(request.window.table ?? "")} in ${request.className} ` +
+      `on system '${request.system}'`
+    );
   }
   const named =
     request.action && request.action.event !== request.event
@@ -161,6 +185,15 @@ export function confirmDetail(request: Omit<ConfirmRequest, "signal">): string {
   const lines: string[] = [];
   if (request.kind === "start") {
     lines.push("Starting an app runs its code on the system, as you.");
+  } else if (request.window) {
+    lines.push(
+      "A window request (more rows, another sort or filter) runs the app's own event for the " +
+        "table, as you - what that event does is the app's code."
+    );
+    const rest = Object.entries(request.window).filter(([key]) => key !== "table");
+    if (rest.length) {
+      lines.push(`Window: ${shown(Object.fromEntries(rest))}`);
+    }
   } else {
     lines.push("The event runs for real, as you - it may save, post or delete data.");
     if (request.action?.label) {
@@ -818,7 +851,7 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
       : {};
 
   /**
-   * The question for an `app_act` with an event, from the session's last
+   * The question for an `app_act` with an event or a window request, from the session's last
    * screen (memory only, as app_describe reads it): its class, the action
    * behind the event, and the values that go out - the edits already
    * pending plus this call's. A session the client does not know is its
@@ -842,8 +875,6 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
       }
       throw err;
     }
-    const event = String(args.event);
-    const action = screen.actions.find((a) => a.id === event || a.event === event);
     const values: Record<string, unknown> = {};
     for (const pending of screen.pending ?? []) {
       const field = screen.fields.find(
@@ -852,10 +883,17 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
       values[pending] = field ? field.value : "(edited)";
     }
     Object.assign(values, valuesOf(args.values));
+    const className = String(screen.app ?? "").toUpperCase();
+    const win = windowOf(args);
+    if (win) {
+      return confirmed({ kind: "event", system: systemName, className, window: win, values });
+    }
+    const event = String(args.event);
+    const action = screen.actions.find((a) => a.id === event || a.event === event);
     return confirmed({
       kind: "event",
       system: systemName,
-      className: String(screen.app ?? "").toUpperCase(),
+      className,
       event,
       ...(action ? { action: { id: action.id, event: action.event, label: action.label } } : {}),
       ...(Array.isArray(args.args) && args.args.length ? { args: args.args } : {}),
@@ -1074,6 +1112,21 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
             description:
               "for a row action: the row index (0-based) in its table - for a selection dialog's confirm, the row to pick",
           },
+          window: {
+            type: "object",
+            description:
+              'a windowed table\'s window request instead of an event: { "table": "<table id or path>", ' +
+              '"count"?: rows wanted from the first, "sort"?: [{ "column", "descending"? }], ' +
+              '"filter"?: [[COLUMN, OPERATOR, value, value2?], ...] } - with only `table` it loads the ' +
+              "next rows (the snapshot's table.window.more says which)",
+            properties: {
+              table: { type: "string" },
+              count: { type: "number" },
+              sort: { type: "array" },
+              filter: { type: "array" },
+            },
+            required: ["table"],
+          },
           max_rows: {
             type: "number",
             description: "table rows per table in the answer (default: what app_start used)",
@@ -1094,8 +1147,12 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
         const row =
           args.row === undefined || args.row === null ? undefined : Number(args.row);
         const session = String(args.session ?? "");
-        // as the client decides it: without an event the values stay pending
-        const fires = args.event !== undefined && args.event !== null && args.event !== "";
+        // as the client decides it: without an event the values stay pending -
+        // a window request is a roundtrip too (under protocol 3 it runs the
+        // app's own event, and it carries the pending edits either way)
+        const fires =
+          (args.event !== undefined && args.event !== null && args.event !== "") ||
+          windowOf(args) !== undefined;
         const systemName = registry.get(session);
         // whatever the session is: nothing is operated on a production
         // system - refused before the question and before anything is sent
@@ -1134,6 +1191,7 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
               clientFor(active).act(args.session, {
                 values: args.values,
                 event: args.event,
+                window: args.window,
                 args: args.args,
                 row,
                 maxRows,
@@ -1159,6 +1217,7 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
           client.act(args.session, {
             values: args.values,
             event: args.event,
+            window: args.window,
             args: args.args,
             row,
             maxRows,

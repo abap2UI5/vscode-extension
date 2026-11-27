@@ -228,7 +228,7 @@ messages, some static text.
 | `app_list` | Class names on the system, from the ADT quick search (`filter`: the start of the name, `*` as wildcard, default `Z`; at most 50). A name search: whether a class implements `z2ui5_if_app` is not checked. |
 | `app_start` | Starts `app` and answers with its snapshot; optional `values` become pending edits, `max_rows` sizes the tables (default 20, max 200). |
 | `app_describe` | The current snapshot of a `session`, from memory - nothing is sent. |
-| `app_act` | Fills `values` and fires `event` (a name or an action id) with `args`/`row`, then answers with the new snapshot. Without `event` the values stay pending, as typing does in the browser. |
+| `app_act` | Fills `values` and fires `event` (a name or an action id) with `args`/`row`, then answers with the new snapshot. Without `event` the values stay pending, as typing does in the browser. `window` (`{ table, count?, sort?, filter? }`) instead of `event` loads more rows of a windowed table, or sorts or filters it on the backend - the snapshot's `window.more` says how. |
 
 They are the same tools, with the same input, snapshot and refusals, as the
 sandbox tools of the [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server)
@@ -246,7 +246,8 @@ real system:
   and answer with how to switch them on, without contacting the system.
 - **Every acting step asks you first.** While
   `abap2ui5.agent.confirmActions` is on (the default; User settings only,
-  too), each event `app_act` fires and the first `app_start` of a class
+  too), each event `app_act` fires (a `window` request included - it runs
+  the app's own event) and the first `app_start` of a class
   opens a dialog that names the system, the class, the event, its arguments
   and the values sent with it: *Allow*, *Allow for This Session* (that class
   on that system, until the window closes) or *Deny*. Deny - or no answer

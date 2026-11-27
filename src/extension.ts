@@ -41,6 +41,7 @@ import { registerConvert } from "./convert";
 import { registerNavMap } from "./navview";
 import { registerPropertyEditor } from "./propview";
 import { takeScreenshot } from "./screenshot";
+import { killAllRunning } from "./childproc";
 import { formatTrafficLine, isRoundtrip } from "./traffic";
 import { registerRoundtripCommands } from "./roundtripview";
 import { activateOrPush, registerPushActivate } from "./pushactivate";
@@ -109,6 +110,10 @@ const SHOT_DIR_STATE = "abap2ui5.screenshotSaveDir";
  */
 
 export function activate(context: vscode.ExtensionContext): void {
+  // The checkers' children (render gate, view preview: npx, node, Chromium)
+  // run detached in their own process group and would outlive a window
+  // reload - first, so it is in place even if a registration below throws.
+  context.subscriptions.push({ dispose: killAllRunning });
   const session = new Session(context);
   const provider = new PreviewViewProvider(session);
   session.previewProvider = provider;
@@ -854,5 +859,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   // Everything is torn down through context.subscriptions - the Session's
-  // dispose( ) covers the proxy, the activation watch and the app tab.
+  // dispose( ) covers the proxy, the activation watch and the app tab. The
+  // checkers' children once more here: a deactivate that runs without the
+  // disposables (or before them) must not leave a detached tree behind;
+  // killing twice is a no-op.
+  killAllRunning();
 }

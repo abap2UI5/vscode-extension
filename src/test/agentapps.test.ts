@@ -535,6 +535,82 @@ test("the question's wording: one headline, the action, arguments, row and value
   );
 });
 
+test("app_act { window }: the window request goes out, asked about first, and production refuses it", async () => {
+  const sys = scriptedSystem("window-agent-p3");
+  const h = harness({ request: sys.request });
+  const steps = fixture("window-agent-p3").steps;
+  const start = snapOf(await h.call("app_start", { app: steps[0].arg }));
+  const t1 = start.tables.find((t) => t.id === "t1");
+  assert.match(String(t1?.window?.more), /app_act \{ session, window: \{ table: "t1" \} \}/);
+  assert.equal(h.asked.length, 1);
+  // the schema names it, so a client that validates arguments passes it on
+  const act = h.tools.find((t) => t.name === "app_act")!;
+  assert.deepEqual(
+    (act.inputSchema as { properties: Record<string, { required?: string[] }> }).properties.window
+      .required,
+    ["table"]
+  );
+  // a window request is a roundtrip that runs the app's own event (protocol
+  // 3): Deny sends nothing, and it is no values-only call either
+  h.answers.push("deny");
+  const denied = await h.call("app_act", { session: start.session, window: { table: "t1" } });
+  assert.equal(denied.isError, undefined);
+  assert.match(
+    textOf(denied),
+    /^The user declined the request to request rows of table t1 in ZCL_AGENT_MCP_WINDOW on system 'DEV'\. Nothing was sent/
+  );
+  assert.deepEqual(plain(h.asked[1]), {
+    kind: "event",
+    system: "DEV",
+    className: "ZCL_AGENT_MCP_WINDOW",
+    window: { table: "t1" },
+    values: {},
+  });
+  assert.equal(sys.sent.length, 1);
+  // Allow: the recorded window request (MORE, skip 5, top 5) goes out
+  const more = snapOf(await h.call("app_act", { session: start.session, ...(steps[1].arg as object) }));
+  assert.equal(h.asked.length, 3);
+  assert.equal(sys.sent.length, 2);
+  assert.deepEqual(sys.sent[1].body?.value.S_FRONT.T_EVENT_ARG, ["/ROWS", "ROWS", "MORE", "5", "5"]);
+  assert.ok((more.tables.find((t) => t.id === "t1")?.rows.length ?? 0) > (t1?.rows.length ?? 0));
+  // a sort and filter are shown in the question
+  snapOf(await h.call("app_act", { session: more.session, ...(steps[2].arg as object) }));
+  assert.deepEqual(h.asked[3].window, steps[2].arg && (steps[2].arg as { window: unknown }).window);
+  assert.equal(sys.sent.length, 3);
+  // production: refused before the question, nothing sent
+  h.setActive({ ...system("DEV"), role: "production" });
+  const refused = await h.call("app_act", { session: more.session, window: { table: "t1" } });
+  assert.equal(refused.isError, true);
+  assert.match(textOf(refused), /system 'DEV' is marked as production .* app_act is refused/);
+  assert.equal(h.asked.length, 4);
+  assert.equal(sys.sent.length, 3);
+});
+
+test("the window question's wording: the table in the headline, count, sort and filter underneath", () => {
+  const plainWindow = {
+    kind: "event" as const,
+    system: "DEV",
+    className: "ZCL_A",
+    window: { table: "t1" },
+    values: {},
+  };
+  assert.equal(confirmSummary(plainWindow), "request rows of table t1 in ZCL_A on system 'DEV'");
+  assert.equal(
+    confirmDetail(plainWindow),
+    "A window request (more rows, another sort or filter) runs the app's own event for the " +
+      "table, as you - what that event does is the app's code.\nNo values are sent with it."
+  );
+  const sorted = {
+    ...plainWindow,
+    window: { table: "t1", count: 12, sort: [{ column: "DUE" }] },
+    values: { "t1/1/CHECKED": true },
+  };
+  assert.equal(
+    confirmDetail(sorted).split("\n").slice(1).join("\n"),
+    'Window: {"count":12,"sort":[{"column":"DUE"}]}\nValues sent with it:\n  t1/1/CHECKED = true'
+  );
+});
+
 test("the acting tools tell the agent that the user is asked, and what a refusal means", () => {
   const h = harness();
   for (const name of ["app_start", "app_act"]) {
