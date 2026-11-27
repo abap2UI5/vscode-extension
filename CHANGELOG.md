@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.32.1
+
+- **The agent app tools work against abap2UI5 1.151.0 and later again.**
+  abap2UI5 1.151.0 answers wire protocol 3 (`S_FRONT.VIEWS`, `NAV`,
+  `ACTIONS` instead of the `S_ACTION` envelope), and the vendored agent
+  client refused every such answer ("the backend answered protocol 3, this
+  client speaks protocol 2"), so each `app_start` against a current system
+  failed. The client is re-vendored from abap2UI5/mcp-server
+  ([8a95a6a](https://github.com/abap2UI5/mcp-server/commit/8a95a6a61560d785a4a0b6688f1faa6b27e8fc49),
+  release 1.3.0): it reads protocol 3 and still reads protocol 2, so a
+  system on an older release keeps working. Against a protocol-3 backend a
+  `START_TIMER` tick is marked as one, and a windowed table's "more rows",
+  sort and filter requests follow the app-driven window of 1.151.0.
+- The vendored client no longer waits for someone to remember it: a weekly
+  workflow re-vendors it from mcp-server's main and opens a pull request
+  once the tests pass with the new copy.
+
 ## 0.32.0
 
 The bundled linter moves to v0.11.0 (by way of v0.10.0).

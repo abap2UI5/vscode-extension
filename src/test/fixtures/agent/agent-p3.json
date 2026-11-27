@@ -1,0 +1,370 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.151.0 (the npm backend, protocol 3: VIEWS / ACTIONS, the app-driven window) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/mcp-server test/fixtures/agent-app ZCL_AGENT_MCP (a form, a table with a row action and a selection, a popup)",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "zcl_agent_mcp",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=zcl_agent_mcp"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP",
+      "ID": "738F65E705A84CA7AB36D884E0EF4B88",
+      "PROTOCOL": 3,
+      "VIEWS": {
+       "MAIN": {
+        "XML": "<mvc:View xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\" xmlns:core=\"sap.ui.core\" xmlns:form=\"sap.ui.layout.form\"><Page title=\"Agent test app\"><form:SimpleForm editable=\"true\"><form:content><Label text=\"Customer\" required=\"true\"/><Input value=\"{/NAME}\"/><Label text=\"Express\"/><CheckBox selected=\"{/EXPRESS}\"/><Label text=\"Priority\"/><Select selectedKey=\"{/PRIORITY}\"><core:Item key=\"A\" text=\"High\"/><core:Item key=\"B\" text=\"Normal\"/></Select><Label text=\"Result\"/><Text text=\"{/RESULT}\"/></form:content></form:SimpleForm><Table headerText=\"Rows\" mode=\"MultiSelect\" items=\"{/ROWS}\"><columns><Column><Text text=\"Name\"/></Column><Column><Text text=\"Quantity\"/></Column><Column><Text text=\"Action\"/></Column></columns><items><ColumnListItem selected=\"{SELKZ}\"><cells><Text text=\"{NAME}\"/><Input value=\"{QTY}\"/><Button text=\"Pick\" press=\".eB(['ROW'], ${NAME})\"/></cells></ColumnListItem></items></Table><footer><Toolbar><Button text=\"Save\" press=\".eB(['SAVE'])\"/><Button text=\"Delete selected\" press=\".eB(['DELETE'])\"/><Button text=\"Ask\" press=\".eB(['ASK'])\"/></Toolbar></footer></Page></mvc:View>"
+       },
+       "POPOVER": {
+        "DESTROY": true
+       },
+       "POPUP": {
+        "DESTROY": true
+       }
+      }
+     },
+     "MODEL": {
+      "EXPRESS": false,
+      "NAME": "",
+      "PRIORITY": "B",
+      "RESULT": "nothing yet",
+      "ROWS": [
+       {
+        "NAME": "alpha",
+        "QTY": 1,
+        "SELKZ": false
+       },
+       {
+        "NAME": "beta",
+        "QTY": 2,
+        "SELKZ": false
+       },
+       {
+        "NAME": "gamma",
+        "QTY": 3,
+        "SELKZ": false
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "f1": "ACME",
+     "Express": true,
+     "/PRIORITY": "A"
+    },
+    "event": "SAVE"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "738F65E705A84CA7AB36D884E0EF4B88",
+      "EVENT": "SAVE"
+     },
+     "MODEL": {
+      "NAME": "ACME",
+      "EXPRESS": true,
+      "PRIORITY": "A"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "ACTIONS": [
+       [
+        "MESSAGE_TOAST",
+        "show",
+        "saved ACME express=X priority=A"
+       ]
+      ],
+      "APP": "ZCL_AGENT_MCP",
+      "ID": "1167D9E76878482D9933AFEA5E550308",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "EXPRESS": true,
+      "NAME": "ACME",
+      "PRIORITY": "A",
+      "RESULT": "saved ACME express=X priority=A",
+      "ROWS": [
+       {
+        "NAME": "alpha",
+        "QTY": 1,
+        "SELKZ": false
+       },
+       {
+        "NAME": "beta",
+        "QTY": 2,
+        "SELKZ": false
+       },
+       {
+        "NAME": "gamma",
+        "QTY": 3,
+        "SELKZ": false
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "/ROWS/1/QTY": 7
+    },
+    "event": "ROW",
+    "row": 2
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "1167D9E76878482D9933AFEA5E550308",
+      "EVENT": "ROW",
+      "T_EVENT_ARG": [
+       "gamma"
+      ]
+     },
+     "MODEL": {
+      "ROWS": {
+       "__delta": {
+        "1": {
+         "QTY": 7
+        }
+       }
+      }
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP",
+      "ID": "4BBA13D080EC4F84A73995DD802E85E9",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "EXPRESS": true,
+      "NAME": "ACME",
+      "PRIORITY": "A",
+      "RESULT": "row gamma",
+      "ROWS": [
+       {
+        "NAME": "alpha",
+        "QTY": 1,
+        "SELKZ": false
+       },
+       {
+        "NAME": "beta",
+        "QTY": 7,
+        "SELKZ": false
+       },
+       {
+        "NAME": "gamma",
+        "QTY": 3,
+        "SELKZ": false
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "t1/0/SELKZ": true
+    },
+    "event": "DELETE"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "4BBA13D080EC4F84A73995DD802E85E9",
+      "EVENT": "DELETE"
+     },
+     "MODEL": {
+      "ROWS": {
+       "__delta": {
+        "0": {
+         "SELKZ": true
+        }
+       }
+      }
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP",
+      "ID": "D33E60B1B0144B3984170F002F215B98",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "EXPRESS": true,
+      "NAME": "ACME",
+      "PRIORITY": "A",
+      "RESULT": "row gamma",
+      "ROWS": [
+       {
+        "NAME": "beta",
+        "QTY": 7,
+        "SELKZ": false
+       },
+       {
+        "NAME": "gamma",
+        "QTY": 3,
+        "SELKZ": false
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "ASK"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "D33E60B1B0144B3984170F002F215B98",
+      "EVENT": "ASK"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP",
+      "ID": "85F02C6D2657406C96F1F4AB2B0E6A38",
+      "PROTOCOL": 3,
+      "VIEWS": {
+       "POPUP": {
+        "XML": "<core:FragmentDefinition xmlns=\"sap.m\" xmlns:core=\"sap.ui.core\"><Dialog title=\"Really?\"><Text text=\"Confirm the order.\"/><buttons><Button text=\"Yes\" press=\".eB(['CONFIRM'])\"/><Button text=\"Close\" press=\".eF('CONTROL_GLOBAL', 'VIEW_SLOTS', 'destroy', 'POPUP')\"/></buttons></Dialog></core:FragmentDefinition>"
+       }
+      }
+     },
+     "MODEL": {
+      "EXPRESS": true,
+      "NAME": "ACME",
+      "PRIORITY": "A",
+      "RESULT": "row gamma",
+      "ROWS": [
+       {
+        "NAME": "beta",
+        "QTY": 7,
+        "SELKZ": false
+       },
+       {
+        "NAME": "gamma",
+        "QTY": 3,
+        "SELKZ": false
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "@CLOSE_POPUP"
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "ASK"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "85F02C6D2657406C96F1F4AB2B0E6A38",
+      "EVENT": "ASK"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP",
+      "ID": "2E1694F8D4144B789CE570141C80174A",
+      "PROTOCOL": 3,
+      "VIEWS": {
+       "POPUP": {
+        "XML": "<core:FragmentDefinition xmlns=\"sap.m\" xmlns:core=\"sap.ui.core\"><Dialog title=\"Really?\"><Text text=\"Confirm the order.\"/><buttons><Button text=\"Yes\" press=\".eB(['CONFIRM'])\"/><Button text=\"Close\" press=\".eF('CONTROL_GLOBAL', 'VIEW_SLOTS', 'destroy', 'POPUP')\"/></buttons></Dialog></core:FragmentDefinition>"
+       }
+      }
+     },
+     "MODEL": {
+      "EXPRESS": true,
+      "NAME": "ACME",
+      "PRIORITY": "A",
+      "RESULT": "row gamma",
+      "ROWS": [
+       {
+        "NAME": "beta",
+        "QTY": 7,
+        "SELKZ": false
+       },
+       {
+        "NAME": "gamma",
+        "QTY": 3,
+        "SELKZ": false
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "CONFIRM"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "2E1694F8D4144B789CE570141C80174A",
+      "EVENT": "CONFIRM"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP",
+      "ID": "B546DA753DBC434F8E16B4C251F0D715",
+      "PROTOCOL": 3,
+      "VIEWS": {
+       "POPUP": {
+        "DESTROY": true
+       }
+      }
+     },
+     "MODEL": {
+      "EXPRESS": true,
+      "NAME": "ACME",
+      "PRIORITY": "A",
+      "RESULT": "confirmed",
+      "ROWS": [
+       {
+        "NAME": "beta",
+        "QTY": 7,
+        "SELKZ": false
+       },
+       {
+        "NAME": "gamma",
+        "QTY": 3,
+        "SELKZ": false
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

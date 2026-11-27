@@ -92,6 +92,23 @@ export const DEFAULT_MAX_ROWS: number;
 export const MAX_ROWS_LIMIT: number;
 export const FRONTEND_EVENTS: { POPUP: string; POPOVER: string };
 
+/** One change a response makes to the view slots, in the order the
+ *  frontend applies it: a teardown or a display. */
+export type ViewChange =
+  | { slot: string; destroy: true }
+  | { slot: string; xml: string; options: Record<string, unknown> };
+
+/** The order a frontend applies the entries of a protocol-3 VIEWS in. */
+export const SLOT_ORDER: readonly string[];
+/** The wire a response speaks: 3 when it declares it (S_FRONT.PROTOCOL) or
+ *  carries VIEWS, NAV or ACTIONS; 2 otherwise (the S_ACTION envelope). */
+export function protocolOf(response: unknown): 2 | 3;
+/** VIEWS (protocol 3, in SLOT_ORDER) or the VIEW_SLOTS entries of
+ *  S_ACTION.T_SYSTEM (protocol 2, in list order). */
+export function viewChanges(response: unknown): ViewChange[];
+/** ACTIONS (protocol 3) or S_ACTION.T_CUSTOM (protocol 2). */
+export function followUpActions(response: unknown): unknown[];
+
 export function emptyState(): ScreenState;
 export function applyResponse(state: ScreenState | null, response: unknown): ScreenState;
 export const modelKeyOf: (slot: string) => string;

@@ -28,7 +28,9 @@
  *   start   POST { value: { S_FRONT: { ORIGIN, PATHNAME, SEARCH: '?app_start=<CLASS>' } } }
  *   event   POST { value: { S_FRONT: { ID, EVENT, T_EVENT_ARG: [...] },
  *                           MODEL: <delta of what was edited in the browser> } }
- *   answer  { S_FRONT: { ID, APP, S_ACTION }, MODEL? }
+ *   answer  { S_FRONT: { ID, APP, PROTOCOL: 3, VIEWS, NAV, ACTIONS }, MODEL? }
+ *           (protocol 2, abap2UI5 up to 1.150.0: S_ACTION in place of
+ *           VIEWS, NAV and ACTIONS)
  *
  * "What counts as the model" is decided here, in one place:
  *

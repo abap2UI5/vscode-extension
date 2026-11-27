@@ -10,6 +10,7 @@ import {
   errorText,
   headerOf,
   PROTOCOL,
+  PROTOCOLS,
   validContextId,
   type FetchLike,
 } from "../vendor/agent/appclient";
@@ -17,7 +18,11 @@ import {
   applyResponse,
   buildSnapshot,
   emptyState,
+  followUpActions,
   nameOfPath,
+  protocolOf,
+  SLOT_ORDER,
+  viewChanges,
   type AgentSnapshot,
   type ScreenState,
 } from "../vendor/agent/snapshot";
@@ -154,7 +159,8 @@ test("viewxml: namespaces, bindings, expressions and wires", () => {
   });
   // verbatim: the body is text/plain, a tag in it is text (protocol spec/errors.md)
   assert.equal(errorText(500, "<pre>boom</pre>"), "HTTP 500: <pre>boom</pre>");
-  assert.equal(PROTOCOL, 2);
+  assert.equal(PROTOCOL, 3);
+  assert.deepEqual([...PROTOCOLS], [2, 3]);
   assert.equal(headerOf({ "SAP-ContextId": ["c1"] }, "sap-contextid"), "c1");
   assert.equal(validContextId("undefined"), false);
 });
@@ -284,6 +290,71 @@ test("a selection dialog is a table and its confirm is the pick, row-valued para
   // mcp-server #73) - shipped whole, a windowed table's edit is dropped
   assert.deepEqual(f4.sent[4].MODEL, { MR_VIEW: { "*": { __delta: { 0: { ZZSELKZ: true } } } } });
   assert.equal(f4.snaps[4].fields.find((f: { name: string }) => f.name === "P_PLANT")?.value, "3000");
+});
+
+test("protocol 3 (abap2UI5 1.151.0 on) is read: VIEWS in slot order, ACTIONS as the follow-up actions", () => {
+  const steps = fixture("agent-p3").steps.filter((s) => s.exchange);
+  const start = steps[0].exchange!.response;
+  assert.equal(protocolOf(start), 3);
+  assert.deepEqual(SLOT_ORDER, ["MAIN", "NEST", "NEST2", "POPUP", "POPOVER"]);
+  // the keys arrive as MAIN, POPOVER, POPUP - applied in SLOT_ORDER
+  assert.deepEqual(
+    viewChanges(start).map((c) => c.slot),
+    ["MAIN", "POPUP", "POPOVER"]
+  );
+  assert.deepEqual(followUpActions(steps[1].exchange!.response), [
+    ["MESSAGE_TOAST", "show", "saved ACME express=X priority=A"],
+  ]);
+  // protocol 2: the same two readers over the S_ACTION envelope
+  const v2 = fixture("form-381").steps.find((s) => s.exchange)!.exchange!.response;
+  assert.equal(protocolOf(v2), 2);
+  assert.equal(viewChanges(v2)[0].slot, "MAIN");
+  assert.equal(protocolOf({ S_FRONT: { ACTIONS: [] } }), 3, "a protocol-3 section without the number");
+  assert.equal(protocolOf({ S_FRONT: {} }), 2, "a backend older than the field");
+});
+
+test("the app-driven window of protocol 3 names the app's event, MORE / SORT / FILTER with both parts", async () => {
+  const win = await run("window-agent-p3");
+  assert.deepEqual(win.sent[1].S_FRONT.T_EVENT_ARG, ["/ROWS", "ROWS", "MORE", "5", "5"]);
+  assert.deepEqual(win.sent[2].S_FRONT.T_EVENT_ARG, [
+    "/ROWS",
+    "ROWS",
+    "FILTER",
+    "0",
+    "5",
+    JSON.stringify([{ PATH: "DUE", DESCENDING: true }]),
+    JSON.stringify([[["STATUS", "EQ", "OPEN", null]]]),
+  ]);
+});
+
+test("a response of a protocol the client does not read is refused whole", async () => {
+  for (const [declared, adopted] of [[2, true], [3, true], [4, false]] as const) {
+    const client = createAppClient({
+      baseUrl: BASE,
+      fetchImpl: async () => {
+        const text = JSON.stringify({
+          S_FRONT: {
+            ID: "D1",
+            APP: "ZCL_APP",
+            PROTOCOL: declared,
+            ...(declared === 2
+              ? { S_ACTION: { T_SYSTEM: [["VIEW_SLOTS", "display", "MAIN", "<mvc:View xmlns:mvc=\"sap.ui.core.mvc\"/>"]] } }
+              : { VIEWS: { MAIN: { XML: "<mvc:View xmlns:mvc=\"sap.ui.core.mvc\"/>" } } }),
+          },
+        });
+        return { ok: true, status: 200, text: async () => text };
+      },
+    });
+    const started = client.start("zcl_app");
+    if (adopted) {
+      assert.equal((await started).app, "ZCL_APP", `protocol ${declared}`);
+    } else {
+      await assert.rejects(
+        started,
+        (e: unknown) => e instanceof AgentError && /speaks protocol 2 and 3/.test(e.message)
+      );
+    }
+  }
 });
 
 test("MessagePopover and MessageView items are messages with their own source", () => {

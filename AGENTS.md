@@ -188,7 +188,7 @@ find a German string anywhere, it is a leftover — translate it.
 | `snippets/` | ABAP snippets contributed to the editor |
 | `media/` | Icons: `icon.svg` (panel), `icon-light/dark.svg` (preview tab), `icon.png` (gallery) |
 | `esbuild.js` | Bundles `src/extension.ts` into `dist/extension.js` (plus `src/rendergate-tar.ts` into `dist/rendergate-tar.js` and `src/agent-client.ts` into `dist/agent-client.js`, both loaded on first use), `src/web/extension.ts` into `dist/web/extension.js`, and `src/test/` into `dist-test/` (with its own `agent-client.js`); copies the linter's data files and the extension's own two runtime-read snapshots (`app-template.json`, `client-api.json`) next to the bundles |
-| `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the six weekly `bump-*.yml` callers share |
+| `.github/workflows/` | `ci.yml` builds every push and PR, `release.yml` publishes a tagged `.vsix`, `bump-snapshot.yml` is the one implementation the seven weekly `bump-*.yml` callers share |
 
 `dist/`, `dist-test/`, `node_modules/` and `*.vsix` are build output and are
 not committed.
@@ -839,9 +839,15 @@ Facts an agent cannot see from the code but will trip over:
   TypeScript package is refused, TS1479), the sibling imports rewritten to
   match, a header naming repository, path and commit, and `source.json`
   recording the commit and every file's sha256. Unlike the `src/data/`
-  snapshots this follows a recorded commit, not a branch, and has no weekly
-  bump: it is code, and a new version has to pass this repository's tests
-  first. Two gates: `src/test/agentvendor.test.ts` (in `npm test`, offline)
+  snapshots this follows a recorded commit, not a branch: it is code, and a
+  new version has to pass this repository's tests first. The commit moves
+  only through `bump-agent.yml` (weekly, through `bump-snapshot.yml`: a
+  re-vendor from mcp-server's main when one of the vendored files changed
+  there, the full gate, a PR) or a hand re-vendor - a pin nobody moved
+  refused abap2UI5 1.151.0's wire protocol 3 while main stayed green, which
+  is why the workflow exists. A red bump run means the new copy does not
+  fit as it is: re-vendor by hand and update the `.d.ts`, the tests or
+  `agentapps.ts` with it. Two gates: `src/test/agentvendor.test.ts` (in `npm test`, offline)
   fails on a hand edit of a copy and replays mcp-server's recorded sessions
   through the vendored client; `npm run agent-vendor:check -- <checkout>`
   fails when the copies differ from the recorded commit. **Fix the snapshot
@@ -913,8 +919,8 @@ Facts an agent cannot see from the code but will trip over:
   of `dist/rendergate-tar.js`.
 - **The weekly bump workflows share one implementation.**
   `.github/workflows/bump-snapshot.yml` holds the shape (regenerate → diff →
-  gate → open a pull request) and is called through `workflow_call`; the five
-  named files are thin callers carrying only the schedule, what to regenerate
+  gate → open a pull request) and is called through `workflow_call`; the
+  `bump-*.yml` callers are thin, carrying only the schedule, what to regenerate
   and what to say in the PR. They open their pull requests with
   `BUMP_PR_TOKEN` when that repository secret is configured, and with the
   default `GITHUB_TOKEN` otherwise — GitHub does not fire `pull_request`

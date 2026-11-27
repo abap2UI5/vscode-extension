@@ -1,6 +1,6 @@
 /*
  * VENDORED - do not edit. abap2UI5/mcp-server lib/snapshot.mjs
- * at commit 332a0b0551b27acc6f6f711c45ec8ae3d0504070,
+ * at commit 8a95a6a61560d785a4a0b6688f1faa6b27e8fc49,
  * copied by scripts/vendor-agent.mjs (`npm run agent-vendor`); the only
  * change is the sibling imports ending in .js. `npm run agent-vendor:check`
  * fails when this copy drifts from that commit. Change it upstream, then
@@ -96,35 +96,97 @@ function destroySlot(next, slot) {
   if (slot === 'POPUP' || slot === 'POPOVER') delete next.models[slot];
 }
 
+/* An action list of the response, or none: a T_SYSTEM, T_CUSTOM or ACTIONS
+ * that is no array (an object, a number) threw a TypeError out of this pure
+ * fold - the client refuses such a response with a sentence first
+ * (appclient receive), and a direct caller gets an empty list, never a throw. */
+const listOf = (v) => (Array.isArray(v) ? v : []);
+
+/** The order a frontend applies the entries of VIEWS in (protocol
+ *  spec/response.md "View slots"), whatever order the keys arrive in. */
+export const SLOT_ORDER = ['MAIN', 'NEST', 'NEST2', 'POPUP', 'POPOVER'];
+
+/*
+ * The wire a response speaks: 3 when it says so (S_FRONT.PROTOCOL) or, without
+ * the number, when it carries a section of protocol 3 (VIEWS, NAV, ACTIONS);
+ * 2 for everything else - protocol 2, and a backend older than the field,
+ * which spoke the S_ACTION envelope too. abap2UI5 1.151.0 moved to 3; a real
+ * system on an older release still answers 2, and both are read.
+ */
+export function protocolOf(response) {
+  const front = (response && response.S_FRONT) || {};
+  const n = Number(front.PROTOCOL);
+  if (front.PROTOCOL !== undefined && front.PROTOCOL !== null && Number.isFinite(n)) return n >= 3 ? 3 : 2;
+  return 'VIEWS' in front || 'NAV' in front || 'ACTIONS' in front ? 3 : 2;
+}
+
+/*
+ * What the response does to the view slots, in the order the frontend does
+ * it, as [{ slot, destroy: true } | { slot, xml, options }]:
+ *   protocol 3 - S_FRONT.VIEWS, one entry per slot ({ XML, OPT } a display,
+ *     { DESTROY: true } a teardown), applied in SLOT_ORDER;
+ *   protocol 2 - the VIEW_SLOTS entries of S_ACTION.T_SYSTEM, in list order
+ *     (["VIEW_SLOTS","display",<slot>,<xml>,<options>],
+ *     ["VIEW_SLOTS","destroy",<slot>]).
+ */
+export function viewChanges(response) {
+  const front = (response && response.S_FRONT) || {};
+  const out = [];
+  if (protocolOf(response) === 3) {
+    const views = front.VIEWS && typeof front.VIEWS === 'object' && !Array.isArray(front.VIEWS) ? front.VIEWS : {};
+    const slots = [...SLOT_ORDER, ...Object.keys(views).filter((k) => !SLOT_ORDER.includes(k))];
+    for (const slot of slots) {
+      if (!Object.hasOwn(views, slot)) continue;
+      const entry = views[slot];
+      if (!entry || typeof entry !== 'object') continue;
+      if (entry.DESTROY === true) out.push({ slot, destroy: true });
+      else if ('XML' in entry) out.push({ slot, xml: String(entry.XML ?? ''), options: entry.OPT && typeof entry.OPT === 'object' ? entry.OPT : {} });
+    }
+    return out;
+  }
+  for (const raw of listOf(front.S_ACTION && front.S_ACTION.T_SYSTEM)) {
+    const a = asArray(raw);
+    if (!a || a[0] !== 'VIEW_SLOTS') continue;
+    const [, method, slot, xml, options] = a;
+    if (method === 'destroy') out.push({ slot, destroy: true });
+    else if (method === 'display') out.push({ slot, xml: String(xml || ''), options: options || {} });
+  }
+  return out;
+}
+
+/** The app's follow-up actions, in its order: S_FRONT.ACTIONS (protocol 3)
+ *  or S_ACTION.T_CUSTOM (protocol 2) - entries and order are the same. */
+export function followUpActions(response) {
+  const front = (response && response.S_FRONT) || {};
+  return protocolOf(response) === 3 ? listOf(front.ACTIONS) : listOf(front.S_ACTION && front.S_ACTION.T_CUSTOM);
+}
+
 /*
  * One response folded into the state, the way the frontend folds it:
- *   - a response of another APP than the one that answered last tears the
- *     popup and the popover down first (protocol spec/response.md "View
- *     slots": the backend queues those destroys only for a hop between two
- *     instances of the same class, which a frontend cannot see);
- *   - every VIEW_SLOTS action of T_SYSTEM in order (a MAIN display tears
- *     down the nested views, the popup and the popover - the backend sends
- *     no destroy for them next to a MAIN display);
+ *   - protocol 2 only: a response of another APP than the one that answered
+ *     last tears the popup and the popover down first (the protocol-2
+ *     frontend's rule). Under protocol 3 the backend states that teardown
+ *     in VIEWS for every app hop and app start, and a frontend MUST leave a
+ *     slot the response does not name as it is (spec/response.md "View
+ *     slots", frontend check slots.app-change);
+ *   - every view change (viewChanges) in order - a MAIN display tears down
+ *     the nested views, the popup and the popover (the frontend's rule:
+ *     the backend sends no teardown for them next to a MAIN display);
  *   - a displayed slot gets its model from this response; a MODEL key in
  *     the response is pushed into every OPEN slot whose model belongs to the
  *     app that answered (a popup app's model must not overwrite the caller's
  *     view behind it - updateModelIfRequired);
- *   - T_CUSTOM is kept as the last response's client work (toasts, boxes),
- *     and a CONTROL_GLOBAL VIEW_SLOTS destroy in it is applied too.
+ *   - the follow-up actions (ACTIONS, T_CUSTOM under protocol 2) are kept as
+ *     the last response's client work (toasts, boxes), and a CONTROL_GLOBAL
+ *     VIEW_SLOTS destroy in it is applied too.
  * A response without MODEL leaves every model as it was: the backend only
  * sends what changed, and the client keeps what the user typed.
  */
-/* An action list of the response, or none: a T_SYSTEM or T_CUSTOM that is
- * no array (an object, a number) threw a TypeError out of this pure fold -
- * the client refuses such a response with a sentence first (appclient
- * receive), and a direct caller gets an empty list, never a throw. */
-const listOf = (v) => (Array.isArray(v) ? v : []);
-
 export function applyResponse(state, response) {
   const prev = state || emptyState();
   const next = { app: prev.app, id: prev.id, slots: { ...prev.slots }, models: { ...prev.models }, custom: [] };
   const front = (response && response.S_FRONT) || {};
-  if (front.APP && prev.app && front.APP !== prev.app) {
+  if (protocolOf(response) < 3 && front.APP && prev.app && front.APP !== prev.app) {
     destroySlot(next, 'POPUP');
     destroySlot(next, 'POPOVER');
   }
@@ -132,27 +194,24 @@ export function applyResponse(state, response) {
   if (front.ID) next.id = front.ID;
   const hasModel = response && response.MODEL !== undefined;
   const data = hasModel ? response.MODEL : {};
-  const actions = front.S_ACTION || {};
   const displayed = new Set();
-  for (const raw of listOf(actions.T_SYSTEM)) {
-    const a = asArray(raw);
-    if (!a || a[0] !== 'VIEW_SLOTS') continue;
-    const [, method, slot, xml, options] = a;
-    if (method === 'destroy') {
+  for (const change of viewChanges(response)) {
+    const { slot } = change;
+    if (change.destroy) {
       destroySlot(next, slot);
-    } else if (method === 'display') {
-      if (slot === 'MAIN') {
-        for (const s of ['MAIN', 'POPUP', 'POPOVER']) destroySlot(next, s);
-      }
-      next.slots[slot] = { xml: String(xml || ''), app: next.app, options: options || {} };
-      const key = modelKeyOf(slot);
-      if (slot === key || !next.models[key]) {
-        next.models[key] = { app: next.app, data: clone(data) || {} };
-        displayed.add(key);
-      }
+      continue;
+    }
+    if (slot === 'MAIN') {
+      for (const s of ['MAIN', 'POPUP', 'POPOVER']) destroySlot(next, s);
+    }
+    next.slots[slot] = { xml: change.xml, app: next.app, options: change.options };
+    const key = modelKeyOf(slot);
+    if (slot === key || !next.models[key]) {
+      next.models[key] = { app: next.app, data: clone(data) || {} };
+      displayed.add(key);
     }
   }
-  for (const raw of listOf(actions.T_CUSTOM)) {
+  for (const raw of followUpActions(response)) {
     const a = asArray(raw);
     if (!a) continue;
     const b = a[0] === 'CONTROL_GLOBAL' ? a.slice(1) : a;
@@ -174,18 +233,14 @@ export function applyResponse(state, response) {
 
 /*
  * The models a response builds afresh: every MAIN, POPUP or POPOVER display
- * of its T_SYSTEM. The frontend makes a new JSON model for such a view
+ * of its view changes. The frontend makes a new JSON model for such a view
  * (core/actions/Slots.js createViewModel), and with it a new, empty set of
  * changed paths - an edit not sent yet dies with the view it was typed into,
  * where a model PUSH (updateModelIfRequired) re-applies it.
  */
 export function rebuiltModels(response) {
   const keys = new Set();
-  const front = (response && response.S_FRONT) || {};
-  for (const raw of listOf(front.S_ACTION && front.S_ACTION.T_SYSTEM)) {
-    const a = asArray(raw);
-    if (a && a[0] === 'VIEW_SLOTS' && a[1] === 'display' && MODEL_OWNING.includes(a[2])) keys.add(a[2]);
-  }
+  for (const c of viewChanges(response)) if (!c.destroy && MODEL_OWNING.includes(c.slot)) keys.add(c.slot);
   return keys;
 }
 
@@ -244,7 +299,7 @@ export const WINDOW_KEY = '__WINDOW';
 export const WINDOW_EVENT = '___ZZZ_WIN';
 
 /** The window state of the table at the absolute model path `p` -
- *  `/__WINDOW/<path>` - as { total, count, size }, or null when the table is
+ *  `/__WINDOW/<path>` - as { total, count, size, event }, or null when the table is
  *  no window (the frontend's rule, core/WindowModel.js bindList: a list is
  *  windowed when the model carries a state for its path). */
 export function windowStateOf(data, p) {
@@ -262,6 +317,10 @@ export function windowStateOf(data, p) {
     total: Math.floor(total),
     count: Number.isFinite(count) && count >= 0 ? Math.floor(count) : null,
     size: Number.isFinite(size) && size >= 1 ? Math.floor(size) : 1,
+    /* the app's event a window request of this table names - the
+     * app-driven window of protocol 3 (window_bind_tab( event )); '' on
+     * 1.149.0 and 1.150.0, whose backend cut the window itself */
+    event: typeof st.EVENT === 'string' ? st.EVENT : '',
   };
 }
 
@@ -369,7 +428,8 @@ const ROW_EVENTS_ON_TABLE = new Set(['itemPress', 'selectionChange', 'rowSelecti
  * buttons, its highlight) - their wires are row actions. */
 const ROW_TEMPLATES = new Set(['rowActionTemplate', 'rowSettingsTemplate']);
 
-/* Client work in T_CUSTOM that changes nothing an agent reads. */
+/* Client work in the follow-up actions (ACTIONS, T_CUSTOM under protocol 2)
+ * that changes nothing an agent reads. */
 const BENIGN_CUSTOM = new Set(['SET_FOCUS', 'SCROLL_TO', 'SCROLL_INTO_VIEW', 'SET_SIZE_LIMIT', 'SET_TITLE', 'SET_FAVICON', 'BUSY_INDICATOR', 'ROUTER', 'ICON_POOL', 'THEMING', 'FORMATTING', 'POPUP', 'SET_TITLE_LAUNCHPAD']);
 
 const MESSAGE_TYPES = { Error: 'error', Warning: 'warning', Success: 'success', Information: 'info' };
