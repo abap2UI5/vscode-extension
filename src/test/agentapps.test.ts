@@ -368,12 +368,20 @@ test("no answer within the timeout is a refusal too - and a late Allow sends not
   const sys = buttonSystem();
   let answerLate: ((a: ConfirmAnswer) => void) | undefined;
   const signals: AbortSignal[] = [];
+  const questions: Promise<ConfirmAnswer>[] = [];
+  let askedAgain: () => void = () => undefined;
+  const secondQuestion = new Promise<void>((resolve) => (askedAgain = resolve));
   const h = harness({
     request: sys.request,
     confirmTimeoutMs: 20,
     confirm: (request) => {
       signals.push(request.signal);
-      return new Promise<ConfirmAnswer>((resolve) => (answerLate = resolve));
+      if (signals.length === 2) {
+        askedAgain();
+      }
+      const question = new Promise<ConfirmAnswer>((resolve) => (answerLate = resolve));
+      questions.push(question);
+      return question;
     },
   });
   const r = await h.call("app_start", { app: "zcl_a" });
@@ -385,16 +393,19 @@ test("no answer within the timeout is a refusal too - and a late Allow sends not
       "Do not retry it unless the user asks for it."
   );
   assert.equal(signals[0].aborted, true, "the plumbing can tell that the answer no longer counts");
+  // No sleeps: each wait below ends on a definite signal - the late answer
+  // having arrived, the second question being put (or the second start
+  // answering without one, which the assertion after it then fails on).
   answerLate!("allow-session");
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await questions[0];
   assert.equal(sys.sent.length, 0, "nothing sent after the fact");
   // and the late 'for this session' was not remembered: the next start asks again
   const again = h.call("app_start", { app: "zcl_a" });
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  assert.equal(signals.length, 2);
+  await Promise.race([secondQuestion, again]);
+  assert.equal(signals.length, 2, "the next start asked again");
   answerLate!("allow");
   snapOf(await again);
-  assert.equal(sys.sent.length, 1);
+  assert.equal(sys.sent.length, 1, "only the allowed start was sent - the late Allow sent nothing, before or after");
   assert.equal(CONFIRM_TIMEOUT_MS, 120_000);
 });
 
