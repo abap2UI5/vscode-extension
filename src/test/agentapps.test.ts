@@ -716,6 +716,43 @@ test("a system that cannot be reached is said in the extension's words", async (
   assert.equal(SYSTEM_HINT, 'is the system reachable? "abap2UI5: Check System Connection" says');
 });
 
+test("an event whose answer was lost is not asked about again until app_describe resyncs the session", async () => {
+  const sys = buttonSystem();
+  let drop = false;
+  const h = harness({
+    request: async (url, init) => {
+      if (drop) {
+        drop = false;
+        // the connection was made and lost: the event may have run
+        throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+      }
+      return sys.request(url, init);
+    },
+  });
+  const start = snapOf(await h.call("app_start", { app: "zcl_a" }));
+  drop = true;
+  const lost = await h.call("app_act", { session: start.session, event: "GO" });
+  assert.equal(lost.isError, true);
+  assert.match(textOf(lost), /the backend did not answer \(socket hang up\) after the request had been sent/);
+  assert.match(textOf(lost), new RegExp(`session '${start.session}' is out of sync: event GO may have run`));
+  assert.equal(h.asked.length, 2, "the start and the lost event");
+  // the next event is refused before the question - and nothing is sent
+  const again = await h.call("app_act", { session: start.session, event: "GO" });
+  assert.equal(again.isError, true);
+  assert.match(textOf(again), /^nothing was sent - session '.*' is out of sync: event GO may have run/);
+  assert.match(textOf(again), /app_describe \{ session: /);
+  assert.equal(h.asked.length, 2, "not asked about a step that would not be sent");
+  assert.equal(sys.sent.length, 1, "only the start reached the system");
+  // values alone are no event: still taken
+  snapOf(await h.call("app_act", { session: start.session }));
+  // app_describe resyncs: the event is asked about and sent again
+  snapOf(await h.call("app_describe", { session: start.session }));
+  const fired = snapOf(await h.call("app_act", { session: start.session, event: "GO" }));
+  assert.equal(h.asked.length, 3);
+  assert.deepEqual(sys.sent.map((x) => x.event), [undefined, "GO"]);
+  assert.equal(fired.session, "D2");
+});
+
 test("a backend error is the refusal, with the backend's text verbatim", async () => {
   const h = harness({
     request: async () => json(500, "Class ZCL_APP does not implement z2ui5_if_app\nurl /sap/bc/z2ui5?app_start=<b>x</b>"),

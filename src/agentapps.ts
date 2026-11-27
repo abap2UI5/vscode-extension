@@ -582,6 +582,16 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
   const clients = new Map<string, AppClient>();
   /** draft id -> the system the session runs on */
   const registry = new Map<string, string>();
+  /**
+   * draft id -> why the session is out of sync: an event or window request
+   * reached (or may have reached) the system and its answer was not adopted
+   * (a timeout, a dropped connection, a cancel). The vendored client refuses
+   * the session's next event itself, sending nothing; this copy of its
+   * reason only refuses it BEFORE the question, so the user is not asked
+   * about a step that would not be sent. A successful app_describe clears
+   * both - it is the resync the client's refusal names.
+   */
+  const outOfSync = new Map<string, string>();
   let nobody: AppClient | undefined;
 
   const endpointOf = (system: AgentSystem): string => {
@@ -642,6 +652,21 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
     return nobody;
   };
 
+  /** Notes the session an act refusal says is out of sync - read from the
+   *  client's own text (`session '<id>' is out of sync: ...`). A wording that
+   *  no longer matches only means the question is asked before the client
+   *  refuses; it never lets an event through. */
+  const noteOutOfSync = (session: string, message: string): void => {
+    const at = message.indexOf(`session '${session}' is out of sync: `);
+    if (session && at >= 0) {
+      outOfSync.delete(session);
+      outOfSync.set(session, message.slice(at));
+      while (outOfSync.size > REGISTRY_MAX) {
+        outOfSync.delete(outOfSync.keys().next().value as string);
+      }
+    }
+  };
+
   const remember = (snapshot: AgentSnapshot, system: string): void => {
     if (snapshot.session) {
       registry.delete(snapshot.session);
@@ -670,6 +695,19 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
       }
       throw err;
     }
+  };
+
+  /** An app_act answer, with a refusal that leaves the session out of sync
+   *  noted (see `outOfSync`). */
+  const actAnswer = async (
+    session: string,
+    answer: Promise<McpToolResult>
+  ): Promise<McpToolResult> => {
+    const result = await answer;
+    if (result.isError) {
+      noteOutOfSync(session, result.content[0]?.text ?? "");
+    }
+    return result;
   };
 
   const listOf = (names: string[]) =>
@@ -863,12 +901,19 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
     args: Record<string, unknown>,
     row: number | undefined
   ): Promise<McpToolResult | undefined> => {
+    const stale = outOfSync.get(String(args.session ?? ""));
+    if (stale) {
+      return textResult(`nothing was sent - ${stale}`, true);
+    }
     if (!deps.confirmActions()) {
       return undefined;
     }
     let screen: AgentSnapshot;
     try {
-      screen = client.describe(args.session);
+      // the screen as an act without an event reads it - NOT describe( ),
+      // which is the resync of a session that is out of sync: asking the
+      // question must not clear the client's refusal of the event
+      screen = await client.act(args.session, {});
     } catch (err) {
       if (err instanceof agentClient().AgentError) {
         return textResult(err.message, true);
@@ -1035,8 +1080,10 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
         "The current agent snapshot of a running app session (see app_start) - answered from " +
         "the last response this server kept, no roundtrip, so it is free and sends nothing. " +
         "Pending edits (values sent without an event) show as the fields' values and are listed " +
-        "under `pending`. Answers only while the user allows the app tools (setting " +
-        "abap2ui5.agent.enableAppTools).",
+        "under `pending`. It is also the resync after an app_act whose event was sent but whose " +
+        "answer never arrived (a timeout, a dropped connection): the event may have run on the " +
+        "system, and the session takes no further event until app_describe (or a fresh app_start). " +
+        "Answers only while the user allows the app tools (setting abap2ui5.agent.enableAppTools).",
       inputSchema: {
         type: "object",
         properties: {
@@ -1061,9 +1108,13 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
           min: 0,
           max: 200,
         });
-        return snapshotAnswer(() =>
+        const answer = await snapshotAnswer(() =>
           clientOfSession(args.session).describe(args.session, { maxRows })
         );
+        if (!answer.isError) {
+          outOfSync.delete(String(args.session ?? ""));
+        }
+        return answer;
       },
     },
     {
@@ -1186,17 +1237,20 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
               return textResult("the user cancelled the system/credential picker", true);
             }
           }
-          return snapshotAnswer(
-            () =>
-              clientFor(active).act(args.session, {
-                values: args.values,
-                event: args.event,
-                window: args.window,
-                args: args.args,
-                row,
-                maxRows,
-              }),
-            systemName
+          return actAnswer(
+            session,
+            snapshotAnswer(
+              () =>
+                clientFor(active).act(args.session, {
+                  values: args.values,
+                  event: args.event,
+                  window: args.window,
+                  args: args.args,
+                  row,
+                  maxRows,
+                }),
+              systemName
+            )
           );
         }
         // unknown here: the client refuses it in its own words, sending nothing
@@ -1213,15 +1267,18 @@ export function createAgentAppTools(deps: AgentAppsDeps): McpTool[] {
             return refusal;
           }
         }
-        return snapshotAnswer(() =>
-          client.act(args.session, {
-            values: args.values,
-            event: args.event,
-            window: args.window,
-            args: args.args,
-            row,
-            maxRows,
-          })
+        return actAnswer(
+          session,
+          snapshotAnswer(() =>
+            client.act(args.session, {
+              values: args.values,
+              event: args.event,
+              window: args.window,
+              args: args.args,
+              row,
+              maxRows,
+            })
+          )
         );
       },
     },
