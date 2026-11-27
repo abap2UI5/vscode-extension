@@ -3,8 +3,8 @@
  *
  * abap2UI5/app-template's `template.json` carries an `agentSetup` key: the
  * part of the template that makes a repository ready for an AI agent
- * (AGENTS.md, CLAUDE.md, the four skills, the MCP server, the permission
- * allowlist), the two gates the setup tells the agent to run and the CI job
+ * (AGENTS.md, CLAUDE.md, the four skills with the app-building guide, the MCP
+ * server, the permission allowlist), the two gates the setup tells the agent to run and the CI job
  * that runs them - for the project that did NOT start from the template,
  * which is most abap2UI5 projects. The template's create package executes it
  * as `npm create abap2ui5-app@latest -- --agent-setup`; this module executes
@@ -41,7 +41,13 @@
  * execute a workspace's code, and the web host could not.
  */
 
-import { templateFiles, templateSpec, withinNpmNameRules } from "./scaffold";
+import {
+  GUIDE_FILE,
+  placeholderClass,
+  templateFiles,
+  templateSpec,
+  withinNpmNameRules,
+} from "./scaffold";
 
 /** The `agentSetup` key of app-template's template.json. */
 export interface AgentSetupSpec {
@@ -622,10 +628,12 @@ export function confirmationDetail(plan: AgentSetupPlan): string {
 export function agentSetupNextSteps(folder: string, wroteAgents: boolean): string {
   const agents = wroteAgents
     ? `
-AGENTS.md's first section ("This repository") describes a project made from
-the template - zcl_app_001 in src/. Rewrite it for this one and keep
-everything from "1. The model in one paragraph" down: that half is the
-app-building reference, and it is the same for every abap2UI5 app.
+AGENTS.md's first part ("This repository", and docs/project.md, its long
+form) describes a project made from the template - ${placeholderClass()} in src/.
+Rewrite it for this one and keep the block between the two guide-essentials
+marker lines: it is cut out of the framework's app-building guide, which is
+${GUIDE_FILE}, and it is the same
+for every abap2UI5 app.
 `
     : "";
   return `

@@ -71,21 +71,23 @@ const RAW = (file) => `https://raw.githubusercontent.com/${REPO}/main/${file}`;
  * scaffold puts it back when it writes (`bom: true`), where the test suite
  * can see the decision.
  *
- * Two of the shared files are here to be READ, not copied: the scaffold takes
- * the dependency versions and the shared scripts out of `package.json` and the
- * linter action's pin out of `.github/workflows/check.yml`, and writes its own
- * file around them. See src/scaffold.ts.
+ * No shared file is rewritten by the scaffold any more. It used to compose
+ * its own `package.json`, CI workflow and AGENTS.md around values read out of
+ * the template's (the template's scripts ran files a project did not get, and
+ * its AGENTS.md was one page of project text above the whole framework
+ * guide). Both reasons are gone upstream: every script in the shared
+ * `package.json` resolves to a shared file, and AGENTS.md is the project's own
+ * part plus a GENERATED block of the guide's essentials between two marker
+ * lines, with the guide itself as ONE shared file under the build-an-app
+ * skill. So the scaffold copies all of `files.shared` and applies the
+ * substitutions `template.json` names - and what this script still demands of
+ * the template is listed below, each because some text or code here relies on
+ * it.
  *
  * The spec itself is snapshotted alongside the files: the scaffold needs the
  * list to know what to copy, and one list is the whole point.
  */
 const SPEC_FILE = "template.json";
-
-/** The one line the scaffold's own workflow shares with the template's. */
-export function linterActionLine(workflow) {
-  const m = /^\s*uses:\s*abap2UI5\/linter@.*$/m.exec(workflow);
-  return m ? m[0].trim() : null;
-}
 
 /** The framework release app-template pins abaplint's clone to. */
 export function frameworkPin(abaplintConfig) {
@@ -93,83 +95,81 @@ export function frameworkPin(abaplintConfig) {
   return m ? m[1] : null;
 }
 
-/** Where the mirrored app-building guide starts inside AGENTS.md. */
-export const GUIDE_MARKER = "> **Provenance:**";
+/*
+ * The layout of the template's AGENTS.md, as far as this extension names it
+ * to a user: the essentials of the framework's app-building guide sit between
+ * two marker lines (`ESSENTIALS_BEGIN` / `ESSENTIALS_END` in app-template's
+ * `scripts/app-guide-deviations.mjs` - the begin line carries a sentence
+ * after this prefix), and the whole guide is one file (`TEMPLATE_GUIDE_FILE`
+ * there). Mirrored in `src/scaffold.ts`, because a .mjs generator cannot
+ * import the bundle's TypeScript; `src/test/scaffold.test.ts` holds the two
+ * copies together.
+ */
+export const ESSENTIALS_BEGIN = "<!-- guide-essentials:begin";
+export const ESSENTIALS_END = "<!-- guide-essentials:end -->";
+export const GUIDE_FILE = ".claude/skills/build-an-app/references/building-apps.md";
 
 const TOOL = "generate-app-template";
 
+/** How often `needle` occurs in `text`. */
+const count = (text, needle) => text.split(needle).length - 1;
+
 /**
- * The scripts a scaffolded project is left with - `scaffoldScripts` in
- * `src/scaffold.ts`, mirrored here because a .mjs generator cannot import the
- * bundle's TypeScript (the same arrangement `frameworkPin` already has).
- *
- * `src/scaffold.ts` drops every script whose body runs files out of the
- * template's own `scripts/` directory - a scaffolded project does not get
- * one - and then removes the `npm run <dropped>` links the surviving bodies
- * chain through, to a fixpoint.
+ * What is wrong with the essentials block of an AGENTS.md, as a list - empty
+ * when it has exactly one, well formed. "Exactly one" matters: the extension
+ * tells a user to keep "the block between the two marker lines", and the
+ * template's own generator rewrites the text between the FIRST begin and the
+ * first end.
  */
-export function scaffoldScripts(scripts = {}) {
-  const kept = Object.fromEntries(
-    Object.entries(scripts).filter(([, body]) => !String(body).includes("scripts/"))
-  );
-  for (;;) {
-    let changed = false;
-    for (const [name, body] of Object.entries(kept)) {
-      const rewritten = String(body)
-        .split("&&")
-        .map((segment) => segment.trim())
-        .filter((segment) => {
-          const link = /^npm\s+run\s+([\w:.@/-]+)$/.exec(segment);
-          return !link || link[1] in kept;
-        })
-        .filter(Boolean)
-        .join(" && ");
-      if (rewritten === body) {
-        continue;
-      }
-      changed = true;
-      if (rewritten) {
-        kept[name] = rewritten;
-      } else {
-        delete kept[name];
-      }
-    }
-    if (!changed) {
-      return kept;
-    }
+export function essentialsProblems(agents) {
+  const problems = [];
+  const begins = count(agents, ESSENTIALS_BEGIN);
+  const ends = count(agents, ESSENTIALS_END);
+  if (begins !== 1 || ends !== 1) {
+    problems.push(
+      `AGENTS.md has ${begins} "${ESSENTIALS_BEGIN}" and ${ends} "${ESSENTIALS_END}" marker lines - exactly one of each is expected`
+    );
+  } else if (agents.indexOf(ESSENTIALS_BEGIN) > agents.indexOf(ESSENTIALS_END)) {
+    problems.push("AGENTS.md's guide-essentials markers are in the wrong order");
+  } else if (
+    !agents.slice(agents.indexOf(ESSENTIALS_BEGIN), agents.indexOf(ESSENTIALS_END)).includes(GUIDE_FILE)
+  ) {
+    problems.push(`AGENTS.md's essentials block no longer says the whole guide is ${GUIDE_FILE}`);
   }
+  return problems;
 }
 
 /**
- * Which `npm run` targets a scaffolded project would still be left chasing.
+ * The files and scripts a shared `package.json` and CI workflow invoke that a
+ * project would not have. The scaffold copies both files as they are, so the
+ * template's own rule - every script in the shared package.json resolves to a
+ * shared file - is what keeps `npm run doctor` from dying in a new project
+ * with "Cannot find module". Checked here because a snapshot that broke the
+ * rule would ship in the extension before the template's own gate was read.
  *
- * The gate used to check only that `check` itself is not a `scripts/` script,
- * which a KEPT script chaining to a DROPPED one walks straight past: a
- * template edit to `"check:all": "npm run check:pin && npm run check"` passed
- * here and every scaffolded project's `npm run check:all` died with "missing
- * script". The scaffold resolves that shape itself now (above), so what is
- * left here is what it CANNOT resolve: a reference the template does not
- * define at all, and a dropped one written into a richer command than a bare
- * `npm run <target>` - both of which want a human, not a rewrite.
+ * `shipped` is every path a project gets (files.shared and files.named).
  */
-export function danglingScriptRefs(scripts = {}) {
-  const kept = scaffoldScripts(scripts);
-  const dangling = [];
-  for (const [name, body] of Object.entries(kept)) {
-    for (const [, target] of String(body).matchAll(/\bnpm\s+run\s+([\w:.@/-]+)/g)) {
-      if (target in kept) {
-        continue;
+export function unresolvedInvocations({ scripts = {}, workflow = "", shipped = [] }) {
+  const have = new Set(shipped);
+  const problems = [];
+  for (const [name, body] of Object.entries(scripts)) {
+    for (const [, file] of String(body).matchAll(/\bnode\s+((?:\.\/)?[\w./-]+\.[cm]?js)\b/g)) {
+      if (!have.has(file.replace(/^\.\//, ""))) {
+        problems.push(`package.json's "${name}" script runs ${file}, which the template does not list as a file a project gets`);
       }
-      dangling.push({
-        name,
-        target,
-        // a target the template does not have at all is upstream's own typo;
-        // one it has is a script this scaffold deliberately drops
-        reason: target in scripts ? "dropped" : "unknown",
-      });
+    }
+    for (const [, target] of String(body).matchAll(/\bnpm\s+run\s+([\w:.@/-]+)/g)) {
+      if (!(target in scripts)) {
+        problems.push(`package.json's "${name}" script runs \`npm run ${target}\`, which package.json does not define`);
+      }
     }
   }
-  return dangling;
+  for (const [, target] of workflow.matchAll(/^\s*(?:-\s+)?run:\s*npm\s+run\s+([\w:.@/-]+)/gm)) {
+    if (!(target in scripts)) {
+      problems.push(`check.yml runs \`npm run ${target}\`, which package.json does not define`);
+    }
+  }
+  return problems;
 }
 
 if (invokedDirectly(import.meta.url)) {
@@ -207,6 +207,7 @@ if (invokedDirectly(import.meta.url)) {
    * TypeError instead of reaching the "template changed shape" report. */
   const PROBED = [
     "AGENTS.md",
+    GUIDE_FILE,
     "abaplint.jsonc",
     "abap2ui5lint.jsonc",
     ".github/workflows/check.yml",
@@ -214,21 +215,21 @@ if (invokedDirectly(import.meta.url)) {
   ];
   for (const required of PROBED) {
     if (!FILES.includes(required)) {
-      missing.push(`${SPEC_FILE} files.shared no longer lists ${required}, which the scaffold reads`);
+      missing.push(`${SPEC_FILE} files.shared no longer lists ${required}, which the scaffold reads or names to the user`);
     }
   }
   if (!missing.length) {
-    if (!files["AGENTS.md"].includes(GUIDE_MARKER)) {
-      missing.push(`AGENTS.md no longer contains "${GUIDE_MARKER}" - the guide half cannot be located`);
+    /* The extension's own texts (the scaffolded README, the agent setup's
+     * next steps) say where the essentials are and where the whole guide is. */
+    missing.push(...essentialsProblems(files["AGENTS.md"]));
+    if (!files[GUIDE_FILE].trim()) {
+      missing.push(`${GUIDE_FILE} is empty - a project would get no app-building guide`);
     }
     if (!frameworkPin(files["abaplint.jsonc"])) {
       missing.push('abaplint.jsonc has no "branch" pin - a scaffolded project would resolve the framework\'s default branch');
     }
     if (!/"chain-house-layout"/.test(files["abap2ui5lint.jsonc"])) {
       missing.push("abap2ui5lint.jsonc no longer names chain-house-layout");
-    }
-    if (!linterActionLine(files[".github/workflows/check.yml"])) {
-      missing.push("check.yml no longer uses the abap2UI5/linter action - the scaffold takes its pin from there");
     }
     let pkg;
     try {
@@ -239,15 +240,44 @@ if (invokedDirectly(import.meta.url)) {
     if (pkg && !pkg.devDependencies?.["@abap2ui5/linter"]) {
       missing.push("package.json no longer depends on @abap2ui5/linter");
     }
-    /* The scaffold drops every template script that runs files out of the
-     * template's own scripts/ directory (a scaffolded project does not get
-     * one). `check` moving there would silently take `npm run check` away from
-     * every new project - the one command its README and AGENTS.md tell the
-     * reader to run. */
-    if (pkg && !scaffoldScripts(pkg.scripts).check) {
+    /* `npm run check` is the one command the scaffolded README and the
+     * wizard's closing message tell the reader to run. */
+    if (pkg && !pkg.scripts?.check) {
+      missing.push('package.json has no "check" script - the one command a new project is told to run');
+    }
+    /* package.json and check.yml are copied as they are, so what they invoke
+     * has to be something a project gets. */
+    if (pkg) {
       missing.push(
-        'package.json\'s "check" script is missing or runs files under scripts/ - the scaffold drops such scripts, so a new project would lose `npm run check`'
+        ...unresolvedInvocations({
+          scripts: pkg.scripts,
+          workflow: files[".github/workflows/check.yml"],
+          shipped: [...FILES, ...NAMED],
+        })
       );
+    }
+    /* Every file a substitution names has to be one the snapshot carries, and
+     * the text it replaces has to be there - or a project keeps the
+     * template's name in that file, silently. */
+    for (const rel of spec.substitutions?.class?.files ?? []) {
+      if (!(rel in files)) {
+        missing.push(`${SPEC_FILE} substitutions.class.files names ${rel}, which is neither in files.shared nor in files.named`);
+      }
+    }
+    for (const t of [...(spec.substitutions?.packageText ?? []), ...(spec.substitutions?.repo ?? [])]) {
+      const text = files[t.file];
+      const found =
+        typeof text === "string" &&
+        (t.element
+          ? new RegExp(`<${t.element}>[^<]*</${t.element}>`).test(text)
+          : t.jsonKey
+            ? new RegExp(`"${t.jsonKey}":\\s*"[^"]*"`).test(text)
+            : false);
+      if (!found) {
+        missing.push(
+          `${SPEC_FILE} substitutes ${t.element ? `<${t.element}>` : `"${t.jsonKey}"`} in ${t.file}, which src/scaffold.ts cannot find there (it replaces an XML element or a JSON string key)`
+        );
+      }
     }
     /* The named files are SUBSTITUTED, not copied, and the scaffold executes
      * the description literally: the placeholder class in the listed files
@@ -296,17 +326,6 @@ if (invokedDirectly(import.meta.url)) {
         }
       }
     }
-    /* And the same trap one hop further out: a KEPT script chaining via
-     * `npm run` into a DROPPED one is a script that exists and cannot run. */
-    for (const { name, target, reason } of danglingScriptRefs(pkg?.scripts)) {
-      missing.push(
-        `package.json's "${name}" script runs \`npm run ${target}\`, which ` +
-          (reason === "dropped"
-            ? "the scaffold drops (it runs files under scripts/) and cannot strip from this command"
-            : "the template does not define") +
-          ` - a scaffolded project's \`npm run ${name}\` would die with "missing script"`
-      );
-    }
   }
   requireShape({
     problems: missing,
@@ -316,7 +335,7 @@ if (invokedDirectly(import.meta.url)) {
 
   const json = `${JSON.stringify(
     {
-      note: "abap2UI5/app-template's files for the New Project scaffold: the project-independent ones (files.shared) copied verbatim, the name-carrying ones (files.named) as the template has them, placeholder class and all, for the scaffold to substitute; plus that repository's own template.json, which says which files those are and what to substitute - and, under agentSetup, which of them Add Agent Setup to Workspace adds to an existing project. Generated by scripts/generate-app-template.mjs - do not edit.",
+      note: "abap2UI5/app-template's files for the New Project scaffold: the project-independent ones (files.shared) and the name-carrying ones (files.named), both as the template has them, placeholder class and all, for the scaffold to copy and to substitute where template.json says so; plus that repository's own template.json, which says which files those are and what to substitute - and, under agentSetup, which of them Add Agent Setup to Workspace adds to an existing project. Generated by scripts/generate-app-template.mjs - do not edit.",
       source: REPO,
       template: spec,
       files,

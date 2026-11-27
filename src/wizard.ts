@@ -118,8 +118,9 @@ export function registerNewApp(context: vscode.ExtensionContext): void {
  * check falls back to VS Code settings, and the first CI run in that new
  * repository disagrees with everything the editor has been telling you.
  *
- * The project is abap2UI5/app-template's project: its starter class with
- * its ABAP Unit test include and its gates, renamed. There is no gallery
+ * The project is abap2UI5/app-template's project, file for file: its
+ * starter class with its ABAP Unit test include, its gates, scripts, AGENTS.md
+ * and skills, renamed the way its template.json says (`scaffold.ts`). There is no gallery
  * pick here - the template's test include asserts on the template's own
  * class, so a gallery class in its place would fail the project's first
  * `npm run check` - and the gallery stays with "New App from Template",
@@ -232,11 +233,11 @@ export async function newProjectWizard(context: vscode.ExtensionContext): Promis
     written++;
   }
 
-  // `npm install`, not `npm ci`: a brand-new project has no lockfile yet,
-  // and `npm ci` refuses without one. The install writes it - AGENTS.md and
-  // the README tell the reader to commit it.
+  // `npm ci`: the project starts with the template's lockfile, which locks
+  // the dependencies of the package.json written beside it (only its name
+  // differs) - the command the template's own AGENTS.md gives.
   const created =
-    `abap2UI5: created ${files.length} files. Run "npm install" there, ` +
+    `abap2UI5: created ${files.length} files. Run "npm ci" there, ` +
     `then "npm run check" - the same gates CI runs.`;
 
   // A folder this window already shows needs no openFolder (which reloads

@@ -152,12 +152,12 @@ find a German string anywhere, it is a leftover — translate it.
 | `src/xmltoabap.ts` | "Convert XML View to Builder Chain": the forgiving XML parser and the handler-to-event wiring in front of the linter's chain writer (`@abap2ui5/linter/chain-write` - never a second layout here, the same way `chainformat.ts` hands on the rule's fixes) |
 | `src/convert.ts` | The convert command's plumbing (source pick, result document) |
 | `src/wizard.ts` | "New App from Template" (gallery pick, class name input) and "New Project from Template" (class name input, writing app-template's project - the gallery stays with the former, because the template's test include asserts on the template's own starter class) |
-| `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — app-template's shared files copied from the `src/data/app-template.json` snapshot, its named files (starter class, sidecar, test include, abapGit descriptors) substituted from the same snapshot the way `template.json`'s `substitutions` describe, and the three composed files written here. The snapshot is NOT bundled: it is handed in through `setAppTemplate` / `loadAppTemplate` (the suite passes the file, `apptemplate.test.ts` pins the registry) and `templateFiles( )` / `templateSpec( )` throw until it is |
+| `src/scaffold.ts` | `vscode`-free: every file a new project gets, as data — every file app-template's `template.json` lists (`files.shared` and `files.named`), from the `src/data/app-template.json` snapshot, with the substitutions that description names applied to the file it names them for (the class in the starter files, `AGENTS.md` and `docs/project.md`; the package text; the repository name in `.abapgit.xml` and `package.json`), plus the one file written here, the project's `README.md`. The snapshot is NOT bundled: it is handed in through `setAppTemplate` / `loadAppTemplate` (the suite passes the file, `apptemplate.test.ts` pins the registry) and `templateFiles( )` / `templateSpec( )` throw until it is |
 | `src/apptemplatefile.ts` | Where that snapshot comes from at runtime, for both entries: `dist/app-template.json` next to the bundle (copied by `esbuild.js`), read through `workspace.fs` the first time "New Project from Template" or "Add Agent Setup to Workspace" runs - never at activation |
-| `src/agentsetup.ts` | `vscode`/`fs`/`path`-free: what "Add Agent Setup to Workspace" writes into an EXISTING project - app-template's `agentSetup` key executed over the snapshot, ported function by function from that repository's `create/agent-setup.mjs` (never overwrite, `package.json`/`.gitignore` only gain entries, the gates pointed at `.abapgit.xml`'s `STARTING_FOLDER`, nothing planned into the source folder), decided as a plan over a `WorkspaceProbe` before anything is written |
+| `src/agentsetup.ts` | `vscode`/`fs`/`path`-free: what "Add Agent Setup to Workspace" writes into an EXISTING project - app-template's `agentSetup` key executed over the snapshot (the agent setup with `AGENTS.md`, `docs/project.md`, the four skills and their references - the app-building guide among them -, the gates, the CI job and the scripts it runs), ported function by function from that repository's `create/agent-setup.mjs` (never overwrite, `package.json`/`.gitignore` only gain entries, the gates pointed at `.abapgit.xml`'s `STARTING_FOLDER`, nothing planned into the source folder), decided as a plan over a `WorkspaceProbe` before anything is written |
 | `src/agentsetupview.ts` | The command's plumbing, shared by both entries: the workspace folder, the modal confirmation listing what is written and skipped, a re-plan right before writing (a folder that changed under the dialog is refused), the writes through `workspace.fs`, the "abap2UI5 Agent Setup" output with the next steps |
 | `scripts/coverage.mjs` | `npm run test:coverage`: runs the suite with `NODE_V8_COVERAGE` over the build of `node esbuild.js --tests --coverage` and prints a per-module line table for `src/` (into `$GITHUB_STEP_SUMMARY` in CI); the arithmetic - source-map segments, V8 ranges, the table - is `scripts/lib/coverage.mjs`, pinned by `src/test/coverage.test.ts` |
-| `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` (the template's `files.shared` and `files.named`, BOM stripped, plus its `template.json`) from abap2UI5/app-template (local checkout or GitHub raw); `--check` fails when it is stale |
+| `scripts/generate-app-template.mjs` | Regenerates `src/data/app-template.json` (the template's `files.shared` and `files.named`, BOM stripped, plus its `template.json`) from abap2UI5/app-template (local checkout or GitHub raw), refusing a template whose shape the scaffold or the extension's texts no longer fit; `--check` fails when it is stale |
 | `src/rendergate-tar.ts` | The entry of the `dist/rendergate-tar.js` bundle (`tar` alone - `x`, and the `Parser` it unpacks with, which "Install Report Converter" reads its archives with) `rendergate.ts` loads on first use (`loadTar`, exported for `migratereport.ts`) |
 | `src/repolayout.ts` | The sibling-checkout directory names, out of the generated `src/data/repo-dirs.json` snapshot, and the `*_HOME` variable each checkout is handed to mcp-server as (`checkoutHomes`) |
 | `scripts/generate-repo-dirs.mjs` | Regenerates `src/data/repo-dirs.json` from abap2UI5/mcp-server's `lib/repo-dirs.json` (local checkout or GitHub raw); `--check` fails when it is stale |
@@ -718,17 +718,20 @@ Facts an agent cannot see from the code but will trip over:
   new knob the linter's config grows belongs in that merge — and never as a
   second implementation of the JSONC parsing or the directive syntax here.
 - **"New Project from Template" hands out abap2UI5/app-template's own files,
-  from a snapshot.** `src/data/app-template.json` (shipped as
-  `dist/app-template.json`, read on first use - `src/apptemplatefile.ts`)
-  carries that repository's
-  `abaplint.jsonc`, `abap2ui5lint.jsonc`, `.claude/settings.json`,
-  `.gitattributes`, `.gitignore`, `dependabot.yml`, `AGENTS.md`, its
-  `package.json` and its `check.yml` - and, since 0.29.0, its named files
-  (the starter class, its sidecar, its test include, `.abapgit.xml`,
-  `package.devc.xml`) with the placeholder class as the template has it;
-  `scaffold.ts` writes the shared files verbatim, the named ones substituted
-  (next bullet), and reads the dependency versions, the framework pin, the
-  linter action's pin and the app-building guide out of the rest. A snapshot rather
+  from a snapshot - all of them, and nothing composed.**
+  `src/data/app-template.json` (shipped as `dist/app-template.json`, read on
+  first use - `src/apptemplatefile.ts`) carries every file that repository's
+  `template.json` lists under `files.shared` (the configs, `package.json` and
+  its lockfile, `check.yml`, `scripts/*.mjs` with `addons.json`, `AGENTS.md`,
+  `docs/project.md`, `.claude/` with the four skills and their `references/`)
+  and under `files.named` (the starter class, its sidecar, its test include,
+  `.abapgit.xml`, `package.devc.xml`), each as the template has it,
+  placeholder class and all. `scaffold.ts` writes every one of them and
+  applies the substitutions `template.json` names (next bullet); the one file
+  it writes itself is `README.md`, which the template lists under
+  `templateOwn` ("a project writes its own"). The result is byte for byte the
+  project `npm create abap2ui5-app` and the template's `scripts/rename.mjs`
+  produce, plus that README. A snapshot rather
   than a clone because `abap2ui5.newProject` is registered in the WEB entry
   too and vscode.dev has neither git nor a child process — and because the
   content is then data the test suite can run through the bundled linter.
@@ -740,28 +743,51 @@ Facts an agent cannot see from the code but will trip over:
   in another one — so `bump-app-template.yml` regenerates weekly instead and
   opens a pull request when the template moved. The cost of that choice is a
   window: between an upstream merge and the Monday bump the snapshot is stale,
-  and only `npm run app-template:check` locally says so. **Do not re-type any of those files here.** That is precisely
+  and only `npm run app-template:check` locally says so. **Do not re-type any of those files here, and do not compose one.** Re-typing is
   how the scaffold came to emit `@abap2ui5/linter@^0.1.1` against an ecosystem
-  on 0.2.1, with no framework pin at all.
-- **Which files those are is app-template's answer too.** That repository
-  describes itself in `template.json` — `files.shared` (what a project takes
-  unchanged), `files.named` (what carries a name), what stays with the template
-  and why, and the substitutions. The snapshot carries that spec alongside the
-  files (`appTemplate.template`), the generator takes its file list from it,
-  and `VERBATIM_FILES` in `scaffold.ts` is `files.shared` minus the three the
-  scaffold composes around values it reads (`package.json`,
-  `.github/workflows/check.yml`, `AGENTS.md`). The NAMED files come out of the
-  same snapshot: `NAMED_FILES` is `files.named`, and `substituteText` /
-  `substitutePath` execute the spec's `substitutions` block literally - the
-  placeholder class in the listed files and paths in the listed cases, one XML
-  element for the package text, one element or JSON key for the repository
-  name - mirroring app-template's `scripts/lib/substitute.mjs`. The scaffold
+  on 0.2.1, with no framework pin at all. Composing is how it nearly lost the
+  app-building guide: the scaffold used to write its own `package.json`
+  (the template's minus the scripts that ran files under `scripts/`), its own
+  `check.yml` and its own `AGENTS.md` (a head written here above the
+  framework guide, cut out of the template's `AGENTS.md` at a
+  `> **Provenance:**` marker). The template then made its scripts shared
+  files, moved the guide into ONE file -
+  `.claude/skills/build-an-app/references/building-apps.md` - and left
+  `AGENTS.md` with the project's own part plus a GENERATED block of the
+  guide's essentials between two marker lines (`<!-- guide-essentials:begin
+  ... -->` / `<!-- guide-essentials:end -->`); the marker the cut relied on
+  was gone, and the composed files named commands (`npm run doctor`,
+  `npm run add-addon`) the composed manifest did not have.
+- **Which files those are, and what changes in them, is app-template's answer
+  too.** That repository describes itself in `template.json` — `files.shared`
+  (what a project takes), `files.named` (what carries a name in its path),
+  what stays with the template and why, and the substitutions. The snapshot
+  carries that spec alongside the files (`appTemplate.template`), the
+  generator takes its file list from it, and `scaffoldFiles( )` executes it:
+  `projectFilePaths( )` is `files.shared` plus `files.named`, and
+  `substituteText` / `substitutePath` apply the spec's `substitutions` block
+  literally to whichever file it names - the placeholder class in the listed
+  files and paths in the listed cases (the ABAP, the sidecar, the test
+  include, **and** `AGENTS.md` and `docs/project.md`, which name the starter
+  class), one XML element for the package text, one element or JSON key for
+  the repository name (`package.json`'s `name` is that JSON key - the rest of
+  the manifest is the template's bytes, which is why its lockfile still fits
+  and a new project starts with `npm ci`). The functions mirror app-template's
+  `scripts/lib/substitute.mjs`, escaping included. `verbatimFilePaths( )` is
+  what no substitution names. The scaffold
   used to write the starter class, sidecar and descriptors itself, and the day
   the template grew a `.clas.testclasses.abap` and `WITH_UNIT_TESTS` in the
-  sidecar, a project from the IDE had neither. So a file added to app-template,
-  shared or named, reaches a new project here without an edit. mcp-server's
-  `scaffold_app` executes the same description; the three executors differ,
-  the description does not.
+  sidecar, a project from the IDE had neither. So a file or a substitution
+  added to app-template reaches a new project here without an edit.
+  mcp-server's `scaffold_app` executes the same description; the executors
+  differ, the description does not. What the extension's own texts say about
+  the layout - where the essentials are, where the whole guide is
+  (`ESSENTIALS_BEGIN`, `ESSENTIALS_END`, `GUIDE_FILE` in `scaffold.ts`,
+  mirrored in the generator) - is checked when the snapshot is generated: the
+  generator refuses an `AGENTS.md` without exactly one essentials block that
+  names the guide file, a `files.shared` without that file, a `package.json`
+  script or `check.yml` step that runs something a project does not get, and
+  a substitution that finds no text.
 - **"Add Agent Setup to Workspace" executes the same snapshot's
   `agentSetup` key.** app-template's `template.json` says which of its
   shared files an EXISTING project takes (`agentSetup.files`), which two are

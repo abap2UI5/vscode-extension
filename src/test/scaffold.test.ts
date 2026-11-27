@@ -2,26 +2,29 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import appTemplate from "../data/app-template.json";
 import {
-  GUIDE_MARKER,
+  ESSENTIALS_BEGIN,
+  ESSENTIALS_END,
+  GUIDE_FILE,
   applyClass,
   applyElement,
   applyJsonKey,
+  essentialsBlock,
   frameworkPin,
-  guideSection,
-  linterActionRef,
   projectClassNameError,
-  unitActionRef,
+  projectFilePaths,
   scaffoldFiles,
-  scaffoldScripts,
   scaffoldText,
   starterClassSource,
   substitutePath,
+  substituteText,
+  substitutedFilePaths,
   namedFilePaths,
   placeholderClass,
   setAppTemplate,
   templateFiles,
   templateSpec,
   verbatimFilePaths,
+  xmlEscape,
 } from "../scaffold";
 
 // the snapshot is read from next to the bundle at runtime - the suite hands
@@ -65,18 +68,41 @@ const contentOf = (path: string): string => {
 /** The files a project takes from app-template unchanged - app-template's own
  *  list, not a second one kept here. */
 const VERBATIM = VERBATIM_FILES;
+const count = (text: string, needle: string): number => text.split(needle).length - 1;
 
-test("the verbatim list is app-template's, minus what the scaffold composes", () => {
+test("the scaffold writes app-template's files - every one it lists, and one README", () => {
   // A hand-kept list here would go stale the moment app-template adds a file,
-  // and a project would quietly be missing it. This is the shape of that guard:
-  // everything the template calls shared is either copied or composed.
-  const composed = TEMPLATE_SPEC.files.shared.filter((f) => !VERBATIM.includes(f));
-  assert.deepEqual(composed.sort(), [
-    ".github/workflows/check.yml",
-    "AGENTS.md",
-    "package.json",
-  ]);
+  // and a project would quietly be missing it. The scaffold used to compose
+  // three shared files itself (package.json, check.yml, AGENTS.md), and each
+  // was a second description that drifted; now the only path it writes that
+  // template.json does not list is the README the template says a project
+  // writes for itself.
+  const listed = projectFilePaths().map((rel) => substitutePath(rel, "zcl_my_app"));
+  const written = files().map((f) => f.path);
+  assert.deepEqual(written.filter((p) => !listed.includes(p)), ["README.md"]);
+  assert.deepEqual(listed.filter((p) => !written.includes(p)), []);
+  assert.ok("README.md" in TEMPLATE_SPEC.files.templateOwn, "the template still keeps its README to itself");
+});
+
+test("a shared file is either copied or named by a substitution - nothing else touches it", () => {
+  const substituted = substitutedFilePaths();
+  const shared: string[] = TEMPLATE_SPEC.files.shared;
+  assert.deepEqual(
+    shared.filter((f) => !VERBATIM.includes(f)).sort(),
+    shared.filter((f) => substituted.includes(f)).sort()
+  );
+  // by name, so a spec that stopped naming one of them fails here and not in
+  // a user's project: the documentation that names the starter class, and
+  // npm's idea of the repository name
+  for (const rel of ["AGENTS.md", "docs/project.md", "package.json"]) {
+    assert.ok(substituted.includes(rel), `template.json substitutes in ${rel}`);
+    assert.ok(!VERBATIM.includes(rel), `${rel} is not handed out unsubstituted`);
+  }
   assert.ok(VERBATIM.length > 0, "the template still hands out files to copy");
+  // every file a substitution names is one the snapshot carries
+  for (const rel of substituted) {
+    assert.equal(typeof TEMPLATE_FILES[rel], "string", `${rel} is in the snapshot`);
+  }
 });
 
 test("the copied files are copied - byte for byte, from the snapshot", () => {
@@ -88,6 +114,45 @@ test("the copied files are copied - byte for byte, from the snapshot", () => {
       `${path} differs from abap2UI5/app-template's copy - it is not the scaffold's to edit; ` +
         "change it in app-template and run `npm run app-template`"
     );
+  }
+});
+
+test("a substituted shared file is the template's with exactly the substitutions template.json names", () => {
+  // AGENTS.md and docs/project.md: the class, in both spellings, and nothing else
+  for (const rel of ["AGENTS.md", "docs/project.md"]) {
+    assert.ok(/zcl_app_001/i.test(TEMPLATE_FILES[rel]), `the template's ${rel} names its starter class`);
+    assert.equal(contentOf(rel), applyClass(TEMPLATE_FILES[rel], PLACEHOLDER_CLASS, "zcl_my_app"), rel);
+  }
+  // package.json: the name key, as text - formatting, scripts, versions, the
+  // rest of the file are the template's bytes
+  assert.equal(contentOf("package.json"), applyJsonKey(TEMPLATE_FILES["package.json"], "name", "my-app"));
+  assert.notEqual(contentOf("package.json"), TEMPLATE_FILES["package.json"]);
+  // and the general statement, for whatever the spec names next
+  for (const rel of substitutedFilePaths()) {
+    assert.equal(
+      contentOf(substitutePath(rel, "zcl_my_app")),
+      substituteText(rel, TEMPLATE_FILES[rel], { className: "zcl_my_app", projectName: "my-app" }),
+      rel
+    );
+  }
+});
+
+test("no file of a new project still names the template's placeholder class", () => {
+  // The class is renamed where template.json says it is written. A file that
+  // names it and is NOT listed there would hand every project a pointer to a
+  // class it does not have - in the template that is a missing entry in
+  // substitutions.class.files, and this is where the extension notices.
+  for (const file of files()) {
+    assert.ok(!file.path.toLowerCase().includes(PLACEHOLDER_CLASS), `${file.path}: the path is renamed`);
+    assert.ok(
+      !file.content.toLowerCase().includes(PLACEHOLDER_CLASS),
+      `${file.path} still names ${PLACEHOLDER_CLASS} after the rename`
+    );
+  }
+  // and the files that carried it now carry the chosen name
+  for (const rel of TEMPLATE_SPEC.substitutions.class.files) {
+    const content = contentOf(substitutePath(rel, "zcl_my_app"));
+    assert.ok(/zcl_my_app/i.test(content), `${rel} names the class that was created`);
   }
 });
 
@@ -119,86 +184,46 @@ test("a scaffolded project runs the chain-layout rule the guide documents", () =
   assert.match(contentOf("abap2ui5lint.jsonc"), /"failOn":\s*"warning"/);
 });
 
-test("the dependency versions are the template's, not a second copy of them", () => {
-  const template = JSON.parse(TEMPLATE_FILES["package.json"]) as {
-    scripts: Record<string, string>;
-    devDependencies: Record<string, string>;
+test("the manifest is the template's: versions, scripts and all - only the name is the project's", () => {
+  const template = JSON.parse(TEMPLATE_FILES["package.json"]) as Record<string, unknown>;
+  const scaffolded = JSON.parse(contentOf("package.json")) as Record<string, unknown>;
+  assert.equal(scaffolded.name, "my-app");
+  assert.deepEqual({ ...scaffolded, name: template.name }, template);
+  // so the lockfile the template hands out still locks this manifest's
+  // dependencies, which is what lets a new project start with `npm ci`
+  const lock = JSON.parse(contentOf("package-lock.json")) as {
+    packages: Record<string, { devDependencies?: Record<string, string> }>;
   };
-  const scaffolded = JSON.parse(contentOf("package.json")) as {
-    scripts: Record<string, string>;
-    devDependencies: Record<string, string>;
-  };
-  assert.deepEqual(
-    scaffolded.devDependencies,
-    template.devDependencies,
-    "every gate is the version app-template installs"
-  );
-  for (const [name, body] of Object.entries(scaffolded.scripts)) {
-    // A body is the template's, or the template's with the links into a
-    // dropped script taken out - never a third thing written here.
-    const segments = new Set(template.scripts[name]?.split("&&").map((s) => s.trim()));
-    for (const segment of body.split("&&").map((s) => s.trim())) {
-      assert.ok(
-        segments.has(segment),
-        `script "${name}" runs \`${segment}\`, which app-template's "${name}" does not`
-      );
+  assert.deepEqual(lock.packages[""].devDependencies, scaffolded.devDependencies);
+});
+
+test("every script a new project offers can run: the files and scripts it invokes are in the project", () => {
+  // The scaffold used to DROP the scripts that ran files under scripts/,
+  // because a project did not get that directory. The template's rule is now
+  // that every script in the shared package.json resolves to a shared file,
+  // and this holds the scaffolded project to it - `npm run doctor` and
+  // `npm run add-addon` are commands AGENTS.md tells the reader to run.
+  const paths = new Set(files().map((f) => f.path));
+  const { scripts } = JSON.parse(contentOf("package.json")) as { scripts: Record<string, string> };
+  let ranFiles = 0;
+  for (const [name, body] of Object.entries(scripts)) {
+    for (const [, file] of body.matchAll(/\bnode\s+([\w./-]+\.[cm]?js)\b/g)) {
+      ranFiles++;
+      assert.ok(paths.has(file), `"${name}" runs ${file}, which this project has`);
     }
-  }
-  // The one the scaffold drops on purpose: it runs a file out of the
-  // template's scripts/ directory, which a scaffolded project does not get.
-  for (const dropped of ["check:pin"]) {
-    assert.equal(scaffolded.scripts[dropped], undefined, `"${dropped}" is not offered`);
-  }
-  assert.ok(scaffolded.scripts.check, "one command still runs the gates");
-  // And every script it DOES offer can run: a body chaining `npm run` into a
-  // script the project does not have is one that dies with "missing script".
-  for (const [name, body] of Object.entries(scaffolded.scripts)) {
     for (const [, target] of body.matchAll(/\bnpm\s+run\s+([\w:.@/-]+)/g)) {
-      assert.ok(
-        scaffolded.scripts[target],
-        `"${name}" runs \`npm run ${target}\`, which this project has`
-      );
+      assert.ok(scripts[target], `"${name}" runs \`npm run ${target}\`, which this project has`);
     }
   }
-});
-
-test("AGENTS.md names the packages the scaffolded package.json installs", () => {
-  // The row used to be typed here, so a package renamed upstream
-  // (`@abap2ui5/render-runtime` -> `@abap2ui5/linter-render`) left the
-  // briefing naming one package and the manifest installing another.
-  const { devDependencies } = JSON.parse(contentOf("package.json")) as {
-    devDependencies: Record<string, string>;
-  };
-  const row = contentOf("AGENTS.md")
-    .split("\n")
-    .find((line) => line.startsWith("| `package.json` |"));
-  assert.ok(row, "AGENTS.md has a package.json row");
-  const named = [...row.matchAll(/`(@[\w.-]+\/[\w.-]+)`/g)].map((m) => m[1]);
-  assert.deepEqual(named, Object.keys(devDependencies));
-});
-
-test("a script that chains into a dropped one is rewritten, not shipped broken", () => {
-  // app-template's own shape: `check:all` chains through `check:pin`, which
-  // runs a file out of its scripts/ directory and is therefore not scaffolded.
-  assert.deepEqual(
-    scaffoldScripts({
-      check: "abap2ui5lint",
-      "check:pin": "node scripts/check-pin.mjs",
-      "check:all": "npm run check:pin && npm run check",
-      test: "npm run check:all",
-    }),
-    { check: "abap2ui5lint", "check:all": "npm run check", test: "npm run check:all" }
-  );
-  // A body that was NOTHING but the dropped link goes with it, and so does
-  // whatever was only reachable through it - resolved to a fixpoint.
-  assert.deepEqual(
-    scaffoldScripts({
-      rename: "node scripts/rename.mjs",
-      "rename:all": "npm run rename",
-      test: "npm run rename:all",
-    }),
-    {}
-  );
+  assert.ok(ranFiles >= 3, "the template's scripts under scripts/ are offered, not dropped");
+  for (const offered of ["check", "check:pin", "check:all", "doctor", "add-addon", "fix", "test:unit"]) {
+    assert.ok(scripts[offered], `"npm run ${offered}" is offered`);
+  }
+  // add-addon reads the catalogue snapshot next to it
+  assert.ok(paths.has("scripts/add-addon.mjs") && paths.has("scripts/addons.json"));
+  assert.doesNotThrow(() => JSON.parse(contentOf("scripts/addons.json")));
+  // and the agent may run it without a prompt
+  assert.match(contentOf(".claude/settings.json"), /"Bash\(npm run add-addon:\*\)"/);
 });
 
 test("no scaffolded file names a linter version of its own", () => {
@@ -208,73 +233,125 @@ test("no scaffolded file names a linter version of its own", () => {
   const want = (JSON.parse(TEMPLATE_FILES["package.json"]) as {
     devDependencies: Record<string, string>;
   }).devDependencies["@abap2ui5/linter"];
+  let named = 0;
   for (const file of files()) {
     for (const [, found] of file.content.matchAll(/"@abap2ui5\/linter":\s*"([^"]+)"/g)) {
+      if (file.path === "package-lock.json") {
+        continue; // the lockfile also records the RESOLVED version, by design
+      }
+      named++;
       assert.equal(found, want, `${file.path} names linter ${found}, app-template says ${want}`);
     }
   }
+  assert.ok(named >= 1, "package.json names the linter");
 });
 
-test("the CI workflow runs the app's unit tests through the same pinned mcp-server action app-template runs", () => {
-  const ref = unitActionRef();
-  assert.ok(ref, "app-template's workflow carries the unit job, so the scaffold's must too");
-  assert.match(ref!, /^abap2UI5\/mcp-server@[0-9a-f]{40} # v\d+$/, "pinned to a commit, the major tag in the comment");
+test("the CI workflow is app-template's own, and every script it runs exists", () => {
   const workflow = contentOf(".github/workflows/check.yml");
-  assert.ok(workflow.includes(`uses: ${ref}`), "the scaffolded workflow runs the same pin");
-  assert.match(workflow, /^  unit:\n    runs-on: ubuntu-latest/m, "as a job of its own");
+  assert.equal(workflow, TEMPLATE_FILES[".github/workflows/check.yml"]);
+  // what the composed workflow used to assert one by one, now as facts about
+  // the copied file: both actions pinned to a commit with the tag in the
+  // comment, the unit job, and no step this project cannot execute
+  assert.match(workflow, /uses: abap2UI5\/linter@[0-9a-f]{40} # v\d+\.\d+\.\d+/);
+  assert.match(workflow, /uses: abap2UI5\/mcp-server@[0-9a-f]{40} # v\d+/);
+  assert.match(workflow, /^  unit:\n    runs-on: ubuntu-latest/m, "the unit tests are a job of their own");
   assert.match(workflow, /paths: src/);
-  // and the local form is a script a project keeps: npx, not a template-only file
+  const { scripts } = JSON.parse(contentOf("package.json")) as { scripts: Record<string, string> };
+  const ran = [...workflow.matchAll(/^\s*(?:-\s+)?run:\s*npm run ([\w:-]+)/gm)].map((m) => m[1]);
+  assert.ok(ran.includes("check:pin"), "the workflow runs the pin check, like the template's");
+  for (const name of ran) {
+    assert.ok(scripts[name], `the workflow runs "npm run ${name}", which this project has`);
+  }
   assert.match(contentOf("package.json"), /"test:unit": "npx --yes -p @abap2ui5\/mcp-server abap2ui5-unit src"/);
 });
 
-test("the CI workflow runs the same pinned linter action app-template runs", () => {
-  const ref = linterActionRef();
-  assert.match(
-    ref,
-    /^abap2UI5\/linter@[0-9a-f]{40} # v\d+\.\d+\.\d+$/,
-    "the action is pinned to a commit with its tag in the comment - the template's convention"
-  );
-  assert.ok(
-    TEMPLATE_FILES[".github/workflows/check.yml"].includes(ref),
-    "the pin comes out of app-template's workflow"
-  );
-  assert.ok(
-    contentOf(".github/workflows/check.yml").includes(`uses: ${ref}`),
-    "and is what the scaffolded workflow uses"
-  );
-  // Every script the workflow calls has to exist in the project it is written
-  // into - the template's own workflow runs a `check:pin` this one must not.
-  const workflow = contentOf(".github/workflows/check.yml");
-  const scripts = (JSON.parse(contentOf("package.json")) as { scripts: Record<string, string> })
-    .scripts;
-  for (const [, name] of workflow.matchAll(/npm run ([\w:-]+)/g)) {
-    assert.ok(scripts[name], `the workflow runs "npm run ${name}", which this project has`);
+test("AGENTS.md is the template's: the project's part, then exactly one essentials block", () => {
+  const agents = contentOf("AGENTS.md");
+  // one block, well formed - the extension tells a user to keep "the block
+  // between the two marker lines", and the template's generator rewrites the
+  // text between the first begin and the first end
+  assert.equal(count(agents, ESSENTIALS_BEGIN), 1, "one begin marker");
+  assert.equal(count(agents, ESSENTIALS_END), 1, "one end marker");
+  const block = essentialsBlock(agents);
+  assert.ok(block.startsWith(ESSENTIALS_BEGIN) && block.endsWith(ESSENTIALS_END));
+  assert.ok(agents.trimEnd().endsWith(ESSENTIALS_END), "nothing follows the generated block");
+  // the block is generated upstream and carries no name: byte for byte the template's
+  assert.equal(block, essentialsBlock(TEMPLATE_FILES["AGENTS.md"]));
+  assert.ok(block.length > 3000, `the essentials travel (${block.length} chars)`);
+  assert.ok(block.includes(GUIDE_FILE), "the block says where the whole guide is");
+  // the old layout is gone: no provenance marker, no guide inlined below it
+  assert.ok(!agents.includes("> **Provenance:**"));
+  assert.ok(agents.length < TEMPLATE_FILES[GUIDE_FILE].length, "AGENTS.md is the essentials, not the guide");
+  // the part above describes THIS project
+  const head = agents.slice(0, agents.indexOf(ESSENTIALS_BEGIN));
+  assert.ok(head.includes("zcl_my_app"), "the head names the class that was created");
+  assert.ok(head.includes(GUIDE_FILE), "and points at the full guide");
+  assert.ok(head.includes("docs/project.md"), "and at its own long form");
+  // and the commands it tells the reader to run are commands this project has
+  const { scripts } = JSON.parse(contentOf("package.json")) as { scripts: Record<string, string> };
+  const bash = /```bash\n([\s\S]*?)```/.exec(head);
+  assert.ok(bash, "the head has a build-and-verify block");
+  const told = [...bash[1].matchAll(/npm run ([\w:-]+)/g)].map((m) => m[1]);
+  assert.ok(told.includes("add-addon") && told.includes("doctor"));
+  for (const name of told) {
+    assert.ok(scripts[name], `the head tells the reader to run "npm run ${name}"`);
   }
 });
 
-test("a scaffolded project carries the app-building guide, verbatim", () => {
-  const guide = guideSection();
-  assert.ok(
-    guide.startsWith(GUIDE_MARKER),
-    "the guide starts at app-template's provenance block"
-  );
+test("the app-building guide is written once, as the one file the essentials point at", () => {
+  const guides = files().filter((f) => f.path === GUIDE_FILE);
+  assert.equal(guides.length, 1, `${GUIDE_FILE} is written exactly once`);
+  const guide = guides[0].content;
+  assert.equal(guide, TEMPLATE_FILES[GUIDE_FILE], "verbatim");
   assert.ok(guide.length > 20000, `the whole guide travels (${guide.length} chars)`);
-  const agents = contentOf("AGENTS.md");
-  assert.ok(agents.endsWith(guide), "AGENTS.md ends with app-template's guide, unedited");
-  // and the head above it describes THIS project, not the template's
-  const head = agents.slice(0, agents.length - guide.length);
-  assert.ok(head.includes("zcl_my_app"), "the head names the class that was created");
-  assert.ok(!head.includes("zcl_app_001"), "and not app-template's starter class");
-  // and the commands it tells the reader to run are commands this project has
-  // (app-template's head also lists `npm run rename` and `npm run check:pin`,
-  // neither of which is scaffolded)
-  const scripts = (JSON.parse(contentOf("package.json")) as { scripts: Record<string, string> })
-    .scripts;
-  const block = /```bash\n([\s\S]*?)```/.exec(head);
-  assert.ok(block, "the head has a build-and-verify block");
-  for (const [, name] of block[1].matchAll(/npm run ([\w:-]+)/g)) {
-    assert.ok(scripts[name], `the head tells the reader to run "npm run ${name}"`);
+  // ONE copy: the guide's closing pages are in no other file (the essentials
+  // block is cut out of the guide, so its early sections repeat by design -
+  // the guide as a whole does not)
+  const carriers = files().filter((f) => f.content.includes(guide.slice(guide.length - 2000)));
+  assert.deepEqual(carriers.map((f) => f.path), [GUIDE_FILE], "no second copy of the guide");
+  // every section the essentials send a reader to exists in that file
+  const block = essentialsBlock(contentOf("AGENTS.md"));
+  const sent = [...block.matchAll(/^\| (\d+) \|/gm)].map((m) => m[1]);
+  assert.ok(sent.length > 3, "the essentials name guide sections to read on");
+  for (const n of sent) {
+    assert.match(guide, new RegExp(`^## ${n}\\. `, "m"), `the guide has a section ${n}`);
   }
+});
+
+test("the four skills travel whole: a SKILL.md each, and every reference it links", () => {
+  const paths = files().map((f) => f.path);
+  for (const skill of ["build-an-app", "view-chain-layout", "abap-check", "ui5-check"]) {
+    const dir = `.claude/skills/${skill}/`;
+    assert.ok(paths.includes(`${dir}SKILL.md`), `${skill} has its SKILL.md`);
+    for (const [, ref] of contentOf(`${dir}SKILL.md`).matchAll(/(?:`|\]\()(references\/[\w./-]+\.md)/g)) {
+      assert.ok(paths.includes(dir + ref), `${skill}/SKILL.md names ${ref}, which the project has`);
+    }
+    // and no reference travels that its SKILL.md does not send a reader to
+    for (const ref of paths.filter((p) => p.startsWith(`${dir}references/`))) {
+      assert.ok(
+        contentOf(`${dir}SKILL.md`).includes(ref.slice(dir.length)),
+        `${ref} is named by its SKILL.md`
+      );
+    }
+  }
+  assert.ok(paths.filter((p) => /^\.claude\/skills\/[^/]+\/references\//.test(p)).length >= 10);
+});
+
+test("the README sends the reader where the template's layout has the guide", () => {
+  const readme = contentOf("README.md");
+  const paths = files().map((f) => f.path);
+  assert.ok(readme.includes(GUIDE_FILE));
+  for (const [, link] of readme.matchAll(/\]\((?!https?:)([^)#]+)\)/g)) {
+    assert.ok(paths.includes(link), `the README links ${link}, which the project has`);
+  }
+  assert.ok(!/provenance/i.test(readme), "the provenance block is gone from the template");
+  const { scripts } = JSON.parse(contentOf("package.json")) as { scripts: Record<string, string> };
+  for (const [, name] of readme.matchAll(/npm run ([\w:-]+)/g)) {
+    assert.ok(scripts[name], `the README tells the reader to run "npm run ${name}"`);
+  }
+  // `npm ci`: the project starts with the template's lockfile
+  assert.match(readme, /^npm ci\b/m);
+  assert.ok(paths.includes("package-lock.json"));
 });
 
 test("the snapshot has nothing in it nobody reads", () => {
@@ -319,9 +396,6 @@ test("the class is renamed in both spellings, in every file the spec names", () 
   const cls = TEMPLATE_SPEC.substitutions.class;
   assert.deepEqual([...cls.cases].sort(), ["lower", "upper"]);
   for (const rel of cls.files) {
-    if (!NAMED_FILES.includes(rel)) {
-      continue; // AGENTS.md is composed here, its head names the class itself
-    }
     const content = files().find((f) => f.path === substitutePath(rel, "zcl_my_app"))!.content;
     assert.ok(!/zcl_app_001/i.test(content), `${rel}: no placeholder name survives`);
     assert.equal(
@@ -356,8 +430,13 @@ test("the descriptors carry the project's name, and only that changes", () => {
   const pkg = TEMPLATE_SPEC.substitutions.packageText.find((t) => t.file === "src/package.devc.xml");
   assert.ok(pkg, "the package text is one XML element of package.devc.xml");
   assert.match(contentOf("src/package.devc.xml"), /<CTEXT>my-app<\/CTEXT>/);
-  // the composed package.json carries the name too - the spec's jsonKey
-  // substitution says which key, and the composed file agrees with it
+  // a package text of its own is what the template's `--package` is
+  const described = scaffoldFiles("my-app", "zcl_my_app", "Tom & Jerry's").find(
+    (f) => f.path === "src/package.devc.xml"
+  )!.content;
+  assert.match(described, /<CTEXT>Tom &amp; Jerry&apos;s<\/CTEXT>/);
+  // package.json carries the name too - the spec's jsonKey substitution
+  // says which key
   const json = TEMPLATE_SPEC.substitutions.repo.find((t) => t.file === "package.json");
   assert.equal(json?.jsonKey, "name");
   assert.equal(JSON.parse(contentOf("package.json")).name, "my-app");
@@ -369,6 +448,10 @@ test("the substitutions are the template's own, edit for edit", () => {
   assert.equal(applyClass("a A", "a", "b", ["upper"]), "a B");
   assert.equal(applyElement("<X><NAME>old</NAME><NAME>old</NAME></X>", "NAME", "new"), "<X><NAME>new</NAME><NAME>old</NAME></X>");
   assert.equal(applyJsonKey('{\n  "name":   "old",\n  "x": "name"\n}', "name", "new"), '{\n  "name": "new",\n  "x": "name"\n}');
+  // values are escaped for where they are written, and `$&` stays literal
+  assert.equal(xmlEscape(`<a & "b" 'c'>`), "&lt;a &amp; &quot;b&quot; &apos;c&apos;&gt;");
+  assert.equal(applyElement("<NAME>old</NAME>", "NAME", "R&D $&"), "<NAME>R&amp;D $&amp;</NAME>");
+  assert.equal(applyJsonKey('{"name": "old"}', "name", 'a"b $&'), '{"name": "a\\"b $&"}');
   assert.equal(substitutePath("src/zcl_app_001.clas.xml", "ZCL_New"), "src/zcl_new.clas.xml");
   assert.equal(substitutePath("package.json", "zcl_new"), "package.json");
 });
@@ -444,7 +527,7 @@ test("the scaffolded class passes the scaffolded config", () => {
 
 test("the scaffold writes every file once", () => {
   const paths = files().map((f) => f.path);
-  for (const needed of [...VERBATIM, "AGENTS.md", "README.md", "package.json"]) {
+  for (const needed of [...VERBATIM, "AGENTS.md", "docs/project.md", "README.md", "package.json", GUIDE_FILE]) {
     assert.ok(paths.includes(needed), `the scaffold writes ${needed}`);
   }
   assert.equal(new Set(paths).size, paths.length, "no path written twice");
@@ -457,4 +540,75 @@ test("a new project's class name follows the template's naming rule", () => {
   assert.equal(projectClassNameError("ZCX_MY_ERROR"), undefined);
   assert.match(projectClassNameError("ycl_app") ?? "", /ZCL_/);
   assert.match(projectClassNameError("zmy_app") ?? "", /ZCL_/);
+});
+
+/*
+ * The generator's half. `scripts/generate-app-template.mjs` refuses to write a
+ * snapshot this module could not use, and a .mjs script cannot import the
+ * bundle's TypeScript - so it carries its own copy of the three landmarks of
+ * the template's AGENTS.md layout and its own checks. Imported here (it only
+ * runs as a program when invoked directly) so the copies cannot part and the
+ * checks are exercised against the committed snapshot and against the shapes
+ * they exist to refuse.
+ */
+test("the snapshot generator agrees with the scaffold about the template's layout, and refuses the broken shapes", async () => {
+  const path = require("path") as typeof import("path");
+  const { pathToFileURL } = require("url") as typeof import("url");
+  const file = path.join(__dirname, "..", "scripts", "generate-app-template.mjs");
+  const generator = (await import(pathToFileURL(file).href)) as {
+    ESSENTIALS_BEGIN: string;
+    ESSENTIALS_END: string;
+    GUIDE_FILE: string;
+    frameworkPin: (config: string) => string | null;
+    essentialsProblems: (agents: string) => string[];
+    unresolvedInvocations: (input: {
+      scripts?: Record<string, string>;
+      workflow?: string;
+      shipped?: string[];
+    }) => string[];
+  };
+  assert.equal(generator.ESSENTIALS_BEGIN, ESSENTIALS_BEGIN);
+  assert.equal(generator.ESSENTIALS_END, ESSENTIALS_END);
+  assert.equal(generator.GUIDE_FILE, GUIDE_FILE);
+  assert.equal(generator.frameworkPin(TEMPLATE_FILES["abaplint.jsonc"]), frameworkPin());
+
+  // the committed snapshot passes both checks
+  const agents = TEMPLATE_FILES["AGENTS.md"];
+  assert.deepEqual(generator.essentialsProblems(agents), []);
+  const { scripts } = JSON.parse(TEMPLATE_FILES["package.json"]) as { scripts: Record<string, string> };
+  const workflow = TEMPLATE_FILES[".github/workflows/check.yml"];
+  const shipped = projectFilePaths();
+  assert.deepEqual(generator.unresolvedInvocations({ scripts, workflow, shipped }), []);
+
+  // an AGENTS.md of the OLD layout - the guide inlined below a provenance
+  // marker, no essentials block - is what this change is about
+  assert.match(
+    generator.essentialsProblems("# AGENTS.md\n\n> **Provenance:** mirrored\n\n## 1. The model in one paragraph\n")[0],
+    /0 "<!-- guide-essentials:begin" and 0 "<!-- guide-essentials:end -->"/
+  );
+  const block = essentialsBlock(agents);
+  assert.match(generator.essentialsProblems(`${agents}\n${block}\n`)[0], /2 "<!-- guide-essentials:begin"/);
+  assert.match(
+    generator.essentialsProblems(`${ESSENTIALS_END}\n${ESSENTIALS_BEGIN} -->\n`)[0],
+    /wrong order/
+  );
+  assert.match(
+    generator.essentialsProblems(agents.split(GUIDE_FILE).join("docs/guide.md"))[0],
+    /no longer says the whole guide is/
+  );
+
+  // a script running a file a project does not get, a chain into a script
+  // that is not there, and a workflow step doing the same
+  assert.deepEqual(
+    generator.unresolvedInvocations({
+      scripts: { check: "abaplint", rename: "node scripts/rename.mjs", all: "npm run pin && npm run check" },
+      workflow: "    steps:\n      - run: npm ci\n      - name: pin\n        run: npm run check:pin\n",
+      shipped: ["scripts/doctor.mjs"],
+    }),
+    [
+      'package.json\'s "rename" script runs scripts/rename.mjs, which the template does not list as a file a project gets',
+      'package.json\'s "all" script runs `npm run pin`, which package.json does not define',
+      "check.yml runs `npm run check:pin`, which package.json does not define",
+    ]
+  );
 });

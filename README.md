@@ -114,7 +114,11 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   or `?src=<raw GitHub URL>` opens the class unsaved, ready for F9.
 - **Templates**: *New App from Template* is a gallery of linter-clean
   skeletons; *New Project from Template* writes a whole
-  [app-template](https://github.com/abap2UI5/app-template) project.
+  [app-template](https://github.com/abap2UI5/app-template) project - the
+  same files `npm create abap2ui5-app` writes: the gates, `AGENTS.md` with
+  the essentials of building an app, the complete app-building guide as
+  `.claude/skills/build-an-app/references/building-apps.md`, the four
+  skills, and `npm run doctor` / `npm run add-addon`.
 - **For AI agents**: the
   [abap2UI5 MCP server](https://github.com/abap2UI5/mcp-server) registered for
   every MCP client in the window, plus a second, in-extension server holding
@@ -123,8 +127,10 @@ https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100
   allow it, the [app tools](#agent-app-tools-on-the-system) that let an agent
   operate an app on the system through its JSON protocol. *Add Agent Setup
   to Workspace* makes an existing project agent-ready: app-template's
-  `AGENTS.md`, `CLAUDE.md`, the four skills, `.mcp.json`, the two gates and
-  `check.yml`, from the bundled snapshot - nothing overwritten,
+  `AGENTS.md` and `docs/project.md`, `CLAUDE.md`, the four skills with their
+  references (the app-building guide is one of them), `.mcp.json`, the two
+  gates, `check.yml` and the scripts it and `npm run doctor` /
+  `npm run add-addon` run, from the bundled snapshot - nothing overwritten,
   `package.json` and `.gitignore` merged, the gates pointed at your
   `STARTING_FOLDER`, the same files as
   `npm create abap2ui5-app@latest -- --agent-setup`. The setup for
