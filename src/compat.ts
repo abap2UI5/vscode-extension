@@ -20,7 +20,7 @@
  * null too - its `fs` is a shim.
  *
  * `vscode`-free: the pin parser is shared with `scaffold.ts` (which names the
- * template's pin in the scaffolded guide), and the verdict is data the test
+ * template's pin in the scaffolded README), and the verdict is data the test
  * suite runs over fixtures.
  */
 

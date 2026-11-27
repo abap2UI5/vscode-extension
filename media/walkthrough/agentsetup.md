@@ -6,13 +6,18 @@ project what makes [abap2UI5/app-template](https://github.com/abap2UI5/app-templ
 ready for one - the same files `npm create abap2ui5-app@latest -- --agent-setup`
 adds, from the copy bundled with the extension (no network needed):
 
-- `AGENTS.md` - the app-building reference an agent reads first - and `CLAUDE.md`
+- `AGENTS.md` - what an agent reads first: a page about the repository, then
+  the essentials of the framework's app-building guide - with `docs/project.md`
+  as its long form, and `CLAUDE.md`
 - `.claude/settings.json` and the four skills (`build-an-app`,
-  `view-chain-layout`, `abap-check`, `ui5-check`), `.mcp.json`
+  `view-chain-layout`, `abap-check`, `ui5-check`), each a short `SKILL.md` and
+  its `references/`; the complete app-building guide is
+  `.claude/skills/build-an-app/references/building-apps.md`. And `.mcp.json`
 - the two gates: `abaplint.jsonc` and `abap2ui5lint.jsonc`, pointed at the
   folder your `.abapgit.xml` names as `STARTING_FOLDER`
 - `.github/workflows/check.yml`, `scripts/check-pin.mjs`, `scripts/doctor.mjs`,
-  `.nvmrc`
+  `scripts/add-addon.mjs` with its `scripts/addons.json`
+  (`npm run add-addon -- <repo>`), `.nvmrc`
 
 A file you already have is left as it is. `package.json` and `.gitignore` are
 **merged**: missing scripts, devDependencies and patterns are added, yours keep

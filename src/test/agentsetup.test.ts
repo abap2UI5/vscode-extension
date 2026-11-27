@@ -18,7 +18,15 @@ import {
   type AgentSetupPlan,
   type WorkspaceProbe,
 } from "../agentsetup";
-import { setAppTemplate, templateFiles, templateSpec } from "../scaffold";
+import {
+  ESSENTIALS_BEGIN,
+  ESSENTIALS_END,
+  GUIDE_FILE,
+  essentialsBlock,
+  setAppTemplate,
+  templateFiles,
+  templateSpec,
+} from "../scaffold";
 
 setAppTemplate(appTemplate);
 const TEMPLATE_FILES = templateFiles();
@@ -96,6 +104,49 @@ test("the snapshot carries agentSetup, and every file it lists is a shared file 
   for (const rel of ["AGENTS.md", "CLAUDE.md", ".claude/settings.json", ".mcp.json", "abaplint.jsonc",
     "abap2ui5lint.jsonc", "package.json", ".gitignore", ".github/workflows/check.yml", ".nvmrc"]) {
     assert.ok(rel in SETUP.files, `agentSetup no longer takes ${rel}`);
+  }
+});
+
+test("the agent setup is complete in the template's split layout: AGENTS.md, the one guide file, the references, add-addon", async () => {
+  // AGENTS.md no longer inlines the framework guide: it carries the essentials
+  // between two marker lines and sends the reader to ONE guide file, to
+  // docs/project.md and to the skills' references. An agent setup that wrote
+  // AGENTS.md without them would be a briefing full of pointers to nothing.
+  const p = await plan(new MemoryFolder({ ".abapgit.xml": abapgit("/src/") }, ["src"]));
+  const added = (rel: string): string => {
+    const a = action(p, rel);
+    assert.ok(a && a.kind === "add", `${rel} is added`);
+    return a.text;
+  };
+  const agents = added("AGENTS.md");
+  assert.equal(agents.split(ESSENTIALS_BEGIN).length - 1, 1, "one essentials block");
+  assert.equal(agents.split(ESSENTIALS_END).length - 1, 1);
+  assert.ok(essentialsBlock(agents).includes(GUIDE_FILE));
+  // the guide: once, whole, verbatim
+  assert.equal(p.actions.filter((a) => a.path === GUIDE_FILE).length, 1);
+  assert.equal(added(GUIDE_FILE), TEMPLATE_FILES[GUIDE_FILE]);
+  assert.ok(added(GUIDE_FILE).length > 20000);
+  assert.equal(added("docs/project.md"), TEMPLATE_FILES["docs/project.md"]);
+  // every skill reference the template hands a new project, an existing one gets too
+  const references = (TEMPLATE_SPEC.files.shared as string[]).filter((f) =>
+    /^\.claude\/skills\/[^/]+\/(SKILL\.md|references\/)/.test(f)
+  );
+  assert.ok(references.length >= 14, "four SKILL.md and their references");
+  for (const rel of references) {
+    assert.equal(added(rel), TEMPLATE_FILES[rel], rel);
+  }
+  // `npm run add-addon`: the script, the catalogue it reads, the package.json
+  // entry and the allowlist line
+  added("scripts/add-addon.mjs");
+  assert.doesNotThrow(() => JSON.parse(added("scripts/addons.json")));
+  const scripts = JSON.parse(added("package.json")).scripts as Record<string, string>;
+  assert.equal(scripts["add-addon"], "node scripts/add-addon.mjs");
+  assert.match(added(".claude/settings.json"), /npm run add-addon/);
+  // closed under what it invokes: every file a merged script runs is in the plan
+  for (const [name, body] of Object.entries(scripts)) {
+    for (const [, file] of body.matchAll(/\bnode\s+([\w./-]+\.[cm]?js)\b/g)) {
+      assert.ok(action(p, file)?.kind === "add", `"${name}" runs ${file}, which the setup adds`);
+    }
   }
 });
 
@@ -186,14 +237,27 @@ test("an existing package.json and AGENTS.md: AGENTS.md skipped, package.json on
   assert.ok(p.warnings.some((w) => w.startsWith('package.json: kept your scripts.check "echo mine"')));
   assert.ok(p.warnings.some((w) => w.includes("kept your devDependencies.@abaplint/cli")));
 
-  // .gitignore: /node_modules is node_modules/ - only .playwright/ is added, with its comment
+  // .gitignore: /node_modules is node_modules/ - every OTHER pattern of the
+  // template's is appended, each with the comment above it, nothing reordered.
+  // The patterns are read out of the template's file rather than typed here:
+  // the list grew (the rename script's output folders) and will again.
   const ignore = action(p, ".gitignore");
   assert.ok(ignore && ignore.kind === "merge");
-  assert.deepEqual(ignore.added, [".playwright/"]);
-  assert.equal(
-    ignore.text,
-    "/node_modules\n*.log\n\n# the render gate's browser, when playwright is told to keep it in-project\n.playwright/\n"
+  const templateIgnore = TEMPLATE_FILES[".gitignore"];
+  const patterns = templateIgnore.split("\n").filter((l) => l.trim() && !l.startsWith("#"));
+  assert.ok(patterns.includes("node_modules/") && patterns.includes(".playwright/"));
+  assert.deepEqual(ignore.added, patterns.filter((l) => l !== "node_modules/"));
+  const OWN = "/node_modules\n*.log\n";
+  assert.ok(ignore.text.startsWith(OWN), "the project's own lines stay first, untouched");
+  // what was appended is the template's file from its second block on - the
+  // first block is node_modules/ with its comment, which the project has
+  const appended = ignore.text.slice(OWN.length);
+  assert.ok(
+    appended.startsWith("\n# the render gate's browser, when playwright is told to keep it in-project\n.playwright/\n"),
+    "a pattern arrives with the comment above it"
   );
+  assert.ok(templateIgnore.endsWith(appended), "appended as the template has it, comments and order");
+  assert.ok(!appended.includes("node_modules"), "what the project already ignores is not added again");
 });
 
 test("another STARTING_FOLDER: the gates are pointed there, the dependency's folder stays", async () => {
@@ -364,7 +428,7 @@ test("the confirmation lists writes and skips, the report the next steps", async
   const p = await planFromSnapshot(folder, "proj");
   const detail = confirmationDetail(p);
   assert.match(detail, /^Sources: src\/ \(no \.abapgit\.xml - assuming src\/\)/);
-  assert.match(detail, /Will write \d+:\n {2}add {2}CLAUDE\.md/);
+  assert.match(detail, /Will write \d+:\n(?: {2}add {2}.+\n)*? {2}add {2}CLAUDE\.md\n/);
   assert.match(detail, /merge {2}package\.json \(\+\d+ scripts/);
   assert.match(detail, /Left as they are \(1\):\n {2}AGENTS\.md - already there - left as it is/);
   assert.match(detail, /Nothing is overwritten/);
@@ -379,7 +443,10 @@ test("the confirmation lists writes and skips, the report the next steps", async
   assert.doesNotMatch(report, /Rewrite it for this one/, "AGENTS.md was the project's own");
 
   const fresh = agentSetupReport(await planFromSnapshot(new MemoryFolder({}, ["src"]), "p"), "p");
-  assert.match(fresh, /AGENTS\.md's first section \("This repository"\)/);
+  assert.match(fresh, /AGENTS\.md's first part \("This repository", and docs\/project\.md/);
+  assert.match(fresh, /between the two guide-essentials\nmarker lines/);
+  assert.ok(fresh.includes(GUIDE_FILE), "the next steps say where the whole guide is");
+  assert.doesNotMatch(fresh, /model in one paragraph/, "the old layout's landmark is gone");
 });
 
 test("samePlan tells a folder that moved under the confirmation apart", async () => {

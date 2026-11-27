@@ -4,6 +4,46 @@
 
 The bundled linter moves to v0.11.0 (by way of v0.10.0).
 
+- **"New Project from Template" writes app-template's project, file for
+  file.** [abap2UI5/app-template](https://github.com/abap2UI5/app-template)
+  changed its layout: `AGENTS.md` is now the project's own part plus a
+  generated block with the essentials of building an app (between two
+  `guide-essentials` marker lines), the complete app-building guide is one
+  file, `.claude/skills/build-an-app/references/building-apps.md`, each of
+  the four skills is a short `SKILL.md` with its long sections under
+  `references/`, the long project text is `docs/project.md`, and
+  `npm run add-addon -- <repo>` registers an addon of abap2UI5-addons in
+  `abaplint.jsonc` (`scripts/add-addon.mjs`, `scripts/addons.json`). A new
+  project gets all of it. The command no longer writes a `package.json`, CI
+  workflow and `AGENTS.md` of its own around values read out of the
+  template's: it writes every file the template's `template.json` lists and
+  applies the substitutions that description names - the class in the
+  starter files and in `AGENTS.md` and `docs/project.md`, the repository
+  name in `.abapgit.xml` and `package.json` - which is the project
+  `npm create abap2ui5-app` produces, byte for byte, plus a `README.md`.
+  What that changes for a new project: `package.json` keeps the template's
+  `check:pin`, `doctor` and `add-addon` scripts (the files they run are
+  written too), `check.yml` runs the pin check first like the template's,
+  and the project starts with `npm ci` - the lockfile written beside the
+  manifest fits it. The project's `README.md` and the closing message say
+  so. A package description or repository name with `&`, `<`, `'` or `"` in
+  it is escaped the way the template's own tools escape it.
+- **"Add Agent Setup to Workspace" adds the split layout too.** The same
+  snapshot's `agentSetup` now lists `docs/project.md`, the guide file, the
+  skills' references, `scripts/add-addon.mjs` and `scripts/addons.json`, so
+  an existing project gets them with `AGENTS.md` - the same files as
+  `npm create abap2ui5-app@latest -- --agent-setup`. The next steps name the
+  new landmarks: keep the block between the two `guide-essentials` marker
+  lines, the whole guide is
+  `.claude/skills/build-an-app/references/building-apps.md`.
+- The app-template snapshot is regenerated, which also catches up with what
+  the template had gained before this layout: the 7.02 downport check
+  (`scripts/check-702.mjs`, `.github/abaplint/abap_702.jsonc`), the
+  framework namespace rename (`.github/scripts/rename.mjs`) and its
+  `.gitignore` entries. `npm run app-template` refuses a template whose
+  `AGENTS.md` does not carry exactly one essentials block naming the guide
+  file, whose `package.json` or `check.yml` runs something a project does
+  not get, or whose substitutions find no text.
 - **Linter 0.11.0: the same findings, a lighter checker.** The release moves
   each rule's description card out of the module that checks views, so the
   checks themselves, every rule id, finding, quick fix and config key are as

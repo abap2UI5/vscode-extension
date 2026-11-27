@@ -1,6 +1,7 @@
 # src/data/app-template.json is a snapshot of abap2UI5/app-template's own
-# files - the configs, the CI workflow and the AGENTS.md guide that
-# "New Project from Template" writes into a new project. It has to be a
+# files - the configs, the CI workflow, the scripts, AGENTS.md and the skills
+# with the app-building guide - that "New Project from Template" writes into a
+# new project and "Add Agent Setup to Workspace" into an existing one. It has to be a
 # snapshot rather than a clone, because the command is registered in the web
 # build too and vscode.dev has no git; the price of a snapshot is drift, and
 # drift is what happened before there was a gate: the scaffold shipped
@@ -51,7 +52,9 @@ jobs:
 
         Read the diff before merging: this is what a new project gets, so
         a changed gate, rule set or framework pin over there becomes a
-        changed default here. The scaffold reads values out of this snapshot
-        (the framework pin, the dependency versions, the linter action's pin,
-        where the guide starts), so a template that changed shape fails the
+        changed default here. The scaffold copies these files and applies the
+        substitutions `template.json` names, and the extension's own texts say
+        where the guide's essentials and the whole guide are, so a template
+        that changed shape (no essentials block in `AGENTS.md`, no guide
+        file, a script that runs a file a project does not get) fails the
         gate rather than a user's new project.
