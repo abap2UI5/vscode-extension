@@ -1,0 +1,994 @@
+{
+ "note": "Recorded against @abap2ui5/node-runtime 1.151.0 (the npm backend, protocol 3: VIEWS / ACTIONS, the app-driven window) by driving lib/appclient.mjs; request = the body under `value`, response = the backend JSON as returned.",
+ "sample": "abap2UI5/mcp-server test/fixtures/agent-app ZCL_AGENT_MCP_WINDOW (a windowed table the app loads itself: 30 rows, a window of 5, event ROWS)",
+ "steps": [
+  {
+   "op": "start",
+   "arg": "zcl_agent_mcp_window",
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ORIGIN": "http://127.0.0.1:4471",
+      "PATHNAME": "/",
+      "SEARCH": "?app_start=zcl_agent_mcp_window"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP_WINDOW",
+      "ID": "A0052FA471E74FEFA3D70A0217389361",
+      "PROTOCOL": 3,
+      "VIEWS": {
+       "MAIN": {
+        "XML": "<mvc:View xmlns=\"sap.m\" xmlns:mvc=\"sap.ui.core.mvc\"><Page title=\"Agent window app\"><Text text=\"{/SUMMARY}\"/><Text text=\"{/MAINS}\"/><Button text=\"Check\" press=\".eB(['CHECK'])\"/><Button text=\"Sort by quantity\" press=\".eF('BINDING_CALL', 'orders', 'items', 'sort', 'QTY', 'X')\"/><Button text=\"Only open\" press=\".eF('BINDING_CALL', 'orders', 'items', 'filter', 'STATUS', 'EQ', 'OPEN')\"/><Table id=\"orders\" headerText=\"Orders\" growing=\"true\" growingThreshold=\"5\" items=\"{/ROWS}\"><columns><Column/><Column/><Column/><Column/><Column/><Column/><Column/></columns><items><ColumnListItem><cells><Text text=\"{ID}\"/><Text text=\"{TITLE}\"/><Text text=\"{STATUS}\"/><Text text=\"{DUE}\"/><Input value=\"{QTY}\"/><CheckBox selected=\"{CHECKED}\"/><Button text=\"Open\" press=\".eB(['OPEN'], ${ID})\"/></cells></ColumnListItem></items></Table></Page></mvc:View>"
+       },
+       "POPOVER": {
+        "DESTROY": true
+       },
+       "POPUP": {
+        "DESTROY": true
+       }
+      }
+     },
+     "MODEL": {
+      "MAINS": 1,
+      "ROWS": [
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 1,
+        "QTY": 7,
+        "STATUS": "OPEN",
+        "TITLE": "order 1"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 2,
+        "QTY": 14,
+        "STATUS": "HOLD",
+        "TITLE": "order 2"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 3,
+        "QTY": 21,
+        "STATUS": "DONE",
+        "TITLE": "order 3"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 4,
+        "QTY": 28,
+        "STATUS": "OPEN",
+        "TITLE": "order 4"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 5,
+        "QTY": 4,
+        "STATUS": "HOLD",
+        "TITLE": "order 5"
+       }
+      ],
+      "SUMMARY": "nothing yet",
+      "__WINDOW": {
+       "ROWS": {
+        "COUNT": 5,
+        "EVENT": "ROWS",
+        "SIZE": 5,
+        "TOTAL": 30
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "window": {
+     "table": "t1"
+    }
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "A0052FA471E74FEFA3D70A0217389361",
+      "EVENT": "___ZZZ_WIN",
+      "T_EVENT_ARG": [
+       "/ROWS",
+       "ROWS",
+       "MORE",
+       "5",
+       "5"
+      ]
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP_WINDOW",
+      "ID": "15F5226060024E7FAF654039A06E010E",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "MAINS": 2,
+      "ROWS": [
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 1,
+        "QTY": 7,
+        "STATUS": "OPEN",
+        "TITLE": "order 1"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 2,
+        "QTY": 14,
+        "STATUS": "HOLD",
+        "TITLE": "order 2"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 3,
+        "QTY": 21,
+        "STATUS": "DONE",
+        "TITLE": "order 3"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 4,
+        "QTY": 28,
+        "STATUS": "OPEN",
+        "TITLE": "order 4"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 5,
+        "QTY": 4,
+        "STATUS": "HOLD",
+        "TITLE": "order 5"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 6,
+        "QTY": 11,
+        "STATUS": "DONE",
+        "TITLE": "order 6"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 7,
+        "QTY": 18,
+        "STATUS": "OPEN",
+        "TITLE": "order 7"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 8,
+        "QTY": 25,
+        "STATUS": "HOLD",
+        "TITLE": "order 8"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 9,
+        "QTY": 1,
+        "STATUS": "DONE",
+        "TITLE": "order 9"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 10,
+        "QTY": 8,
+        "STATUS": "OPEN",
+        "TITLE": "order 10"
+       }
+      ],
+      "SUMMARY": "nothing yet",
+      "__WINDOW": {
+       "ROWS": {
+        "COUNT": 10,
+        "EVENT": "ROWS",
+        "SIZE": 5,
+        "TOTAL": 30
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "window": {
+     "table": "t1",
+     "filter": [
+      [
+       "STATUS",
+       "EQ",
+       "OPEN"
+      ]
+     ],
+     "sort": [
+      {
+       "column": "DUE",
+       "descending": true
+      }
+     ]
+    }
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "15F5226060024E7FAF654039A06E010E",
+      "EVENT": "___ZZZ_WIN",
+      "T_EVENT_ARG": [
+       "/ROWS",
+       "ROWS",
+       "FILTER",
+       "0",
+       "5",
+       "[{\"PATH\":\"DUE\",\"DESCENDING\":true}]",
+       "[[[\"STATUS\",\"EQ\",\"OPEN\",null]]]"
+      ]
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP_WINDOW",
+      "ID": "9D4AECA942474FF29B6112C5CAC88CE9",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "MAINS": 3,
+      "ROWS": [
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 7,
+        "QTY": 18,
+        "STATUS": "OPEN",
+        "TITLE": "order 7"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 19,
+        "QTY": 9,
+        "STATUS": "OPEN",
+        "TITLE": "order 19"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 10,
+        "QTY": 8,
+        "STATUS": "OPEN",
+        "TITLE": "order 10"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 22,
+        "QTY": 30,
+        "STATUS": "OPEN",
+        "TITLE": "order 22"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 1,
+        "QTY": 7,
+        "STATUS": "OPEN",
+        "TITLE": "order 1"
+       }
+      ],
+      "SUMMARY": "nothing yet",
+      "__WINDOW": {
+       "ROWS": {
+        "COUNT": 5,
+        "EVENT": "ROWS",
+        "SIZE": 5,
+        "TOTAL": 10
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "t1/2/QTY": 77,
+     "t1/2/CHECKED": true
+    },
+    "event": "CHECK"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "9D4AECA942474FF29B6112C5CAC88CE9",
+      "EVENT": "CHECK"
+     },
+     "MODEL": {
+      "ROWS": {
+       "__delta": {
+        "2": {
+         "QTY": 77,
+         "CHECKED": true
+        }
+       }
+      }
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP_WINDOW",
+      "ID": "11C32102358C45189E938689E15AD783",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "MAINS": 4,
+      "ROWS": [
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 7,
+        "QTY": 18,
+        "STATUS": "OPEN",
+        "TITLE": "order 7"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 19,
+        "QTY": 9,
+        "STATUS": "OPEN",
+        "TITLE": "order 19"
+       },
+       {
+        "CHECKED": true,
+        "DUE": "2026-03-15",
+        "ID": 10,
+        "QTY": 77,
+        "STATUS": "OPEN",
+        "TITLE": "order 10"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 22,
+        "QTY": 30,
+        "STATUS": "OPEN",
+        "TITLE": "order 22"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 1,
+        "QTY": 7,
+        "STATUS": "OPEN",
+        "TITLE": "order 1"
+       }
+      ],
+      "SUMMARY": "10:77 ",
+      "__WINDOW": {
+       "ROWS": {
+        "COUNT": 5,
+        "EVENT": "ROWS",
+        "SIZE": 5,
+        "TOTAL": 10
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "a2"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "11C32102358C45189E938689E15AD783",
+      "EVENT": "___ZZZ_WIN",
+      "T_EVENT_ARG": [
+       "/ROWS",
+       "ROWS",
+       "SORT",
+       "0",
+       "5",
+       "[{\"PATH\":\"QTY\",\"DESCENDING\":true}]",
+       "[[[\"STATUS\",\"EQ\",\"OPEN\",null]]]"
+      ]
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP_WINDOW",
+      "ID": "0E4C35E6F6A34B9FA0493BE194E1EBD1",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "MAINS": 5,
+      "ROWS": [
+       {
+        "CHECKED": true,
+        "DUE": "2026-03-15",
+        "ID": 10,
+        "QTY": 77,
+        "STATUS": "OPEN",
+        "TITLE": "order 10"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 22,
+        "QTY": 30,
+        "STATUS": "OPEN",
+        "TITLE": "order 22"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 13,
+        "QTY": 29,
+        "STATUS": "OPEN",
+        "TITLE": "order 13"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 4,
+        "QTY": 28,
+        "STATUS": "OPEN",
+        "TITLE": "order 4"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 25,
+        "QTY": 20,
+        "STATUS": "OPEN",
+        "TITLE": "order 25"
+       }
+      ],
+      "SUMMARY": "10:77 ",
+      "__WINDOW": {
+       "ROWS": {
+        "COUNT": 5,
+        "EVENT": "ROWS",
+        "SIZE": 5,
+        "TOTAL": 10
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "a3"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "0E4C35E6F6A34B9FA0493BE194E1EBD1",
+      "EVENT": "___ZZZ_WIN",
+      "T_EVENT_ARG": [
+       "/ROWS",
+       "ROWS",
+       "FILTER",
+       "0",
+       "5",
+       "[{\"PATH\":\"QTY\",\"DESCENDING\":true}]",
+       "[[[\"STATUS\",\"EQ\",\"OPEN\",null]]]"
+      ]
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP_WINDOW",
+      "ID": "523B931F7D4F4EF8B0DC27923B530743",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "MAINS": 6,
+      "ROWS": [
+       {
+        "CHECKED": true,
+        "DUE": "2026-03-15",
+        "ID": 10,
+        "QTY": 77,
+        "STATUS": "OPEN",
+        "TITLE": "order 10"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 22,
+        "QTY": 30,
+        "STATUS": "OPEN",
+        "TITLE": "order 22"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 13,
+        "QTY": 29,
+        "STATUS": "OPEN",
+        "TITLE": "order 13"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 4,
+        "QTY": 28,
+        "STATUS": "OPEN",
+        "TITLE": "order 4"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 25,
+        "QTY": 20,
+        "STATUS": "OPEN",
+        "TITLE": "order 25"
+       }
+      ],
+      "SUMMARY": "10:77 ",
+      "__WINDOW": {
+       "ROWS": {
+        "COUNT": 5,
+        "EVENT": "ROWS",
+        "SIZE": 5,
+        "TOTAL": 10
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "values": {
+     "t1/1/CHECKED": true
+    },
+    "window": {
+     "table": "t1",
+     "sort": [],
+     "filter": [],
+     "count": 12
+    }
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "523B931F7D4F4EF8B0DC27923B530743",
+      "EVENT": "___ZZZ_WIN",
+      "T_EVENT_ARG": [
+       "/ROWS",
+       "ROWS",
+       "FILTER",
+       "0",
+       "12",
+       "[]",
+       "[]"
+      ]
+     },
+     "MODEL": {
+      "ROWS": {
+       "__delta": {
+        "1": {
+         "CHECKED": true
+        }
+       }
+      }
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP_WINDOW",
+      "ID": "33D074CA146448B59FE137AD51950DF2",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "MAINS": 7,
+      "ROWS": [
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 1,
+        "QTY": 7,
+        "STATUS": "OPEN",
+        "TITLE": "order 1"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 2,
+        "QTY": 14,
+        "STATUS": "HOLD",
+        "TITLE": "order 2"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 3,
+        "QTY": 21,
+        "STATUS": "DONE",
+        "TITLE": "order 3"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 4,
+        "QTY": 28,
+        "STATUS": "OPEN",
+        "TITLE": "order 4"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 5,
+        "QTY": 4,
+        "STATUS": "HOLD",
+        "TITLE": "order 5"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 6,
+        "QTY": 11,
+        "STATUS": "DONE",
+        "TITLE": "order 6"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 7,
+        "QTY": 18,
+        "STATUS": "OPEN",
+        "TITLE": "order 7"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 8,
+        "QTY": 25,
+        "STATUS": "HOLD",
+        "TITLE": "order 8"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 9,
+        "QTY": 1,
+        "STATUS": "DONE",
+        "TITLE": "order 9"
+       },
+       {
+        "CHECKED": true,
+        "DUE": "2026-03-15",
+        "ID": 10,
+        "QTY": 77,
+        "STATUS": "OPEN",
+        "TITLE": "order 10"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 11,
+        "QTY": 15,
+        "STATUS": "HOLD",
+        "TITLE": "order 11"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 12,
+        "QTY": 22,
+        "STATUS": "DONE",
+        "TITLE": "order 12"
+       }
+      ],
+      "SUMMARY": "10:77 ",
+      "__WINDOW": {
+       "ROWS": {
+        "COUNT": 12,
+        "EVENT": "ROWS",
+        "SIZE": 5,
+        "TOTAL": 30
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "CHECK"
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "33D074CA146448B59FE137AD51950DF2",
+      "EVENT": "CHECK"
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP_WINDOW",
+      "ID": "F0CE903918564AE2B34B94A4417D61D6",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "MAINS": 8,
+      "ROWS": [
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 1,
+        "QTY": 7,
+        "STATUS": "OPEN",
+        "TITLE": "order 1"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 2,
+        "QTY": 14,
+        "STATUS": "HOLD",
+        "TITLE": "order 2"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 3,
+        "QTY": 21,
+        "STATUS": "DONE",
+        "TITLE": "order 3"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 4,
+        "QTY": 28,
+        "STATUS": "OPEN",
+        "TITLE": "order 4"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 5,
+        "QTY": 4,
+        "STATUS": "HOLD",
+        "TITLE": "order 5"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 6,
+        "QTY": 11,
+        "STATUS": "DONE",
+        "TITLE": "order 6"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 7,
+        "QTY": 18,
+        "STATUS": "OPEN",
+        "TITLE": "order 7"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 8,
+        "QTY": 25,
+        "STATUS": "HOLD",
+        "TITLE": "order 8"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 9,
+        "QTY": 1,
+        "STATUS": "DONE",
+        "TITLE": "order 9"
+       },
+       {
+        "CHECKED": true,
+        "DUE": "2026-03-15",
+        "ID": 10,
+        "QTY": 77,
+        "STATUS": "OPEN",
+        "TITLE": "order 10"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 11,
+        "QTY": 15,
+        "STATUS": "HOLD",
+        "TITLE": "order 11"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 12,
+        "QTY": 22,
+        "STATUS": "DONE",
+        "TITLE": "order 12"
+       }
+      ],
+      "SUMMARY": "10:77 ",
+      "__WINDOW": {
+       "ROWS": {
+        "COUNT": 12,
+        "EVENT": "ROWS",
+        "SIZE": 5,
+        "TOTAL": 30
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "op": "act",
+   "arg": {
+    "event": "OPEN",
+    "row": 1
+   },
+   "exchange": {
+    "request": {
+     "S_FRONT": {
+      "ID": "F0CE903918564AE2B34B94A4417D61D6",
+      "EVENT": "OPEN",
+      "T_EVENT_ARG": [
+       2
+      ]
+     }
+    },
+    "response": {
+     "S_FRONT": {
+      "APP": "ZCL_AGENT_MCP_WINDOW",
+      "ID": "B3985B953531417287CD133E0B6B9092",
+      "PROTOCOL": 3
+     },
+     "MODEL": {
+      "MAINS": 9,
+      "ROWS": [
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 1,
+        "QTY": 7,
+        "STATUS": "OPEN",
+        "TITLE": "order 1"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 2,
+        "QTY": 14,
+        "STATUS": "HOLD",
+        "TITLE": "order 2"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 3,
+        "QTY": 21,
+        "STATUS": "DONE",
+        "TITLE": "order 3"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 4,
+        "QTY": 28,
+        "STATUS": "OPEN",
+        "TITLE": "order 4"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 5,
+        "QTY": 4,
+        "STATUS": "HOLD",
+        "TITLE": "order 5"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-15",
+        "ID": 6,
+        "QTY": 11,
+        "STATUS": "DONE",
+        "TITLE": "order 6"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 7,
+        "QTY": 18,
+        "STATUS": "OPEN",
+        "TITLE": "order 7"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 8,
+        "QTY": 25,
+        "STATUS": "HOLD",
+        "TITLE": "order 8"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-08",
+        "ID": 9,
+        "QTY": 1,
+        "STATUS": "DONE",
+        "TITLE": "order 9"
+       },
+       {
+        "CHECKED": true,
+        "DUE": "2026-03-15",
+        "ID": 10,
+        "QTY": 77,
+        "STATUS": "OPEN",
+        "TITLE": "order 10"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-22",
+        "ID": 11,
+        "QTY": 15,
+        "STATUS": "HOLD",
+        "TITLE": "order 11"
+       },
+       {
+        "CHECKED": false,
+        "DUE": "2026-03-01",
+        "ID": 12,
+        "QTY": 22,
+        "STATUS": "DONE",
+        "TITLE": "order 12"
+       }
+      ],
+      "SUMMARY": "opened 2",
+      "__WINDOW": {
+       "ROWS": {
+        "COUNT": 12,
+        "EVENT": "ROWS",
+        "SIZE": 5,
+        "TOTAL": 30
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

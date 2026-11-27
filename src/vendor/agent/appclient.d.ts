@@ -76,9 +76,12 @@ export interface AppLocation {
 /** The local backend's hint after "the backend did not answer (...)". */
 export const LOCAL_BACKEND_HINT: string;
 
-/** The protocol number the client is written for; another one in a
- *  response is refused. */
+/** The newest protocol number the client reads (3: abap2UI5 1.151.0 on). */
 export const PROTOCOL: number;
+/** Every protocol number the client reads - 2 (abap2UI5 up to 1.150.0, the
+ *  S_ACTION envelope) and 3 (VIEWS, NAV, ACTIONS); a response declaring
+ *  another one is refused whole. */
+export const PROTOCOLS: readonly number[];
 /** A response header, case-insensitively, a repeated one joined; '' when absent. */
 export function headerOf(
   headers: Record<string, string | string[] | undefined> | undefined,

@@ -1,0 +1,84 @@
+# src/vendor/agent/ is abap2UI5/mcp-server's agent client (lib/viewxml.mjs,
+# lib/snapshot.mjs, lib/appclient.mjs) and src/test/fixtures/agent/ its
+# recorded backend sessions, copied by scripts/vendor-agent.mjs at the COMMIT
+# src/vendor/agent/source.json records (see AGENTS.md, "The agent app tools
+# run mcp-server's own code, vendored at a COMMIT").
+#
+# The pin is code, so it never follows a branch - but nothing moved it either,
+# and it went stale in the way that hurts most: abap2UI5 1.151.0 answers wire
+# protocol 3, the copy pinned then refused everything but protocol 2, and
+# every app_start against a current system failed while main was green. This
+# workflow moves the pin: once a week it re-vendors from mcp-server's main,
+# runs the full gate - `npm test` replays every recorded session through the
+# new copy and type-checks the hand-written .d.ts beside it - and opens a PR.
+#
+# A new mcp-server commit that touched none of the vendored files would only
+# move the commit in every header and in source.json; the regenerate step
+# skips that case, so a PR here always carries a change of the client, its
+# parsers or its fixtures. A RED run means the new copy does not fit this
+# repository as it is (an export changed shape, a recorded session no longer
+# replays): re-vendor by hand (`npm run agent-vendor -- <checkout> --ref
+# <commit>`) and update the .d.ts, the tests or src/agentapps.ts with it.
+#
+# The mechanics live in bump-snapshot.yml, shared with the other bumps.
+
+name: Bump agent client
+
+on:
+  schedule:
+    # Mondays 07:37 UTC - after the local-backend and report2UI5 bumps
+    # (07:23), off the full-hour spikes.
+    - cron: "37 7 * * 1"
+  workflow_dispatch:
+  # Fired by the upstream repository when a relevant change merges, so the
+  # bump lands the same day instead of waiting for the weekly schedule
+  # (send a repository_dispatch with this event type via the GitHub API).
+  repository_dispatch:
+    types: [bump-agent]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    uses: ./.github/workflows/bump-snapshot.yml
+    secrets: inherit
+    with:
+      label: the vendored agent client (src/vendor/agent/)
+      timeout-minutes: 30
+      paths: |
+        src/vendor/agent
+        src/test/fixtures/agent
+      regenerate: |
+        set -euo pipefail
+        MCP="$RUNNER_TEMP/mcp-server"
+        # full history, blobs on demand: the pinned commit has to be there
+        # for the comparison below
+        git clone --quiet --filter=blob:none https://github.com/abap2UI5/mcp-server.git "$MCP"
+        OLD=$(node -p 'require("./src/vendor/agent/source.json").commit')
+        NEW=$(git -C "$MCP" rev-parse HEAD)
+        if [ "$OLD" = "$NEW" ]; then
+          echo "::notice::the agent client is pinned to mcp-server's main already ($NEW)"
+          exit 0
+        fi
+        if git -C "$MCP" cat-file -e "$OLD^{commit}" 2>/dev/null \
+          && git -C "$MCP" diff --quiet "$OLD" "$NEW" -- \
+            lib/viewxml.mjs lib/snapshot.mjs lib/appclient.mjs test/fixtures/agent; then
+          echo "::notice::mcp-server ${OLD:0:12}..${NEW:0:12} changed none of the vendored files - pin left as it is"
+          exit 0
+        fi
+        node scripts/vendor-agent.mjs "$MCP" --ref "$NEW"
+      branch: bump-agent
+      title: "chore: re-vendor the agent client from mcp-server's main"
+      body: |
+        Weekly re-vendor of `src/vendor/agent/` (mcp-server's
+        `lib/viewxml.mjs`, `lib/snapshot.mjs`, `lib/appclient.mjs`) and
+        `src/test/fixtures/agent/` from `abap2UI5/mcp-server` main, through
+        `scripts/vendor-agent.mjs` - `source.json` names the new commit.
+
+        The gate's `npm test` replayed every recorded session through the
+        new copy and type-checked the hand-written `.d.ts` beside it. Read
+        mcp-server's changelog before merging: this is the code that acts on
+        a real system as the user (`app_start`, `app_act`), and a new export
+        the extension should use is not picked up by the `.d.ts` on its own.

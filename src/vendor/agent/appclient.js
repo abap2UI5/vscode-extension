@@ -1,6 +1,6 @@
 /*
  * VENDORED - do not edit. abap2UI5/mcp-server lib/appclient.mjs
- * at commit 332a0b0551b27acc6f6f711c45ec8ae3d0504070,
+ * at commit 8a95a6a61560d785a4a0b6688f1faa6b27e8fc49,
  * copied by scripts/vendor-agent.mjs (`npm run agent-vendor`); the only
  * change is the sibling imports ending in .js. `npm run agent-vendor:check`
  * fails when this copy drifts from that commit. Change it upstream, then
@@ -17,7 +17,14 @@
  *   event   POST { value: { S_FRONT: { ID: <draft id of the last response>,
  *                                     EVENT: 'SAVE', T_EVENT_ARG: [...] },
  *                           MODEL: <delta of the model the event's view owns> } }
- *   answer  { S_FRONT: { ID, APP, S_ACTION: { T_SYSTEM, T_CUSTOM } }, MODEL? }
+ *   tick    the event of a START_TIMER, with S_FRONT.TIMER: true (protocol 3)
+ *   answer  { S_FRONT: { ID, APP, PROTOCOL: 3, VIEWS, NAV, ACTIONS }, MODEL? }
+ *
+ * Both wires are read, by the number the response declares (PROTOCOL):
+ * protocol 3 (abap2UI5 1.151.0 on) and protocol 2, whose answer carried the
+ * slots and the follow-up actions as S_ACTION: { T_SYSTEM, T_CUSTOM } - a
+ * real system on an older release (the system mode, the VS Code extension)
+ * still answers that, and the request of both is the same but for TIMER.
  *
  * This client keeps per session what the frontend keeps per component: the
  * views in their slots and the models (lib/snapshot.mjs applyResponse), the
@@ -37,7 +44,7 @@
  * next event fired from the same view, exactly as the browser's delta does.
  */
 import {
-  applyResponse, analyzeScreen, emptyState, getAt, setAt, rebuiltModels, writablePath, DEFAULT_MAX_ROWS,
+  applyResponse, protocolOf, analyzeScreen, emptyState, getAt, setAt, rebuiltModels, writablePath, DEFAULT_MAX_ROWS,
   windowStateOf, nextWindowCount, WINDOW_EVENT,
 } from './snapshot.js';
 import { parseBinding, evalExpression } from './viewxml.js';
@@ -195,8 +202,13 @@ const listOf = (items) => {
 export const LOCAL_BACKEND_HINT = 'is it running? backend { action: "status" } says';
 
 /** The protocol number this client is written for (protocol
- *  spec/versioning.md): a response declaring another one is refused. */
-export const PROTOCOL = 2;
+ *  spec/versioning.md) - the newest it reads. */
+export const PROTOCOL = 3;
+
+/** Every protocol number this client reads: a response declaring another
+ *  one is refused whole. 2 is the wire of abap2UI5 up to 1.150.0, which
+ *  real systems keep answering long after a release moves on. */
+export const PROTOCOLS = Object.freeze([2, 3]);
 
 /** How many earlier draft ids of a session are still named as earlier states. */
 export const EARLIER_IDS = 100;
@@ -372,18 +384,33 @@ export function createAppClient({
     // a present and different number is refused whole, its ID included;
     // an absent one is let through (a backend older than the field)
     const declared = json.S_FRONT.PROTOCOL;
-    if (declared !== undefined && declared !== null && Number(declared) !== PROTOCOL) {
+    if (declared !== undefined && declared !== null && !PROTOCOLS.includes(Number(declared))) {
       const newer = Number(declared) > PROTOCOL;
-      throw new AgentError(`the backend answered protocol ${JSON.stringify(declared)}, this client speaks protocol ${PROTOCOL} - `
+      throw new AgentError(`the backend answered protocol ${JSON.stringify(declared)}, this client speaks protocol ${PROTOCOLS.join(' and ')} - `
         + `the ${newer ? 'client' : 'backend'} is older; nothing of the response was adopted (update the ${newer ? 'client' : 'backend'})`);
     }
-    /* The frontend iterates both lists; anything else is a broken backend,
-     * said as such - it used to surface as "object is not iterable". */
-    const act = json.S_FRONT.S_ACTION;
-    for (const list of ['T_SYSTEM', 'T_CUSTOM']) {
-      const v = act && act[list];
-      if (v !== undefined && v !== null && !Array.isArray(v)) {
-        throw new AgentError(`the backend answered an S_ACTION.${list} that is no list: ${shownBody(JSON.stringify(v), 200)}`);
+    /* The sections in the shape the frontend reads them; anything else is a
+     * broken backend, said as such - it used to surface as "object is not
+     * iterable". */
+    const front = json.S_FRONT;
+    const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+    const present = (v) => v !== undefined && v !== null;
+    if (protocolOf(json) === 3) {
+      if (present(front.VIEWS) && !isObject(front.VIEWS)) throw new AgentError(`the backend answered a VIEWS that is no object: ${shownBody(JSON.stringify(front.VIEWS), 200)}`);
+      for (const [slot, entry] of Object.entries(isObject(front.VIEWS) ? front.VIEWS : {})) {
+        if (!isObject(entry) || (entry.DESTROY !== true && !('XML' in entry))) {
+          throw new AgentError(`the backend answered a VIEWS.${slot} that is neither { XML } nor { DESTROY: true }: ${shownBody(JSON.stringify(entry), 200)}`);
+        }
+      }
+      if (present(front.ACTIONS) && !Array.isArray(front.ACTIONS)) throw new AgentError(`the backend answered an ACTIONS that is no list: ${shownBody(JSON.stringify(front.ACTIONS), 200)}`);
+      if (present(front.NAV) && !isObject(front.NAV)) throw new AgentError(`the backend answered a NAV that is no object: ${shownBody(JSON.stringify(front.NAV), 200)}`);
+    } else {
+      const act = front.S_ACTION;
+      for (const list of ['T_SYSTEM', 'T_CUSTOM']) {
+        const v = act && act[list];
+        if (v !== undefined && v !== null && !Array.isArray(v)) {
+          throw new AgentError(`the backend answered an S_ACTION.${list} that is no list: ${shownBody(JSON.stringify(v), 200)}`);
+        }
       }
     }
     const contextId = headerOf(res.headers, 'sap-contextid');
@@ -406,6 +433,7 @@ export function createAppClient({
   function adopt(session, { json: response, contextId }) {
     // a response without the header keeps the established session id
     if (contextId) session.contextId = contextId;
+    session.protocol = protocolOf(response);
     session.state = applyResponse(session.state, response);
     const id = session.state.id;
     if (id) {
@@ -440,6 +468,7 @@ export function createAppClient({
     // in the old view are gone with it (they would otherwise go out with the
     // new view's next event)
     const rebuilt = rebuiltModels(response);
+    if (session.orders) for (const k of [...session.orders.keys()]) if (rebuilt.has(k.split(':')[0])) session.orders.delete(k);
     for (const [key, map] of Object.entries(session.pending)) {
       const m = session.state.models[key];
       if (!m || rebuilt.has(key)) {
@@ -1096,13 +1125,69 @@ export function createAppClient({
       }
       count = nextWindowCount(t.rowCount, st);
     }
+    const sig = `window:${entry.modelKey}:${entry.path}`;
+    if (appDriven(session, st)) {
+      return { ...appWindowRequest(session, entry, st, { count, held: t.rowCount, sort, filter, countSaid: spec.count !== undefined && spec.count !== null }), sig };
+    }
     const args = [entry.path, String(count)];
     if (sortSaid) args[2] = JSON.stringify(sort);
     if (filterSaid) {
       args[2] = args[2] ?? '';
       args[3] = JSON.stringify(filter);
     }
-    return { modelKey: entry.modelKey, args, sig: `window:${entry.modelKey}:${entry.path}` };
+    return { modelKey: entry.modelKey, args, sig };
+  }
+
+  /* The order a windowed list holds - its sorters and filter groups - kept
+   * per table as the UI5 list binding keeps them (protocol 3: the order is
+   * the frontend's to keep and to send whole with every SORT and FILTER,
+   * spec/windowed-tables.md "The app owns the order"). Set when a SORT or
+   * FILTER roundtrip lands, dropped with the model of a view displayed
+   * anew (a new view is a new list binding). */
+  const orderKey = (modelKey, path) => `${modelKey}:${path}`;
+
+  /* Which window request a table takes: the app-driven one of protocol 3
+   * when its state names the app's EVENT - which only that window writes
+   * (abap2UI5 main after 1.150.0 wrote it under the number 2 already, so
+   * the state decides, not the number alone) - or when the backend speaks
+   * protocol 3; else the request of 1.149.0 and 1.150.0, whose backend cut
+   * the window itself. */
+  const appDriven = (session, st) => Boolean(st.event) || session.protocol >= 3;
+  function heldOrder(session, modelKey, path) {
+    return (session.orders && session.orders.get(orderKey(modelKey, path))) || { sort: [], filter: [] };
+  }
+
+  /*
+   * The window request of protocol 3 - the app-driven window of abap2UI5
+   * 1.151.0 (spec/windowed-tables.md "The window request"):
+   * [path, event, reason, skip, top, sort?, filter?] with the app's EVENT of
+   * the window state, as core/WindowModel.js _z2ui5Ensure / _z2ui5Restart /
+   * _z2ui5Send build it:
+   *   more rows       MORE, skip = the rows held, top = the rows wanted less
+   *                   those (whole windows by default)
+   *   a new order     SORT or FILTER, skip 0, top = one window (or count),
+   *                   and BOTH parts: the list's sorters and filter groups
+   *                   after the change - the part not named is the one held
+   * A count at or below the rows held asks for the first rows of the order
+   * held again (a SORT naming that order): MORE only appends.
+   */
+  function appWindowRequest(session, entry, st, { count, held, sort, filter, countSaid }) {
+    if (!st.event) {
+      throw new AgentError(`table ${entry.table.id} (${entry.path}) names no app event in its window state - there is no event a window request could name, so none is sent`);
+    }
+    const { modelKey, path } = entry;
+    const kept = heldOrder(session, modelKey, path);
+    const restart = sort !== null || filter !== null || (countSaid && count <= held);
+    if (!restart) {
+      return { modelKey, args: [path, st.event, 'MORE', String(held), String(count - held)] };
+    }
+    const order = { sort: sort ?? kept.sort, filter: filter ?? kept.filter };
+    const reason = filter !== null ? 'FILTER' : 'SORT';
+    return {
+      modelKey,
+      args: [path, st.event, reason, '0', String(count), JSON.stringify(order.sort), JSON.stringify(order.filter)],
+      order: { key: orderKey(modelKey, path), ...order },
+    };
   }
 
   /*
@@ -1121,12 +1206,22 @@ export function createAppClient({
     const st = windowStateOf(session.state.models[modelKey]?.data || {}, path);
     if (!st) throw new AgentError(`action ${action.id} sorts or filters ${path}, which is no windowed table any more - nothing sent`);
     const nothing = (why) => new AgentError(`action ${action.id} (${action.label}): ${why} - the browser only logs it and sends nothing, so nothing was sent`);
-    const out = [path, String(st.size)];
+    const v3 = appDriven(session, st);
+    if (v3 && !st.event) throw nothing(`${path} names no app event in its window state`);
+    const kept = v3 ? heldOrder(session, modelKey, path) : null;
+    /* protocol 3: the restart of the list with its whole order (one
+     * window, skip 0); protocol 2: [path, count, sort] / [path, count, "", filter] */
+    const send = (sorters, groups) => (v3
+      ? {
+        modelKey,
+        args: [path, st.event, groups === null ? 'SORT' : 'FILTER', '0', String(st.size), JSON.stringify(sorters ?? kept.sort), JSON.stringify(groups ?? kept.filter)],
+        order: { key: orderKey(modelKey, path), sort: sorters ?? kept.sort, filter: groups ?? kept.filter },
+      }
+      : { modelKey, args: groups === null ? [path, String(st.size), JSON.stringify(sorters)] : [path, String(st.size), '', JSON.stringify(groups)] });
     if (method === 'sort') {
       const [col, descending] = params;
-      out[2] = JSON.stringify(typeof col === 'string' && col
-        ? [{ PATH: col, DESCENDING: descending === true || descending === 'true' || descending === 'X' }] : []);
-      return { modelKey, args: out };
+      return send(typeof col === 'string' && col
+        ? [{ PATH: col, DESCENDING: descending === true || descending === 'true' || descending === 'X' }] : [], null);
     }
     const [col, operator, value1, value2] = params;
     const empty = (v) => v === undefined || v === null || v === '';
@@ -1152,9 +1247,7 @@ export function createAppClient({
     } else {
       groups = [[rowOf([col, operator, value1, value2])]];
     }
-    out[2] = '';
-    out[3] = JSON.stringify(groups);
-    return { modelKey, args: out };
+    return send(null, groups);
   }
 
   // ------------------------------------------------------------ act ----
@@ -1242,6 +1335,7 @@ export function createAppClient({
     let body;
     let sent;
     let modelKey;
+    let order = null; // the list order a protocol-3 SORT/FILTER sets once it lands
     try {
       applyValues(session, values, res.snapshot, res.index);
       if (plan) {
@@ -1249,6 +1343,7 @@ export function createAppClient({
         // slot's eB does (core/actions/Slots.js _z2ui5WindowSend): an edit
         // travels with it and lands in the row it was made in
         modelKey = plan.modelKey;
+        order = plan.order || null;
         sent = new Map(session.pending[modelKey] || []);
         body = { S_FRONT: { ID: session.state.id, EVENT: WINDOW_EVENT, T_EVENT_ARG: plan.args } };
         if (sent.size && session.state.models[modelKey]) body.MODEL = buildDelta([...sent.keys()], session.state.models[modelKey].data);
@@ -1307,6 +1402,7 @@ export function createAppClient({
           // binding sends for it, with the delta of the list's model
           const call = bindingCallPlan(entry, args, row, session);
           modelKey = call.modelKey;
+          order = call.order || null;
           sent = new Map(session.pending[modelKey] || []);
           body = { S_FRONT: { ID: session.state.id, EVENT: WINDOW_EVENT, T_EVENT_ARG: call.args } };
         } else {
@@ -1318,6 +1414,11 @@ export function createAppClient({
           sent = new Map(session.pending[modelKey] || []);
           body = { S_FRONT: { ID: session.state.id, EVENT: entry.action.event } };
           if (tArgs.length) body.S_FRONT.T_EVENT_ARG = tArgs;
+          // the tick of a START_TIMER, marked as the frontend marks it
+          // (protocol spec/request.md "The timer tick") - for a backend of
+          // protocol 3, which may answer an unchanged tick with the id it
+          // continued; a protocol-2 backend is sent what it was always sent
+          if (entry.action.trigger === 'timer' && session.protocol >= 3) body.S_FRONT.TIMER = true;
         }
         if (sent.size && session.state.models[modelKey]) body.MODEL = buildDelta([...sent.keys()], session.state.models[modelKey].data);
       }
@@ -1343,6 +1444,10 @@ export function createAppClient({
       for (const [p, v] of sent) if (pendingNow.has(p) && pendingNow.get(p) === v) pendingNow.delete(p);
     }
     adopt(session, response);
+    if (order && !rebuiltModels(response).has(order.key.split(':')[0])) {
+      if (!session.orders) session.orders = new Map();
+      session.orders.set(order.key, { sort: order.sort, filter: order.filter });
+    }
     res = analyze(session, maxRows);
     session.lastIndex = res.index;
     return res.snapshot;
@@ -1388,7 +1493,7 @@ export function createAppClient({
       const session = {
         state: emptyState(), ids: new Set(), pending: { MAIN: new Map(), POPUP: new Map(), POPOVER: new Map() },
         generation: currentGeneration(), maxRows: maxRows ?? DEFAULT_MAX_ROWS, lastIndex: null,
-        contextId: null, queue: Promise.resolve(),
+        contextId: null, protocol: 0, queue: Promise.resolve(),
       };
       adopt(session, response);
       remember(session);
@@ -1419,7 +1524,8 @@ export function createAppClient({
     },
 
     /** The folded screen state of a session - the views in their slots, the
-     *  models with the pending edits in them, the last response's T_CUSTOM -
+     *  models with the pending edits in them, the last response's follow-up
+     *  actions (ACTIONS; T_CUSTOM under protocol 2) -
      *  as a copy, for a renderer other than the snapshot (the Adaptive Card
      *  of `format: "adaptive-card"`). Reads only, like describe. */
     screen(sessionId) {

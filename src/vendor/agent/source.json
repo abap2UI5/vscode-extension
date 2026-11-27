@@ -1,8 +1,12 @@
 {
   "note": "What scripts/vendor-agent.mjs copied from abap2UI5/mcp-server, at which commit, and the sha256 of every file it wrote. Generated - do not edit; src/test/agentvendor.test.ts holds the copies to these hashes.",
   "repository": "abap2UI5/mcp-server",
-  "commit": "332a0b0551b27acc6f6f711c45ec8ae3d0504070",
+  "commit": "8a95a6a61560d785a4a0b6688f1faa6b27e8fc49",
   "files": {
+    "src/test/fixtures/agent/agent-p3.json": {
+      "from": "test/fixtures/agent/agent-p3.json",
+      "sha256": "e820c7ee84f5132fbf0b2b6f87a8f6aefeeb19715934194e7d5f2b16e355aabe"
+    },
     "src/test/fixtures/agent/args-537.json": {
       "from": "test/fixtures/agent/args-537.json",
       "sha256": "5b3048c12c599d818fd41640135ecf941297a3bda62953fb61d806a3a54e130c"
@@ -63,21 +67,25 @@
       "from": "test/fixtures/agent/table-011.json",
       "sha256": "a24e7474966dee1c23393c8fd9d440ec9ea3f7e3fe8351d59a550903cf74e52a"
     },
+    "src/test/fixtures/agent/window-agent-p3.json": {
+      "from": "test/fixtures/agent/window-agent-p3.json",
+      "sha256": "cf95817858a37177a67b74613a5a6aeecbd1550039998fe932c62970a0b70d59"
+    },
     "src/test/fixtures/agent/window-agent.json": {
       "from": "test/fixtures/agent/window-agent.json",
       "sha256": "c741fd0623c7262da4bcc82f25868a3449bd8bdfa13e4a5608947f1e404a99e9"
     },
     "src/vendor/agent/appclient.js": {
       "from": "lib/appclient.mjs",
-      "sha256": "e348c683cd0732051dadcc39a7e1f8bc0427003ba9ccf0cc7ccedc1759471d89"
+      "sha256": "6953c72857c1acaf4de298213d4d7ba1edc0a7e371599ac755495b474a15b863"
     },
     "src/vendor/agent/snapshot.js": {
       "from": "lib/snapshot.mjs",
-      "sha256": "acc6d1ab78e075d30a1a5dae1d6fa57c3fc24b758378683f81ba5371926ade4e"
+      "sha256": "a70fa378d0dabb7b11b4b102813c987021eb30ce1a96b20e73782341f5d1c9ac"
     },
     "src/vendor/agent/viewxml.js": {
       "from": "lib/viewxml.mjs",
-      "sha256": "3a0f3845edad78e410a78e1f4fe2df97cace49c41f1612d8a0d4151220605176"
+      "sha256": "6e82c158b5d5d9ff9e519af0a9faaab756716e467ae8f0352392ccb8fead20d1"
     }
   }
 }
