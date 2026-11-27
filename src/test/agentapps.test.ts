@@ -764,6 +764,41 @@ test("an event whose answer was lost is not asked about again until app_describe
   assert.equal(fired.session, "D2");
 });
 
+test("app_describe ends the out-of-sync note even when it fails - the client cleared its own flag when it was called", async () => {
+  const sys = buttonSystem();
+  let drop = false;
+  let broken = false;
+  const h = harness({
+    request: async (url, init) => {
+      if (drop) {
+        drop = false;
+        throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+      }
+      return sys.request(url, init);
+    },
+    // the screen cannot be described: describe( ) fails after the client
+    // has already cleared its out-of-sync flag
+    metadata: () => {
+      if (broken) {
+        throw new Error("the control snapshot could not be read");
+      }
+      return null;
+    },
+  });
+  const start = snapOf(await h.call("app_start", { app: "zcl_a" }));
+  drop = true;
+  const lost = await h.call("app_act", { session: start.session, event: "GO" });
+  assert.match(textOf(lost), /is out of sync: event GO may have run/);
+  broken = true;
+  await assert.rejects(h.call("app_describe", { session: start.session }), /the control snapshot could not be read/);
+  broken = false;
+  // the client sends the event again - so it is asked about, not refused
+  const fired = snapOf(await h.call("app_act", { session: start.session, event: "GO" }));
+  assert.equal(h.asked.length, 3, "the start, the lost event and this one");
+  assert.deepEqual(sys.sent.map((x) => x.event), [undefined, "GO"]);
+  assert.equal(fired.session, "D2");
+});
+
 test("a backend error is the refusal, with the backend's text verbatim", async () => {
   const h = harness({
     request: async () => json(500, "Class ZCL_APP does not implement z2ui5_if_app\nurl /sap/bc/z2ui5?app_start=<b>x</b>"),
