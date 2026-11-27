@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.32.0
 
 The bundled linter moves to v0.11.0 (by way of v0.10.0).
 
